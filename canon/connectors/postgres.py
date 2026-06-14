@@ -175,10 +175,10 @@ class PostgresConnector(ConnectorBase):
 
     def capabilities(self) -> list[Capability]:
         return [
-            Capability.introspect_schema,
-            Capability.run_read_only_sql,
-            Capability.test_connection,
-            Capability.capabilities,
+            Capability.INTROSPECT_SCHEMA,
+            Capability.RUN_READ_ONLY_SQL,
+            Capability.TEST_CONNECTION,
+            Capability.CAPABILITIES,
         ]
 
     async def test_connection(self) -> Health:
@@ -217,7 +217,7 @@ class PostgresConnector(ConnectorBase):
                     primary_key=pk,
                     foreign_keys=fks,
                     row_count_estimate=estimate,
-                    acquisition_tier=AcquisitionTier.live,
+                    acquisition_tier=AcquisitionTier.LIVE,
                     source_fingerprint=_fingerprint(cols, pk, fks),
                 )
             )
