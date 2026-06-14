@@ -1,3 +1,6 @@
+# Canon local state & secrets
+.canon/
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[codz]
@@ -216,3 +219,4 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+.DS_Store
