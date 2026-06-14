@@ -17,3 +17,7 @@ class SchemaMismatch(CanonError):
 
 class ConnectionError(CanonError):  # noqa: A001 — intentionally shadows builtin in this namespace
     """Raised when a connector cannot establish or maintain a connection."""
+
+
+class CredentialError(CanonError):
+    """Raised when a credentials_ref cannot be resolved to a secret."""
