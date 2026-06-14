@@ -22,6 +22,7 @@ from canon.connectors.base import (
 )
 from canon.exc import CanonError, ConnectionError, ReadOnlyViolation, SchemaMismatch
 
+
 class _MinimalConnector(ConnectorBase):
     """Implements only the two mandatory methods."""
 
