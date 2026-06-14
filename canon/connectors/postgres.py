@@ -7,8 +7,6 @@ Implements the four P0 capabilities against PostgreSQL: ``capabilities``,
 
 from __future__ import annotations
 
-import hashlib
-import json
 import logging
 import re
 from datetime import date, datetime
@@ -32,6 +30,7 @@ from canon.connectors.base import (
     RelationSchema,
     ResultColumn,
     ResultSet,
+    compute_fingerprint,
 )
 from canon.credentials import resolve_credential
 from canon.exc import ReadOnlyViolation
@@ -45,6 +44,10 @@ __all__ = ["PostgresConnector"]
 
 _DEFAULT_ROW_LIMIT = 10_000
 _DEFAULT_STATEMENT_TIMEOUT_MS = 30_000
+
+# A `schema.table` (or bare `table`) identifier safe to interpolate into the
+# zero-scan probe query in describe_relation(); rejects anything else.
+_SAFE_RELATION = re.compile(r"^(?:[A-Za-z_][A-Za-z0-9_]*\.)?[A-Za-z_][A-Za-z0-9_]*$")
 
 # Native Postgres type (parameter- and array-stripped, lower-cased) → normalized
 # type set: string, int, decimal, float, bool, date, timestamp, json.
@@ -102,19 +105,6 @@ def _normalize_type(raw: str, relation: str, column: str) -> str:
         logger.warning("unmapped Postgres type %r on %s.%s recorded as json", raw, relation, column)
         return "json"
     return mapped
-
-
-def _fingerprint(
-    columns: list[ColumnInfo], primary_key: list[str], foreign_keys: list[ForeignKey]
-) -> str:
-    """Stable sha256 over the normalized schema, for drift detection."""
-    payload = {
-        "columns": [c.model_dump() for c in columns],
-        "primary_key": primary_key,
-        "foreign_keys": [fk.model_dump() for fk in foreign_keys],
-    }
-    digest = hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()
-    return f"sha256:{digest}"
 
 
 def _normalize_value_type(value: Any) -> str:
@@ -218,7 +208,7 @@ class PostgresConnector(ConnectorBase):
                     foreign_keys=fks,
                     row_count_estimate=estimate,
                     acquisition_tier=AcquisitionTier.LIVE,
-                    source_fingerprint=_fingerprint(cols, pk, fks),
+                    source_fingerprint=compute_fingerprint(cols, pk, fks),
                 )
             )
         return schemas
@@ -395,6 +385,33 @@ class PostgresConnector(ConnectorBase):
         rows = [list(row) for row in fetched[: self._row_limit]]
         columns = self._result_columns(keys, rows)
         return ResultSet(columns=columns, rows=rows, truncated=truncated, bytes_scanned=None)
+
+    async def describe_relation(self, relation: str) -> list[ColumnInfo]:
+        """Observe a relation's columns via a zero-scan probe (SPEC-E2 §5).
+
+        Prepares ``SELECT * FROM <relation> WHERE false`` on the raw asyncpg
+        connection and reads the statement's result attributes, mapping each
+        native type name to the normalized set. Scans no rows. A non-existent
+        relation surfaces the driver's ``UndefinedTableError``.
+        """
+        if not _SAFE_RELATION.match(relation):
+            raise ValueError(f"unsafe relation identifier: {relation!r}")
+        engine = self._get_engine()
+        async with engine.connect() as conn, conn.begin():
+            await conn.execute(text("SET LOCAL default_transaction_read_only = on"))
+            raw = await conn.get_raw_connection()
+            asyncpg_conn = raw.driver_connection  # the underlying asyncpg.Connection
+            stmt = await asyncpg_conn.prepare(f"SELECT * FROM {relation} WHERE false")  # type: ignore[union-attr]
+            attributes = stmt.get_attributes()
+        return [
+            ColumnInfo(
+                name=attr.name,
+                type=_normalize_type(attr.type.name, relation, attr.name),
+                nullable=True,
+                position=i + 1,
+            )
+            for i, attr in enumerate(attributes)
+        ]
 
     @staticmethod
     def _result_columns(keys: list[str], rows: list[list[Any]]) -> list[ResultColumn]:
