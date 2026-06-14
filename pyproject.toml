@@ -38,6 +38,7 @@ dev = [
     "hypothesis>=6",
     "mypy>=1.0",
     "ruff>=0.9",
+    "testcontainers[postgres]>=4.0",
 ]
 
 [build-system]
@@ -47,6 +48,9 @@ build-backend = "hatchling.build"
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+markers = [
+    "integration: tests that require a live database (skipped if Docker is unavailable)",
+]
 
 [tool.mypy]
 python_version = "3.13"
