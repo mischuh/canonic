@@ -21,6 +21,8 @@
 - Tests use fixtures from conftest.py — check there before creating new ones
 - No bare `except:` — always catch specific exceptions
 - Custom exceptions live in `canon/exc.py` (package root), not inline in the raising module
+- No blank line between a class docstring and the first attribute/method
+- Enum members (including `StrEnum`) use UPPER_CASE names; string values stay lowercase if needed for serialization
 
 ## Don't touch
 - `migrations/` — hands off unless explicitly asked

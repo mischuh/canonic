@@ -21,3 +21,7 @@ class ConnectionError(CanonError):  # noqa: A001 — intentionally shadows built
 
 class CredentialError(CanonError):
     """Raised when a credentials_ref cannot be resolved to a secret."""
+
+
+class SemanticSourceError(CanonError):
+    """Raised when a semantics/*.yaml file is invalid; message carries file+line."""

@@ -33,22 +33,22 @@ __all__ = [
 class Capability(StrEnum):
     """Capabilities a connector may advertise via capabilities()."""
 
-    introspect_schema = "introspect_schema"
-    read_query_history = "read_query_history"
-    run_read_only_sql = "run_read_only_sql"
-    test_connection = "test_connection"
-    capabilities = "capabilities"
+    INTROSPECT_SCHEMA = "introspect_schema"
+    READ_QUERY_HISTORY = "read_query_history"
+    RUN_READ_ONLY_SQL = "run_read_only_sql"
+    TEST_CONNECTION = "test_connection"
+    CAPABILITIES = "capabilities"
 
 
 class AcquisitionTier(StrEnum):
     """Schema acquisition ladder tier that produced a RelationSchema."""
 
-    live = "live"
-    modeling = "modeling"
-    query_history = "query_history"
-    declarative = "declarative"
-    sample = "sample"
-    hand_authored = "hand_authored"
+    LIVE = "live"
+    MODELING = "modeling"
+    QUERY_HISTORY = "query_history"
+    DECLARATIVE = "declarative"
+    SAMPLE = "sample"
+    HAND_AUTHORED = "hand_authored"
 
 
 class Health(BaseModel):
