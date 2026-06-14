@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 from abc import ABC, abstractmethod
 from datetime import datetime  # noqa: TC003 — Pydantic resolves annotations at runtime
 from enum import StrEnum
@@ -27,6 +29,7 @@ __all__ = [
     "ResultColumn",
     "ResultSet",
     "SchemaMismatch",
+    "compute_fingerprint",
 ]
 
 
@@ -103,6 +106,7 @@ class RelationSchema(BaseModel):
     row_count_estimate: int | None = None
     acquisition_tier: AcquisitionTier
     source_fingerprint: str | None = None  # sha256 over the normalized schema for drift detection
+    last_validated_at: datetime | None = None  # stamped by the schema validation probe (§5)
 
 
 class ObservedQuery(BaseModel):
@@ -137,6 +141,23 @@ class ResultSet(BaseModel):
     bytes_scanned: int | None = None  # nullable; feeds cost control (E13)
 
 
+def compute_fingerprint(
+    columns: list[ColumnInfo], primary_key: list[str], foreign_keys: list[ForeignKey]
+) -> str:
+    """Stable sha256 over the normalized schema, for drift detection (§2.1).
+
+    Shared by every acquisition tier so a relation acquired live, declaratively,
+    or by hand fingerprints identically when its normalized shape matches.
+    """
+    payload = {
+        "columns": [c.model_dump() for c in columns],
+        "primary_key": primary_key,
+        "foreign_keys": [fk.model_dump() for fk in foreign_keys],
+    }
+    digest = hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()
+    return f"sha256:{digest}"
+
+
 class ConnectorBase(ABC):
     """Abstract base class for all Canon connectors.
 
@@ -164,3 +185,13 @@ class ConnectorBase(ABC):
     async def run_read_only_sql(self, sql: str) -> ResultSet:
         """Execute a read-only SELECT and return a normalized ResultSet."""
         raise NotImplementedError(f"{type(self).__name__} does not support run_read_only_sql")
+
+    async def describe_relation(self, relation: str) -> list[ColumnInfo]:
+        """Observe a relation's columns with zero data scanned (SPEC-E2 §5).
+
+        Backs the schema validation probe: a ``SELECT … WHERE false`` against the
+        live source whose result description yields observed column names and
+        normalized types, used to diff declared-vs-observed schema even when
+        catalog introspection is blocked.
+        """
+        raise NotImplementedError(f"{type(self).__name__} does not support describe_relation")
