@@ -111,10 +111,10 @@ class TestConnectorSurface:
 
     def test_capabilities(self, offline_connector: PostgresConnector) -> None:
         assert set(offline_connector.capabilities()) == {
-            Capability.introspect_schema,
-            Capability.run_read_only_sql,
-            Capability.test_connection,
-            Capability.capabilities,
+            Capability.INTROSPECT_SCHEMA,
+            Capability.RUN_READ_ONLY_SQL,
+            Capability.TEST_CONNECTION,
+            Capability.CAPABILITIES,
         }
 
 
@@ -158,7 +158,7 @@ class TestPostgresIntegration:
         orders = schemas["analytics.fct_orders"]
         assert orders.connection == "warehouse_pg"
         assert orders.kind == "table"
-        assert orders.acquisition_tier == AcquisitionTier.live
+        assert orders.acquisition_tier == AcquisitionTier.LIVE
         assert orders.primary_key == ["order_id"]
         assert orders.source_fingerprint is not None
         assert orders.source_fingerprint.startswith("sha256:")
