@@ -103,6 +103,104 @@ Every connector normalizes its output into one internal evidence schema, so new 
 - **Offline / air-gapped capable** — local LLM + local embeddings keep all content on-machine.
 - **Not an orchestrator** — Canon gates and feeds pipelines but owns neither scheduling nor the write-path. dbt / Airflow / Dagster keep ownership of execution.
 
+## What works today
+
+Phase 0 is under active development. The pieces below are implemented and testable now.
+
+### Schema import from DDL (tier 4)
+
+When catalog access is blocked, import schema from a `CREATE TABLE` statement:
+
+```python
+from canon.connectors.acquisition import relations_from_ddl
+
+ddl = """
+CREATE TABLE analytics.fct_orders (
+    order_id  bigint PRIMARY KEY,
+    amount    numeric(12,2),
+    metadata  jsonb,
+    order_date date
+);
+"""
+
+schemas = relations_from_ddl(ddl, connection="warehouse_pg")
+s = schemas[0]
+# s.acquisition_tier == "declarative"
+# s.primary_key      == ["order_id"]
+# s.columns[1].type  == "decimal"   ← native types normalized automatically
+```
+
+### Hand-authored semantic source (tier 6)
+
+Describe a relation in `semantics/<connection-id>/<name>.yaml` and load it into the same evidence shape:
+
+```yaml
+# semantics/warehouse_pg/orders.yaml
+name: orders
+connection: warehouse_pg
+table: analytics.fct_orders
+grain: [order_id]
+columns:
+  - { name: order_id, type: int }
+  - { name: amount,   type: decimal }
+measures:
+  - { name: total_revenue, expr: "sum(amount)" }
+```
+
+```python
+from canon.semantic.loader import load_semantic_source
+from canon.connectors.acquisition import relations_from_semantic_sources
+from pathlib import Path
+
+source = load_semantic_source(Path("semantics/warehouse_pg/orders.yaml"))
+schemas = relations_from_semantic_sources([source])
+# schemas[0].acquisition_tier == "hand_authored"
+# schemas[0].source_fingerprint == "sha256:…"
+```
+
+### Validation probe
+
+Before trusting declarative or hand-authored schema, run a zero-scan probe against the live source. It issues `SELECT <columns> FROM <table> WHERE false`, compares declared vs. observed columns and types, and stamps `last_validated_at` on success:
+
+```python
+import asyncio
+from canon.connectors.acquisition import probe_schema
+
+result = asyncio.run(probe_schema(connector, schemas[0]))
+
+if result.ok:
+    print(result.validated.last_validated_at)   # stamped
+    print(result.validated.source_fingerprint)  # sha256 over live schema
+else:
+    result.raise_for_status()
+    # raises SchemaMismatch: "amount: declared decimal, observed string"
+```
+
+### PostgreSQL live introspection (tier 1)
+
+With a real Postgres connection, `introspect_schema()` returns normalized `RelationSchema` evidence for every table, view, and materialized view — including primary keys, foreign keys, and row-count estimates:
+
+```python
+import asyncio
+from canon.connectors.postgres import PostgresConnector
+
+connector = PostgresConnector(connection)
+schemas = asyncio.run(connector.introspect_schema())
+# schemas[i].acquisition_tier == "live"
+# schemas[i].primary_key, .foreign_keys, .row_count_estimate populated
+```
+
+### CLI skeleton
+
+```sh
+canon --version
+canon status          # show project root + config version
+canon connection list  # registered connections
+canon --help
+```
+
+---
+
 ## Status & roadmap
 
 Canon ships in phases (see [`docs/PRD-canon-final.md`](docs/PRD-canon-final.md) §9.1):
