@@ -29,6 +29,7 @@ __all__ = [
     "SchemaMismatch",
 ]
 
+
 class Capability(StrEnum):
     """Capabilities a connector may advertise via capabilities()."""
 
