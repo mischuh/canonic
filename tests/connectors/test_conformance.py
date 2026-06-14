@@ -27,7 +27,7 @@ class _MinimalConnector(ConnectorBase):
     """Implements only the two mandatory methods."""
 
     def capabilities(self) -> list[Capability]:
-        return [Capability.capabilities, Capability.test_connection]
+        return [Capability.CAPABILITIES, Capability.TEST_CONNECTION]
 
     async def test_connection(self) -> Health:
         return Health(status="ok")
@@ -45,7 +45,7 @@ class TestRelationSchema:
     def test_valid_round_trip(self) -> None:
         schema = RelationSchema.model_validate(self._VALID)
         assert schema.relation == "analytics.fct_orders"
-        assert schema.acquisition_tier == AcquisitionTier.live
+        assert schema.acquisition_tier == AcquisitionTier.LIVE
         assert schema.primary_key == []
         assert schema.foreign_keys == []
 
@@ -97,7 +97,7 @@ class TestConnectorBase:
 
     def test_minimal_connector_instantiates(self) -> None:
         conn = _MinimalConnector()
-        assert Capability.test_connection in conn.capabilities()
+        assert Capability.TEST_CONNECTION in conn.capabilities()
 
     @pytest.mark.asyncio
     async def test_test_connection_returns_health(self) -> None:
@@ -148,15 +148,15 @@ async def test_capabilities_are_truthful(offline_connector) -> None:  # noqa: AN
 
     advertised = set(offline_connector.capabilities())
     for cap in (
-        Capability.introspect_schema,
-        Capability.run_read_only_sql,
-        Capability.test_connection,
+        Capability.INTROSPECT_SCHEMA,
+        Capability.RUN_READ_ONLY_SQL,
+        Capability.TEST_CONNECTION,
     ):
         assert cap in advertised
         method = getattr(type(offline_connector), cap.value)
         assert method is not getattr(ConnectorBase, cap.value)
 
-    assert Capability.read_query_history not in advertised
+    assert Capability.READ_QUERY_HISTORY not in advertised
     with pytest.raises(NotImplementedError):
         await offline_connector.read_query_history(datetime.now(tz=UTC))
 
@@ -188,5 +188,5 @@ async def test_fixture_round_trip(pg_connector) -> None:  # noqa: ANN001
     schemas = {s.relation: s for s in await pg_connector.introspect_schema()}
     assert "analytics.fct_orders" in schemas
     orders = schemas["analytics.fct_orders"]
-    assert orders.acquisition_tier == AcquisitionTier.live
+    assert orders.acquisition_tier == AcquisitionTier.LIVE
     assert orders.primary_key == ["order_id"]
