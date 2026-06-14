@@ -29,7 +29,7 @@ embeddings = [
 ]
 
 [project.scripts]
-canon = "canon.cli.main:app"
+canon = "canon.cli.app:app"
 
 [dependency-groups]
 dev = [
