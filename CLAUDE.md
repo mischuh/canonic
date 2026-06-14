@@ -20,6 +20,7 @@
 - Docstrings on public classes and non-obvious functions
 - Tests use fixtures from conftest.py — check there before creating new ones
 - No bare `except:` — always catch specific exceptions
+- Custom exceptions live in `canon/exc.py` (package root), not inline in the raising module
 
 ## Don't touch
 - `migrations/` — hands off unless explicitly asked
