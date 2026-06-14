@@ -48,6 +48,7 @@ _P0_AGG_FUNCTIONS: frozenset[type[exp.AggFunc]] = frozenset({exp.Sum, exp.Count,
 
 class NormalizedType(StrEnum):
     """The dialect-neutral internal type set (SPEC-E5 §2.1 "Typing")."""
+
     STRING = "string"
     INT = "int"
     DECIMAL = "decimal"
@@ -60,6 +61,7 @@ class NormalizedType(StrEnum):
 
 class Additivity(StrEnum):
     """How a measure aggregates across dimensions."""
+
     ADDITIVE = "additive"  # [P0]
     SEMI_ADDITIVE = "semi_additive"  # [P1]
     NON_ADDITIVE = "non_additive"  # [P1]
@@ -67,6 +69,7 @@ class Additivity(StrEnum):
 
 class Relationship(StrEnum):
     """Cardinality of a join between two semantic sources."""
+
     ONE_TO_ONE = "one_to_one"
     MANY_TO_ONE = "many_to_one"
     ONE_TO_MANY = "one_to_many"
@@ -75,6 +78,7 @@ class Relationship(StrEnum):
 
 class Provenance(StrEnum):
     """Trust origin of a semantic source's schema (system-managed)."""
+
     BOARD_APPROVED = "board_approved"
     HUMAN_CURATED = "human_curated"
     INFERRED = "inferred"
@@ -82,6 +86,7 @@ class Provenance(StrEnum):
 
 class Column(BaseModel):
     """A physical column exposed by the source."""
+
     model_config = ConfigDict(frozen=True)
 
     name: str
@@ -91,6 +96,7 @@ class Column(BaseModel):
 
 class Measure(BaseModel):
     """An aggregation over the source (e.g. sum(amount))."""
+
     model_config = ConfigDict(frozen=True)
 
     name: str
@@ -122,6 +128,7 @@ class Measure(BaseModel):
 
 class Dimension(BaseModel):
     """A column exposed for grouping/filtering, optionally time-bucketed."""
+
     model_config = ConfigDict(frozen=True)
 
     name: str
@@ -131,6 +138,7 @@ class Dimension(BaseModel):
 
 class Join(BaseModel):
     """A declared join path to another semantic source."""
+
     model_config = ConfigDict(frozen=True)
 
     to: str
@@ -140,6 +148,7 @@ class Join(BaseModel):
 
 class Filter(BaseModel):
     """A named reusable predicate."""  # [P1]
+
     model_config = ConfigDict(frozen=True)
 
     name: str
@@ -148,6 +157,7 @@ class Filter(BaseModel):
 
 class FinalityMeta(BaseModel):
     """Finality watermark for provisional/final result tagging."""  # [P1]
+
     model_config = ConfigDict(frozen=True)
 
     watermark: str | None = None  # null = always-final source
@@ -155,6 +165,7 @@ class FinalityMeta(BaseModel):
 
 class SourceMeta(BaseModel):
     """System-managed provenance metadata, not hand-edited."""
+
     model_config = ConfigDict(frozen=True)
 
     provenance: Provenance = Provenance.INFERRED
@@ -178,6 +189,7 @@ def _columns_in_expr(expr: str) -> set[str]:
 
 class SemanticSource(BaseModel):
     """One queryable relation described for agent reasoning (SPEC-E5 §2.1)."""
+
     model_config = ConfigDict(frozen=True)
 
     name: str  # [P0] unique within connection
