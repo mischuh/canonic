@@ -22,11 +22,6 @@ from canon.connectors.base import (
 )
 from canon.exc import CanonError, ConnectionError, ReadOnlyViolation, SchemaMismatch
 
-# ---------------------------------------------------------------------------
-# Minimal test double — used by ABC and capability tests
-# ---------------------------------------------------------------------------
-
-
 class _MinimalConnector(ConnectorBase):
     """Implements only the two mandatory methods."""
 
@@ -35,11 +30,6 @@ class _MinimalConnector(ConnectorBase):
 
     async def test_connection(self) -> Health:
         return Health(status="ok")
-
-
-# ---------------------------------------------------------------------------
-# RelationSchema validation
-# ---------------------------------------------------------------------------
 
 
 class TestRelationSchema:
@@ -79,11 +69,6 @@ class TestRelationSchema:
             schema.relation = "other"  # type: ignore[misc]
 
 
-# ---------------------------------------------------------------------------
-# ResultSet JSON serialization
-# ---------------------------------------------------------------------------
-
-
 class TestResultSet:
     def test_serialize_and_deserialize(self) -> None:
         rs = ResultSet(
@@ -102,11 +87,6 @@ class TestResultSet:
         rs = ResultSet(columns=[], rows=[])
         assert rs.truncated is False
         assert rs.bytes_scanned is None
-
-
-# ---------------------------------------------------------------------------
-# ConnectorBase ABC enforcement
-# ---------------------------------------------------------------------------
 
 
 class TestConnectorBase:
@@ -146,11 +126,6 @@ class TestConnectorBase:
             await conn.read_query_history(datetime.now(tz=UTC))
 
 
-# ---------------------------------------------------------------------------
-# Exception hierarchy
-# ---------------------------------------------------------------------------
-
-
 class TestExceptions:
     def test_read_only_violation_is_canon_error(self) -> None:
         err = ReadOnlyViolation("INSERT not allowed")
@@ -165,26 +140,52 @@ class TestExceptions:
         assert isinstance(err, CanonError)
 
 
-# ---------------------------------------------------------------------------
-# Future conformance probes (filled in when PostgreSQL connector lands, GH-4)
-# ---------------------------------------------------------------------------
+@pytest.mark.asyncio
+async def test_capabilities_are_truthful(offline_connector) -> None:  # noqa: ANN001
+    """Advertised capabilities are overridden; unadvertised ones raise."""
+    from datetime import UTC, datetime
+
+    advertised = set(offline_connector.capabilities())
+    for cap in (
+        Capability.introspect_schema,
+        Capability.run_read_only_sql,
+        Capability.test_connection,
+    ):
+        assert cap in advertised
+        method = getattr(type(offline_connector), cap.value)
+        assert method is not getattr(ConnectorBase, cap.value)
+
+    assert Capability.read_query_history not in advertised
+    with pytest.raises(NotImplementedError):
+        await offline_connector.read_query_history(datetime.now(tz=UTC))
 
 
-@pytest.mark.skip(reason="TODO GH-4: verify connector capabilities() matches actual behaviour")
-def test_capabilities_are_truthful() -> None:
-    raise NotImplementedError
+@pytest.mark.parametrize(
+    "sql",
+    ["INSERT INTO t VALUES (1)", "DROP TABLE t", "UPDATE t SET a = 1", "SELECT 1; SELECT 2"],
+)
+def test_read_only_enforcement(offline_connector, sql) -> None:  # noqa: ANN001
+    """DML/DDL and multiple statements are rejected before execution."""
+    with pytest.raises(ReadOnlyViolation):
+        offline_connector._assert_read_only(sql)
 
 
-@pytest.mark.skip(reason="TODO GH-4: verify introspect_schema emits schema-valid RelationSchema")
-def test_evidence_schema_validity() -> None:
-    raise NotImplementedError
+@pytest.mark.integration
+async def test_evidence_schema_validity(pg_connector) -> None:  # noqa: ANN001
+    """Emitted RelationSchema evidence is schema-valid and round-trips."""
+    schemas = await pg_connector.introspect_schema()
+    assert schemas
+    for schema in schemas:
+        restored = RelationSchema.model_validate(schema.model_dump())
+        assert restored == schema
+        assert restored.acquisition_tier in set(AcquisitionTier)
 
 
-@pytest.mark.skip(reason="TODO GH-4: verify read-only enforcement rejects DML/DDL")
-def test_read_only_enforcement() -> None:
-    raise NotImplementedError
-
-
-@pytest.mark.skip(reason="TODO GH-4: verify fixture relation round-trips through connector")
-def test_fixture_round_trip() -> None:
-    raise NotImplementedError
+@pytest.mark.integration
+async def test_fixture_round_trip(pg_connector) -> None:  # noqa: ANN001
+    """A known seeded relation is discovered with normalized evidence."""
+    schemas = {s.relation: s for s in await pg_connector.introspect_schema()}
+    assert "analytics.fct_orders" in schemas
+    orders = schemas["analytics.fct_orders"]
+    assert orders.acquisition_tier == AcquisitionTier.live
+    assert orders.primary_key == ["order_id"]
