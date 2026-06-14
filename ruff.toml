@@ -1,0 +1,13 @@
+target-version = "py313"
+line-length = 100
+
+[lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "TCH"]
+ignore = ["E501"]
+
+[lint.isort]
+known-first-party = ["canon"]
+
+[format]
+quote-style = "double"
+indent-style = "space"
