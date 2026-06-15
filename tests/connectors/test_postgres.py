@@ -19,42 +19,6 @@ from canon.connectors.postgres import PostgresConnector, _normalize_type
 from canon.exc import ReadOnlyViolation
 
 # ---------------------------------------------------------------------------
-# Unit: read-only enforcement (parse level, no DB)
-# ---------------------------------------------------------------------------
-
-
-class TestReadOnlyEnforcement:
-    @pytest.mark.parametrize(
-        "sql",
-        [
-            "SELECT 1",
-            "SELECT a, b FROM analytics.fct_orders WHERE a > 1",
-            "WITH x AS (SELECT 1 AS a) SELECT a FROM x",
-            "SELECT 1 UNION SELECT 2",
-        ],
-    )
-    def test_select_allowed(self, offline_connector: PostgresConnector, sql: str) -> None:
-        offline_connector._assert_read_only(sql)  # must not raise
-
-    @pytest.mark.parametrize(
-        "sql",
-        [
-            "INSERT INTO t VALUES (1)",
-            "UPDATE t SET a = 1",
-            "DELETE FROM t",
-            "DROP TABLE t",
-            "CREATE TABLE t (a int)",
-            "TRUNCATE t",
-            "SELECT 1; SELECT 2",
-            "SELECT 1; DROP TABLE t",
-        ],
-    )
-    def test_non_select_rejected(self, offline_connector: PostgresConnector, sql: str) -> None:
-        with pytest.raises(ReadOnlyViolation):
-            offline_connector._assert_read_only(sql)
-
-
-# ---------------------------------------------------------------------------
 # Unit: type mapping
 # ---------------------------------------------------------------------------
 

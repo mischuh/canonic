@@ -165,10 +165,10 @@ async def test_capabilities_are_truthful(offline_connector) -> None:  # noqa: AN
     "sql",
     ["INSERT INTO t VALUES (1)", "DROP TABLE t", "UPDATE t SET a = 1", "SELECT 1; SELECT 2"],
 )
-def test_read_only_enforcement(offline_connector, sql) -> None:  # noqa: ANN001
-    """DML/DDL and multiple statements are rejected before execution."""
+async def test_read_only_enforcement(offline_connector, sql) -> None:  # noqa: ANN001
+    """DML/DDL and multiple statements are rejected before any connection opens."""
     with pytest.raises(ReadOnlyViolation):
-        offline_connector._assert_read_only(sql)
+        await offline_connector.run_read_only_sql(sql)
 
 
 @pytest.mark.integration
