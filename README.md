@@ -4,7 +4,7 @@ Canon is an open, file-based **context layer** that sits between your data stack
 
 Canon turns your warehouse metadata, BI definitions, modeling code, query history, and team docs into three reviewable surfaces and serves them to agents at runtime via **MCP** and a **CLI**. Database access is always **read-only**; all context is versioned in git and reviewed like code.
 
-> **Status:** early development — Phase 0 walking skeleton complete. The compiler, MCP serving surface (E8), and CLI capability commands (`canon query`, `canon sql`) are all live. An agent or CI pipeline can call `query` on either surface, receive `QueryResult` with resolved SQL, guardrails fired, and freshness metadata, and get a structured error on ambiguity — no LLM in the path. CLI `--json` and MCP `query` are verified byte-identical against live Postgres (E2E parity test). The PRD and Phase 0 specs live in [`docs/`](docs/).
+> **Status:** early development — Phase 0 walking skeleton complete. The compiler, MCP serving surface (E8), CLI capability commands (`canon query`, `canon sql`), and the project setup wizard (`canon setup`) are all live. An agent or CI pipeline can call `query` on either surface, receive `QueryResult` with resolved SQL, guardrails fired, and freshness metadata, and get a structured error on ambiguity — no LLM in the path. CLI `--json` and MCP `query` are verified byte-identical against live Postgres (E2E parity test). The PRD and Phase 0 specs live in [`docs/`](docs/).
 
 ---
 
@@ -359,6 +359,48 @@ All errors map to structured `ErrorCode` values with canonical headless exit cod
 `UNSUPPORTED_MEASURE` → 6, `GUARDRAIL_BLOCK` → 8) — enabling the CI-gate role without
 parsing free text.
 
+### Project setup wizard
+
+`canon setup` bootstraps a new project interactively. It writes `canon.yaml`, creates the four context directories, and adds a `.gitignore` covering `.canon/`. Interrupted runs resume from the last completed step — the checkpoint is saved to `.canon/setup-state.json` after each step.
+
+```sh
+cd my-new-project
+canon setup
+```
+
+The wizard walks through five steps:
+
+1. **Project name** — defaults to the current directory name.
+2. **First connection** — prompts for Postgres host, port, user, database, and the name of the environment variable holding the password (e.g. `CANON_PG_PASSWORD`). The connection is tested before it is recorded; a failing test re-prompts rather than writing a broken entry.
+3. **LLM** — provider, base URL (default `http://localhost:11434/v1` for Ollama), model, and an optional API key env var.
+4. **Schema preview** — optionally introspects the live database and reports the number of relations found (no files written).
+5. **Write** — emits `canon.yaml`, scaffolds the context directories, and validates the written config by re-loading it.
+
+Secrets are written as env-var references (`credentials_ref: env:CANON_PG_PASSWORD`), never as literal values.
+
+Running `canon setup` inside an existing project enters a menu instead of overwriting committed files:
+
+```sh
+# In an existing canon project:
+canon setup
+# → shows project status and offers:
+#   [1] status  [2] add connection  [3] exit
+```
+
+After setup completes:
+
+```sh
+# Your project tree:
+# canon.yaml
+# semantics/
+# knowledge/
+# contracts/
+#   metrics/  guardrails/  assertions/
+# raw-sources/
+# .canon/           ← git-ignored
+# .gitignore        ← covers .canon/
+```
+
 ### CLI — query and serving
 
 All capability commands share the `--json` flag for structured, machine-readable output.
@@ -374,14 +416,14 @@ cat > q.json <<'EOF'
 EOF
 
 canon query -f q.json          # human output (Rich table)
-canon query --json -f q.json   # machine output (QueryResult JSON)
+canon --json query -f q.json   # machine output (QueryResult JSON)
 
 # Raw read-only SQL escape hatch:
 canon sql "SELECT count(*) FROM analytics.fct_orders"
-canon sql --json "SELECT count(*) FROM analytics.fct_orders"
+canon --json sql "SELECT count(*) FROM analytics.fct_orders"
 ```
 
-Both `canon query --json` and the MCP `query` tool return **byte-identical core payloads**
+Both `canon --json query` and the MCP `query` tool return **byte-identical core payloads**
 (SPEC §2.1 adapter rule) — the walking-skeleton parity test asserts this end-to-end against
 a live Postgres.
 
@@ -504,7 +546,7 @@ rows = asyncio.run(service.run_sql("SELECT count(*) FROM analytics.fct_orders"))
 
 Canon ships in phases (see [`docs/PRD-canon-final.md`](docs/PRD-canon-final.md) §9.1):
 
-- **Phase 0 — Walking skeleton.** ✓ Complete. Foundation + install (E1), one primary connector (E2), compiler + minimal contracts (E5 + E15), CLI (E7), MCP serving (E8). An agent or CI pipeline asks for a metric → Canon resolves the canonical binding → compiles read-only SQL with guardrail filters injected → executes against live Postgres → returns a byte-identical `QueryResult` on both CLI (`canon query --json`) and MCP (`query` tool). E2E parity conformance test passes against live Postgres.
+- **Phase 0 — Walking skeleton.** ✓ Complete. Foundation + install + setup wizard (E1), one primary connector (E2), compiler + minimal contracts (E5 + E15), CLI (E7), MCP serving (E8). An agent or CI pipeline asks for a metric → Canon resolves the canonical binding → compiles read-only SQL with guardrail filters injected → executes against live Postgres → returns a byte-identical `QueryResult` on both CLI (`canon --json query`) and MCP (`query` tool). E2E parity conformance test passes against live Postgres. `canon setup` bootstraps a new project interactively with checkpoint-based resumability.
 - **Phase 1 — v1 core.** Auto-built context across pillars and multiple sources: ingestion + reconciliation (E4), knowledge + retrieval (E6), LLM config incl. local/offline (E10), definition + evidence connectors (E3), fuller contracts, accuracy tracking.
 - **Phase 2 — Trust & operations.** Cost control (E13), answer trust score (E14), feedback loop (E11), agent edit/review loop (E9), governance: RLS/PII + locked context versions (E12).
 

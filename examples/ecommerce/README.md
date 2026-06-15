@@ -165,7 +165,7 @@ canon query -f q.json
 **Machine output (`--json`) — byte-identical to the MCP `query` tool:**
 
 ```sh
-canon query --json -f q.json
+canon --json query -f q.json
 ```
 
 ```json
@@ -186,14 +186,14 @@ canon query --json -f q.json
 cat > q.json <<'EOF'
 {"metrics": ["revenue", "order_count"], "dimensions": ["country"]}
 EOF
-canon query --json -f q.json
+canon --json query -f q.json
 ```
 
 **Raw read-only SQL:**
 
 ```sh
 canon sql "SELECT status, sum(amount) FROM analytics.fct_orders GROUP BY status"
-canon sql --json "SELECT count(*) FROM analytics.fct_orders"
+canon --json sql "SELECT count(*) FROM analytics.fct_orders"
 
 # Non-SELECT is rejected before touching the database:
 canon sql "DROP TABLE analytics.fct_orders"
@@ -208,11 +208,11 @@ canon sql "DROP TABLE analytics.fct_orders"
 cat > q.json <<'EOF'
 {"metrics": ["mrr"]}
 EOF
-canon query --json -f q.json   # stderr: {"code": "unresolved", "message": "…"}
+canon --json query -f q.json   # stderr: {"code": "unresolved", "message": "…"}
 echo $?                        # 2
 ```
 
-**CLI vs. MCP — same result:** `canon query --json` and the MCP `query` tool both call
+**CLI vs. MCP — same result:** `canon --json query` and the MCP `query` tool both call
 the same `CanonService` and serialize via the same Pydantic model. The walking-skeleton
 E2E test (`tests/e2e/test_walking_skeleton.py::test_parity`) asserts byte-identical
 payloads against live Postgres on every CI run.

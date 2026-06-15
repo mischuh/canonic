@@ -16,6 +16,11 @@ if TYPE_CHECKING:
 KNOWN_VERSIONS: frozenset[int] = frozenset({1})
 _REF_PATTERN = re.compile(r"^(env:|keyring:|file:)")
 
+#: Committed context directories scaffolded for every project (SPEC E1 §2).
+CONTEXT_DIRS: tuple[str, ...] = ("semantics", "knowledge", "contracts", "raw-sources")
+#: Git-ignored local state/secret directory (SPEC E1 §7).
+LOCAL_STATE_DIR = ".canon"
+
 
 class ConfigError(Exception):
     """Raised when canon.yaml is invalid, missing, or uses an unknown version."""
@@ -119,6 +124,53 @@ def find_project_root() -> Path | None:
         if (directory / "canon.yaml").exists():
             return directory
     return None
+
+
+def dump_config(config: CanonConfig, path: Path) -> None:
+    """Write a validated CanonConfig to path as canon.yaml.
+
+    Round-trips with load_config: the result re-parses to an equal config. Only
+    indirection strings (``*_ref``) are written — secret values never touch disk.
+    """
+    data = config.model_dump(mode="json", exclude_none=True)
+    llm = data.get("llm")
+    if isinstance(llm, dict) and not llm.get("tasks"):
+        llm.pop("tasks", None)
+    yaml = YAML()
+    yaml.default_flow_style = False
+    with open(path, "w") as f:
+        yaml.dump(data, f)
+
+
+def scaffold_project(root: Path) -> list[Path]:
+    """Create the canon project skeleton under root; return the paths created.
+
+    Idempotent — existing files and directories are left untouched. Scaffolds the
+    four committed context directories (SPEC E1 §2), the restrictive-permission
+    ``.canon/`` local-state directory (§7), and a ``.gitignore`` covering
+    ``.canon/`` when none exists yet.
+    """
+    from canon.contracts.loader import contracts_dir_scaffold
+
+    created: list[Path] = []
+    for name in CONTEXT_DIRS:
+        directory = root / name
+        if not directory.exists():
+            created.append(directory)
+        directory.mkdir(parents=True, exist_ok=True)
+    contracts_dir_scaffold(root)
+
+    local = root / LOCAL_STATE_DIR
+    if not local.exists():
+        created.append(local)
+    local.mkdir(parents=True, exist_ok=True)
+    local.chmod(0o700)
+
+    gitignore = root / ".gitignore"
+    if not gitignore.exists():
+        gitignore.write_text(f"{LOCAL_STATE_DIR}/\n")
+        created.append(gitignore)
+    return created
 
 
 def load_config(path: Path) -> CanonConfig:

@@ -10,8 +10,8 @@ from canon.cli.app import app
 _GROUPS = ["setup", "connection", "sl", "query", "sql", "knowledge", "status", "mcp", "completion"]
 
 # Capability stubs that must exit 0 with a "not implemented yet" notice.
+# (``setup`` is now a real interactive command — see tests/cli/test_setup.py.)
 _STUBS = [
-    ["setup"],
     ["connection", "add"],
     ["connection", "test"],
     ["connection", "list"],
