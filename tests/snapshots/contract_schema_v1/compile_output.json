@@ -1,0 +1,137 @@
+{
+  "$defs": {
+    "Compiled": {
+      "description": "The compiled SQL and its dialect (SPEC \u00a72.2 ``compiled``).",
+      "properties": {
+        "dialect": {
+          "title": "Dialect",
+          "type": "string"
+        },
+        "sql": {
+          "title": "Sql",
+          "type": "string"
+        }
+      },
+      "required": [
+        "sql",
+        "dialect"
+      ],
+      "title": "Compiled",
+      "type": "object"
+    },
+    "FiredGuardrailOut": {
+      "description": "A guardrail that fired during compilation (mirrors compiler ``FiredGuardrail``).",
+      "properties": {
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "kind": {
+          "title": "Kind",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "kind"
+      ],
+      "title": "FiredGuardrailOut",
+      "type": "object"
+    },
+    "QueryMetadata": {
+      "description": "The E5 compiler metadata block carried alongside a result (SPEC \u00a72.2).",
+      "properties": {
+        "contract_schema": {
+          "default": "1.0",
+          "title": "Contract Schema",
+          "type": "string"
+        },
+        "freshness": {
+          "items": {
+            "$ref": "#/$defs/SourceFreshnessOut"
+          },
+          "title": "Freshness",
+          "type": "array"
+        },
+        "guardrails_fired": {
+          "items": {
+            "$ref": "#/$defs/FiredGuardrailOut"
+          },
+          "title": "Guardrails Fired",
+          "type": "array"
+        },
+        "resolved": {
+          "additionalProperties": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object"
+          },
+          "title": "Resolved",
+          "type": "object"
+        },
+        "warnings": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Warnings",
+          "type": "array"
+        }
+      },
+      "required": [
+        "resolved",
+        "guardrails_fired",
+        "freshness"
+      ],
+      "title": "QueryMetadata",
+      "type": "object"
+    },
+    "SourceFreshnessOut": {
+      "description": "Per-source freshness metadata (mirrors compiler ``SourceFreshness``).",
+      "properties": {
+        "last_validated_at": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Last Validated At"
+        },
+        "source": {
+          "title": "Source",
+          "type": "string"
+        },
+        "stale": {
+          "default": false,
+          "title": "Stale",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "source"
+      ],
+      "title": "SourceFreshnessOut",
+      "type": "object"
+    }
+  },
+  "description": "The ``compile`` response: ``compiled`` + ``metadata`` without a result set (SPEC \u00a72.2).",
+  "properties": {
+    "compiled": {
+      "$ref": "#/$defs/Compiled"
+    },
+    "metadata": {
+      "$ref": "#/$defs/QueryMetadata"
+    }
+  },
+  "required": [
+    "compiled",
+    "metadata"
+  ],
+  "title": "CompileOutput",
+  "type": "object"
+}

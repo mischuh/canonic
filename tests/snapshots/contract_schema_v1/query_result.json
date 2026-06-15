@@ -1,0 +1,203 @@
+{
+  "$defs": {
+    "Compiled": {
+      "description": "The compiled SQL and its dialect (SPEC \u00a72.2 ``compiled``).",
+      "properties": {
+        "dialect": {
+          "title": "Dialect",
+          "type": "string"
+        },
+        "sql": {
+          "title": "Sql",
+          "type": "string"
+        }
+      },
+      "required": [
+        "sql",
+        "dialect"
+      ],
+      "title": "Compiled",
+      "type": "object"
+    },
+    "FiredGuardrailOut": {
+      "description": "A guardrail that fired during compilation (mirrors compiler ``FiredGuardrail``).",
+      "properties": {
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "kind": {
+          "title": "Kind",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "kind"
+      ],
+      "title": "FiredGuardrailOut",
+      "type": "object"
+    },
+    "QueryMetadata": {
+      "description": "The E5 compiler metadata block carried alongside a result (SPEC \u00a72.2).",
+      "properties": {
+        "contract_schema": {
+          "default": "1.0",
+          "title": "Contract Schema",
+          "type": "string"
+        },
+        "freshness": {
+          "items": {
+            "$ref": "#/$defs/SourceFreshnessOut"
+          },
+          "title": "Freshness",
+          "type": "array"
+        },
+        "guardrails_fired": {
+          "items": {
+            "$ref": "#/$defs/FiredGuardrailOut"
+          },
+          "title": "Guardrails Fired",
+          "type": "array"
+        },
+        "resolved": {
+          "additionalProperties": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object"
+          },
+          "title": "Resolved",
+          "type": "object"
+        },
+        "warnings": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Warnings",
+          "type": "array"
+        }
+      },
+      "required": [
+        "resolved",
+        "guardrails_fired",
+        "freshness"
+      ],
+      "title": "QueryMetadata",
+      "type": "object"
+    },
+    "ResultColumn": {
+      "description": "A single column descriptor in a ResultSet.",
+      "properties": {
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "type": {
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "type"
+      ],
+      "title": "ResultColumn",
+      "type": "object"
+    },
+    "ResultSet": {
+      "description": "Normalized query result emitted by run_read_only_sql().",
+      "properties": {
+        "bytes_scanned": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Bytes Scanned"
+        },
+        "columns": {
+          "items": {
+            "$ref": "#/$defs/ResultColumn"
+          },
+          "title": "Columns",
+          "type": "array"
+        },
+        "rows": {
+          "items": {
+            "items": {},
+            "type": "array"
+          },
+          "title": "Rows",
+          "type": "array"
+        },
+        "truncated": {
+          "default": false,
+          "title": "Truncated",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "columns",
+        "rows"
+      ],
+      "title": "ResultSet",
+      "type": "object"
+    },
+    "SourceFreshnessOut": {
+      "description": "Per-source freshness metadata (mirrors compiler ``SourceFreshness``).",
+      "properties": {
+        "last_validated_at": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Last Validated At"
+        },
+        "source": {
+          "title": "Source",
+          "type": "string"
+        },
+        "stale": {
+          "default": false,
+          "title": "Stale",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "source"
+      ],
+      "title": "SourceFreshnessOut",
+      "type": "object"
+    }
+  },
+  "description": "The combined ``query`` response: ``result`` + ``compiled`` + ``metadata`` (SPEC \u00a72.2).",
+  "properties": {
+    "compiled": {
+      "$ref": "#/$defs/Compiled"
+    },
+    "metadata": {
+      "$ref": "#/$defs/QueryMetadata"
+    },
+    "result": {
+      "$ref": "#/$defs/ResultSet"
+    }
+  },
+  "required": [
+    "result",
+    "compiled",
+    "metadata"
+  ],
+  "title": "QueryResult",
+  "type": "object"
+}

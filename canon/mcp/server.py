@@ -16,6 +16,8 @@ from typing import TYPE_CHECKING, Any
 from fastmcp import FastMCP
 
 from canon.compiler.query import SemanticQuery
+from canon.contract import CONTRACT_SCHEMA
+from canon.core.models import CompileOutput
 from canon.mcp.errors import canon_error_response
 
 if TYPE_CHECKING:
@@ -27,6 +29,39 @@ __all__ = ["build_server"]
 def build_server(service: CanonService) -> FastMCP:
     """Return a :class:`FastMCP` instance with all P0 tools registered against *service*."""
     mcp: FastMCP = FastMCP("canon")
+
+    # ------------------------------------------------------------------
+    # Tool: list_metrics
+    # ------------------------------------------------------------------
+
+    @mcp.tool(
+        description=(
+            "Return the serving contract version this daemon implements. "
+            "Call this at session start to confirm compatibility."
+        )
+    )
+    async def contract_info() -> dict[str, str]:
+        return {"contract_schema": CONTRACT_SCHEMA}
+
+    # ------------------------------------------------------------------
+    # Tool: negotiate_contract
+    # ------------------------------------------------------------------
+
+    @mcp.tool(
+        description=(
+            "Declare the contract_schema MAJOR your client was built against. "
+            "The daemon accepts iff client MAJOR == server MAJOR; otherwise fails fast."
+        )
+    )
+    async def negotiate_contract(contract_major: int) -> dict[str, Any]:
+        server_major = int(CONTRACT_SCHEMA.split(".")[0])
+        if contract_major != server_major:
+            raise ValueError(
+                f"contract_schema MAJOR mismatch: client declared {contract_major}, "
+                f"server implements {CONTRACT_SCHEMA} (MAJOR {server_major}). "
+                "Update your client or connect to a compatible Canon daemon."
+            )
+        return {"accepted": True, "contract_schema": CONTRACT_SCHEMA}
 
     # ------------------------------------------------------------------
     # Tool: list_metrics
@@ -82,20 +117,7 @@ def build_server(service: CanonService) -> FastMCP:
     async def compile_query(query: dict[str, Any]) -> dict[str, Any]:
         sq = SemanticQuery.model_validate(query)
         result = service.compile_query(sq)
-        return {
-            "sql": result.sql,
-            "dialect": result.dialect,
-            "resolved": result.resolved,
-            "guardrails_fired": [{"id": g.id, "kind": g.kind} for g in result.guardrails_fired],
-            "freshness": [
-                {
-                    "source": f.source,
-                    "last_validated_at": f.last_validated_at,
-                    "stale": f.stale,
-                }
-                for f in result.freshness
-            ],
-        }
+        return CompileOutput.from_compile_result(result).model_dump(mode="json")
 
     # ------------------------------------------------------------------
     # Tool: query

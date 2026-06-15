@@ -7,6 +7,7 @@ from rich.console import Console
 
 from canon.cli._errors import get_cli_context
 from canon.config import ConfigError, find_project_root, load_config
+from canon.contract import CONTRACT_SCHEMA
 
 _console = Console(soft_wrap=True)
 
@@ -40,6 +41,7 @@ def status(ctx: typer.Context) -> None:
                     "config_version": config_version,
                     "config_error": config_error,
                     "dotcanon_present": dotcanon_present,
+                    "contract_schema": CONTRACT_SCHEMA,
                 }
             )
         )
@@ -51,3 +53,4 @@ def status(ctx: typer.Context) -> None:
     else:
         _console.print(f"config version: {config_version}")
     _console.print(f".canon/:        {'present' if dotcanon_present else 'absent'}")
+    _console.print(f"contract:       {CONTRACT_SCHEMA}")
