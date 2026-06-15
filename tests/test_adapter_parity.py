@@ -8,13 +8,17 @@ so they are covered by e2e tests).
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 import pytest
 from fastmcp import Client
 
 from canon.compiler.query import SemanticQuery
 from canon.core.models import CompileOutput
-from canon.core.service import CanonService
 from canon.mcp.server import build_server
+
+if TYPE_CHECKING:
+    from canon.core.service import CanonService
 
 
 @pytest.mark.asyncio
