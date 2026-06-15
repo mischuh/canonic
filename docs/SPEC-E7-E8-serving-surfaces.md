@@ -170,7 +170,7 @@ The single source of truth for error codes across all capabilities and surfaces.
 
 **S1 [P0] Agent answers a metric question end-to-end.**
 - AC1: Given a connected Postgres source and a canonical `revenue` binding, when an agent calls the MCP `query` tool with `{metrics:[revenue], dimensions:[order_date]}`, then it receives rows plus the metadata block (resolved binding, guardrails fired, freshness).
-- AC2: The same query via `canon query --json` returns a byte-identical core payload.
+- AC2: The same query via `canon --json query` returns a byte-identical core payload.
 
 **S2 [P0] Discovery.**
 - AC1: When an agent calls `list_metrics`, then it gets the active canonical metrics; `describe_metric(revenue)` returns grain, dimensions, owning source, and freshness.
