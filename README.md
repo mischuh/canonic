@@ -4,7 +4,7 @@ Canon is an open, file-based **context layer** that sits between your data stack
 
 Canon turns your warehouse metadata, BI definitions, modeling code, query history, and team docs into three reviewable surfaces and serves them to agents at runtime via **MCP** and a **CLI**. Database access is always **read-only**; all context is versioned in git and reviewed like code.
 
-> **Status:** early development — Phase 0 walking skeleton in progress. The deterministic compiler core is implemented and the MCP serving surface (E8) is live: an agent can call the `query` tool, receive resolved SQL + guardrails + freshness metadata, and get a structured error on ambiguity — no LLM in that path. The PRD and Phase 0 specs live in [`docs/`](docs/).
+> **Status:** early development — Phase 0 walking skeleton complete. The compiler, MCP serving surface (E8), and CLI capability commands (`canon query`, `canon sql`) are all live. An agent or CI pipeline can call `query` on either surface, receive `QueryResult` with resolved SQL, guardrails fired, and freshness metadata, and get a structured error on ambiguity — no LLM in the path. CLI `--json` and MCP `query` are verified byte-identical against live Postgres (E2E parity test). The PRD and Phase 0 specs live in [`docs/`](docs/).
 
 ---
 
@@ -359,7 +359,40 @@ All errors map to structured `ErrorCode` values with canonical headless exit cod
 `UNSUPPORTED_MEASURE` → 6, `GUARDRAIL_BLOCK` → 8) — enabling the CI-gate role without
 parsing free text.
 
-### CLI and MCP daemon control
+### CLI — query and serving
+
+All capability commands share the `--json` flag for structured, machine-readable output.
+Exit codes follow the canonical error registry (see error table below) — the same codes
+the MCP surface returns in structured error dicts, so CLI and agent paths are identical.
+
+**Semantic queries:**
+
+```sh
+# Compile + execute a semantic query read-only; -f points at a JSON file:
+cat > q.json <<'EOF'
+{"metrics": ["revenue"], "dimensions": ["order_date"]}
+EOF
+
+canon query -f q.json          # human output (Rich table)
+canon query --json -f q.json   # machine output (QueryResult JSON)
+
+# Raw read-only SQL escape hatch:
+canon sql "SELECT count(*) FROM analytics.fct_orders"
+canon sql --json "SELECT count(*) FROM analytics.fct_orders"
+```
+
+Both `canon query --json` and the MCP `query` tool return **byte-identical core payloads**
+(SPEC §2.1 adapter rule) — the walking-skeleton parity test asserts this end-to-end against
+a live Postgres.
+
+Non-SELECT statements are rejected before reaching the database:
+```sh
+canon sql "DROP TABLE orders"
+# error: read_only_violation: …
+# exit code 11
+```
+
+**MCP daemon control:**
 
 ```sh
 canon --version
@@ -380,6 +413,16 @@ canon mcp stop         # SIGTERM + remove .canon/mcp.json
 
 Version compatibility is checked on start: if a daemon is already running with a different
 Canon version, the command exits with a clear message instead of starting a second server.
+
+**Headless exit codes:**
+
+| Code | Meaning | Exit |
+| --- | --- | --- |
+| `UNRESOLVED` | metric name matches no active binding | 2 |
+| `AMBIGUOUS` | name matches more than one active binding | 3 |
+| `READ_ONLY_VIOLATION` | non-SELECT statement rejected | 11 |
+| `GUARDRAIL_BLOCK` | severity:error guardrail blocked the query | 8 |
+| `UNREACHABLE` | dimension/filter has no join path | 4 |
 
 ### MCP serving surface (E8)
 
@@ -426,9 +469,9 @@ same codes the CLI uses as headless exit values, so pipeline and agent paths are
 
 **`CanonService` — the shared capability layer:**
 
-Both the MCP adapter and future CLI capability commands call `CanonService`; neither
-re-implements resolution or compilation. This guarantees byte-identical results across
-surfaces (SPEC §2.1 adapter rule):
+Both the MCP adapter and the CLI capability commands (`query`, `sql`) call `CanonService`;
+neither re-implements resolution or compilation. This guarantees byte-identical results
+across surfaces (SPEC §2.1 adapter rule):
 
 ```python
 from pathlib import Path
@@ -461,7 +504,7 @@ rows = asyncio.run(service.run_sql("SELECT count(*) FROM analytics.fct_orders"))
 
 Canon ships in phases (see [`docs/PRD-canon-final.md`](docs/PRD-canon-final.md) §9.1):
 
-- **Phase 0 — Walking skeleton.** End-to-end for one database: foundation + install (E1), one primary connector (E2), compiler + minimal contracts (E5 + E15), CLI (E7), MCP serving (E8). ✓ Compiler, contracts, and MCP serving are implemented. An agent asks for a metric → Canon resolves the canonical binding → compiles read-only SQL → executes → returns `QueryResult` with guardrails + freshness. No LLM in this path.
+- **Phase 0 — Walking skeleton.** ✓ Complete. Foundation + install (E1), one primary connector (E2), compiler + minimal contracts (E5 + E15), CLI (E7), MCP serving (E8). An agent or CI pipeline asks for a metric → Canon resolves the canonical binding → compiles read-only SQL with guardrail filters injected → executes against live Postgres → returns a byte-identical `QueryResult` on both CLI (`canon query --json`) and MCP (`query` tool). E2E parity conformance test passes against live Postgres.
 - **Phase 1 — v1 core.** Auto-built context across pillars and multiple sources: ingestion + reconciliation (E4), knowledge + retrieval (E6), LLM config incl. local/offline (E10), definition + evidence connectors (E3), fuller contracts, accuracy tracking.
 - **Phase 2 — Trust & operations.** Cost control (E13), answer trust score (E14), feedback loop (E11), agent edit/review loop (E9), governance: RLS/PII + locked context versions (E12).
 

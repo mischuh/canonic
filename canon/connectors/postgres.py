@@ -13,7 +13,7 @@ from datetime import date, datetime
 from decimal import Decimal
 from typing import TYPE_CHECKING, Any
 
-from sqlalchemy import URL, text
+from sqlalchemy import URL, make_url, text
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 
 from canon.connectors.base import (
@@ -128,15 +128,18 @@ class PostgresConnector(ConnectorBase):
 
     def __init__(self, connection: Connection) -> None:
         params = connection.params
-        password = resolve_credential(connection.credentials_ref)
-        self._url = URL.create(
-            "postgresql+asyncpg",
-            username=params.get("user"),
-            password=password,
-            host=params.get("host"),
-            port=params.get("port"),
-            database=params.get("dbname") or params.get("database"),
-        )
+        credential = resolve_credential(connection.credentials_ref)
+        if credential.startswith(("postgres://", "postgresql://")):
+            self._url = make_url(credential).set(drivername="postgresql+asyncpg")
+        else:
+            self._url = URL.create(
+                "postgresql+asyncpg",
+                username=params.get("user"),
+                password=credential,
+                host=params.get("host"),
+                port=params.get("port"),
+                database=params.get("dbname") or params.get("database"),
+            )
         schema = params.get("schema")
         self._connect_args: dict[str, object] = (
             {"server_settings": {"search_path": schema}} if schema else {}
