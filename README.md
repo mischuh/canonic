@@ -4,7 +4,7 @@ Canon is an open, file-based **context layer** that sits between your data stack
 
 Canon turns your warehouse metadata, BI definitions, modeling code, query history, and team docs into three reviewable surfaces and serves them to agents at runtime via **MCP** and a **CLI**. Database access is always **read-only**; all context is versioned in git and reviewed like code.
 
-> **Status:** early development — Phase 0 walking skeleton complete. The compiler, MCP serving surface (E8), CLI capability commands (`canon query`, `canon sql`), and the project setup wizard (`canon setup`) are all live. An agent or CI pipeline can call `query` on either surface, receive `QueryResult` with resolved SQL, guardrails fired, and freshness metadata, and get a structured error on ambiguity — no LLM in the path. CLI `--json` and MCP `query` are verified byte-identical against live Postgres (E2E parity test). The PRD and Phase 0 specs live in [`docs/`](docs/).
+> **Status:** early development — Phase 0 walking skeleton complete and serving contract frozen. The compiler, MCP serving surface (E8), CLI capability commands (`canon query`, `canon sql`), and the project setup wizard (`canon setup`) are all live. The serving contract is now versioned (`contract_schema: v1`) and locked behind a conformance gate: JSON schema golden files catch any silent field change in CI. `canon status` and the MCP `contract_info` tool both advertise the version; every `QueryResult.metadata` carries it for provenance. An agent or CI pipeline can call `query` on either surface, receive `QueryResult` with resolved SQL, guardrails fired, freshness, and warnings, and get a structured error on ambiguity — no LLM in the path. CLI `--json` and MCP `query` are verified byte-identical. The PRD and Phase 0 specs live in [`docs/`](docs/).
 
 ---
 
@@ -438,7 +438,7 @@ canon sql "DROP TABLE orders"
 
 ```sh
 canon --version
-canon status           # show project root + config version
+canon status           # show project root, config version, contract_schema
 canon connection list  # registered connections
 canon --help
 
@@ -476,10 +476,12 @@ Cursor, Codex). The server is a thin adapter — all logic lives in the protocol
 
 | Tool | Purpose |
 | --- | --- |
+| `contract_info` | Return the `contract_schema` version this daemon implements |
+| `negotiate_contract(contract_major)` | Declare the MAJOR your client was built against; daemon rejects mismatches at connect time |
 | `list_metrics` | List all active canonical metrics |
 | `describe_metric(name)` | Grain, dimensions, measures, and freshness for one metric |
 | `resolve_metric(name)` | Resolve a name/alias → canonical binding; surface `AMBIGUOUS`/`UNRESOLVED` |
-| `compile_query(query)` | Semantic query → SQL + metadata, no execution |
+| `compile_query(query)` | Semantic query → `{compiled: {sql, dialect}, metadata: {…}}`, no execution |
 | `query(query)` | Compile + execute read-only → `QueryResult` with rows + metadata |
 | `run_sql(sql, connection?)` | Execute a raw SELECT; rejects non-SELECT with `READ_ONLY_VIOLATION` |
 
@@ -494,7 +496,22 @@ Cursor, Codex). The server is a thin adapter — all logic lives in the protocol
   "compiled": { "sql": "SELECT …", "dialect": "postgres" },
   "metadata": { "resolved":          {"metrics": {"revenue": "orders.total_revenue"}},
                 "guardrails_fired":  [{"id": "revenue-excludes-refunds", "kind": "mandatory_filter"}],
-                "freshness":         [{"source": "orders", "last_validated_at": "…", "stale": false}] }
+                "freshness":         [{"source": "orders", "last_validated_at": "…", "stale": false}],
+                "warnings":          [],
+                "contract_schema":   "1.0" }
+}
+```
+
+**`compile_query` returns a `CompileOutput` (SPEC §2.2 compile path):**
+
+```json
+{
+  "compiled": { "sql": "SELECT …", "dialect": "postgres" },
+  "metadata": { "resolved":         {"metrics": {"revenue": "orders.total_revenue"}},
+                "guardrails_fired": [{"id": "revenue-excludes-refunds", "kind": "mandatory_filter"}],
+                "freshness":        [],
+                "warnings":         [],
+                "contract_schema":  "1.0" }
 }
 ```
 
@@ -546,7 +563,7 @@ rows = asyncio.run(service.run_sql("SELECT count(*) FROM analytics.fct_orders"))
 
 Canon ships in phases (see [`docs/PRD-canon-final.md`](docs/PRD-canon-final.md) §9.1):
 
-- **Phase 0 — Walking skeleton.** ✓ Complete. Foundation + install + setup wizard (E1), one primary connector (E2), compiler + minimal contracts (E5 + E15), CLI (E7), MCP serving (E8). An agent or CI pipeline asks for a metric → Canon resolves the canonical binding → compiles read-only SQL with guardrail filters injected → executes against live Postgres → returns a byte-identical `QueryResult` on both CLI (`canon --json query`) and MCP (`query` tool). E2E parity conformance test passes against live Postgres. `canon setup` bootstraps a new project interactively with checkpoint-based resumability.
+- **Phase 0 — Walking skeleton.** ✓ Complete. Foundation + install + setup wizard (E1), one primary connector (E2), compiler + minimal contracts (E5 + E15), CLI (E7), MCP serving (E8), serving contract interface freeze (P0). The serving contract is versioned as `contract_schema: v1`, locked by JSON schema golden files in CI, and stamped on every `QueryResult.metadata`. An agent or CI pipeline asks for a metric → Canon resolves the canonical binding → compiles read-only SQL with guardrail filters injected → executes against live Postgres → returns a byte-identical `QueryResult` on both CLI (`canon --json query`) and MCP (`query` tool). `canon setup` bootstraps a new project interactively with checkpoint-based resumability.
 - **Phase 1 — v1 core.** Auto-built context across pillars and multiple sources: ingestion + reconciliation (E4), knowledge + retrieval (E6), LLM config incl. local/offline (E10), definition + evidence connectors (E3), fuller contracts, accuracy tracking.
 - **Phase 2 — Trust & operations.** Cost control (E13), answer trust score (E14), feedback loop (E11), agent edit/review loop (E9), governance: RLS/PII + locked context versions (E12).
 
@@ -557,3 +574,4 @@ Canon ships in phases (see [`docs/PRD-canon-final.md`](docs/PRD-canon-final.md) 
 - [`docs/SPEC-E2-primary-source-connector.md`](docs/SPEC-E2-primary-source-connector.md) — primary source connector
 - [`docs/SPEC-E5-E15-semantics-and-contracts.md`](docs/SPEC-E5-E15-semantics-and-contracts.md) — semantic layer, compiler & contract surface
 - [`docs/SPEC-E7-E8-serving-surfaces.md`](docs/SPEC-E7-E8-serving-surfaces.md) — CLI & MCP serving surfaces
+- [`docs/SPEC-P0-interface-freeze.md`](docs/SPEC-P0-interface-freeze.md) — serving contract version policy and conformance gate
