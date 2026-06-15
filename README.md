@@ -298,9 +298,9 @@ The pipeline runs these stages in order:
 2. Bind every dimension and filter string to its owning source
 3. Plan the minimal join path via declared `joins` (ambiguous path → error, never guessed)
 4. Detect fanout — additive measures across a one→many join are deduplicated to source grain before aggregating; non-additive measures return `UNSUPPORTED_MEASURE`
-6. Enforce guardrails — `mandatory_filter` guardrails are AND-ed into WHERE and listed in `guardrails_fired`
-7. Emit SQL through the Postgres dialect adapter (identifiers quoted, `LIMIT` injected, non-SELECT AST rejected)
-8. Attach result metadata — resolved bindings, fired guardrails, per-source freshness
+5. Enforce guardrails — `mandatory_filter` guardrails are AND-ed into WHERE and listed in `guardrails_fired`
+6. Emit SQL through the Postgres dialect adapter — identifiers quoted, `LIMIT` injected, read-only guarantee enforced: non-SELECT statements, locking SELECTs (`FOR UPDATE` / `FOR SHARE`), `SELECT … INTO`, and data-modifying CTEs all raise `ReadOnlyViolation` before any string is produced
+7. Attach result metadata — resolved bindings, fired guardrails, per-source freshness
 
 ```python
 from pathlib import Path
