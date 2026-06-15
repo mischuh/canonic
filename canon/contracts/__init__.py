@@ -25,21 +25,33 @@ from canon.contracts.models import (
     Severity,
     Status,
 )
+from canon.contracts.resolver import (
+    Ambiguous,
+    Binding,
+    ContractResolver,
+    MetricResolution,
+    Unresolved,
+)
 from canon.contracts.validate import validate_contracts
 
 __all__ = [
+    "Ambiguous",
     "AppliesTo",
     "Assertion",
+    "Binding",
     "CanonicalRef",
+    "ContractResolver",
     "ContractValidationError",
     "DeprecatedAlternative",
     "FinalityRule",
     "Guardrail",
     "GuardrailKind",
     "MetricBinding",
+    "MetricResolution",
     "Realization",
     "Severity",
     "Status",
+    "Unresolved",
     "contracts_dir_scaffold",
     "dump_assertion",
     "dump_guardrail",

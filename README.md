@@ -253,6 +253,39 @@ contracts_dir_scaffold(Path("."))
 # creates contracts/{metrics,guardrails,assertions}/ if absent
 ```
 
+### Contract resolver — the canonicality authority
+
+`ContractResolver` is the single integration point between the contract surface and the compiler.
+It resolves metric names and returns applicable guardrails deterministically — the compiler calls it
+and trusts the result; no canonicality logic lives outside the resolver.
+
+```python
+from pathlib import Path
+from canon.contracts import ContractResolver, Binding, Ambiguous, Unresolved
+
+resolver = ContractResolver.from_project(Path("."))
+
+# Resolve a metric name or alias
+match resolver.resolve_metric("rev"):
+    case Binding(metric=metric, source=source, measure=measure):
+        print(f"{metric} → {source}.{measure}")
+        # revenue → orders.total_revenue
+    case Ambiguous(name=name, candidates=candidates):
+        print(f"{name} is ambiguous: {[c.metric for c in candidates]}")
+    case Unresolved(name=name):
+        print(f"{name} has no active binding")
+
+# Guardrails that apply to a (source, measure) pair — stable-sorted by id
+guardrails = resolver.guardrails_for("orders", "total_revenue")
+# guardrails[0].id     == "revenue-excludes-refunds"
+# guardrails[0].filter == "status != 'refunded'"
+# guardrails[0].kind   == "mandatory_filter"
+```
+
+Calling `resolve_metric` or `guardrails_for` twice with identical arguments returns identical results —
+required for deterministic SQL compilation and CI assertions.
+Metrics that target an unknown source raise no exception; the result is `Unresolved` and the compiler decides how to surface it.
+
 ### CLI skeleton
 
 ```sh
