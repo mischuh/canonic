@@ -1,0 +1,14 @@
+{
+  "ambiguous": 3,
+  "ambiguous_join_path": 5,
+  "assertion_failed": 10,
+  "connection_error": 13,
+  "fanout_unsafe": 7,
+  "guardrail_block": 8,
+  "read_only_violation": 11,
+  "schema_mismatch": 12,
+  "unreachable": 4,
+  "unresolved": 2,
+  "unsupported_measure": 6,
+  "validation_failed": 9
+}

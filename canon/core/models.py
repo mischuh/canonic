@@ -15,12 +15,14 @@ from pydantic import BaseModel, ConfigDict
 from canon.connectors.base import (
     ResultSet,  # noqa: TC001 — Pydantic resolves field annotations at runtime
 )
+from canon.contract import CONTRACT_SCHEMA
 
 if TYPE_CHECKING:
     from canon.compiler.result import CompileResult
 
 __all__ = [
     "Compiled",
+    "CompileOutput",
     "FiredGuardrailOut",
     "MetricDetail",
     "MetricSummary",
@@ -93,6 +95,8 @@ class QueryMetadata(BaseModel):
     resolved: dict[str, dict[str, str]]
     guardrails_fired: list[FiredGuardrailOut]
     freshness: list[SourceFreshnessOut]
+    warnings: list[str] = []
+    contract_schema: str = CONTRACT_SCHEMA
 
     @classmethod
     def from_compile_result(cls, compiled: CompileResult) -> QueryMetadata:
@@ -108,6 +112,8 @@ class QueryMetadata(BaseModel):
                 )
                 for f in compiled.freshness
             ],
+            warnings=list(compiled.warnings),
+            contract_schema=CONTRACT_SCHEMA,
         )
 
 
@@ -125,6 +131,23 @@ class QueryResult(BaseModel):
         """Merge the compiler output and the executed result set (no field renamed)."""
         return cls(
             result=result,
+            compiled=Compiled(sql=compiled.sql, dialect=compiled.dialect),
+            metadata=QueryMetadata.from_compile_result(compiled),
+        )
+
+
+class CompileOutput(BaseModel):
+    """The ``compile`` response: ``compiled`` + ``metadata`` without a result set (SPEC §2.2)."""
+
+    model_config = ConfigDict(frozen=True)
+
+    compiled: Compiled
+    metadata: QueryMetadata
+
+    @classmethod
+    def from_compile_result(cls, compiled: CompileResult) -> CompileOutput:
+        """Build a compile response from a :class:`CompileResult`."""
+        return cls(
             compiled=Compiled(sql=compiled.sql, dialect=compiled.dialect),
             metadata=QueryMetadata.from_compile_result(compiled),
         )
