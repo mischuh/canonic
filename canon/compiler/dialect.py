@@ -1,9 +1,9 @@
 """Dialect adapter — transpiles the compiler's neutral AST to target SQL (SPEC-E5-E15 §5).
 
-The compiler builds a dialect-neutral SQLGlot AST; an adapter renders it. This is the
-issue #11 seam in minimal form: PostgreSQL only, enough for the #10 compiler to emit
-read-only, identifier-quoted SQL end-to-end. Type-mapping breadth and further dialects
-are completed in #11.
+The compiler builds a dialect-neutral SQLGlot AST; an adapter renders it to a concrete
+dialect. Adapter responsibilities: type mapping (internal type set → dialect types),
+identifier quoting, ``LIMIT`` injection, and the read-only guarantee. P0 dialect:
+PostgreSQL; further dialects plug in behind the same interface.
 """
 
 from __future__ import annotations
@@ -16,6 +16,20 @@ from canon.exc import ReadOnlyViolation
 from canon.semantic.models import NormalizedType
 
 __all__ = ["DIALECT_ADAPTERS", "DialectAdapter", "PostgresDialectAdapter"]
+
+# DML/DDL nodes that may never appear anywhere in the AST — including inside a CTE
+# (Postgres permits data-modifying statements in ``WITH``). Catching them by class
+# covers ``WITH t AS (DELETE … RETURNING *) SELECT …`` and friends.
+_WRITE_NODES: tuple[type[exp.Expression], ...] = (
+    exp.Insert,
+    exp.Update,
+    exp.Delete,
+    exp.Merge,
+    exp.Create,
+    exp.Drop,
+    exp.Alter,
+    exp.TruncateTable,
+)
 
 
 class DialectAdapter(ABC):
@@ -55,11 +69,22 @@ class PostgresDialectAdapter(DialectAdapter):
     def emit(self, ast: exp.Expression, *, limit: int | None = None) -> str:
         """Render a SELECT AST to Postgres SQL with all identifiers quoted.
 
-        Raises :class:`ReadOnlyViolation` if ``ast`` is not a ``SELECT`` — the read-only
-        guarantee holds by construction, before any string is produced.
+        Raises :class:`ReadOnlyViolation` if ``ast`` is anything but a pure, read-only
+        ``SELECT``. The guarantee holds by construction — every write/lock path is
+        rejected before any string is produced. A bare ``isinstance`` check is not
+        enough: a ``SELECT`` can still write (``… INTO``), take locks (``FOR UPDATE``),
+        or wrap DML in a CTE (``WITH t AS (DELETE … RETURNING *) SELECT …``).
         """
         if not isinstance(ast, exp.Select):
             raise ReadOnlyViolation(f"refusing to emit non-SELECT statement: {type(ast).__name__}")
+        if (write := ast.find(*_WRITE_NODES)) is not None:
+            raise ReadOnlyViolation(
+                f"refusing to emit data-modifying statement: {type(write).__name__}"
+            )
+        if ast.find(exp.Into) is not None:
+            raise ReadOnlyViolation("refusing to emit SELECT ... INTO (writes a new relation)")
+        if ast.args.get("locks"):
+            raise ReadOnlyViolation("refusing to emit locking SELECT (FOR UPDATE / FOR SHARE)")
         if limit is not None:
             ast = ast.limit(limit)
         return ast.sql(dialect=self.dialect, identify=True)
