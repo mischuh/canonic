@@ -69,10 +69,11 @@ async def test_compile_query(canon_service: CanonService) -> None:
     async with Client(mcp) as client:
         result = await client.call_tool("compile_query", {"query": {"metrics": ["revenue"]}})
     data = result.data
-    assert "sql" in data
-    assert "SELECT" in data["sql"].upper()
-    assert data["resolved"]["revenue"] == "orders.total_revenue"
-    assert any(g["id"] == "revenue-excludes-refunds" for g in data["guardrails_fired"])
+    assert "sql" in data["compiled"]
+    assert "SELECT" in data["compiled"]["sql"].upper()
+    assert data["metadata"]["resolved"]["metrics"]["revenue"] == "orders.total_revenue"
+    assert any(g["id"] == "revenue-excludes-refunds" for g in data["metadata"]["guardrails_fired"])
+    assert data["metadata"]["contract_schema"] == "1.0"
 
 
 @pytest.mark.asyncio
