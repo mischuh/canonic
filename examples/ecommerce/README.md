@@ -28,12 +28,12 @@ contracts/guardrails/
 **1. Create the tables and seed data:**
 
 ```sh
-export CANON_PG_DSN=postgres://postgres:postgres@localhost:5432/postgres
-psql "$CANON_PG_DSN" < setup.sql
+export CANON_PG_PASSWORD=postgres   # password for the postgres user
+psql "postgres://postgres:${CANON_PG_PASSWORD}@localhost:5432/postgres" < setup.sql
 ```
 
 The `analytics` schema is declared once in `canon.yaml` (`schema: analytics`) and applied
-as `search_path` on every session — no need to embed it in the DSN.
+as `search_path` on every session — no need to embed it in the connection string.
 
 **2. Verify the project is recognised:**
 
@@ -138,6 +138,84 @@ compile_query({"metrics": ["revenue"], "dimensions": ["order_date"]})
 resolve_metric("rev")
 → {"metric": "revenue", "source": "orders", "measure": "total_revenue"}
 ```
+
+## CLI usage
+
+The same project works directly from the terminal — no MCP client needed.
+
+**Create a query file:**
+
+```sh
+cat > q.json <<'EOF'
+{"metrics": ["revenue"], "dimensions": ["order_date"]}
+EOF
+```
+
+**Human output (Rich table):**
+
+```sh
+canon query -f q.json
+# ┏━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━┓
+# ┃ order_date          ┃ total_revenue ┃
+# ┡━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━┩
+# │ 2025-01-10T00:00:00 │ 500.00        │
+# │ …                   │ …             │
+```
+
+**Machine output (`--json`) — byte-identical to the MCP `query` tool:**
+
+```sh
+canon query --json -f q.json
+```
+
+```json
+{
+  "result":   { "columns": […], "rows": […], "truncated": false },
+  "compiled": { "sql": "SELECT … WHERE \"orders\".\"status\" <> 'refunded' …", "dialect": "postgres" },
+  "metadata": {
+    "resolved":         {"metrics": {"revenue": "orders.total_revenue"}},
+    "guardrails_fired": [{"id": "revenue-excludes-refunds", "kind": "mandatory_filter"}],
+    "freshness":        [{"source": "orders", "last_validated_at": "…", "stale": false}]
+  }
+}
+```
+
+**Revenue by country (join to customers fires automatically):**
+
+```sh
+cat > q.json <<'EOF'
+{"metrics": ["revenue", "order_count"], "dimensions": ["country"]}
+EOF
+canon query --json -f q.json
+```
+
+**Raw read-only SQL:**
+
+```sh
+canon sql "SELECT status, sum(amount) FROM analytics.fct_orders GROUP BY status"
+canon sql --json "SELECT count(*) FROM analytics.fct_orders"
+
+# Non-SELECT is rejected before touching the database:
+canon sql "DROP TABLE analytics.fct_orders"
+# error: read_only_violation: …
+# echo $? → 11
+```
+
+**Structured errors on unknown or ambiguous metrics:**
+
+```sh
+# exit 2 — metric name matches no active binding
+cat > q.json <<'EOF'
+{"metrics": ["mrr"]}
+EOF
+canon query --json -f q.json   # stderr: {"code": "unresolved", "message": "…"}
+echo $?                        # 2
+```
+
+**CLI vs. MCP — same result:** `canon query --json` and the MCP `query` tool both call
+the same `CanonService` and serialize via the same Pydantic model. The walking-skeleton
+E2E test (`tests/e2e/test_walking_skeleton.py::test_parity`) asserts byte-identical
+payloads against live Postgres on every CI run.
 
 ## What the guardrail does
 

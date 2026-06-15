@@ -1,0 +1,35 @@
+name: orders
+connection: warehouse_pg
+table: fct_orders
+grain: [order_id]
+description: "One row per order. Refunds carry status = 'refunded'."
+
+columns:
+  - { name: order_id,    type: int,       nullable: false }
+  - { name: customer_id, type: int,       nullable: false }
+  - { name: amount,      type: decimal,   nullable: false }
+  - { name: status,      type: string,    nullable: false }
+  - { name: created_at,  type: timestamp, nullable: false }
+
+measures:
+  - name: total_revenue
+    expr: "sum(amount)"
+    additivity: additive
+  - name: order_count
+    expr: "count(order_id)"
+    additivity: additive
+
+dimensions:
+  - { name: status,      column: status }
+  - { name: order_date,  column: created_at }
+  - { name: customer_id, column: customer_id }
+
+joins:
+  - to: customers
+    on: "orders.customer_id = customers.customer_id"
+    relationship: many_to_one
+
+# Set so QueryResult.metadata.freshness is deterministically non-empty in tests.
+meta:
+  provenance: human_curated
+  last_validated_at: "2026-06-13T00:00:00Z"

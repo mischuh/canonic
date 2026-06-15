@@ -1,11 +1,19 @@
-"""``canon sql`` — read-only SQL escape hatch (stub; E2)."""
+"""``canon sql`` — read-only SQL escape hatch (E2)."""
 
+from __future__ import annotations
+
+import asyncio
+import json
 from typing import Annotated
 
 import typer
+from rich.console import Console
+from rich.table import Table
 
-from canon.cli._errors import handle_errors
-from canon.cli.commands import not_implemented
+from canon.cli._errors import get_cli_context, handle_errors
+from canon.cli.commands import load_service
+
+_console = Console()
 
 
 @handle_errors
@@ -19,5 +27,23 @@ def sql(
         ),
     ] = None,
 ) -> None:
-    """Execute a read-only SQL string on a named connection (core.run_sql)."""
-    not_implemented(ctx, "sql")
+    """Execute a read-only SQL string on a named connection (core.run_sql).
+
+    Non-SELECT statements are rejected with ``READ_ONLY_VIOLATION`` (exit 11).
+    """
+    service = load_service(ctx)
+    result = asyncio.run(service.run_sql(statement, connection=connection))
+
+    payload = result.model_dump(mode="json")
+    if get_cli_context(ctx).json_output:
+        typer.echo(json.dumps(payload))
+        return
+
+    table = Table(show_header=True, header_style="bold")
+    for col in result.columns:
+        table.add_column(col.name)
+    for row in result.rows:
+        table.add_row(*(str(v) for v in row))
+    _console.print(table)
+    if result.truncated:
+        _console.print("[yellow]note:[/yellow] result truncated at the connection row limit")
