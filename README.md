@@ -4,7 +4,7 @@ Canon is an open, file-based **context layer** that sits between your data stack
 
 Canon turns your warehouse metadata, BI definitions, modeling code, query history, and team docs into three reviewable surfaces and serves them to agents at runtime via **MCP** and a **CLI**. Database access is always **read-only**; all context is versioned in git and reviewed like code.
 
-> **Status:** early development — Phase 0 walking skeleton in progress. The deterministic compiler core is implemented: metric resolution → join planning → guardrail enforcement → Postgres SQL emission. CLI/MCP serving (E7/E8) is next. The PRD and Phase 0 specs live in [`docs/`](docs/).
+> **Status:** early development — Phase 0 walking skeleton in progress. The deterministic compiler core is implemented and the MCP serving surface (E8) is live: an agent can call the `query` tool, receive resolved SQL + guardrails + freshness metadata, and get a structured error on ambiguity — no LLM in that path. The PRD and Phase 0 specs live in [`docs/`](docs/).
 
 ---
 
@@ -359,13 +359,100 @@ All errors map to structured `ErrorCode` values with canonical headless exit cod
 `UNSUPPORTED_MEASURE` → 6, `GUARDRAIL_BLOCK` → 8) — enabling the CI-gate role without
 parsing free text.
 
-### CLI skeleton
+### CLI and MCP daemon control
 
 ```sh
 canon --version
-canon status          # show project root + config version
+canon status           # show project root + config version
 canon connection list  # registered connections
 canon --help
+
+# Start the MCP server in stdio mode (foreground; the MCP client owns the process):
+canon mcp start
+
+# Or as a background HTTP daemon on localhost:7474:
+canon mcp start --http --port 7474
+
+# Lifecycle:
+canon mcp status       # running / PID / version / transport
+canon mcp stop         # SIGTERM + remove .canon/mcp.json
+```
+
+Version compatibility is checked on start: if a daemon is already running with a different
+Canon version, the command exits with a clear message instead of starting a second server.
+
+### MCP serving surface (E8)
+
+`canon mcp start` exposes the six P0 tools to any MCP-compatible agent client (Claude Code,
+Cursor, Codex). The server is a thin adapter — all logic lives in the protocol-neutral
+`CanonService`; the MCP layer only translates transport.
+
+**Available tools:**
+
+| Tool | Purpose |
+| --- | --- |
+| `list_metrics` | List all active canonical metrics |
+| `describe_metric(name)` | Grain, dimensions, measures, and freshness for one metric |
+| `resolve_metric(name)` | Resolve a name/alias → canonical binding; surface `AMBIGUOUS`/`UNRESOLVED` |
+| `compile_query(query)` | Semantic query → SQL + metadata, no execution |
+| `query(query)` | Compile + execute read-only → `QueryResult` with rows + metadata |
+| `run_sql(sql, connection?)` | Execute a raw SELECT; rejects non-SELECT with `READ_ONLY_VIOLATION` |
+
+**`query` returns a `QueryResult` with three blocks (SPEC §2.2):**
+
+```json
+{
+  "result":   { "columns": [{"name": "order_date", "type": "date"},
+                             {"name": "total_revenue", "type": "decimal"}],
+                "rows": [["2025-01-01", 12000.50]],
+                "truncated": false },
+  "compiled": { "sql": "SELECT …", "dialect": "postgres" },
+  "metadata": { "resolved":          {"metrics": {"revenue": "orders.total_revenue"}},
+                "guardrails_fired":  [{"id": "revenue-excludes-refunds", "kind": "mandatory_filter"}],
+                "freshness":         [{"source": "orders", "last_validated_at": "…", "stale": false}] }
+}
+```
+
+**Structured errors** — on any `CanonError` the tool returns `{code, message, candidates?}`
+instead of raising, so the agent can refuse-and-ask rather than fabricate:
+
+```json
+{ "code": "ambiguous", "message": "metric 'rev' is ambiguous",
+  "candidates": [{"metric": "revenue", …}, {"metric": "revenue_gross", …}] }
+```
+
+Error codes map to the canonical registry (`UNRESOLVED` → 2, `AMBIGUOUS` → 3, …) — the
+same codes the CLI uses as headless exit values, so pipeline and agent paths are identical.
+
+**`CanonService` — the shared capability layer:**
+
+Both the MCP adapter and future CLI capability commands call `CanonService`; neither
+re-implements resolution or compilation. This guarantees byte-identical results across
+surfaces (SPEC §2.1 adapter rule):
+
+```python
+from pathlib import Path
+from canon.core.service import CanonService
+from canon.compiler import SemanticQuery
+
+service = CanonService.from_project(Path("."))
+
+# Discovery
+summaries = service.list_metrics()         # list[MetricSummary]
+detail    = service.describe_metric("rev") # MetricDetail — grain, dims, freshness
+
+# Compile only (no execution)
+compiled = service.compile_query(SemanticQuery(metrics=["revenue"], dimensions=["order_date"]))
+print(compiled.sql)  # deterministic, byte-identical on repeated calls
+
+# Compile + execute
+import asyncio
+result = asyncio.run(service.query(SemanticQuery(metrics=["revenue"])))
+print(result.result.rows)        # [[…], …]
+print(result.metadata.guardrails_fired)  # [FiredGuardrailOut(id='revenue-excludes-refunds', …)]
+
+# Raw read-only SQL
+rows = asyncio.run(service.run_sql("SELECT count(*) FROM analytics.fct_orders"))
 ```
 
 ---
@@ -374,7 +461,7 @@ canon --help
 
 Canon ships in phases (see [`docs/PRD-canon-final.md`](docs/PRD-canon-final.md) §9.1):
 
-- **Phase 0 — Walking skeleton.** End-to-end for one database: foundation + install (E1), one primary connector (E2), compiler + minimal contracts (E5 + E15), CLI (E7), MCP serving (E8). An agent asks for a metric → Canon resolves the canonical binding → compiles read-only SQL → returns a result. No LLM in this path.
+- **Phase 0 — Walking skeleton.** End-to-end for one database: foundation + install (E1), one primary connector (E2), compiler + minimal contracts (E5 + E15), CLI (E7), MCP serving (E8). ✓ Compiler, contracts, and MCP serving are implemented. An agent asks for a metric → Canon resolves the canonical binding → compiles read-only SQL → executes → returns `QueryResult` with guardrails + freshness. No LLM in this path.
 - **Phase 1 — v1 core.** Auto-built context across pillars and multiple sources: ingestion + reconciliation (E4), knowledge + retrieval (E6), LLM config incl. local/offline (E10), definition + evidence connectors (E3), fuller contracts, accuracy tracking.
 - **Phase 2 — Trust & operations.** Cost control (E13), answer trust score (E14), feedback loop (E11), agent edit/review loop (E9), governance: RLS/PII + locked context versions (E12).
 

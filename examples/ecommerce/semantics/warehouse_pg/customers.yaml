@@ -1,0 +1,13 @@
+name: customers
+connection: warehouse_pg
+table: dim_customers
+grain: [customer_id]
+description: "One row per registered customer."
+
+columns:
+  - { name: customer_id, type: int,    nullable: false }
+  - { name: email,       type: string, nullable: false }
+  - { name: country,     type: string, nullable: false }
+
+dimensions:
+  - { name: country, column: country }

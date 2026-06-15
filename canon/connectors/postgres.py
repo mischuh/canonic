@@ -137,6 +137,10 @@ class PostgresConnector(ConnectorBase):
             port=params.get("port"),
             database=params.get("dbname") or params.get("database"),
         )
+        schema = params.get("schema")
+        self._connect_args: dict[str, object] = (
+            {"server_settings": {"search_path": schema}} if schema else {}
+        )
         self._row_limit = int(params.get("row_limit", _DEFAULT_ROW_LIMIT))
         self._statement_timeout_ms = int(
             params.get("statement_timeout_ms", _DEFAULT_STATEMENT_TIMEOUT_MS)
@@ -151,7 +155,7 @@ class PostgresConnector(ConnectorBase):
 
     def _get_engine(self) -> AsyncEngine:
         if self._engine is None:
-            self._engine = create_async_engine(self._url)
+            self._engine = create_async_engine(self._url, connect_args=self._connect_args)
         return self._engine
 
     async def aclose(self) -> None:
