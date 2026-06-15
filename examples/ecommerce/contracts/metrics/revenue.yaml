@@ -1,0 +1,7 @@
+metric: revenue
+canonical:
+  source: orders
+  measure: total_revenue
+provenance: human_curated
+aliases: ["net revenue", "rev"]
+status: active

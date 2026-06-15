@@ -1,0 +1,7 @@
+metric: order_count
+canonical:
+  source: orders
+  measure: order_count
+provenance: human_curated
+aliases: ["orders", "number of orders"]
+status: active

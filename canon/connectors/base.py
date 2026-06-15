@@ -195,3 +195,10 @@ class ConnectorBase(ABC):
         catalog introspection is blocked.
         """
         raise NotImplementedError(f"{type(self).__name__} does not support describe_relation")
+
+    async def aclose(self) -> None:  # noqa: B027 — intentional no-op default; stateful subclasses override
+        """Release any held resources (connection pools, sockets).
+
+        The default implementation is a no-op; stateful connectors override it.
+        Called by the core after each use so callers never manage engine lifecycles.
+        """
