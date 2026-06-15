@@ -88,7 +88,7 @@ async def test_query_revenue(e2e_service: CanonService) -> None:
 
 
 def test_parity(e2e_project: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """CLI ``query --json`` and the MCP ``query`` tool emit identical payloads."""
+    """CLI ``--json query`` and the MCP ``query`` tool emit identical payloads."""
     import asyncio
 
     monkeypatch.chdir(e2e_project)
