@@ -1,9 +1,11 @@
 version: 1
 
 project:
-  name: ecommerce-demo
+  name: walking-skeleton
   default_connection: warehouse_pg
 
+# host/port/user/dbname are rewritten by the e2e conftest with live container
+# coordinates; the password is supplied via the CANON_PG_PASSWORD env var.
 connections:
   - id: warehouse_pg
     type: postgres
@@ -13,13 +15,12 @@ connections:
       user: postgres
       dbname: postgres
       schema: analytics
-    credentials_ref: env:CANON_PG_PASSWORD  # export CANON_PG_PASSWORD=<your-postgres-password>
+    credentials_ref: env:CANON_PG_PASSWORD
 
 llm:
   provider: openai_compatible
-  base_url: http://127.0.0.1:8765/v1  # Ollama; swap for OpenAI/Anthropic in Phase 1
-  model: gemma-4-e2b-it-4bit
-  api_key_ref: 
+  base_url: http://127.0.0.1:8765/v1
+  model: stub-model
 
 telemetry:
   enabled: false
