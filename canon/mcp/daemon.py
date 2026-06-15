@@ -202,10 +202,17 @@ def start_http(
         return
 
     # Child: detach and run the server.
+    # Redirect stdin/stdout/stderr to /dev/null at the FD level so that Python's
+    # sys.std* objects stay open (logging handlers that reference them won't crash),
+    # while the process is fully detached from the terminal.
     os.setsid()
-    sys.stdin.close()
-    sys.stdout.close()
-    sys.stderr.close()
+    _null_r = os.open(os.devnull, os.O_RDONLY)
+    _null_w = os.open(os.devnull, os.O_WRONLY)
+    os.dup2(_null_r, 0)
+    os.dup2(_null_w, 1)
+    os.dup2(_null_w, 2)
+    os.close(_null_r)
+    os.close(_null_w)
 
     from canon.mcp.server import build_server
 

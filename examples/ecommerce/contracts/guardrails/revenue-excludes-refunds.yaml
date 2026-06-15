@@ -1,0 +1,8 @@
+id: revenue-excludes-refunds
+applies_to:
+  source: orders
+  measure: total_revenue
+kind: mandatory_filter
+filter: "status != 'refunded'"
+severity: error
+rationale: "Refunds are reversals, not revenue. The compiler injects this filter automatically."

@@ -1,0 +1,24 @@
+version: 1
+
+project:
+  name: ecommerce-demo
+  default_connection: warehouse_pg
+
+connections:
+  - id: warehouse_pg
+    type: postgres
+    params:
+      host: localhost
+      port: 5432
+      database: postgres
+      schema: analytics
+    credentials_ref: env:CANON_PG_DSN  # export CANON_PG_DSN=postgres://user:pass@localhost:5432/canon_demo
+
+llm:
+  provider: openai_compatible
+  base_url: http://127.0.0.1:8765/v1  # Ollama; swap for OpenAI/Anthropic in Phase 1
+  model: gemma-4-e2b-it-4bit
+  api_key_ref: 
+
+telemetry:
+  enabled: false
