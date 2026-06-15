@@ -4,7 +4,7 @@ Canon is an open, file-based **context layer** that sits between your data stack
 
 Canon turns your warehouse metadata, BI definitions, modeling code, query history, and team docs into three reviewable surfaces and serves them to agents at runtime via **MCP** and a **CLI**. Database access is always **read-only**; all context is versioned in git and reviewed like code.
 
-> **Status:** early development. The PRD and Phase 0 specs live in [`docs/`](docs/). This README is a first draft.
+> **Status:** early development — Phase 0 walking skeleton in progress. The deterministic compiler core is implemented: metric resolution → join planning → guardrail enforcement → Postgres SQL emission. CLI/MCP serving (E7/E8) is next. The PRD and Phase 0 specs live in [`docs/`](docs/).
 
 ---
 
@@ -285,6 +285,79 @@ guardrails = resolver.guardrails_for("orders", "total_revenue")
 Calling `resolve_metric` or `guardrails_for` twice with identical arguments returns identical results —
 required for deterministic SQL compilation and CI assertions.
 Metrics that target an unknown source raise no exception; the result is `Unresolved` and the compiler decides how to surface it.
+
+### Compiler — semantic query → SQL
+
+`compile()` is the deterministic core of the Phase 0 walking skeleton. Given a
+`SemanticQuery` (a plain dict of names, never physical tables), a `ContractResolver`, and
+the loaded semantic sources, it produces dialect-correct, read-only Postgres SQL plus
+full result metadata — no LLM in the path.
+
+The pipeline runs these stages in order:
+1. Resolve each metric name → canonical `(source, measure)` via `ContractResolver`
+2. Bind every dimension and filter string to its owning source
+3. Plan the minimal join path via declared `joins` (ambiguous path → error, never guessed)
+4. Detect fanout — additive measures across a one→many join are deduplicated to source grain before aggregating; non-additive measures return `UNSUPPORTED_MEASURE`
+6. Enforce guardrails — `mandatory_filter` guardrails are AND-ed into WHERE and listed in `guardrails_fired`
+7. Emit SQL through the Postgres dialect adapter (identifiers quoted, `LIMIT` injected, non-SELECT AST rejected)
+8. Attach result metadata — resolved bindings, fired guardrails, per-source freshness
+
+```python
+from pathlib import Path
+from canon.compiler import SemanticQuery, compile
+from canon.contracts import ContractResolver
+from canon.semantic.loader import list_semantic_sources
+
+resolver = ContractResolver.from_project(Path("."))
+sources  = list_semantic_sources(Path("."))
+
+result = compile(
+    SemanticQuery(metrics=["revenue"], dimensions=["order_date"]),
+    resolver,
+    sources,
+)
+
+print(result.sql)
+# SELECT DATE_TRUNC('day', "orders"."created_at") AS "order_date",
+#        SUM("orders"."amount") AS "total_revenue"
+# FROM "analytics"."fct_orders" AS "orders"
+# WHERE "orders"."status" <> 'refunded'
+# GROUP BY DATE_TRUNC('day', "orders"."created_at")
+
+print(result.resolved)
+# {'revenue': 'orders.total_revenue'}
+
+print(result.guardrails_fired)
+# [FiredGuardrail(id='revenue-excludes-refunds', kind='mandatory_filter')]
+
+print(result.freshness)
+# [SourceFreshness(source='orders', last_validated_at='…', stale=False)]
+```
+
+The same query compiled twice produces byte-identical SQL — required for deterministic CI
+assertions and result caching (SPEC-E5 §8). Structured errors carry candidates so upstream
+callers can act programmatically:
+
+```python
+from canon import exc
+
+try:
+    compile(SemanticQuery(metrics=["mrr"]), resolver, sources)
+except exc.Unresolved as e:
+    # e.code == ErrorCode.UNRESOLVED, exit code 2
+    print(e)  # metric 'mrr' matches no active binding
+
+try:
+    compile(SemanticQuery(metrics=["revenue"], dimensions=["unknown_dim"]), resolver, sources)
+except exc.Unreachable as e:
+    # e.code == ErrorCode.UNREACHABLE, exit code 4
+    print(e)  # dimension 'unknown_dim' is not declared on any source
+```
+
+All errors map to structured `ErrorCode` values with canonical headless exit codes
+(`UNRESOLVED` → 2, `AMBIGUOUS` → 3, `UNREACHABLE` → 4, `AMBIGUOUS_JOIN_PATH` → 5,
+`UNSUPPORTED_MEASURE` → 6, `GUARDRAIL_BLOCK` → 8) — enabling the CI-gate role without
+parsing free text.
 
 ### CLI skeleton
 
