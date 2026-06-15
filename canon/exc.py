@@ -138,3 +138,7 @@ class CredentialError(CanonError):
 
 class SemanticSourceError(CanonError):
     """Raised when a semantics/*.yaml file is invalid; message carries file+line."""
+
+
+class ContractError(CanonError):
+    """Raised when a contracts/*.yaml file is invalid; message carries file+line."""

@@ -190,6 +190,69 @@ schemas = asyncio.run(connector.introspect_schema())
 # schemas[i].primary_key, .foreign_keys, .row_count_estimate populated
 ```
 
+### Contract surface — metric bindings and guardrails
+
+Declare which metric definition is canonical and what rules every query must obey.
+Files live in `contracts/metrics/` and `contracts/guardrails/` and are validated like code.
+
+**Define a canonical metric binding** (`contracts/metrics/revenue.yaml`):
+
+```yaml
+metric: revenue
+canonical:
+  source: orders
+  measure: total_revenue
+provenance: human_curated
+aliases: ["net revenue", "rev"]
+status: active
+```
+
+**Define an enforced guardrail** (`contracts/guardrails/revenue-excludes-refunds.yaml`):
+
+```yaml
+id: revenue-excludes-refunds
+applies_to:
+  source: orders
+  measure: total_revenue
+kind: mandatory_filter
+filter: "status != 'refunded'"
+severity: error
+rationale: "Refunds are reversals, not revenue."
+```
+
+**Load and validate in Python:**
+
+```python
+from pathlib import Path
+from canon.contracts import load_metric_bindings, load_guardrails, validate_contracts
+
+root = Path(".")
+
+bindings = load_metric_bindings(root)
+# bindings[0].metric          == "revenue"
+# bindings[0].canonical.source == "orders"
+# bindings[0].aliases          == ["net revenue", "rev"]
+
+guardrails = load_guardrails(root)
+# guardrails[0].id     == "revenue-excludes-refunds"
+# guardrails[0].filter == "status != 'refunded'"
+
+# Cross-surface check: canonical.source/measure must exist in semantics/
+validate_contracts(root)
+# raises ContractError if applies_to.source or canonical.measure can't be resolved
+```
+
+Duplicate active bindings for the same metric name or alias raise a `ContractError` that
+names both conflicting files — no silent shadowing.
+
+**Scaffold the directory layout** for a new project:
+
+```python
+from canon.contracts import contracts_dir_scaffold
+contracts_dir_scaffold(Path("."))
+# creates contracts/{metrics,guardrails,assertions}/ if absent
+```
+
 ### CLI skeleton
 
 ```sh
