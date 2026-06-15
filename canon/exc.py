@@ -3,6 +3,10 @@
 from __future__ import annotations
 
 from enum import StrEnum
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
 
 
 class ErrorCode(StrEnum):
@@ -51,6 +55,16 @@ class CanonError(Exception):
     """
 
     code: ErrorCode | None = None
+
+    def __init__(self, message: str = "", *, candidates: Sequence[Any] | None = None) -> None:
+        """Structured error: a message plus optional candidate list (SPEC-E5 §4).
+
+        ``candidates`` carries the alternatives an upstream caller can act on
+        programmatically (e.g. the competing bindings behind an ``AMBIGUOUS`` result),
+        so errors are never free text.
+        """
+        super().__init__(message)
+        self.candidates: tuple[Any, ...] = tuple(candidates) if candidates is not None else ()
 
     @property
     def exit_code(self) -> int:
