@@ -13,11 +13,8 @@ from datetime import date, datetime
 from decimal import Decimal
 from typing import TYPE_CHECKING, Any
 
-import sqlglot
 from sqlalchemy import URL, text
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
-from sqlglot import expressions as exp
-from sqlglot.errors import ParseError
 
 from canon.connectors.base import (
     AcquisitionTier,
@@ -32,8 +29,8 @@ from canon.connectors.base import (
     ResultSet,
     compute_fingerprint,
 )
+from canon.connectors.readonly import assert_read_only
 from canon.credentials import resolve_credential
-from canon.exc import ReadOnlyViolation
 
 if TYPE_CHECKING:
     from canon.config import Connection
@@ -357,22 +354,8 @@ class PostgresConnector(ConnectorBase):
             )
         return out
 
-    def _assert_read_only(self, sql: str) -> None:
-        """Parse-level read-only check (SPEC-E2 §3.2); raises before execution."""
-        try:
-            statements = [s for s in sqlglot.parse(sql, read="postgres") if s is not None]
-        except ParseError as exc:
-            raise ReadOnlyViolation(f"could not parse SQL as read-only: {exc}") from exc
-        if len(statements) != 1:
-            raise ReadOnlyViolation(f"exactly one statement is allowed, got {len(statements)}")
-        stmt = statements[0]
-        if not isinstance(stmt, (exp.Select, exp.Union)):
-            raise ReadOnlyViolation(
-                f"only SELECT statements are permitted, got {type(stmt).__name__}"
-            )
-
     async def run_read_only_sql(self, sql: str) -> ResultSet:
-        self._assert_read_only(sql)
+        assert_read_only(sql)
         engine = self._get_engine()
         async with engine.connect() as conn, conn.begin():
             await conn.execute(text("SET LOCAL default_transaction_read_only = on"))
