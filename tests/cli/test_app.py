@@ -21,10 +21,15 @@ _STUBS = [
     ["query", "-f", "q.json"],
     ["sql", "SELECT 1"],
     ["knowledge", "search", "orders"],
+    ["completion"],
+]
+
+# MCP commands are now real (E8) — they require a project directory and exit non-zero
+# when run outside one. Excluded from the generic stub test above.
+_MCP_COMMANDS = [
     ["mcp", "start"],
     ["mcp", "stop"],
     ["mcp", "status"],
-    ["completion"],
 ]
 
 
@@ -60,3 +65,11 @@ def test_stub_commands_json_mode(runner: CliRunner, argv: list[str]) -> None:
     result = runner.invoke(app, ["--json", *argv])
     assert result.exit_code == 0, result.output
     assert '"status": "not_implemented"' in result.output
+
+
+@pytest.mark.parametrize("argv", _MCP_COMMANDS, ids=lambda a: " ".join(a))
+def test_mcp_commands_require_project(runner: CliRunner, argv: list[str]) -> None:
+    """MCP commands are real (E8) and exit non-zero outside a project directory."""
+    result = runner.invoke(app, argv)
+    assert result.exit_code != 0
+    assert "no canon project found" in result.output
