@@ -37,6 +37,12 @@ from canon.ingestion.reconciliation import (
     InMemoryAcceptedStore,
     ReconciliationEngine,
 )
+from canon.ingestion.validation import (
+    ValidationGate,
+    ValidationReport,
+    Violation,
+    ViolationKind,
+)
 
 __all__ = [
     "AcceptedStore",
@@ -68,4 +74,8 @@ __all__ = [
     "ReconciliationReport",
     "SkippedEvidence",
     "SnapshotStore",
+    "ValidationGate",
+    "ValidationReport",
+    "Violation",
+    "ViolationKind",
 ]
