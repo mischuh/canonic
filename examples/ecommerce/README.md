@@ -139,6 +139,77 @@ resolve_metric("rev")
 → {"metric": "revenue", "source": "orders", "measure": "total_revenue"}
 ```
 
+## Ingestion — keep semantics current as the schema evolves
+
+`canon ingest` refreshes the semantic files from the live Postgres schema.  The demo project
+ships with **hand-authored** (`provenance: human_curated`) files; an ingest run reconciles the
+live schema against them and surfaces any drift as a reviewable diff — without overwriting the
+curated definitions silently.
+
+**Dry run — see what would change, write nothing:**
+
+```sh
+canon ingest --dry-run
+# Decisions: add: 0, no_op: 2, …
+# (no_op because orders.yaml and customers.yaml already match the live schema)
+```
+
+**Bootstrap a connection from scratch** (for a fresh project without hand-authored files):
+
+```sh
+canon ingest --bootstrap
+# Introspects warehouse_pg → writes semantics/warehouse_pg/*.yaml deterministically
+```
+
+**Full ingest — propose diffs for review:**
+
+```sh
+canon ingest
+# Writes raw-sources/warehouse_pg/evidence.jsonl (committed, reproducible)
+# Writes .canon/ingest-events.jsonl             (local audit log, git-ignored)
+# Edits no committed semantics in place
+```
+
+**JSON output — machine-readable reconciliation report:**
+
+```sh
+canon --json ingest --dry-run
+# {"diffs": […], "notes": [], "report": {"entries": […], "summary": {"add": 0, "no_op": 2, …}}}
+```
+
+**Headless / CI — deterministic pipeline + auto-PR:**
+
+```sh
+# Same result on every run with the same schema (identical proposals, identical JSON):
+canon ingest --headless --no-pr
+
+# Full CI recipe: open a PR if diffs exist, fail on contradictions:
+canon --json ingest --headless --strict
+# exit 0  → clean run (PR opened if diffs, or no-op)
+# exit 9  → VALIDATION_FAILED — proposed output invalid, no PR
+# exit 13 → CONNECTION_ERROR  — Postgres unreachable
+# exit 14 → CONTRADICTION     — --strict flagged a drift that conflicts with a curated fact
+```
+
+Example GitHub Actions job (add to `.github/workflows/`):
+
+```yaml
+- name: Canon ingest
+  run: canon --json ingest --headless --strict
+  working-directory: examples/ecommerce
+  env:
+    CI: "true"
+    CANON_PG_PASSWORD: ${{ secrets.CANON_PG_PASSWORD }}
+```
+
+**Contradiction example** — what happens when schema drift conflicts with a curated fact:
+
+The `orders.yaml` and `customers.yaml` files carry `provenance: human_curated`.  If the live
+Postgres schema diverges from those definitions (e.g. a column type changes), ingest flags a
+`contradiction` entry in the report but **keeps the curated file untouched**.  With `--strict`
+the run exits 14; without it, the contradiction note rides into the PR body for a human to
+resolve.
+
 ## CLI usage
 
 The same project works directly from the terminal — no MCP client needed.

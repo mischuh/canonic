@@ -11,3 +11,6 @@ columns:
 
 dimensions:
   - { name: country, column: country }
+
+meta:
+  provenance: human_curated

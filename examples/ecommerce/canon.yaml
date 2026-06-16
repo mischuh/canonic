@@ -21,5 +21,10 @@ llm:
   model: gemma-4-e2b-it-4bit
   api_key_ref: 
 
+reconcile:
+  strict_contradictions: false   # set to true to gate CI on any contradiction (exit 14)
+  auto_apply:
+    enabled: false               # propose-only by default; reviewed diffs become the commit
+
 telemetry:
   enabled: false

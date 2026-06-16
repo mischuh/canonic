@@ -3,12 +3,12 @@
     "Compiled": {
       "description": "The compiled SQL and its dialect (SPEC \u00a72.2 ``compiled``).",
       "properties": {
-        "dialect": {
-          "title": "Dialect",
-          "type": "string"
-        },
         "sql": {
           "title": "Sql",
+          "type": "string"
+        },
+        "dialect": {
+          "title": "Dialect",
           "type": "string"
         }
       },
@@ -41,25 +41,6 @@
     "QueryMetadata": {
       "description": "The E5 compiler metadata block carried alongside a result (SPEC \u00a72.2).",
       "properties": {
-        "contract_schema": {
-          "default": "1.0",
-          "title": "Contract Schema",
-          "type": "string"
-        },
-        "freshness": {
-          "items": {
-            "$ref": "#/$defs/SourceFreshnessOut"
-          },
-          "title": "Freshness",
-          "type": "array"
-        },
-        "guardrails_fired": {
-          "items": {
-            "$ref": "#/$defs/FiredGuardrailOut"
-          },
-          "title": "Guardrails Fired",
-          "type": "array"
-        },
         "resolved": {
           "additionalProperties": {
             "additionalProperties": {
@@ -70,6 +51,20 @@
           "title": "Resolved",
           "type": "object"
         },
+        "guardrails_fired": {
+          "items": {
+            "$ref": "#/$defs/FiredGuardrailOut"
+          },
+          "title": "Guardrails Fired",
+          "type": "array"
+        },
+        "freshness": {
+          "items": {
+            "$ref": "#/$defs/SourceFreshnessOut"
+          },
+          "title": "Freshness",
+          "type": "array"
+        },
         "warnings": {
           "default": [],
           "items": {
@@ -77,6 +72,11 @@
           },
           "title": "Warnings",
           "type": "array"
+        },
+        "contract_schema": {
+          "default": "1.1",
+          "title": "Contract Schema",
+          "type": "string"
         }
       },
       "required": [
@@ -109,18 +109,6 @@
     "ResultSet": {
       "description": "Normalized query result emitted by run_read_only_sql().",
       "properties": {
-        "bytes_scanned": {
-          "anyOf": [
-            {
-              "type": "integer"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Bytes Scanned"
-        },
         "columns": {
           "items": {
             "$ref": "#/$defs/ResultColumn"
@@ -140,6 +128,18 @@
           "default": false,
           "title": "Truncated",
           "type": "boolean"
+        },
+        "bytes_scanned": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Bytes Scanned"
         }
       },
       "required": [
@@ -152,6 +152,10 @@
     "SourceFreshnessOut": {
       "description": "Per-source freshness metadata (mirrors compiler ``SourceFreshness``).",
       "properties": {
+        "source": {
+          "title": "Source",
+          "type": "string"
+        },
         "last_validated_at": {
           "anyOf": [
             {
@@ -163,10 +167,6 @@
           ],
           "default": null,
           "title": "Last Validated At"
-        },
-        "source": {
-          "title": "Source",
-          "type": "string"
         },
         "stale": {
           "default": false,
@@ -183,14 +183,14 @@
   },
   "description": "The combined ``query`` response: ``result`` + ``compiled`` + ``metadata`` (SPEC \u00a72.2).",
   "properties": {
+    "result": {
+      "$ref": "#/$defs/ResultSet"
+    },
     "compiled": {
       "$ref": "#/$defs/Compiled"
     },
     "metadata": {
       "$ref": "#/$defs/QueryMetadata"
-    },
-    "result": {
-      "$ref": "#/$defs/ResultSet"
     }
   },
   "required": [
