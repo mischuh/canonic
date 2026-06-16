@@ -54,7 +54,7 @@ async def test_negotiate_contract_accepts_matching_major(canon_service: CanonSer
     async with Client(mcp) as client:
         result = await client.call_tool("negotiate_contract", {"contract_major": 1})
     assert result.data["accepted"] is True
-    assert result.data["contract_schema"] == "1.0"
+    assert result.data["contract_schema"] == "1.1"
 
 
 @pytest.mark.asyncio

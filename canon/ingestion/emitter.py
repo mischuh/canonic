@@ -180,7 +180,20 @@ class EmissionResult(BaseModel):
             lines.append("```")
             lines.append("")
 
-        lines.append(f"## Contradictions ({len(self.notes)})")
+        lines.extend(self._contradiction_lines())
+        return "\n".join(lines)
+
+    def render_contradictions(self) -> str:
+        """Standalone markdown for the contradiction notes — the headless PR review block (§5.4).
+
+        Posted as a single review comment on the auto-PR so each flagged contradiction reaches a
+        human with both sides and a recommended action, separate from the diff body.
+        """
+        return "\n".join(self._contradiction_lines())
+
+    def _contradiction_lines(self) -> list[str]:
+        """Render the ``## Contradictions`` section shared by the body and the review comment."""
+        lines = [f"## Contradictions ({len(self.notes)})"]
         for note in self.notes:
             existing = note.existing_provenance.value if note.existing_provenance else "—"
             frozen = " (frozen)" if note.existing_frozen else ""
@@ -188,8 +201,7 @@ class EmissionResult(BaseModel):
             lines.append(f"- existing: {existing}, incoming: {note.incoming_provenance.value}")
             lines.append(f"- recommended action: {note.recommended_action or '—'}")
             lines.append("")
-
-        return "\n".join(lines)
+        return lines
 
 
 # ---------------------------------------------------------------------------

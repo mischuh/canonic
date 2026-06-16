@@ -28,6 +28,9 @@ class ErrorCode(StrEnum):
     READ_ONLY_VIOLATION = "read_only_violation"
     SCHEMA_MISMATCH = "schema_mismatch"
     CONNECTION_ERROR = "connection_error"
+    # Additive contradiction gate for headless strict mode (SPEC-E4 §5.4); does not
+    # touch the frozen serving contract.
+    CONTRADICTION = "contradiction"
 
 
 EXIT_CODES: dict[ErrorCode, int] = {
@@ -43,6 +46,7 @@ EXIT_CODES: dict[ErrorCode, int] = {
     ErrorCode.READ_ONLY_VIOLATION: 11,
     ErrorCode.SCHEMA_MISMATCH: 12,
     ErrorCode.CONNECTION_ERROR: 13,
+    ErrorCode.CONTRADICTION: 14,
 }
 
 
@@ -144,6 +148,12 @@ class ConnectionError(CanonError):  # noqa: A001 — intentionally shadows built
     """Raised when a connector cannot establish or maintain a connection."""
 
     code = ErrorCode.CONNECTION_ERROR
+
+
+class ContradictionsFound(CanonError):
+    """Raised by headless ``--strict`` ingest when a run flags any contradiction (E4 §5.4)."""
+
+    code = ErrorCode.CONTRADICTION
 
 
 class CredentialError(CanonError):

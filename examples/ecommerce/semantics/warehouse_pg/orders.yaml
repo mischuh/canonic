@@ -28,3 +28,6 @@ joins:
   - to: customers
     on: "orders.customer_id = customers.customer_id"
     relationship: many_to_one
+
+meta:
+  provenance: human_curated
