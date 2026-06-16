@@ -6,9 +6,11 @@ import re
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from pydantic import BaseModel, ValidationError, field_validator
+from pydantic import BaseModel, Field, ValidationError, field_validator
 from pydantic_settings import BaseSettings, PydanticBaseSettingsSource, SettingsConfigDict
 from ruamel.yaml import YAML
+
+from canon.semantic.models import Provenance
 
 if TYPE_CHECKING:
     from pydantic.fields import FieldInfo
@@ -65,6 +67,28 @@ class TelemetryConfig(BaseModel):
     enabled: bool = False
 
 
+class AutoApplyConfig(BaseModel):
+    """Governs whether a reconciliation proposal may be applied without review (SPEC-E4 §5.5).
+
+    Auto-apply is opt-in, bounded by confidence, capped at the lowest provenance, and
+    forbidden for structurally risky fields. The defaults keep ingest propose-only.
+    """
+
+    enabled: bool = False  # default: propose-only
+    min_confidence: float = Field(default=0.95, ge=0.0, le=1.0)
+    max_provenance: Provenance = Provenance.INFERRED  # never auto-apply over human_curated+
+    never: list[str] = ["grain", "joins", "measures"]  # structural fields always need review
+
+
+class ReconcileConfig(BaseModel):
+    """Reconciliation policy block from canon.yaml (SPEC-E4 §5.4, §5.5)."""
+
+    auto_apply: AutoApplyConfig = AutoApplyConfig()
+    # Strict CI mode that gates a run on contradictions; non-default (§5.4). Enforcement
+    # (exit code) is the caller's; the engine never fails a run on contradictions itself.
+    strict_contradictions: bool = False
+
+
 class YamlConfigSource(PydanticBaseSettingsSource):
     """Pydantic-settings source that reads a canon.yaml file via ruamel.yaml."""
 
@@ -101,6 +125,7 @@ class CanonConfig(BaseSettings):
     connections: list[Connection] = []
     llm: LLMConfig
     telemetry: TelemetryConfig = TelemetryConfig()
+    reconcile: ReconcileConfig = ReconcileConfig()
 
     @classmethod
     def settings_customise_sources(
