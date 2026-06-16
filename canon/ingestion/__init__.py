@@ -19,20 +19,30 @@ from canon.ingestion.models import (
     ReconciliationEntry,
     ReconciliationReport,
 )
+from canon.ingestion.reconciliation import (
+    AcceptedStore,
+    ExistingFact,
+    InMemoryAcceptedStore,
+    ReconciliationEngine,
+)
 
 __all__ = [
+    "AcceptedStore",
     "BuildResult",
     "ContextBuilder",
     "DraftedBy",
     "EvidenceItem",
     "EvidenceKind",
+    "ExistingFact",
     "GrainDraft",
+    "InMemoryAcceptedStore",
     "KNOWN_EVIDENCE_KINDS",
     "LLMDrafter",
     "NullLLMDrafter",
     "Proposal",
     "ProposalOp",
     "ReconciliationDecision",
+    "ReconciliationEngine",
     "ReconciliationEntry",
     "ReconciliationReport",
     "SkippedEvidence",
