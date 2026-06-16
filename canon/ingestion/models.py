@@ -133,7 +133,14 @@ class Proposal(BaseModel):
 
 
 class ReconciliationEntry(BaseModel):
-    """One reconciliation decision with both sides recorded (SPEC-E4 §5.2, §5.4)."""
+    """One reconciliation decision with both sides recorded (SPEC-E4 §5.2, §5.4).
+
+    ``auto_apply`` records whether the auto-apply policy (§5.5) deems this entry eligible
+    to be applied without review; it is ``False`` under the default propose-only config.
+    ``low_confidence`` flags an ``EDIT`` whose confidence fell below the policy threshold
+    (decision-table row 6) so a reviewer sorts it accordingly. ``existing_frozen`` records
+    that a flagged contradiction was driven by a frozen fact (§5.3).
+    """
 
     model_config = ConfigDict(frozen=True)
 
@@ -143,6 +150,9 @@ class ReconciliationEntry(BaseModel):
     existing: dict[str, Any] | None = None
     existing_provenance: Provenance | None = None
     recommended_action: str | None = None
+    auto_apply: bool = False
+    low_confidence: bool = False
+    existing_frozen: bool = False
 
 
 class ReconciliationReport(BaseModel):
