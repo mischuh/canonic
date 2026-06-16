@@ -3,6 +3,7 @@
   "ambiguous_join_path": 5,
   "assertion_failed": 10,
   "connection_error": 13,
+  "contradiction": 14,
   "fanout_unsafe": 7,
   "guardrail_block": 8,
   "read_only_violation": 11,

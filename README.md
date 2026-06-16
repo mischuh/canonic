@@ -401,7 +401,206 @@ After setup completes:
 # .gitignore        ← covers .canon/
 ```
 
-### CLI — query and serving
+### Ingestion pipeline — `canon ingest`
+
+`canon ingest` is the four-stage engine that turns live connector evidence into reviewable
+context diffs without ever writing to a committed file silently.  It runs:
+
+```
+connector introspection
+        │
+        ▼
+1. Context builder      evidence → Proposal[]          (deterministic)
+        │
+        ▼
+2. Reconciliation       Proposal[] × accepted files → ReconciliationReport
+        │
+        ▼
+3. Validation           proposed output state → pass | VALIDATION_FAILED
+        │
+        ▼
+4. Diff emission        reviewable diffs + report      (→ auto-PR in headless mode)
+```
+
+Every proposed change is **anchored to evidence** and traceable through the audit trail.
+Higher provenance tiers always win — ingest can never silently overwrite a human-curated
+or board-approved fact with an inferred one. Contradictions are surfaced as review notes,
+never silent overwrites.
+
+#### Bootstrap a new project
+
+On a fresh project, `--bootstrap` runs tier-1 live introspection against the first configured
+connection and **writes** the initial `semantics/` files directly — enough to make the agent
+useful on day one:
+
+```sh
+canon ingest --bootstrap
+# Introspects warehouse_pg, writes semantics/warehouse_pg/*.yaml,
+# prints the reconciliation report (add: N, no_op: 0, …)
+```
+
+Scope to one connection when you have several:
+
+```sh
+canon ingest --bootstrap --connection warehouse_pg
+```
+
+#### Ongoing ingest — propose-only by default
+
+A regular `canon ingest` refreshes evidence from all connections and emits reviewable diffs.
+No committed file is touched — every change becomes a diff for a human to review and merge:
+
+```sh
+canon ingest
+# Prints a reconciliation summary and the diff set.
+# Writes the audit trail under raw-sources/ and .canon/ but edits no semantics in place.
+```
+
+**Dry run** — compute and print diffs, write absolutely nothing:
+
+```sh
+canon ingest --dry-run
+
+# Machine-readable (includes the full ReconciliationReport + EmissionResult):
+canon --json ingest --dry-run
+```
+
+#### Re-runs are idempotent
+
+If no upstream schema has changed, `canon ingest` proposes **zero diffs** and only refreshes
+`last_validated_at` on unchanged files.  A changed `source_fingerprint` triggers exactly the
+affected proposals — nothing else.
+
+#### Reconciliation decisions and provenance
+
+When new evidence conflicts with an existing accepted file the reconciliation engine applies
+provenance rules:
+
+| Situation | Decision |
+| --- | --- |
+| No existing file | `add` — propose the new file |
+| Fingerprint matches | `no_op` — refresh `last_validated_at` only |
+| Existing tier **higher** than proposal | `contradiction` — flag both sides, keep existing |
+| Existing file is **frozen** | `contradiction` — frozen facts are never overwritten |
+| Existing tier ≤ proposal, confidence ≥ threshold | `edit` — propose the change |
+| Source disappeared | `prune` — propose removing the stale file |
+
+A contradiction is never a hard error by default — it rides into the review surface (or the
+auto-PR) for a human to resolve.
+
+#### Strict mode — gate CI on contradictions
+
+Pass `--strict` (or set `reconcile.strict_contradictions: true` in `canon.yaml`) to fail the
+run whenever any contradiction is flagged.  The exit is structured, not a bare non-zero:
+
+```sh
+canon --json ingest --strict
+# If contradictions exist:
+#   stderr: {"code": "contradiction", "message": "2 contradiction(s) flagged; …"}
+#   exit 14
+```
+
+#### Headless / CI mode — deterministic pipeline + auto-PR
+
+`--headless` (or the environment variable `CI=true`, which Canon auto-detects) enables
+the safe, repeatable scheduled-ingest role:
+
+- Pins the **deterministic builder** — no LLM on the critical path, so identical evidence
+  yields byte-identical proposals across runs.
+- After diff emission, opens an **auto-PR** via `git` + `gh` carrying the diffs and
+  contradiction notes.
+- Returns canonical **exit codes** for every error so the CI runner can gate or route.
+
+```sh
+# Headless ingest — auto-PR opened if diffs exist:
+canon ingest --headless
+
+# Suppress the PR (headless determinism + exit codes, no git side-effect):
+canon ingest --headless --no-pr
+
+# Force a PR even in interactive mode (e.g. for a one-off review request):
+canon ingest --open-pr
+
+# Full CI recipe:
+canon --json ingest --headless --strict
+# exit 0  → clean run, PR opened (or nothing to propose)
+# exit 9  → VALIDATION_FAILED — proposed output invalid, no PR opened
+# exit 13 → CONNECTION_ERROR  — source unreachable, no PR opened
+# exit 14 → CONTRADICTION     — strict mode flagged contradiction(s)
+```
+
+**Example GitHub Actions job:**
+
+```yaml
+- name: Canon ingest
+  run: canon --json ingest --headless --strict
+  env:
+    CI: "true"
+    CANON_PG_PASSWORD: ${{ secrets.CANON_PG_PASSWORD }}
+  # exit 0 → clean; 9/13/14 → fail with structured error on stderr
+```
+
+The auto-PR carries:
+- **PR body** — the full `ReconciliationReport`: decision counts, each diff with its evidence
+  anchors and provenance, and the contradiction block.
+- **Review comment** — a standalone contradictions summary posted separately so it is easy
+  to dismiss once resolved.
+
+The branch name is derived from a hash of the emission's JSON, so a re-run with identical
+proposals targets the same branch — no churn, no duplicate PRs.
+
+#### Python API
+
+```python
+import asyncio
+from pathlib import Path
+from canon.config import ReconcileConfig, scaffold_project
+from canon.connectors.postgres import PostgresConnector
+from canon.ingestion.pipeline import IngestionPipeline
+from canon.ingestion.source import evidence_from_introspection
+
+root = Path(".")
+scaffold_project(root)
+
+connector = PostgresConnector(connection)
+connectors = {"warehouse_pg": connector}
+pipeline = IngestionPipeline(root, connectors, ReconcileConfig())
+
+async def run() -> None:
+    evidence = await evidence_from_introspection(connector, "warehouse_pg")
+    result = await pipeline.run(evidence)          # propose-only
+    print(result.emission.render_markdown())       # human-readable summary
+    print(result.emission.to_json())               # CI/machine-readable
+
+    # Bootstrap path — writes semantics directly:
+    result = await pipeline.bootstrap("warehouse_pg")
+
+asyncio.run(run())
+```
+
+**Headless mode — pins the deterministic builder:**
+
+```python
+pipeline = IngestionPipeline(root, connectors, ReconcileConfig(), headless=True)
+# NullLLMDrafter is used unconditionally — identical evidence → byte-identical output.
+```
+
+**Auto-PR — injectable seam for tests:**
+
+```python
+from canon.ingestion.autopr import AutoPRPublisher, SubprocessPublisher
+
+publisher = AutoPRPublisher(root, SubprocessPublisher(root))
+pr_ref = asyncio.run(publisher.publish(result))
+# Calls: git checkout -b canon/ingest-<hash>
+#        git add <diff targets>
+#        git commit -m "chore(canon): ingest reconciliation — N diffs"
+#        gh pr create --title … --body <ReconciliationReport markdown>
+#        gh pr comment <pr_ref> <contradiction notes>   (if any)
+print(pr_ref)  # https://github.com/…/pull/42
+```
+
+#### CLI — query and serving
 
 All capability commands share the `--json` flag for structured, machine-readable output.
 Exit codes follow the canonical error registry (see error table below) — the same codes
@@ -462,9 +661,15 @@ Canon version, the command exits with a clear message instead of starting a seco
 | --- | --- | --- |
 | `UNRESOLVED` | metric name matches no active binding | 2 |
 | `AMBIGUOUS` | name matches more than one active binding | 3 |
-| `READ_ONLY_VIOLATION` | non-SELECT statement rejected | 11 |
-| `GUARDRAIL_BLOCK` | severity:error guardrail blocked the query | 8 |
 | `UNREACHABLE` | dimension/filter has no join path | 4 |
+| `GUARDRAIL_BLOCK` | severity:error guardrail blocked the query | 8 |
+| `VALIDATION_FAILED` | proposed ingest output invalid — no PR opened | 9 |
+| `READ_ONLY_VIOLATION` | non-SELECT statement rejected | 11 |
+| `CONNECTION_ERROR` | source unreachable during ingest | 13 |
+| `CONTRADICTION` | `--strict` ingest flagged one or more contradictions | 14 |
+
+All errors produce a structured `{code, message}` payload on stderr (or via `--json`) so CI
+can branch on the code without parsing free text.
 
 ### MCP serving surface (E8)
 
@@ -498,7 +703,7 @@ Cursor, Codex). The server is a thin adapter — all logic lives in the protocol
                 "guardrails_fired":  [{"id": "revenue-excludes-refunds", "kind": "mandatory_filter"}],
                 "freshness":         [{"source": "orders", "last_validated_at": "…", "stale": false}],
                 "warnings":          [],
-                "contract_schema":   "1.0" }
+                "contract_schema":   "1.1" }
 }
 ```
 
@@ -511,7 +716,7 @@ Cursor, Codex). The server is a thin adapter — all logic lives in the protocol
                 "guardrails_fired": [{"id": "revenue-excludes-refunds", "kind": "mandatory_filter"}],
                 "freshness":        [],
                 "warnings":         [],
-                "contract_schema":  "1.0" }
+                "contract_schema":  "1.1" }
 }
 ```
 
@@ -564,7 +769,7 @@ rows = asyncio.run(service.run_sql("SELECT count(*) FROM analytics.fct_orders"))
 Canon ships in phases (see [`docs/PRD-canon-final.md`](docs/PRD-canon-final.md) §9.1):
 
 - **Phase 0 — Walking skeleton.** ✓ Complete. Foundation + install + setup wizard (E1), one primary connector (E2), compiler + minimal contracts (E5 + E15), CLI (E7), MCP serving (E8), serving contract interface freeze (P0). The serving contract is versioned as `contract_schema: v1`, locked by JSON schema golden files in CI, and stamped on every `QueryResult.metadata`. An agent or CI pipeline asks for a metric → Canon resolves the canonical binding → compiles read-only SQL with guardrail filters injected → executes against live Postgres → returns a byte-identical `QueryResult` on both CLI (`canon --json query`) and MCP (`query` tool). `canon setup` bootstraps a new project interactively with checkpoint-based resumability.
-- **Phase 1 — v1 core.** Auto-built context across pillars and multiple sources: ingestion + reconciliation (E4), knowledge + retrieval (E6), LLM config incl. local/offline (E10), definition + evidence connectors (E3), fuller contracts, accuracy tracking.
+- **Phase 1 — v1 core (in progress).** `canon ingest` (E4) is live: the four-stage deterministic pipeline (builder → reconciliation → validation → diff emission), headless CI mode with auto-PR (`--headless` / `CI=true`), provenance-aware contradiction handling, `--strict` gate (exit 14), and full exit-code coverage for CI (`VALIDATION_FAILED` 9, `CONNECTION_ERROR` 13, `CONTRADICTION` 14). Serving contract bumped to `contract_schema: 1.1` (additive, non-breaking). Remaining Phase 1: knowledge + retrieval (E6), LLM config incl. local/offline (E10), definition + evidence connectors (E3), fuller contracts, accuracy tracking.
 - **Phase 2 — Trust & operations.** Cost control (E13), answer trust score (E14), feedback loop (E11), agent edit/review loop (E9), governance: RLS/PII + locked context versions (E12).
 
 ## Documentation

@@ -19,7 +19,7 @@ from typing import TYPE_CHECKING
 
 from pydantic import BaseModel, ConfigDict
 
-from canon.ingestion.builder import ContextBuilder, SkippedEvidence
+from canon.ingestion.builder import ContextBuilder, NullLLMDrafter, SkippedEvidence
 from canon.ingestion.emitter import AuditTrailWriter, DiffEmitter, EmissionResult, EmittedDiff
 from canon.ingestion.models import ProposalOp, ReconciliationDecision, ReconciliationReport
 from canon.ingestion.reconciliation import DiskAcceptedStore, ReconciliationEngine
@@ -34,7 +34,24 @@ if TYPE_CHECKING:
     from canon.connectors.base import ConnectorBase
     from canon.ingestion.models import EvidenceItem
 
-__all__ = ["IngestionPipeline", "PipelineResult"]
+__all__ = ["IngestionPipeline", "PipelineResult", "write_emitted_diffs"]
+
+
+def write_emitted_diffs(project_root: Path, diffs: Iterable[EmittedDiff]) -> None:
+    """Materialize emitted diffs by writing each ``after`` state to its target file.
+
+    The one place that turns an :class:`EmittedDiff` into an on-disk change: ``PRUNE`` unlinks
+    the target, every other op writes the exact ``after`` content the validation gate already
+    accepted. Shared by the pipeline (bootstrap writes / bounded auto-apply, §5.5) and the
+    headless auto-PR step (SPEC-E4 §6), so both apply diffs identically.
+    """
+    for diff in diffs:
+        path = project_root / diff.target
+        if diff.op is ProposalOp.PRUNE:
+            path.unlink(missing_ok=True)
+            continue
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(diff.after or "")
 
 
 class PipelineResult(BaseModel):
@@ -71,11 +88,17 @@ class IngestionPipeline:
         project_root: Path,
         connectors: Mapping[str, ConnectorBase],
         config: ReconcileConfig,
+        *,
+        headless: bool = False,
     ) -> None:
         self._project_root = project_root
         self._connectors = connectors
         self._config = config
-        self._builder = ContextBuilder()
+        # In headless mode the builder is pinned to the deterministic ``NullLLMDrafter`` so the
+        # critical path stays LLM-free (SPEC-E4 §9 / S9-AC1) even once a real drafter (E10) is
+        # injected for interactive runs. Today the default is already deterministic; this hard-
+        # guarantees it.
+        self._builder = ContextBuilder(NullLLMDrafter()) if headless else ContextBuilder()
         self._engine = ReconciliationEngine(config)
         self._emitter = DiffEmitter()
 
@@ -154,10 +177,4 @@ class IngestionPipeline:
         Used for the bootstrap (write every ``add``) and for auto-apply-eligible entries (§5.5);
         both write the exact proposed state the validation gate already accepted.
         """
-        for diff in diffs:
-            path = self._project_root / diff.target
-            if diff.op is ProposalOp.PRUNE:
-                path.unlink(missing_ok=True)
-                continue
-            path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_text(diff.after or "")
+        write_emitted_diffs(self._project_root, diffs)
