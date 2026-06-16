@@ -1,4 +1,4 @@
-"""``canon ingest`` — run the four-stage ingestion pipeline (SPEC-E4 §2, §7, §8).
+"""``canon ingest`` — run the four-stage ingestion pipeline (SPEC-E4 §2, §7, §8, §9).
 
 Refreshes context from the configured sources: introspects each connection into normalized
 evidence, drafts proposals, reconciles them against the accepted files, validates the proposed
@@ -6,11 +6,16 @@ state, and emits reviewable diffs plus a ``ReconciliationReport``. Propose-only 
 (§5.5) — it writes the audit trail and refreshes ``last_validated_at`` on unchanged files but
 edits no committed semantics in place. ``--bootstrap`` is the fast initial path for a fresh
 connection (§8); ``--dry-run`` computes and prints diffs while touching nothing.
+
+Headless mode (§9): ``--headless`` (or an auto-detected ``CI=true``) pins the deterministic
+builder, opens an auto-PR carrying the diffs and contradiction notes, and gates the run on the
+canonical exit codes — the safe, repeatable scheduled-ingest role (PRD §5.6).
 """
 
 from __future__ import annotations
 
 import asyncio
+import os
 from typing import TYPE_CHECKING, Annotated
 
 import typer
@@ -19,16 +24,19 @@ from canon.cli._errors import get_cli_context, handle_errors
 from canon.cli.commands import _console
 from canon.config import find_project_root, load_config
 from canon.connectors.factory import connector_for
-from canon.exc import ConnectionError
+from canon.exc import CanonError, ConnectionError, ContradictionsFound
+from canon.ingestion.autopr import AutoPRPublisher, PullRequestPublisher, SubprocessPublisher
 from canon.ingestion.models import ReconciliationDecision
 from canon.ingestion.pipeline import IngestionPipeline
 from canon.ingestion.source import evidence_from_introspection
 
 if TYPE_CHECKING:
+    from collections.abc import Awaitable
     from pathlib import Path
 
     from canon.config import CanonConfig, Connection
     from canon.connectors.base import ConnectorBase
+    from canon.ingestion.models import EvidenceItem
     from canon.ingestion.pipeline import PipelineResult
 
 
@@ -49,6 +57,21 @@ def ingest(
         str | None,
         typer.Option("--connection", help="Limit the run to a single connection id."),
     ] = None,
+    headless: Annotated[
+        bool,
+        typer.Option("--headless", help="Force headless mode (also auto-detected via CI=true)."),
+    ] = False,
+    strict: Annotated[
+        bool,
+        typer.Option("--strict", help="Fail the run (exit 14) if any contradiction is flagged."),
+    ] = False,
+    open_pr: Annotated[
+        bool | None,
+        typer.Option(
+            "--open-pr/--no-pr",
+            help="Force/suppress the auto-PR (defaults to on in headless mode).",
+        ),
+    ] = None,
 ) -> None:
     """Reconcile configured sources into reviewable context diffs (SPEC-E4 §2)."""
     root = find_project_root()
@@ -58,21 +81,51 @@ def ingest(
         )
         raise typer.Exit(1)
 
+    is_headless = _is_headless(headless)
     config = load_config(root / "canon.yaml")
     targets = _select_connections(config, bootstrap=bootstrap, connection=connection)
-    result = asyncio.run(_ingest(root, config, targets, bootstrap=bootstrap, dry_run=dry_run))
+    result = asyncio.run(
+        _ingest(root, config, targets, bootstrap=bootstrap, dry_run=dry_run, headless=is_headless)
+    )
 
     if get_cli_context(ctx).json_output:
         typer.echo(result.emission.to_json())
     else:
         typer.echo(result.emission.render_markdown())
 
-    if config.reconcile.strict_contradictions:
+    # Auto-PR before the strict gate so the PR still carries the contradiction notes, then CI
+    # fails the run on the gate (SPEC-E4 §6/§5.4).
+    if _should_open_pr(open_pr, headless=is_headless) and not dry_run and not bootstrap:
+        pr_ref = asyncio.run(_open_auto_pr(root, result))
+        if pr_ref and not get_cli_context(ctx).json_output:
+            typer.echo(f"opened auto-PR: {pr_ref}")
+
+    if strict or config.reconcile.strict_contradictions:
         contradictions = result.report.summary[ReconciliationDecision.CONTRADICTION.value]
         if contradictions > 0:
-            # SPEC-E4 §5.4: strict mode gates the run on contradictions. No dedicated error
-            # code exists yet (a future additive); exit non-zero so CI fails the run.
-            raise typer.Exit(1)
+            raise ContradictionsFound(
+                f"{contradictions} contradiction(s) flagged; strict mode gates the run (E4 §5.4)"
+            )
+
+
+def _is_headless(flag: bool) -> bool:
+    """Headless if the flag is set or the run is in CI (SPEC-E4 §9)."""
+    return flag or os.environ.get("CI") == "true"
+
+
+def _should_open_pr(override: bool | None, *, headless: bool) -> bool:
+    """Resolve the auto-PR decision: explicit ``--open-pr/--no-pr`` wins, else default to headless."""
+    return override if override is not None else headless
+
+
+def build_publisher(project_root: Path) -> PullRequestPublisher:
+    """Construct the git/gh publisher for the auto-PR step (seam for test injection)."""
+    return SubprocessPublisher(project_root)
+
+
+async def _open_auto_pr(root: Path, result: PipelineResult) -> str | None:
+    """Open the headless auto-PR for ``result`` and return its reference (SPEC-E4 §6)."""
+    return await AutoPRPublisher(root, build_publisher(root)).publish(result)
 
 
 def _select_connections(
@@ -104,19 +157,44 @@ async def _ingest(
     *,
     bootstrap: bool,
     dry_run: bool,
+    headless: bool,
 ) -> PipelineResult:
     """Build connectors, gather evidence, and drive the pipeline; always closes connectors."""
     connectors: dict[str, ConnectorBase] = {conn.id: connector_for(conn) for conn in targets}
-    pipeline = IngestionPipeline(root, connectors, config.reconcile)
+    pipeline = IngestionPipeline(root, connectors, config.reconcile, headless=headless)
     try:
         if bootstrap:
-            return await pipeline.bootstrap(targets[0].id)
+            return await _guard_connection(targets[0].id, pipeline.bootstrap(targets[0].id))
         evidence = [
             item
             for conn in targets
-            for item in await evidence_from_introspection(connectors[conn.id], conn.id)
+            for item in await _gather_evidence(connectors[conn.id], conn.id)
         ]
         return await pipeline.run(evidence, dry_run=dry_run)
     finally:
         for connector in connectors.values():
             await connector.aclose()
+
+
+async def _gather_evidence(connector: ConnectorBase, conn_id: str) -> list[EvidenceItem]:
+    """Introspect a connection, translating transport failures into ``CONNECTION_ERROR`` (exit 13)."""
+    try:
+        return await evidence_from_introspection(connector, conn_id)
+    except CanonError:
+        raise
+    except Exception as exc:  # noqa: BLE001 — any connector/transport failure ⇒ unreachable source
+        raise ConnectionError(f"source {conn_id!r} unreachable: {exc}") from exc
+
+
+async def _guard_connection(conn_id: str, coro: Awaitable[PipelineResult]) -> PipelineResult:
+    """Await ``coro``, translating non-canon (transport) failures into ``CONNECTION_ERROR``.
+
+    Canon errors (e.g. ``VALIDATION_FAILED`` from the gate) pass through untouched; only an
+    unexpected connector/transport failure becomes a ``ConnectionError`` (exit 13).
+    """
+    try:
+        return await coro
+    except CanonError:
+        raise
+    except Exception as exc:  # noqa: BLE001 — any connector/transport failure ⇒ unreachable source
+        raise ConnectionError(f"source {conn_id!r} unreachable: {exc}") from exc

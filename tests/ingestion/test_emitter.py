@@ -220,6 +220,21 @@ class TestContradictionNotes:
         note = DiffEmitter().emit(_report(entry)).notes[0]
         assert note.existing_frozen is True
 
+    def test_render_contradictions_is_the_pr_review_block(self) -> None:
+        """render_contradictions() yields the standalone notes block for the auto-PR comment (§5.4)."""
+        entry = _entry(
+            ReconciliationDecision.CONTRADICTION,
+            existing={"name": "orders"},
+            existing_provenance=Provenance.HUMAN_CURATED,
+            recommended_action="resolve manually",
+        )
+        result = DiffEmitter().emit(_report(entry))
+        block = result.render_contradictions()
+        assert block.startswith("## Contradictions (1)")
+        assert "resolve manually" in block
+        # The same block is embedded in the full markdown body.
+        assert block.strip() in result.render_markdown()
+
 
 # ---------------------------------------------------------------------------
 # Scan snapshot (S7-AC1)
