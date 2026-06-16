@@ -31,12 +31,15 @@ from canon.ingestion.models import (
     ReconciliationEntry,
     ReconciliationReport,
 )
+from canon.ingestion.pipeline import IngestionPipeline, PipelineResult
 from canon.ingestion.reconciliation import (
     AcceptedStore,
+    DiskAcceptedStore,
     ExistingFact,
     InMemoryAcceptedStore,
     ReconciliationEngine,
 )
+from canon.ingestion.source import evidence_from_introspection
 from canon.ingestion.validation import (
     ValidationGate,
     ValidationReport,
@@ -52,6 +55,7 @@ __all__ = [
     "ContradictionNote",
     "DiffEmitter",
     "DiffFormat",
+    "DiskAcceptedStore",
     "DiskEventLog",
     "DiskSnapshotStore",
     "DraftedBy",
@@ -62,10 +66,12 @@ __all__ = [
     "EvidenceKind",
     "ExistingFact",
     "GrainDraft",
+    "IngestionPipeline",
     "InMemoryAcceptedStore",
     "KNOWN_EVIDENCE_KINDS",
     "LLMDrafter",
     "NullLLMDrafter",
+    "PipelineResult",
     "Proposal",
     "ProposalOp",
     "ReconciliationDecision",
@@ -78,4 +84,5 @@ __all__ = [
     "ValidationReport",
     "Violation",
     "ViolationKind",
+    "evidence_from_introspection",
 ]
