@@ -14,6 +14,7 @@ from canon.cli._errors import get_cli_context
 from canon.cli.commands import (
     completion,
     connection,
+    ingest,
     knowledge,
     mcp,
     query,
@@ -74,6 +75,7 @@ app.add_typer(knowledge.app, name="knowledge")
 
 # Top-level single commands.
 app.command("setup")(setup.setup)
+app.command("ingest")(ingest.ingest)
 app.command("query")(query.query)
 app.command("sql")(sql.sql)
 app.command("status")(status.status)
