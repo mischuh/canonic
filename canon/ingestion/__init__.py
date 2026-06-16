@@ -8,6 +8,18 @@ from canon.ingestion.builder import (
     NullLLMDrafter,
     SkippedEvidence,
 )
+from canon.ingestion.emitter import (
+    AuditTrailWriter,
+    ContradictionNote,
+    DiffEmitter,
+    DiffFormat,
+    DiskEventLog,
+    DiskSnapshotStore,
+    EmissionResult,
+    EmittedDiff,
+    EventLog,
+    SnapshotStore,
+)
 from canon.ingestion.models import (
     KNOWN_EVIDENCE_KINDS,
     DraftedBy,
@@ -28,9 +40,18 @@ from canon.ingestion.reconciliation import (
 
 __all__ = [
     "AcceptedStore",
+    "AuditTrailWriter",
     "BuildResult",
     "ContextBuilder",
+    "ContradictionNote",
+    "DiffEmitter",
+    "DiffFormat",
+    "DiskEventLog",
+    "DiskSnapshotStore",
     "DraftedBy",
+    "EmissionResult",
+    "EmittedDiff",
+    "EventLog",
     "EvidenceItem",
     "EvidenceKind",
     "ExistingFact",
@@ -46,4 +67,5 @@ __all__ = [
     "ReconciliationEntry",
     "ReconciliationReport",
     "SkippedEvidence",
+    "SnapshotStore",
 ]
