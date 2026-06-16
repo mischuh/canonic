@@ -86,7 +86,12 @@ class TestEvidenceItem:
             assert kind in KNOWN_EVIDENCE_KINDS
 
     def test_known_evidence_kinds_constant(self) -> None:
-        assert {"relation_schema", "observed_query", "definition", "doc_evidence"} == KNOWN_EVIDENCE_KINDS
+        assert {
+            "relation_schema",
+            "observed_query",
+            "definition",
+            "doc_evidence",
+        } == KNOWN_EVIDENCE_KINDS
 
 
 # ---------------------------------------------------------------------------
