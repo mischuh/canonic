@@ -26,13 +26,16 @@ from canon.ingestion.models import (
     ReconciliationEntry,
     ReconciliationReport,
 )
+from canon.semantic.loader import list_semantic_sources
 from canon.semantic.models import Provenance
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
+    from pathlib import Path
 
 __all__ = [
     "AcceptedStore",
+    "DiskAcceptedStore",
     "ExistingFact",
     "InMemoryAcceptedStore",
     "ReconciliationEngine",
@@ -91,6 +94,38 @@ class InMemoryAcceptedStore:
 
     def __init__(self, facts: Iterable[ExistingFact] = ()) -> None:
         self._facts: dict[str, ExistingFact] = {f.target: f for f in facts}
+
+    def get(self, target: str) -> ExistingFact | None:
+        return self._facts.get(target)
+
+    def targets(self) -> Iterable[str]:
+        return tuple(self._facts)
+
+
+class DiskAcceptedStore:
+    """:class:`AcceptedStore` backed by the committed ``semantics/*.yaml`` files (SPEC-E4 §5).
+
+    Loads every accepted semantic source under ``project_root`` once (eagerly, so a re-run
+    over an unchanged tree yields identical facts) and projects each onto an
+    :class:`ExistingFact`: its ``meta.provenance`` and ``meta.source_fingerprint`` drive the
+    §5.1 tier check and the §7 fingerprint idempotency. The ``target`` is the file's path
+    relative to ``project_root`` — the same ``semantics/<conn>/<name>.yaml`` shape the builder
+    emits — so a proposal and its accepted fact line up.
+    """
+
+    def __init__(self, project_root: Path) -> None:
+        self._facts: dict[str, ExistingFact] = {}
+        for source in list_semantic_sources(project_root):
+            target = f"semantics/{source.connection}/{source.name}.yaml"
+            self._facts[target] = ExistingFact(
+                target=target,
+                content=source.model_dump(mode="json"),
+                provenance=source.meta.provenance,
+                # SPEC-E4 §11 open touchpoint: `frozen` is not yet a field on SourceMeta.
+                # Once E5 adds it, read it here; until then no accepted fact is frozen.
+                frozen=False,
+                source_fingerprint=source.meta.source_fingerprint,
+            )
 
     def get(self, target: str) -> ExistingFact | None:
         return self._facts.get(target)
