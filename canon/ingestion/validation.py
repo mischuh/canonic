@@ -228,7 +228,7 @@ class ValidationGate:
                 shutil.copytree(src, root / surface)
 
         for proposal in proposals:
-            if not self._is_e5_target(proposal.target):
+            if not self._is_validation_target(proposal.target):
                 continue
             dest = root / proposal.target
             if proposal.op is ProposalOp.PRUNE:
