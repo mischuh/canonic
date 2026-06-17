@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 from datetime import datetime  # noqa: TC003 — Pydantic resolves annotations at runtime
 from enum import StrEnum
 from typing import Any
@@ -24,6 +26,7 @@ __all__ = [
     "SemanticSource",
     "SemanticValidationError",
     "SourceMeta",
+    "compute_measure_fingerprint",
 ]
 
 
@@ -124,6 +127,19 @@ class Measure(BaseModel):
         if isinstance(agg, exp.Count) and agg.args.get("this") and agg.this.find(exp.Distinct):
             return False  # count(distinct …) does not sum across fanout
         return type(agg) in _P0_AGG_FUNCTIONS
+
+
+def compute_measure_fingerprint(measure: Measure) -> str:
+    """Stable sha256 over a measure's definition, for drift detection (SPEC-E6 §7).
+
+    Mirrors :func:`canon.connectors.base.compute_fingerprint`'s ``"sha256:<hex>"`` format so
+    bound knowledge-page fingerprints read the same as schema fingerprints. Hashes the raw
+    ``expr`` literally for v1; whether cosmetic ``expr`` changes should be ignored is an open
+    question (SPEC-E6 §12, shared with E15).
+    """
+    payload = {"expr": measure.expr}
+    digest = hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()
+    return f"sha256:{digest}"
 
 
 class Dimension(BaseModel):

@@ -7,6 +7,7 @@ description: "One row per order. Refunds carry status = 'refunded'."
 columns:
   - { name: order_id,    type: int,       nullable: false }
   - { name: customer_id, type: int,       nullable: false }
+  - { name: channel_id,  type: int,       nullable: false }
   - { name: amount,      type: decimal,   nullable: false }
   - { name: status,      type: string,    nullable: false }
   - { name: created_at,  type: timestamp, nullable: false }
@@ -23,10 +24,14 @@ dimensions:
   - { name: status,      column: status }
   - { name: order_date,  column: created_at }
   - { name: customer_id, column: customer_id }
+  - { name: channel_id,  column: channel_id }
 
 joins:
   - to: customers
     on: "orders.customer_id = customers.customer_id"
+    relationship: many_to_one
+  - to: channels
+    on: "orders.channel_id = channels.channel_id"
     relationship: many_to_one
 
 meta:

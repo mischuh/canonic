@@ -187,9 +187,20 @@ def start_http(
             f"MCP daemon is already running (PID {existing.pid}). Run `canon mcp stop` first."
         )
 
+    log_path = project_root / ".canon" / "mcp.log"
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+
     pid = os.fork()
     if pid != 0:
-        # Parent: record state and return.
+        # Parent: record state and return.  The child may still be starting up;
+        # give it a moment and confirm it is still alive before reporting success.
+        import time
+
+        time.sleep(0.2)
+        if not _pid_alive(pid):
+            hint = f"check {log_path} for details"
+            raise RuntimeError(f"MCP daemon exited immediately after fork — {hint}")
+
         state = DaemonState(
             pid=pid,
             version=_canon_version(),
@@ -201,25 +212,25 @@ def start_http(
         _write_state(project_root, state)
         return
 
-    # Child: detach and run the server.
-    # Redirect stdin/stdout/stderr to /dev/null at the FD level so that Python's
-    # sys.std* objects stay open (logging handlers that reference them won't crash),
-    # while the process is fully detached from the terminal.
+    # Child: detach from the terminal and run the server.
+    # stdin → /dev/null; stdout+stderr → .canon/mcp.log so crashes are diagnosable.
     os.setsid()
     _null_r = os.open(os.devnull, os.O_RDONLY)
-    _null_w = os.open(os.devnull, os.O_WRONLY)
+    _log_w = os.open(log_path, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o644)
     os.dup2(_null_r, 0)
-    os.dup2(_null_w, 1)
-    os.dup2(_null_w, 2)
+    os.dup2(_log_w, 1)
+    os.dup2(_log_w, 2)
     os.close(_null_r)
-    os.close(_null_w)
+    os.close(_log_w)
 
     from canon.mcp.server import build_server
 
     mcp = build_server(service)  # type: ignore[arg-type]
     import asyncio
 
-    asyncio.run(mcp.run_http_async(host=host, port=port, show_banner=False))
+    # stateless_http=True: no session IDs are issued or expected, so restarting the
+    # daemon never leaves MCP clients stuck with a stale session ID that returns 404.
+    asyncio.run(mcp.run_http_async(host=host, port=port, show_banner=False, stateless_http=True))
     sys.exit(0)
 
 

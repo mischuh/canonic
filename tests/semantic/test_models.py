@@ -12,6 +12,7 @@ from canon.semantic.models import (
     NormalizedType,
     Relationship,
     SemanticSource,
+    compute_measure_fingerprint,
 )
 
 
@@ -115,3 +116,19 @@ class TestIsP0Compilable:
     def test_non_additive_flag_not_compilable(self) -> None:
         m = Measure(name="r", expr="sum(amount)", additivity=Additivity.NON_ADDITIVE)
         assert m.is_p0_compilable is False
+
+
+class TestComputeMeasureFingerprint:
+    def test_format_is_sha256_prefixed(self) -> None:
+        fp = compute_measure_fingerprint(Measure(name="r", expr="sum(amount)"))
+        assert fp.startswith("sha256:")
+
+    def test_stable_for_same_expr(self) -> None:
+        a = compute_measure_fingerprint(Measure(name="r", expr="sum(amount)"))
+        b = compute_measure_fingerprint(Measure(name="other", expr="sum(amount)"))
+        assert a == b  # fingerprint tracks the expr, not the measure name
+
+    def test_changes_with_expr(self) -> None:
+        a = compute_measure_fingerprint(Measure(name="r", expr="sum(amount)"))
+        b = compute_measure_fingerprint(Measure(name="r", expr="sum(amount * fx_rate)"))
+        assert a != b

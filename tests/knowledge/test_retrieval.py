@@ -146,3 +146,95 @@ def test_result_carries_empty_traversed(
     result = engine.search("sales", requesting_user="alice")
 
     assert result.traversed == []
+
+
+def test_hit_carries_usage_mode(
+    make_search_page: Callable[..., KnowledgePage],
+) -> None:
+    """A policy page is ranked like reference but distinguishable via hit.usage_mode (§8)."""
+    policy = make_search_page("policy-page", summary="sales policy", usage_mode=UsageMode.POLICY)
+    engine = KnowledgeSearch([policy])
+
+    result = engine.search("sales", requesting_user="alice")
+
+    assert result.hits[0].usage_mode is UsageMode.POLICY
+
+
+_REVENUE = "warehouse_pg.orders.total_revenue"
+
+
+def test_caveat_rides_along_with_bound_entity(
+    make_search_page: Callable[..., KnowledgePage],
+) -> None:
+    """A caveat bound to a measure surfaces when a hit references it, unsearched (S7 AC1)."""
+    hit = make_search_page("revenue-report", summary="sales revenue", sl_refs=[_REVENUE])
+    caveat = make_search_page(
+        "test-accounts-caveat",
+        summary="excludes test accounts",
+        usage_mode=UsageMode.CAVEAT,
+        sl_refs=[_REVENUE],
+    )
+    engine = KnowledgeSearch([hit, caveat])
+
+    result = engine.search("sales", requesting_user="alice")
+
+    assert [h.page for h in result.hits] == ["revenue-report"]  # caveat not matched by query
+    assert [(c.page, c.triggered_by) for c in result.caveats] == [
+        ("test-accounts-caveat", [_REVENUE])
+    ]
+
+
+def test_caveat_not_surfaced_when_entity_absent(
+    make_search_page: Callable[..., KnowledgePage],
+) -> None:
+    """A caveat bound to an entity no hit references stays silent (S7 AC1)."""
+    hit = make_search_page("revenue-report", summary="sales revenue", sl_refs=[_REVENUE])
+    caveat = make_search_page(
+        "other-caveat",
+        summary="excludes returns",
+        usage_mode=UsageMode.CAVEAT,
+        sl_refs=["warehouse_pg.orders.refunds"],
+    )
+    engine = KnowledgeSearch([hit, caveat])
+
+    result = engine.search("sales", requesting_user="alice")
+
+    assert result.caveats == []
+
+
+def test_caveat_surfacing_respects_cap(
+    make_search_page: Callable[..., KnowledgePage],
+) -> None:
+    """max_caveats bounds how many caveats ride along (§8 relevance gate)."""
+    hit = make_search_page("revenue-report", summary="sales revenue", sl_refs=[_REVENUE])
+    caveats = [
+        make_search_page(
+            f"caveat-{i}", summary="footnote", usage_mode=UsageMode.CAVEAT, sl_refs=[_REVENUE]
+        )
+        for i in range(3)
+    ]
+    engine = KnowledgeSearch([hit, *caveats])
+
+    result = engine.search("sales", requesting_user="alice", max_caveats=1)
+
+    assert len(result.caveats) == 1
+    assert result.caveats[0].page == "caveat-0"  # deterministic order by page id
+
+
+def test_matched_caveat_is_hit_not_duplicated(
+    make_search_page: Callable[..., KnowledgePage],
+) -> None:
+    """A caveat that also matches the query is a hit, never duplicated as a caveat (§8)."""
+    hit = make_search_page("revenue-report", summary="sales revenue", sl_refs=[_REVENUE])
+    caveat = make_search_page(
+        "sales-caveat",
+        summary="sales caveat note",
+        usage_mode=UsageMode.CAVEAT,
+        sl_refs=[_REVENUE],
+    )
+    engine = KnowledgeSearch([hit, caveat])
+
+    result = engine.search("sales", requesting_user="alice")
+
+    assert "sales-caveat" in {h.page for h in result.hits}
+    assert result.caveats == []
