@@ -170,3 +170,21 @@ class ContractError(CanonError):
 
 class KnowledgePageError(CanonError):
     """Raised when a knowledge/**/*.md page is invalid; message carries file+line."""
+
+
+class KnowledgeReferenceError(CanonError):
+    """A knowledge page references a target that does not resolve; blocks the write.
+
+    Raised at the write boundary (SPEC-E6 §3.1) when an ``sl_ref``, page ``ref``, or body
+    ``[[wikilink]]`` points at nothing. Carries the broken ``ref``, its ``kind``
+    (``sl_ref``/``ref``/``wikilink``), and the frontmatter ``path`` it sits at; ``message``
+    embeds the page file plus a precise location.
+    """
+
+    code = ErrorCode.VALIDATION_FAILED
+
+    def __init__(self, path: tuple[str | int, ...], ref: str, kind: str, message: str) -> None:
+        self.path = path
+        self.ref = ref
+        self.kind = kind
+        super().__init__(message)
