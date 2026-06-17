@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from canon.knowledge.drift import DriftDetector, StalenessSignal
 from canon.knowledge.embeddings import Embedder, VectorStore
 from canon.knowledge.index import KnowledgeIndex
 from canon.knowledge.loader import (
@@ -17,8 +18,10 @@ from canon.knowledge.models import (
     KnowledgeValidationError,
     UsageMode,
 )
+from canon.knowledge.rendering import DefinitionRenderer
 from canon.knowledge.results import (
     Annotation,
+    Caveat,
     Hit,
     MatchedOn,
     SearchResult,
@@ -38,7 +41,10 @@ from canon.knowledge.validation import (
 
 __all__ = [
     "Annotation",
+    "Caveat",
     "CollisionResult",
+    "DefinitionRenderer",
+    "DriftDetector",
     "Embedder",
     "EntityIndex",
     "GraphTraversal",
@@ -54,6 +60,7 @@ __all__ = [
     "ReferenceValidator",
     "ScopeResolver",
     "SearchResult",
+    "StalenessSignal",
     "Subgraph",
     "UsageMode",
     "VectorStore",
