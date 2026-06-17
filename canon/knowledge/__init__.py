@@ -14,12 +14,20 @@ from canon.knowledge.models import (
     KnowledgeValidationError,
     UsageMode,
 )
+from canon.knowledge.validation import (
+    EntityIndex,
+    PageIndex,
+    ReferenceValidator,
+)
 
 __all__ = [
+    "EntityIndex",
     "KnowledgePage",
     "KnowledgePageMeta",
     "KnowledgeScope",
     "KnowledgeValidationError",
+    "PageIndex",
+    "ReferenceValidator",
     "UsageMode",
     "load_knowledge_page",
     "scope_from_path",
