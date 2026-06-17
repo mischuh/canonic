@@ -2,12 +2,17 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
 
+from canon.knowledge.models import KnowledgePage, KnowledgeScope
+from canon.knowledge.validation import EntityIndex, PageIndex
+from canon.semantic.models import Column, Dimension, Measure, NormalizedType, SemanticSource
+
 if TYPE_CHECKING:
-    from pathlib import Path
+    from collections.abc import Callable
 
 # The SPEC-E6 §2 example page, trimmed to a self-consistent sample.
 VALID_PAGE_MD = """\
@@ -49,3 +54,64 @@ def write_page(tmp_path: Path):
         return p
 
     return _write
+
+
+@pytest.fixture
+def entity_index() -> EntityIndex:
+    """Live entity index covering the `orders` and `customers` sources (SPEC-E5 §2.1)."""
+    orders = SemanticSource(
+        name="orders",
+        connection="warehouse_pg",
+        table="analytics.fct_orders",
+        grain=["order_id"],
+        columns=[
+            Column(name="order_id", type=NormalizedType.STRING, nullable=False),
+            Column(name="customer_id", type=NormalizedType.STRING, nullable=False),
+            Column(name="amount", type=NormalizedType.DECIMAL, nullable=False),
+        ],
+        measures=[Measure(name="total_revenue", expr="sum(amount)")],
+        dimensions=[Dimension(name="order_status", column="customer_id")],
+    )
+    customers = SemanticSource(
+        name="customers",
+        connection="warehouse_pg",
+        table="analytics.dim_customers",
+        grain=["customer_id"],
+        columns=[Column(name="customer_id", type=NormalizedType.STRING, nullable=False)],
+    )
+    return EntityIndex.from_sources([orders, customers])
+
+
+@pytest.fixture
+def make_page() -> Callable[..., KnowledgePage]:
+    """Factory for KnowledgePage models with sensible defaults; override per test."""
+
+    def _make(
+        slug: str = "customers-active",
+        *,
+        scope: KnowledgeScope = KnowledgeScope.GLOBAL,
+        sl_refs: list[str] | None = None,
+        refs: list[str] | None = None,
+        body: str = "",
+    ) -> KnowledgePage:
+        return KnowledgePage(
+            id=slug,
+            path=Path("knowledge") / scope.value / f"{slug}.md",
+            scope=scope,
+            sl_refs=sl_refs or [],
+            refs=refs or [],
+            body=body,
+        )
+
+    return _make
+
+
+@pytest.fixture
+def page_index() -> PageIndex:
+    """Page index with one GLOBAL page and one USER page."""
+    return PageIndex(
+        slugs_by_scope={
+            KnowledgeScope.GLOBAL: frozenset({"test-account-policy"}),
+            KnowledgeScope.USER: frozenset({"my-private-note"}),
+        }
+    )
