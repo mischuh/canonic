@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from canon.knowledge.models import KnowledgePage, KnowledgeScope
+from canon.knowledge.models import KnowledgePage, KnowledgePageMeta, KnowledgeScope
 from canon.knowledge.validation import EntityIndex, PageIndex
 from canon.semantic.models import Column, Dimension, Measure, NormalizedType, SemanticSource
 
@@ -93,6 +93,7 @@ def make_page() -> Callable[..., KnowledgePage]:
         sl_refs: list[str] | None = None,
         refs: list[str] | None = None,
         body: str = "",
+        meta: KnowledgePageMeta | None = None,
     ) -> KnowledgePage:
         return KnowledgePage(
             id=slug,
@@ -101,6 +102,7 @@ def make_page() -> Callable[..., KnowledgePage]:
             sl_refs=sl_refs or [],
             refs=refs or [],
             body=body,
+            meta=meta or KnowledgePageMeta(),
         )
 
     return _make
