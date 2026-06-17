@@ -22,6 +22,7 @@ __all__ = [
     "Hit",
     "MatchedOn",
     "SearchResult",
+    "Subgraph",
 ]
 
 
@@ -59,12 +60,27 @@ class Hit(BaseModel):
     annotations: list[Annotation] = []  # attached user pages (§4 strict-additive)
 
 
+class Subgraph(BaseModel):
+    """The connected context bundle returned by graph traversal (SPEC-E6 §6).
+
+    ``expand`` walks the reference graph from seed hits and returns the deduped, bounded
+    set of pages reached plus the live semantic entities they bind. ``pages`` is what flows
+    into :attr:`SearchResult.traversed`; ``entities`` is carried for callers that want the
+    reached ``sl_ref`` targets directly.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    pages: list[KnowledgePage] = []
+    entities: list[str] = []  # sl_ref targets reached, sorted
+
+
 class SearchResult(BaseModel):
     """The full result of a hybrid search (SPEC-E6 §5.3)."""
 
     model_config = ConfigDict(frozen=True)
 
     hits: list[Hit]
-    # Graph-expanded pages (§6). Reserved/empty until graph traversal lands; kept in the
-    # shape so adding it later stays additive.
+    # Graph-expanded pages (§6); set to a traversal's ``Subgraph.pages``. Empty unless the
+    # caller requested expansion — additive to the §5.3 shape.
     traversed: list[KnowledgePage] = []
