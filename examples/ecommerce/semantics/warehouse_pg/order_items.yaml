@@ -1,0 +1,35 @@
+name: order_items
+connection: warehouse_pg
+table: fct_order_items
+grain: [order_item_id]
+description: "One row per product line within an order. Joins up to orders and products."
+
+columns:
+  - { name: order_item_id, type: int,     nullable: false }
+  - { name: order_id,      type: int,     nullable: false }
+  - { name: product_id,    type: int,     nullable: false }
+  - { name: quantity,      type: int,     nullable: false }
+  - { name: line_amount,   type: decimal, nullable: false }
+
+measures:
+  - name: line_revenue
+    expr: "sum(line_amount)"
+    additivity: additive
+  - name: units_sold
+    expr: "sum(quantity)"
+    additivity: additive
+
+dimensions:
+  - { name: order_id,   column: order_id }
+  - { name: product_id, column: product_id }
+
+joins:
+  - to: orders
+    on: "order_items.order_id = orders.order_id"
+    relationship: many_to_one
+  - to: products
+    on: "order_items.product_id = products.product_id"
+    relationship: many_to_one
+
+meta:
+  provenance: human_curated

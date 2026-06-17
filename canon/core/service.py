@@ -88,6 +88,11 @@ class CanonService:
     def describe_metric(self, name: str) -> MetricDetail:
         """Return grain, dimensions, measures, and freshness for a metric (SPEC §4.1).
 
+        ``dimensions`` includes every dimension queryable against this metric — both those
+        declared on the owning source and those reachable via its declared join graph.  The
+        compiler resolves dimensions globally across sources (SPEC §4 stage 2), so this list
+        accurately reflects what can be passed as a dimension in a ``query()`` call.
+
         Raises :class:`canon.exc.Unresolved` or :class:`canon.exc.Ambiguous` when the
         name does not resolve to exactly one active binding.
         """
@@ -110,11 +115,39 @@ class CanonService:
             source=binding.source,
             measure=binding.measure,
             grain=list(source.grain),
-            dimensions=[d.name for d in source.dimensions],
+            dimensions=self._reachable_dimensions(source.name),
             measures=[m.name for m in source.measures],
             aliases=list(binding.binding.aliases),
             freshness=freshness,
         )
+
+    def _reachable_dimensions(self, source_name: str) -> list[str]:
+        """All dimension names queryable from *source_name* via its declared join graph.
+
+        Traverses the join tree breadth-first and collects dimensions from every reachable
+        source.  Names are deduplicated (first occurrence wins) and the list is returned in
+        BFS order so native dimensions always precede join-derived ones.
+        """
+        seen_sources: set[str] = set()
+        queue: list[str] = [source_name]
+        dims: list[str] = []
+        seen_dims: set[str] = set()
+        while queue:
+            current_name = queue.pop(0)
+            if current_name in seen_sources:
+                continue
+            seen_sources.add(current_name)
+            current = self._source_by_name.get(current_name)
+            if current is None:
+                continue
+            for d in current.dimensions:
+                if d.name not in seen_dims:
+                    dims.append(d.name)
+                    seen_dims.add(d.name)
+            for join in current.joins:
+                if join.to not in seen_sources:
+                    queue.append(join.to)
+        return dims
 
     # ------------------------------------------------------------------
     # Core capabilities

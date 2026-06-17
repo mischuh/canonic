@@ -1,0 +1,15 @@
+name: channels
+connection: warehouse_pg
+table: dim_channels
+grain: [channel_id]
+description: "Sales channel an order was placed through (web, mobile, in_store)."
+
+columns:
+  - { name: channel_id, type: int,    nullable: false }
+  - { name: name,       type: string, nullable: false }
+
+dimensions:
+  - { name: channel, column: name }
+
+meta:
+  provenance: human_curated
