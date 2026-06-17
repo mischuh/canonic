@@ -23,6 +23,7 @@ __all__ = [
     "load_knowledge_page",
     "scope_from_path",
     "slug_from_path",
+    "user_from_path",
 ]
 
 _KNOWLEDGE_DIR = "knowledge"
@@ -57,6 +58,27 @@ def scope_from_path(path: Path) -> KnowledgeScope:
 def slug_from_path(path: Path) -> str:
     """Derive a page's id/slug from its filename (SPEC-E6 §2: filename stem)."""
     return path.stem
+
+
+def user_from_path(path: Path) -> str | None:
+    """Owner id of a USER-scoped page (``knowledge/user/<id>/…``), ``None`` for GLOBAL.
+
+    The ``<id>`` segment is what scope visibility filters on (SPEC-E6 §4). Raises
+    KnowledgePageError if a ``user/`` path omits the owner directory (e.g.
+    ``knowledge/user/note.md``), since such a page belongs to no one.
+    """
+    if scope_from_path(path) is KnowledgeScope.GLOBAL:
+        return None
+    parts = path.parts
+    i = parts.index(_KNOWLEDGE_DIR)
+    # parts[i+1] is "user"; parts[i+2] must be the owner directory, not the filename.
+    owner_idx = i + 2
+    if owner_idx >= len(parts) - 1:
+        raise KnowledgePageError(
+            f"{path}: user page has no '<id>' owner segment; "
+            f"expected '{_KNOWLEDGE_DIR}/user/<id>/…'"
+        )
+    return parts[owner_idx]
 
 
 def _split_frontmatter(text: str) -> tuple[str, str]:
