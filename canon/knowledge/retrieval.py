@@ -15,7 +15,7 @@ from canon.knowledge.embeddings import VectorStore
 from canon.knowledge.index import KnowledgeIndex
 from canon.knowledge.loader import user_from_path
 from canon.knowledge.models import KnowledgePage, KnowledgeScope, UsageMode
-from canon.knowledge.results import Annotation, Hit, MatchedOn, SearchResult
+from canon.knowledge.results import Annotation, Caveat, Hit, MatchedOn, SearchResult
 from canon.knowledge.scope import ScopeResolver
 
 if TYPE_CHECKING:
@@ -30,6 +30,10 @@ __all__ = [
 #: RRF dampening constant; the standard default. Larger ``k`` flattens the contribution
 #: of top ranks. ``score(doc) = Σ_arm weight[arm] / (k + rank_arm(doc))``.
 _DEFAULT_RRF_K = 60
+
+#: Default cap on auto-surfaced caveats (§8). The relevance gate for "caveat surfacing
+#: volume" is an open question (§12); a small fixed cap keeps caveats from flooding results.
+_DEFAULT_MAX_CAVEATS = 3
 
 # Arms are fused in a fixed order so ``matched_on`` and tie-breaking are deterministic.
 _ARM_ORDER = (MatchedOn.LEXICAL, MatchedOn.VECTOR)
@@ -73,12 +77,15 @@ class KnowledgeSearch:
         tags: Sequence[str] | None = None,
         usage_mode: UsageMode | None = None,
         limit: int = 10,
+        max_caveats: int = _DEFAULT_MAX_CAVEATS,
     ) -> SearchResult:
         """Run a hybrid search and return ranked hits (SPEC-E6 §5.3).
 
         Filters by scope (global + ``requesting_user``'s own pages), ``tags`` (a page
         passes if it shares any tag), and ``usage_mode``. Global hits carry any same-id
-        user page as a strict-additive annotation (§4).
+        user page as a strict-additive annotation (§4). Up to ``max_caveats``
+        ``usage_mode: caveat`` pages whose bound entities appear in the hits ride along in
+        ``SearchResult.caveats`` (§8), even when not matched by the query.
         """
         visible = self._resolver.visible_pages(requesting_user, self._pages)
         eligible = [p for p in visible if self._passes_filters(p, tags, usage_mode)]
@@ -91,7 +98,8 @@ class KnowledgeSearch:
         ranked_keys = self._fuse(arm_ranks)
 
         hits = self._build_hits(ranked_keys, arm_ranks, visible, limit)
-        return SearchResult(hits=hits)
+        caveats = self._surface_caveats(hits, visible, max_caveats)
+        return SearchResult(hits=hits, caveats=caveats)
 
     @staticmethod
     def _passes_filters(
@@ -176,11 +184,48 @@ class KnowledgeSearch:
                     score=score,
                     summary=page.summary,
                     matched_on=matched_on,
+                    usage_mode=page.usage_mode,
                     sl_refs=page.sl_refs,
                     annotations=annotations,
                 )
             )
         return hits
+
+    def _surface_caveats(
+        self, hits: list[Hit], visible: list[KnowledgePage], max_caveats: int
+    ) -> list[Caveat]:
+        """Auto-surface caveat pages whose bound entities appear in the hits (§8).
+
+        Collects the entities referenced across ``hits``, then selects visible
+        ``usage_mode: caveat`` pages that bind any of them — excluding pages already returned
+        as hits so a caveat that also matched the query is never duplicated. Ordered by page
+        id and capped at ``max_caveats`` (the §12 relevance gate)."""
+        if max_caveats <= 0:
+            return []
+        hit_entities = {ref for hit in hits for ref in hit.sl_refs}
+        if not hit_entities:
+            return []
+        hit_ids = {hit.page for hit in hits}
+
+        caveats: list[Caveat] = []
+        for page in sorted(visible, key=lambda p: p.id):
+            if page.usage_mode is not UsageMode.CAVEAT or page.id in hit_ids:
+                continue
+            triggered_by = sorted(set(page.sl_refs) & hit_entities)
+            if not triggered_by:
+                continue
+            caveats.append(
+                Caveat(
+                    page=page.id,
+                    scope=page.scope,
+                    summary=page.summary,
+                    sl_refs=page.sl_refs,
+                    triggered_by=triggered_by,
+                )
+            )
+            if len(caveats) >= max_caveats:
+                break
+        return caveats
 
     def _annotations_for(
         self, global_page: KnowledgePage, visible: list[KnowledgePage]

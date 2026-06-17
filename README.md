@@ -671,6 +671,149 @@ Canon version, the command exits with a clear message instead of starting a seco
 All errors produce a structured `{code, message}` payload on stderr (or via `--json`) so CI
 can branch on the code without parsing free text.
 
+### Knowledge pages & retrieval (E6)
+
+The knowledge layer is the "trust" half of Canon: searchable, auto-maintained Markdown pages that
+carry business meaning — the *why* that makes an answer trustworthy, not just technically correct.
+Every page is committed to git, validated at write time, and kept live against the semantic layer.
+
+#### Page format
+
+A knowledge page is Markdown with YAML frontmatter. `id`, `path`, and `scope` are always derived
+from the filesystem path (`knowledge/global/` → global scope; `knowledge/user/<id>/` → user scope);
+everything else is optional with sensible defaults:
+
+```yaml
+# knowledge/global/revenue-definition.md
+---
+summary: "What total_revenue means and how it is calculated."
+tags: [revenue, definitions, metrics]
+sl_refs:
+  - warehouse_pg.orders.total_revenue   # ties this page to a live semantic entity
+usage_mode: definition                   # reference | caveat | policy | definition
+meta:
+  provenance: human_curated
+  last_validated_at: "2026-06-17T00:00:00Z"
+  bound_fingerprints:
+    "warehouse_pg.orders.total_revenue": "sha256:…"  # drift-detection anchor
+---
+
+The live SQL — rendered at read time, never a copy:
+
+> `{{ sl:warehouse_pg.orders.total_revenue.expr }}`
+
+Refunded orders are excluded by the `revenue-excludes-refunds` guardrail on every query — see
+[[revenue-excludes-refunds-caveat]].
+```
+
+`{{ sl:<entity>.expr }}` directives are resolved at read time by `DefinitionRenderer` against the
+live semantic layer, so the rendered definition can never fall out of sync. `[[wikilinks]]` and
+`refs` / `sl_refs` in frontmatter are validated on write — a broken reference is blocked before
+the page is indexed.
+
+#### Loading and reference validation
+
+```python
+from pathlib import Path
+from canon.knowledge import (
+    load_knowledge_page, EntityIndex, PageIndex, ReferenceValidator,
+)
+from canon.semantic.loader import list_semantic_sources
+
+root = Path(".")
+
+# Build the entity index from live semantic sources — maps FQ names to Measure objects.
+sources = list_semantic_sources(root)
+entity_index = EntityIndex.from_sources(sources)
+
+# Load a page from disk (scope, id, path derived from the filesystem path)
+page = load_knowledge_page(root / "knowledge/global/revenue-definition.md")
+# page.id == "revenue-definition", page.scope == KnowledgeScope.GLOBAL
+
+# Write-time validation: every sl_ref, ref, and [[wikilink]] must resolve before indexing.
+page_index = PageIndex.from_pages([page])
+validator = ReferenceValidator(entity_index, page_index)
+validator.validate_page(page)  # raises KnowledgeReferenceError on first broken reference
+```
+
+#### Hybrid search with caveat surfacing
+
+`KnowledgeSearch` fuses a tantivy BM25 lexical arm with an optional vector arm via Reciprocal
+Rank Fusion. The lexical arm is always available; vector search activates when an embedder is
+supplied (E10). `usage_mode: caveat` pages ride along automatically when a hit references their
+bound entity — no second search call needed.
+
+```python
+from canon.knowledge import KnowledgeSearch
+
+pages = [load_knowledge_page(p) for p in (root / "knowledge" / "global").glob("*.md")]
+engine = KnowledgeSearch(pages)  # lexical-only (no embedder needed)
+
+result = engine.search("revenue", requesting_user="alice")
+
+# Ranked hits — policy + definition pages surface alongside reference pages
+for hit in result.hits:
+    print(hit.page, hit.usage_mode, hit.score)
+# revenue-definition    definition  0.012
+# revenue-reporting-policy  policy  0.010
+
+# Caveat pages auto-surface when a hit's sl_refs intersect their bound entities
+for caveat in result.caveats:
+    print(caveat.page, caveat.triggered_by)
+# revenue-excludes-refunds-caveat  ['warehouse_pg.orders.total_revenue']
+```
+
+Search enforces scope visibility: every user sees `global` pages and their own `user/<id>` pages,
+never another user's. When a user's page shares an `id` with a global one, the global is
+authoritative and the user page rides along as a personal annotation (strict-additive rule).
+
+#### Graph traversal
+
+```python
+from canon.knowledge import GraphTraversal, KnowledgeSearch
+
+# After a search, expand seed hits over the reference graph (sl_refs, refs, [[wikilinks]])
+traversal = GraphTraversal(pages)
+subgraph = traversal.expand(result.hits, max_depth=2, max_nodes=50)
+# subgraph.pages   → deduped KnowledgePage list reached by graph walk
+# subgraph.entities → sorted list of sl_ref targets reached
+```
+
+#### Live rendering
+
+```python
+from canon.knowledge import DefinitionRenderer
+
+renderer = DefinitionRenderer(entity_index)
+rendered_body = renderer.render(page)
+# "{{ sl:warehouse_pg.orders.total_revenue.expr }}" → "sum(amount)"
+# Changing orders.yaml to expr: "sum(amount * fx_rate)" re-renders automatically, no page edit.
+# An unresolvable directive is left verbatim — rendering never raises on drift.
+```
+
+#### Drift detection and freshness
+
+```python
+from canon.knowledge import DriftDetector
+from datetime import timedelta
+
+detector = DriftDetector()
+
+# Flag pages whose bound measure expr changed since the page was authored (S6 AC2)
+flagged = detector.flagged_for_review(page, entity_index)
+# [] if fingerprints match; ['warehouse_pg.orders.total_revenue'] on mismatch.
+# A mismatch is a prose-review signal: the rendered expr auto-updated but the surrounding
+# "why" may now be wrong — resolution flows through E4's diff/review, never a silent edit.
+
+# Surface staleness at query time (S8 AC1)
+signal = detector.staleness(page, window=timedelta(days=90))
+# None if validated within the window; StalenessSignal otherwise:
+# StalenessSignal(page='revenue-definition', age_days=12, message='…unvalidated for 12 days')
+```
+
+The `EntityIndex` also supplies the live fingerprint of any measure, so the same object serves
+drift checks, live rendering, and reference validation — no duplicate lookup.
+
 ### MCP serving surface (E8)
 
 `canon mcp start` exposes the six P0 tools to any MCP-compatible agent client (Claude Code,
@@ -769,7 +912,7 @@ rows = asyncio.run(service.run_sql("SELECT count(*) FROM analytics.fct_orders"))
 Canon ships in phases (see [`docs/PRD-canon-final.md`](docs/PRD-canon-final.md) §9.1):
 
 - **Phase 0 — Walking skeleton.** ✓ Complete. Foundation + install + setup wizard (E1), one primary connector (E2), compiler + minimal contracts (E5 + E15), CLI (E7), MCP serving (E8), serving contract interface freeze (P0). The serving contract is versioned as `contract_schema: v1`, locked by JSON schema golden files in CI, and stamped on every `QueryResult.metadata`. An agent or CI pipeline asks for a metric → Canon resolves the canonical binding → compiles read-only SQL with guardrail filters injected → executes against live Postgres → returns a byte-identical `QueryResult` on both CLI (`canon --json query`) and MCP (`query` tool). `canon setup` bootstraps a new project interactively with checkpoint-based resumability.
-- **Phase 1 — v1 core (in progress).** `canon ingest` (E4) is live: the four-stage deterministic pipeline (builder → reconciliation → validation → diff emission), headless CI mode with auto-PR (`--headless` / `CI=true`), provenance-aware contradiction handling, `--strict` gate (exit 14), and full exit-code coverage for CI (`VALIDATION_FAILED` 9, `CONNECTION_ERROR` 13, `CONTRADICTION` 14). Serving contract bumped to `contract_schema: 1.1` (additive, non-breaking). Remaining Phase 1: knowledge + retrieval (E6), LLM config incl. local/offline (E10), definition + evidence connectors (E3), fuller contracts, accuracy tracking.
+- **Phase 1 — v1 core (in progress).** `canon ingest` (E4) is live: four-stage deterministic pipeline (builder → reconciliation → validation → diff emission), headless CI mode with auto-PR, `--strict` gate, full exit-code coverage. Serving contract bumped to `contract_schema: 1.1` (non-breaking). Knowledge & retrieval (E6) is substantially complete: page schema + loader (GH-46), reference graph with write-time validation + ingest-time pruning (GH-47/48), scope visibility + strict-additive collisions (GH-49), hybrid BM25 + vector search with RRF fusion (GH-50), graph traversal (GH-51), and drift/freshness/usage_mode — live rendering, review flags, caveat surfacing (GH-52). Remaining Phase 1: LLM config incl. local/offline (E10), definition + evidence connectors (E3), fuller contracts, accuracy tracking.
 - **Phase 2 — Trust & operations.** Cost control (E13), answer trust score (E14), feedback loop (E11), agent edit/review loop (E9), governance: RLS/PII + locked context versions (E12).
 
 ## Documentation
@@ -778,5 +921,6 @@ Canon ships in phases (see [`docs/PRD-canon-final.md`](docs/PRD-canon-final.md) 
 - [`docs/SPEC-E1-foundation-config-distribution.md`](docs/SPEC-E1-foundation-config-distribution.md) — project foundation, config, distribution
 - [`docs/SPEC-E2-primary-source-connector.md`](docs/SPEC-E2-primary-source-connector.md) — primary source connector
 - [`docs/SPEC-E5-E15-semantics-and-contracts.md`](docs/SPEC-E5-E15-semantics-and-contracts.md) — semantic layer, compiler & contract surface
+- [`docs/SPEC-E6-knowledge-retrieval.md`](docs/SPEC-E6-knowledge-retrieval.md) — knowledge pages, reference graph, hybrid retrieval, drift & freshness
 - [`docs/SPEC-E7-E8-serving-surfaces.md`](docs/SPEC-E7-E8-serving-surfaces.md) — CLI & MCP serving surfaces
 - [`docs/SPEC-P0-interface-freeze.md`](docs/SPEC-P0-interface-freeze.md) — serving contract version policy and conformance gate

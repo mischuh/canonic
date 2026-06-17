@@ -15,10 +15,12 @@ from pydantic import BaseModel, ConfigDict
 from canon.knowledge.models import (  # noqa: TC001 — Pydantic resolves annotations at runtime
     KnowledgePage,
     KnowledgeScope,
+    UsageMode,
 )
 
 __all__ = [
     "Annotation",
+    "Caveat",
     "Hit",
     "MatchedOn",
     "SearchResult",
@@ -56,8 +58,26 @@ class Hit(BaseModel):
     score: float  # fused (RRF) score; higher is better
     summary: str
     matched_on: list[MatchedOn]  # arm(s) that surfaced this hit
+    usage_mode: UsageMode = UsageMode.REFERENCE  # §8: lets callers distinguish policy pages
     sl_refs: list[str] = []  # bound semantic entities (E5)
     annotations: list[Annotation] = []  # attached user pages (§4 strict-additive)
+
+
+class Caveat(BaseModel):
+    """A ``usage_mode: caveat`` page surfaced because a hit references its bound entity (§8).
+
+    Auto-surfaced even though the caveat was not matched by the query, so a relevant warning
+    rides along with the result (S7). ``triggered_by`` names the entities whose appearance in
+    the hits surfaced it.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    page: str  # the caveat page's id/slug
+    scope: KnowledgeScope
+    summary: str
+    sl_refs: list[str] = []  # the caveat's bound semantic entities (E5)
+    triggered_by: list[str] = []  # entity names in the hits that surfaced this caveat
 
 
 class Subgraph(BaseModel):
@@ -84,3 +104,5 @@ class SearchResult(BaseModel):
     # Graph-expanded pages (§6); set to a traversal's ``Subgraph.pages``. Empty unless the
     # caller requested expansion — additive to the §5.3 shape.
     traversed: list[KnowledgePage] = []
+    # Caveat pages auto-surfaced because a hit references their bound entity (§8); additive.
+    caveats: list[Caveat] = []

@@ -16,6 +16,10 @@ contracts/metrics/
   revenue.yaml                          ← canonical binding: revenue → orders.total_revenue
 contracts/guardrails/
   revenue-excludes-refunds.yaml         ← mandatory_filter: status != 'refunded'
+knowledge/global/
+  revenue-definition.md                 ← usage_mode: definition — what total_revenue means + live expr
+  revenue-excludes-refunds-caveat.md    ← usage_mode: caveat — why refunds are excluded (auto-surfaces)
+  revenue-reporting-policy.md           ← usage_mode: policy — month-end cutoff rules
 ```
 
 ## Prerequisites
@@ -296,3 +300,111 @@ into the WHERE clause and records it in `guardrails_fired`. The seed data has tw
 refunded orders (IDs 2 and 8, total 260.00) — they never appear in revenue results.
 
 Expected revenue after guardrail: **3790.50** (7 completed + 1 pending order).
+
+## Knowledge pages (E6)
+
+The `knowledge/global/` directory adds searchable context on top of the semantic layer —
+the "why" that makes an agent's answers trustworthy, not just technically correct.
+
+### Page format
+
+Each page is Markdown with YAML frontmatter. `scope` and `id` are derived from the path
+(`knowledge/global/revenue-definition.md` → global scope, id `revenue-definition`);
+everything else is in frontmatter:
+
+```yaml
+# knowledge/global/revenue-definition.md
+---
+summary: "What total_revenue means and how it is calculated."
+tags: [revenue, definitions, metrics]
+sl_refs:
+  - warehouse_pg.orders.total_revenue   # ties this page to the live semantic entity
+usage_mode: definition                   # reference | caveat | policy | definition
+meta:
+  provenance: human_curated
+  last_validated_at: "2026-06-17T00:00:00Z"
+  bound_fingerprints:
+    "warehouse_pg.orders.total_revenue": "sha256:…"  # drift detection anchor
+---
+
+The live SQL — rendered at read time, never a copy:
+> `{{ sl:warehouse_pg.orders.total_revenue.expr }}`
+```
+
+`{{ sl:<entity>.expr }}` directives are resolved against the live semantic layer at read
+time by `DefinitionRenderer`, so the rendered definition can never fall out of sync with
+the semantic source.
+
+### Three `usage_mode` values in this example
+
+| Page | `usage_mode` | Effect |
+| --- | --- | --- |
+| `revenue-definition` | `definition` | Canonical prose definition; surfaced by search |
+| `revenue-excludes-refunds-caveat` | `caveat` | **Auto-surfaced** when any result references `total_revenue`, even if not searched |
+| `revenue-reporting-policy` | `policy` | Business rule page; ranked like `reference` but tagged as policy |
+
+### Search and caveat surfacing (Python API)
+
+```python
+from pathlib import Path
+from canon.knowledge import (
+    KnowledgeSearch, EntityIndex, load_knowledge_page,
+)
+from canon.semantic.loader import list_semantic_sources
+
+root = Path(".")  # from examples/ecommerce/
+
+# Build the entity index from the live semantic sources
+sources = list_semantic_sources(root)
+entity_index = EntityIndex.from_sources(sources)
+
+# Load the knowledge pages
+pages = [load_knowledge_page(p) for p in (root / "knowledge" / "global").glob("*.md")]
+
+engine = KnowledgeSearch(pages)
+result = engine.search("revenue", requesting_user="alice")
+
+# The two non-caveat pages match the query
+print([h.page for h in result.hits])
+# ['revenue-definition', 'revenue-reporting-policy']
+
+# The caveat page rides along automatically because a hit references total_revenue
+print([(c.page, c.triggered_by) for c in result.caveats])
+# [('revenue-excludes-refunds-caveat', ['warehouse_pg.orders.total_revenue'])]
+```
+
+### Live rendering
+
+```python
+from canon.knowledge import DefinitionRenderer
+from canon.knowledge.loader import load_knowledge_page
+
+page = load_knowledge_page(root / "knowledge/global/revenue-definition.md")
+renderer = DefinitionRenderer(entity_index)
+
+print(renderer.render(page))
+# … The live SQL — rendered at read time, never a copy:
+# > `sum(amount)`           ← the actual expr from orders.yaml
+```
+
+If `orders.yaml` were updated to `expr: "sum(amount * fx_rate)"`, the next render would
+reflect `sum(amount * fx_rate)` automatically — no page edit needed.
+
+### Drift detection
+
+`meta.bound_fingerprints` records the measure's fingerprint when the page was authored.
+If the `expr` in `orders.yaml` changes, `DriftDetector` flags the page for prose review:
+
+```python
+from canon.knowledge import DriftDetector
+
+detector = DriftDetector()
+
+# Fingerprints match (orders.yaml is unchanged) → no review needed
+print(detector.flagged_for_review(page, entity_index))
+# []
+
+# After changing orders.yaml to a different expr, the fingerprint diverges:
+# → ['warehouse_pg.orders.total_revenue']
+# The flag is a review signal, not a silent edit — the prose "why" may now be wrong.
+```
