@@ -6,6 +6,7 @@ from canon.knowledge.loader import (
     load_knowledge_page,
     scope_from_path,
     slug_from_path,
+    user_from_path,
 )
 from canon.knowledge.models import (
     KnowledgePage,
@@ -14,6 +15,10 @@ from canon.knowledge.models import (
     KnowledgeValidationError,
     UsageMode,
 )
+from canon.knowledge.scope import (
+    CollisionResult,
+    ScopeResolver,
+)
 from canon.knowledge.validation import (
     EntityIndex,
     PageIndex,
@@ -21,6 +26,7 @@ from canon.knowledge.validation import (
 )
 
 __all__ = [
+    "CollisionResult",
     "EntityIndex",
     "KnowledgePage",
     "KnowledgePageMeta",
@@ -28,8 +34,10 @@ __all__ = [
     "KnowledgeValidationError",
     "PageIndex",
     "ReferenceValidator",
+    "ScopeResolver",
     "UsageMode",
     "load_knowledge_page",
     "scope_from_path",
     "slug_from_path",
+    "user_from_path",
 ]
