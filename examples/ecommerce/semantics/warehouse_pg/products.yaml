@@ -1,0 +1,18 @@
+name: products
+connection: warehouse_pg
+table: dim_products
+grain: [product_id]
+description: "One row per product in the catalog."
+
+columns:
+  - { name: product_id, type: int,     nullable: false }
+  - { name: name,       type: string,  nullable: false }
+  - { name: category,   type: string,  nullable: false }
+  - { name: unit_price, type: decimal, nullable: false }
+
+dimensions:
+  - { name: product_name, column: name }
+  - { name: category,     column: category }
+
+meta:
+  provenance: human_curated

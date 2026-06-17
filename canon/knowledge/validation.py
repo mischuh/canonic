@@ -20,6 +20,7 @@ from pydantic import BaseModel, ConfigDict
 
 from canon.exc import KnowledgeReferenceError
 from canon.knowledge.models import KnowledgeScope
+from canon.semantic.models import Measure, compute_measure_fingerprint
 
 if TYPE_CHECKING:
     from collections.abc import Iterable, Iterator
@@ -50,29 +51,47 @@ class EntityIndex(BaseModel):
     A name is ``{connection}.{source}`` for a source, or ``{connection}.{source}.{member}``
     for each column, measure, and dimension. E5/E15 own the authoritative index; this is the
     minimal membership view E6 validates against.
+
+    Beyond membership, ``measures`` carries the live :class:`~canon.semantic.models.Measure`
+    each measure name resolves to, so the same index serves live-definition rendering
+    (SPEC-E6 §7) and bound-fingerprint drift checks (:meth:`current_fingerprint`).
     """
 
     model_config = ConfigDict(frozen=True)
 
     names: frozenset[str]
+    # Fully-qualified measure name → live Measure, for rendering and drift (SPEC-E6 §7).
+    measures: dict[str, Measure] = {}
 
     def __contains__(self, fq_name: str) -> bool:
         return fq_name in self.names
+
+    def current_fingerprint(self, fq_name: str) -> str | None:
+        """Live fingerprint of the measure named ``fq_name``, or ``None`` if it is not one.
+
+        ``None`` covers both a non-measure name and a measure that has disappeared — a
+        disappeared reference is pruning's concern (SPEC-E6 §3.2), not a drift review flag.
+        """
+        measure = self.measures.get(fq_name)
+        return compute_measure_fingerprint(measure) if measure is not None else None
 
     @classmethod
     def from_sources(cls, sources: Iterable[SemanticSource]) -> EntityIndex:
         """Enumerate every fully-qualified entity name exposed by ``sources``."""
         names: set[str] = set()
+        measures: dict[str, Measure] = {}
         for source in sources:
             base = f"{source.connection}.{source.name}"
             names.add(base)
             for column in source.columns:
                 names.add(f"{base}.{column.name}")
             for measure in source.measures:
-                names.add(f"{base}.{measure.name}")
+                fq_name = f"{base}.{measure.name}"
+                names.add(fq_name)
+                measures[fq_name] = measure
             for dimension in source.dimensions:
                 names.add(f"{base}.{dimension.name}")
-        return cls(names=frozenset(names))
+        return cls(names=frozenset(names), measures=measures)
 
 
 class PageIndex(BaseModel):

@@ -1,21 +1,33 @@
 # Canon ecommerce demo
 
-A minimal but end-to-end Canon project: one Postgres connection, two semantic sources,
-one canonical metric, and one enforced guardrail. Enough to run `canon mcp start` and
-let an agent call the `query` tool and get real rows back.
+A small but end-to-end Canon project: one Postgres connection, a four-source star schema
+(two facts, three dimensions), three canonical metrics, and one enforced guardrail. Enough
+to run `canon mcp start` and let an agent call the `query` tool and get real rows back.
 
 ## What's in here
 
 ```
 canon.yaml                              ← project config + Postgres connection
-setup.sql                               ← CREATE TABLE + seed data (10 orders, 5 customers)
+setup.sql                               ← CREATE TABLE + seed data (10 orders, 17 line items,
+                                          5 customers, 5 products, 3 channels)
 semantics/warehouse_pg/
-  orders.yaml                           ← grain, measures (revenue, order_count), dimensions, join
-  customers.yaml                        ← country dimension (join target for orders)
+  orders.yaml                           ← fact: revenue/order_count measures, joins to customers + channels
+  order_items.yaml                      ← fact: line_revenue/units_sold, joins to orders + products
+  customers.yaml                        ← dim: country (join target for orders)
+  products.yaml                         ← dim: product_name, category (join target for order_items)
+  channels.yaml                         ← dim: channel name (join target for orders)
 contracts/metrics/
   revenue.yaml                          ← canonical binding: revenue → orders.total_revenue
+  order-count.yaml                      ← canonical binding: order_count → orders.order_count
+  units-sold.yaml                       ← canonical binding: units_sold → order_items.units_sold
 contracts/guardrails/
   revenue-excludes-refunds.yaml         ← mandatory_filter: status != 'refunded'
+knowledge/global/
+  revenue-definition.md                 ← usage_mode: definition — what total_revenue means + live expr
+  revenue-excludes-refunds-caveat.md    ← usage_mode: caveat — why refunds are excluded (auto-surfaces)
+  revenue-reporting-policy.md           ← usage_mode: policy — month-end cutoff rules
+  units-sold-definition.md              ← usage_mode: definition — what units_sold means + live expr
+  order-items-fanout-caveat.md          ← usage_mode: caveat — line-item fanout trap (auto-surfaces)
 ```
 
 ## Prerequisites
@@ -32,8 +44,10 @@ export CANON_PG_PASSWORD=postgres   # password for the postgres user
 psql "postgres://postgres:${CANON_PG_PASSWORD}@localhost:5432/postgres" < setup.sql
 ```
 
-The `analytics` schema is declared once in `canon.yaml` (`schema: analytics`) and applied
-as `search_path` on every session — no need to embed it in the connection string.
+The script is **idempotent** — re-running it drops and recreates all tables in the correct
+order, so schema changes (e.g. a new column) are always applied cleanly. The `analytics`
+schema is declared once in `canon.yaml` (`schema: analytics`) and applied as `search_path`
+on every session — no need to embed it in the connection string.
 
 **2. Verify the project is recognised:**
 
@@ -75,6 +89,13 @@ canon mcp status   # shows: running | PID | version | transport
 canon mcp stop     # SIGTERM + removes .canon/mcp.json
 ```
 
+If the daemon starts but immediately dies (e.g. port already in use, import error), check
+`.canon/mcp.log` — stdout and stderr from the daemon process are written there:
+
+```sh
+tail -f .canon/mcp.log
+```
+
 Connect your MCP client to the running daemon — no `command`/`args`, just a URL:
 
 **Claude Code** (`~/.claude.json` or project `.claude.json`):
@@ -102,7 +123,11 @@ Once the MCP server is running, an agent can call these tools:
 **List all canonical metrics:**
 ```json
 list_metrics()
-→ [{"metric": "revenue", "source": "orders", "measure": "total_revenue", "aliases": ["net revenue", "rev"]}]
+→ [
+    {"metric": "revenue",     "source": "orders",      "measure": "total_revenue", "aliases": ["net revenue", "rev"]},
+    {"metric": "order_count", "source": "orders",      "measure": "order_count",   "aliases": ["orders", "number of orders"]},
+    {"metric": "units_sold",  "source": "order_items", "measure": "units_sold",    "aliases": ["units", "quantity sold"]}
+  ]
 ```
 
 **Revenue by day (guardrail fires automatically):**
@@ -125,6 +150,19 @@ query({"metrics": ["revenue"], "dimensions": ["order_date"]})
 **Revenue by country (uses the many_to_one join to customers):**
 ```json
 query({"metrics": ["revenue", "order_count"], "dimensions": ["country"]})
+```
+
+**Revenue by sales channel (many_to_one join orders → channels):**
+```json
+query({"metrics": ["revenue"], "dimensions": ["channel"]})
+```
+
+**Units sold by product category (order_items → products):**
+```json
+query({"metrics": ["units_sold"], "dimensions": ["category"]})
+→ {"result": {"columns": [{"name": "category", …}, {"name": "units_sold", …}],
+              "rows": [["Accessories", …], ["Displays", …], ["Furniture", …]]}, …}
+// units_sold across non-refunded orders totals 33
 ```
 
 **Compile only — no execution:**
@@ -296,3 +334,120 @@ into the WHERE clause and records it in `guardrails_fired`. The seed data has tw
 refunded orders (IDs 2 and 8, total 260.00) — they never appear in revenue results.
 
 Expected revenue after guardrail: **3790.50** (7 completed + 1 pending order).
+
+## Knowledge pages (E6)
+
+The `knowledge/global/` directory adds searchable context on top of the semantic layer —
+the "why" that makes an agent's answers trustworthy, not just technically correct.
+
+### Page format
+
+Each page is Markdown with YAML frontmatter. `scope` and `id` are derived from the path
+(`knowledge/global/revenue-definition.md` → global scope, id `revenue-definition`);
+everything else is in frontmatter:
+
+```yaml
+# knowledge/global/revenue-definition.md
+---
+summary: "What total_revenue means and how it is calculated."
+tags: [revenue, definitions, metrics]
+sl_refs:
+  - warehouse_pg.orders.total_revenue   # ties this page to the live semantic entity
+usage_mode: definition                   # reference | caveat | policy | definition
+meta:
+  provenance: human_curated
+  last_validated_at: "2026-06-17T00:00:00Z"
+  bound_fingerprints:
+    "warehouse_pg.orders.total_revenue": "sha256:…"  # drift detection anchor
+---
+
+The live SQL — rendered at read time, never a copy:
+> `{{ sl:warehouse_pg.orders.total_revenue.expr }}`
+```
+
+`{{ sl:<entity>.expr }}` directives are resolved against the live semantic layer at read
+time by `DefinitionRenderer`, so the rendered definition can never fall out of sync with
+the semantic source.
+
+### `usage_mode` values in this example
+
+| Page | `usage_mode` | Effect |
+| --- | --- | --- |
+| `revenue-definition` | `definition` | Canonical prose definition; surfaced by search |
+| `units-sold-definition` | `definition` | Canonical prose definition for `units_sold`; surfaced by search |
+| `revenue-excludes-refunds-caveat` | `caveat` | **Auto-surfaced** when any result references `total_revenue` |
+| `order-items-fanout-caveat` | `caveat` | **Auto-surfaced** when any result references `units_sold` or `line_revenue` |
+| `revenue-reporting-policy` | `policy` | Business rule page; ranked like `reference` but tagged as policy |
+
+### Search and caveat surfacing (Python API)
+
+```python
+from pathlib import Path
+from canon.knowledge import (
+    KnowledgeSearch, EntityIndex, load_knowledge_page,
+)
+from canon.semantic.loader import list_semantic_sources
+
+root = Path(".")  # from examples/ecommerce/
+
+# Build the entity index from the live semantic sources
+sources = list_semantic_sources(root)
+entity_index = EntityIndex.from_sources(sources)
+
+# Load the knowledge pages
+pages = [load_knowledge_page(p) for p in (root / "knowledge" / "global").glob("*.md")]
+
+engine = KnowledgeSearch(pages)
+
+# Search for a revenue topic — only the policy page matches; the caveat rides along
+# automatically because the hit references warehouse_pg.orders.total_revenue
+result = engine.search("month-end cutoff", requesting_user="alice")
+print([h.page for h in result.hits])
+# ['revenue-reporting-policy']
+print([(c.page, c.triggered_by) for c in result.caveats])
+# [('revenue-excludes-refunds-caveat', ['warehouse_pg.orders.total_revenue'])]
+
+# Search for a units/product topic — definition page matches; the fanout caveat rides along
+# because the hit references warehouse_pg.order_items.units_sold
+result2 = engine.search("product category", requesting_user="alice")
+print([h.page for h in result2.hits])
+# ['units-sold-definition']
+print([(c.page, c.triggered_by) for c in result2.caveats])
+# [('order-items-fanout-caveat', ['warehouse_pg.order_items', 'warehouse_pg.order_items.units_sold'])]
+```
+
+### Live rendering
+
+```python
+from canon.knowledge import DefinitionRenderer
+from canon.knowledge.loader import load_knowledge_page
+
+page = load_knowledge_page(root / "knowledge/global/revenue-definition.md")
+renderer = DefinitionRenderer(entity_index)
+
+print(renderer.render(page))
+# … The live SQL — rendered at read time, never a copy:
+# > `sum(amount)`           ← the actual expr from orders.yaml
+```
+
+If `orders.yaml` were updated to `expr: "sum(amount * fx_rate)"`, the next render would
+reflect `sum(amount * fx_rate)` automatically — no page edit needed.
+
+### Drift detection
+
+`meta.bound_fingerprints` records the measure's fingerprint when the page was authored.
+If the `expr` in `orders.yaml` changes, `DriftDetector` flags the page for prose review:
+
+```python
+from canon.knowledge import DriftDetector
+
+detector = DriftDetector()
+
+# Fingerprints match (orders.yaml is unchanged) → no review needed
+print(detector.flagged_for_review(page, entity_index))
+# []
+
+# After changing orders.yaml to a different expr, the fingerprint diverges:
+# → ['warehouse_pg.orders.total_revenue']
+# The flag is a review signal, not a silent edit — the prose "why" may now be wrong.
+```
