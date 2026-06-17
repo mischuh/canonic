@@ -22,7 +22,7 @@ from canon.exc import KnowledgeReferenceError
 from canon.knowledge.models import KnowledgeScope
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable
+    from collections.abc import Iterable, Iterator
 
     from canon.knowledge.models import KnowledgePage
     from canon.semantic.models import SemanticSource
@@ -31,10 +31,17 @@ __all__ = [
     "EntityIndex",
     "PageIndex",
     "ReferenceValidator",
+    "iter_wikilink_slugs",
 ]
 
 # Captures the slug from ``[[slug]]`` / ``[[slug|alias]]``; ignores ``{{ sl:… }}`` tags.
 _WIKILINK_RE = re.compile(r"\[\[\s*([^\]|]+?)\s*(?:\|[^\]]*)?\]\]")
+
+
+def iter_wikilink_slugs(body: str) -> Iterator[str]:
+    """Yield each ``[[slug]]`` target in ``body`` (slug from ``[[slug]]`` / ``[[slug|alias]]``)."""
+    for match in _WIKILINK_RE.finditer(body):
+        yield match.group(1).strip()
 
 
 class EntityIndex(BaseModel):
@@ -131,8 +138,7 @@ class ReferenceValidator:
 
     def validate_wikilinks(self, page: KnowledgePage) -> None:
         """Each ``[[link]]`` in the body must point at a page in a visible scope."""
-        for match in _WIKILINK_RE.finditer(page.body):
-            slug = match.group(1).strip()
+        for slug in iter_wikilink_slugs(page.body):
             if not self._pages.is_visible(slug, page.scope):
                 raise KnowledgeReferenceError(
                     ("body",),

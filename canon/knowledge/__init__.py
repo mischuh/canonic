@@ -22,12 +22,14 @@ from canon.knowledge.results import (
     Hit,
     MatchedOn,
     SearchResult,
+    Subgraph,
 )
 from canon.knowledge.retrieval import KnowledgeSearch
 from canon.knowledge.scope import (
     CollisionResult,
     ScopeResolver,
 )
+from canon.knowledge.traversal import GraphTraversal
 from canon.knowledge.validation import (
     EntityIndex,
     PageIndex,
@@ -39,6 +41,7 @@ __all__ = [
     "CollisionResult",
     "Embedder",
     "EntityIndex",
+    "GraphTraversal",
     "Hit",
     "KnowledgeIndex",
     "KnowledgePage",
@@ -51,6 +54,7 @@ __all__ = [
     "ReferenceValidator",
     "ScopeResolver",
     "SearchResult",
+    "Subgraph",
     "UsageMode",
     "VectorStore",
     "load_knowledge_page",
