@@ -61,18 +61,17 @@ def slug_from_path(path: Path) -> str:
 
 
 def user_from_path(path: Path) -> str | None:
-    """Owner id of a USER-scoped page (``knowledge/user/<id>/…``), or ``None`` for GLOBAL.
+    """Owner id of a USER-scoped page (``knowledge/user/<id>/…``), ``None`` for GLOBAL.
 
-    The ``<id>`` segment carries the page owner that scope visibility filters on (SPEC-E6 §4);
-    GLOBAL pages have no owner. Raises KnowledgePageError if a ``user/`` path omits the owner
-    directory (e.g. ``knowledge/user/note.md``), since such a page belongs to no one.
+    The ``<id>`` segment is what scope visibility filters on (SPEC-E6 §4). Raises
+    KnowledgePageError if a ``user/`` path omits the owner directory (e.g.
+    ``knowledge/user/note.md``), since such a page belongs to no one.
     """
     if scope_from_path(path) is KnowledgeScope.GLOBAL:
         return None
     parts = path.parts
     i = parts.index(_KNOWLEDGE_DIR)
-    # parts[i+1] is the scope segment ("user"); parts[i+2] is the owner id, and it must be a
-    # directory — the filename itself (the last part) cannot stand in for the owner.
+    # parts[i+1] is "user"; parts[i+2] must be the owner directory, not the filename.
     owner_idx = i + 2
     if owner_idx >= len(parts) - 1:
         raise KnowledgePageError(

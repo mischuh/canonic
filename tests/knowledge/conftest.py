@@ -96,8 +96,7 @@ def make_page() -> Callable[..., KnowledgePage]:
         body: str = "",
         meta: KnowledgePageMeta | None = None,
     ) -> KnowledgePage:
-        # USER pages live under knowledge/user/<id>/…; the owner segment is what scope
-        # visibility filters on (SPEC-E6 §4), so default it when a USER page omits ``user``.
+        # USER pages need a knowledge/user/<id>/… path; default owner is "alice".
         if scope is KnowledgeScope.USER:
             path = Path("knowledge") / scope.value / (user or "alice") / f"{slug}.md"
         else:

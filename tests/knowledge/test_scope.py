@@ -86,7 +86,7 @@ def test_resolve_collision_global_authoritative_user_annotated(
 
     assert isinstance(result, CollisionResult)
     assert result.authoritative is g  # S4 AC1: global is authoritative, never replaced
-    assert result.annotation is alice  # user page attached as personal annotation
+    assert result.annotation is alice
 
 
 def test_resolve_collision_rejects_non_global_authoritative(
