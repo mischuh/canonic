@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from canon.knowledge.embeddings import Embedder, VectorStore
+from canon.knowledge.index import KnowledgeIndex
 from canon.knowledge.loader import (
     load_knowledge_page,
     scope_from_path,
@@ -15,6 +17,13 @@ from canon.knowledge.models import (
     KnowledgeValidationError,
     UsageMode,
 )
+from canon.knowledge.results import (
+    Annotation,
+    Hit,
+    MatchedOn,
+    SearchResult,
+)
+from canon.knowledge.retrieval import KnowledgeSearch
 from canon.knowledge.scope import (
     CollisionResult,
     ScopeResolver,
@@ -26,16 +35,24 @@ from canon.knowledge.validation import (
 )
 
 __all__ = [
+    "Annotation",
     "CollisionResult",
+    "Embedder",
     "EntityIndex",
+    "Hit",
+    "KnowledgeIndex",
     "KnowledgePage",
     "KnowledgePageMeta",
     "KnowledgeScope",
+    "KnowledgeSearch",
     "KnowledgeValidationError",
+    "MatchedOn",
     "PageIndex",
     "ReferenceValidator",
     "ScopeResolver",
+    "SearchResult",
     "UsageMode",
+    "VectorStore",
     "load_knowledge_page",
     "scope_from_path",
     "slug_from_path",
