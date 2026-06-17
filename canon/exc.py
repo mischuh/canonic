@@ -166,3 +166,7 @@ class SemanticSourceError(CanonError):
 
 class ContractError(CanonError):
     """Raised when a contracts/*.yaml file is invalid; message carries file+line."""
+
+
+class KnowledgePageError(CanonError):
+    """Raised when a knowledge/**/*.md page is invalid; message carries file+line."""
