@@ -45,8 +45,8 @@ class CollisionResult(BaseModel):
 
     model_config = ConfigDict(frozen=True)
 
-    authoritative: KnowledgePage  # always the global page
-    annotation: KnowledgePage | None = None  # the user page, attached as personal context
+    authoritative: KnowledgePage
+    annotation: KnowledgePage | None = None
 
 
 class ScopeResolver:
@@ -57,16 +57,15 @@ class ScopeResolver:
     ) -> list[KnowledgePage]:
         """Pages ``requesting_user`` may see: all GLOBAL + only their own USER pages.
 
-        Order-preserving. Another user's USER pages are dropped (S4 AC2). ``pages`` is the
+        Order-preserving. Another user's USER pages are dropped (S4 AC2). Operates over the
         page corpus rather than a :class:`~canon.knowledge.validation.PageIndex` because
-        filtering needs each page's owner (parsed from its path) and returns the pages
-        themselves.
+        filtering requires each page's owner (parsed from its path via
+        :func:`~canon.knowledge.loader.user_from_path`).
         """
         return [
             page
             for page in pages
-            if page.scope is KnowledgeScope.GLOBAL
-            or user_from_path(page.path) == requesting_user
+            if page.scope is KnowledgeScope.GLOBAL or user_from_path(page.path) == requesting_user
         ]
 
     def resolve_collision(
@@ -75,8 +74,7 @@ class ScopeResolver:
         """Pair a colliding global/user page: global authoritative, user as annotation (S4 AC1).
 
         Raises KnowledgePageError if ``global_page`` is not GLOBAL or ``user_page`` is not
-        USER — a user page can never be authoritative over a global one. The pages are never
-        mutated; finding which pages collide across the corpus is the caller's job.
+        USER — a user page can never be authoritative over a global one.
         """
         if global_page.scope is not KnowledgeScope.GLOBAL:
             raise KnowledgePageError(
