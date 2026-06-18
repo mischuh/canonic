@@ -9,6 +9,7 @@
   "generation_failed": 15,
   "guardrail_block": 8,
   "read_only_violation": 11,
+  "retries_exhausted": 19,
   "schema_mismatch": 12,
   "structured_output_invalid": 16,
   "structured_output_unsupported": 17,
