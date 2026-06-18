@@ -21,7 +21,8 @@ if TYPE_CHECKING:
 def _response(content: str) -> SimpleNamespace:
     """A minimal stand-in for a litellm ModelResponse exposing the content path used."""
     message = SimpleNamespace(content=content)
-    return SimpleNamespace(choices=[SimpleNamespace(message=message)])
+    usage = SimpleNamespace(prompt_tokens=10, completion_tokens=5, total_tokens=15)
+    return SimpleNamespace(choices=[SimpleNamespace(message=message)], usage=usage)
 
 
 @pytest.fixture
