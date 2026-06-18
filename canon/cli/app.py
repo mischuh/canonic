@@ -14,6 +14,7 @@ from canon.cli._errors import get_cli_context
 from canon.cli.commands import (
     completion,
     connection,
+    evaluate,
     ingest,
     knowledge,
     mcp,
@@ -72,6 +73,7 @@ app.add_typer(connection.app, name="connection")
 app.add_typer(sl.app, name="sl")
 app.add_typer(mcp.app, name="mcp")
 app.add_typer(knowledge.app, name="knowledge")
+app.add_typer(evaluate.app, name="eval")
 
 # Top-level single commands.
 app.command("setup")(setup.setup)

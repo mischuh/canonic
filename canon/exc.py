@@ -227,6 +227,19 @@ class CredentialError(CanonError):
     """Raised when a credentials_ref cannot be resolved to a secret."""
 
 
+class EvalDatasetError(CanonError):
+    """Raised when a baseline dataset, candidates file, or task arg is invalid (SPEC-E10 §7, GH-66).
+
+    Operator-input error for the ``canon eval baseline`` harness: a labeled ``draft`` case that is
+    not valid JSON / fails schema validation, a candidates file that does not parse into
+    ``LLMConfig`` entries, or an unsupported ``--task``. Carries the file and line/entry in its
+    message. Reuses ``VALIDATION_FAILED`` since it is the same class of failure as a malformed
+    semantic/contract file — bad input to a command, surfaced structurally.
+    """
+
+    code = ErrorCode.VALIDATION_FAILED
+
+
 class SemanticSourceError(CanonError):
     """Raised when a semantics/*.yaml file is invalid; message carries file+line."""
 
