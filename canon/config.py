@@ -65,6 +65,19 @@ class LLMConfig(BaseModel):
         return v
 
 
+class EmbeddingConfig(BaseModel):
+    """Local embedding runtime block from canon.yaml (SPEC-E10 §5).
+
+    Powers E6's optional vector-search arm. The backend is local
+    ``sentence-transformers`` (an optional ``canon[embeddings]`` add-on); when it is not
+    installed E6 degrades to lexical-only. ``model`` names the sentence-transformers model
+    to load; it is part of the identity fingerprint E6 uses to detect a model change and
+    trigger a reindex, so changing it forces a clean rebuild rather than mixing vectors.
+    """
+
+    model: str = "all-MiniLM-L6-v2"
+
+
 class TelemetryConfig(BaseModel):
     enabled: bool = False
 
@@ -139,6 +152,7 @@ class CanonConfig(BaseSettings):
     project: ProjectConfig
     connections: list[Connection] = []
     llm: LLMConfig
+    embeddings: EmbeddingConfig = EmbeddingConfig()
     telemetry: TelemetryConfig = TelemetryConfig()
     reconcile: ReconcileConfig = ReconcileConfig()
     runtime: RuntimeConfig = RuntimeConfig()
@@ -154,8 +168,9 @@ class CanonConfig(BaseSettings):
         if not self.runtime.air_gapped:
             return self
         policy = EgressPolicy(allow_cidrs=self.runtime.allow_cidrs)
-        # NOTE: the embeddings endpoint is validated here too once that config block
-        # lands (#64/#67); today embeddings is local-provider-only, so nothing to check.
+        # NOTE: ``embeddings`` is local-provider-only (sentence-transformers, no egress), so
+        # there is no endpoint to validate under air-gapped. A future hosted embeddings
+        # provider (#67) would validate its ``base_url`` here, mirroring ``llm.base_url``.
         policy.check_url(self.llm.base_url, what="llm.base_url")
         if self.telemetry.enabled:
             raise AirGappedViolation(
