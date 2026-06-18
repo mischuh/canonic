@@ -35,6 +35,9 @@ class ErrorCode(StrEnum):
     GENERATION_FAILED = "generation_failed"
     STRUCTURED_OUTPUT_INVALID = "structured_output_invalid"
     STRUCTURED_OUTPUT_UNSUPPORTED = "structured_output_unsupported"
+    # Transient provider/transport failure that persisted past the bounded retry budget.
+    # Distinct from GENERATION_FAILED (deterministic one-shot provider rejection).
+    RETRIES_EXHAUSTED = "retries_exhausted"
     # Air-gapped egress guard (SPEC-E10 §4); raised at config load and before any model
     # call when air_gapped mode would allow context to leave the machine/network.
     AIR_GAPPED_VIOLATION = "air_gapped_violation"
@@ -58,6 +61,7 @@ EXIT_CODES: dict[ErrorCode, int] = {
     ErrorCode.STRUCTURED_OUTPUT_INVALID: 16,
     ErrorCode.STRUCTURED_OUTPUT_UNSUPPORTED: 17,
     ErrorCode.AIR_GAPPED_VIOLATION: 18,
+    ErrorCode.RETRIES_EXHAUSTED: 19,
 }
 
 
@@ -196,6 +200,18 @@ class StructuredOutputUnsupported(CanonError):
     """
 
     code = ErrorCode.STRUCTURED_OUTPUT_UNSUPPORTED
+
+
+class RetriesExhausted(CanonError):
+    """A transient provider/transport failure persisted past the bounded retry budget (SPEC-E10 §3).
+
+    Distinct from :class:`GenerationError`: here the endpoint was reachable but produced
+    transient failures on every attempt up to the configured limit. The error carries the
+    attempt count in its message. Callers that want to distinguish a timeout-after-retries
+    scenario from a deterministic provider rejection should catch this separately.
+    """
+
+    code = ErrorCode.RETRIES_EXHAUSTED
 
 
 class AirGappedViolation(CanonError):

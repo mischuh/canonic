@@ -10,7 +10,8 @@ code" (PRD FR-8) holds structurally.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from time import perf_counter
+from typing import TYPE_CHECKING, Any
 
 import litellm
 from litellm.exceptions import APIError, BadRequestError, UnsupportedParamsError
@@ -19,10 +20,11 @@ from pydantic import ValidationError
 from canon.credentials import resolve_credential
 from canon.exc import (
     GenerationError,
+    RetriesExhausted,
     StructuredOutputError,
     StructuredOutputUnsupported,
 )
-from canon.runtime.models import Completion
+from canon.runtime.models import Completion, Usage
 from canon.runtime.resolver import Task, resolve_model
 
 if TYPE_CHECKING:
@@ -32,6 +34,31 @@ if TYPE_CHECKING:
     from canon.config import LLMConfig
 
 __all__ = ["GenerationRuntime"]
+
+
+def _read_usage(response: Any, *, calls: int, latency_ms: float) -> Usage:
+    """Extract token counts from a litellm response, best-effort (SPEC-E10 §8).
+
+    Any missing or malformed field yields ``None`` rather than failing the call — endpoints
+    are not required to report usage. ``calls`` and ``latency_ms`` are always present since
+    they are measured locally.
+    """
+
+    def _int_or_none(val: Any) -> int | None:
+        try:
+            return int(val)
+        except (TypeError, ValueError):
+            return None
+
+    raw = getattr(response, "usage", None)
+    return Usage(
+        prompt_tokens=_int_or_none(getattr(raw, "prompt_tokens", None)),
+        completion_tokens=_int_or_none(getattr(raw, "completion_tokens", None)),
+        total_tokens=_int_or_none(getattr(raw, "total_tokens", None)),
+        calls=calls,
+        latency_ms=latency_ms,
+    )
+
 
 #: The one provider E10 #61 tests as first-class; the OpenAI-compatible `/v1` surface.
 _OPENAI_COMPATIBLE = "openai_compatible"
@@ -120,8 +147,11 @@ class GenerationRuntime:
         Raises:
             StructuredOutputUnsupported: The endpoint cannot honor schema-constrained output.
             StructuredOutputError: The model returned output that fails schema validation.
-            GenerationError: A provider/transport failure persisting past bounded retries
-                (no silent fallback to a different model).
+            RetriesExhausted: A transient provider/transport failure persisted past the
+                bounded retry budget (timeout-after-retries; distinct from a deterministic
+                one-shot rejection).
+            GenerationError: A deterministic provider failure or unsupported-provider error
+                (not retried).
         """
         model_str = f"openai/{resolve_model(self._config, task)}"
         messages: list[dict[str, str]] = []
@@ -141,8 +171,11 @@ class GenerationRuntime:
         api_key = self._resolve_api_key()
 
         last_exc: APIError | None = None
+        calls = 0
+        start = perf_counter()
         for _ in range(self._max_retries + 1):
             try:
+                calls += 1
                 response = await litellm.acompletion(
                     model=model_str,
                     messages=messages,
@@ -164,14 +197,16 @@ class GenerationRuntime:
                 # Transient transport/provider failure — retry on the same model.
                 last_exc = exc
         else:
-            attempts = self._max_retries + 1
-            raise GenerationError(
-                f"generation call to {model_str!r} failed after {attempts} attempts: {last_exc}"
+            raise RetriesExhausted(
+                f"generation call to {model_str!r} failed after {calls} attempts: {last_exc}"
             ) from last_exc
+
+        latency_ms = (perf_counter() - start) * 1000
+        usage = _read_usage(response, calls=calls, latency_ms=latency_ms)
 
         content = response.choices[0].message.content or ""
         if response_model is None:
-            return Completion(text=content, model=model_str)
+            return Completion(text=content, model=model_str, usage=usage)
 
         try:
             parsed = response_model.model_validate_json(content)
@@ -181,4 +216,4 @@ class GenerationRuntime:
                 f"model {model_str!r} returned output that does not satisfy "
                 f"{response_model.__name__}: {detail}"
             ) from exc
-        return Completion(text=content, parsed=parsed.model_dump(), model=model_str)
+        return Completion(text=content, parsed=parsed.model_dump(), model=model_str, usage=usage)
