@@ -1,0 +1,29 @@
+name: playlist_tracks
+connection: chinook_pg
+table: 'chinook."PlaylistTrack"'
+grain: [PlaylistId, TrackId]
+description: "Bridge table between playlists and tracks. One row per track-in-playlist membership. A single track can appear in many playlists — querying this table without filtering to a single PlaylistId will produce fanout."
+
+columns:
+  - { name: PlaylistId, type: int, nullable: false }
+  - { name: TrackId,    type: int, nullable: false }
+
+measures:
+  - name: track_membership_count
+    expr: 'count(*)'
+    additivity: additive
+
+dimensions:
+  - { name: playlist_id, column: PlaylistId }
+  - { name: track_id,    column: TrackId }
+
+joins:
+  - to: playlists
+    on: 'playlist_tracks."PlaylistId" = playlists."PlaylistId"'
+    relationship: many_to_one
+  - to: tracks
+    on: 'playlist_tracks."TrackId" = tracks."TrackId"'
+    relationship: many_to_one
+
+meta:
+  provenance: human_curated

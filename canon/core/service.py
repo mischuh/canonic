@@ -22,6 +22,7 @@ from canon.semantic.loader import list_semantic_sources
 if TYPE_CHECKING:
     from canon.compiler.result import CompileResult
     from canon.connectors.base import ResultSet
+    from canon.knowledge.results import SearchResult
     from canon.semantic.models import SemanticSource
 
 __all__ = ["CanonService"]
@@ -38,10 +39,13 @@ class CanonService:
         config: CanonConfig,
         resolver: ContractResolver,
         sources: list[SemanticSource],
+        *,
+        project_root: Path | None = None,
     ) -> None:
         self._config = config
         self._resolver = resolver
         self._sources = sources
+        self._project_root = project_root
         # name → source for fast lookup (sources have unique names within project)
         self._source_by_name: dict[str, SemanticSource] = {s.name: s for s in sources}
 
@@ -51,7 +55,7 @@ class CanonService:
         config = load_config(root / "canon.yaml")
         resolver = ContractResolver.from_project(root)
         sources = list_semantic_sources(root)
-        return cls(config=config, resolver=resolver, sources=sources)
+        return cls(config=config, resolver=resolver, sources=sources, project_root=root)
 
     # ------------------------------------------------------------------
     # Discovery
@@ -190,6 +194,36 @@ class CanonService:
             return await connector.run_read_only_sql(sql)
         finally:
             await connector.aclose()
+
+    def search_knowledge(
+        self,
+        query: str,
+        *,
+        user: str | None = None,
+        limit: int = 10,
+    ) -> SearchResult:
+        """Search knowledge pages for business context (E6, P1).
+
+        Returns ranked hits (definitions, policies) and any caveats auto-surfaced
+        because a hit references their bound semantic entity. Returns an empty
+        result when no project root or knowledge directory is available.
+        """
+        from canon.knowledge import KnowledgeSearch, load_knowledge_page
+        from canon.knowledge.results import SearchResult as SR
+
+        if self._project_root is None:
+            return SR(hits=[], caveats=[])
+        knowledge_root = self._project_root / "knowledge"
+        if not knowledge_root.exists():
+            return SR(hits=[], caveats=[])
+
+        pages = [load_knowledge_page(p) for p in sorted(knowledge_root.rglob("*.md"))]
+        if not pages:
+            return SR(hits=[], caveats=[])
+
+        return KnowledgeSearch(pages).search(
+            query, requesting_user=user or "anonymous", limit=limit
+        )
 
     # ------------------------------------------------------------------
     # Internal helpers

@@ -1,0 +1,35 @@
+version: 1
+project:
+  name: Chinook
+  default_connection: chinook_pg
+connections:
+- id: chinook_pg
+  type: postgres
+  params:
+    host: localhost
+    port: 5432
+    user: postgres
+    dbname: postgres
+  credentials_ref: env:CANON_PG_PASSWORD
+llm:
+  provider: openai_compatible
+  base_url: http://127.0.0.1:11434/v1
+  model: gemma-4-e2b-it-4bit
+  api_key_ref: env:CANON_OMLX_API_KEY
+embeddings:
+  model: all-MiniLM-L6-v2
+telemetry:
+  enabled: false
+reconcile:
+  auto_apply:
+    enabled: false
+    min_confidence: 0.95
+    max_provenance: inferred
+    never:
+    - grain
+    - joins
+    - measures
+  strict_contradictions: false
+runtime:
+  air_gapped: false
+  allow_cidrs: []

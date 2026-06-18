@@ -1,0 +1,32 @@
+name: customers
+connection: chinook_pg
+table: 'chinook."Customer"'
+grain: [CustomerId]
+description: "One row per registered customer. Linked to a support rep via SupportRepId."
+
+columns:
+  - { name: CustomerId,    type: int,    nullable: false }
+  - { name: FirstName,     type: string, nullable: false }
+  - { name: LastName,      type: string, nullable: false }
+  - { name: Company,       type: string, nullable: true  }
+  - { name: City,          type: string, nullable: true  }
+  - { name: State,         type: string, nullable: true  }
+  - { name: Country,       type: string, nullable: true  }
+  - { name: PostalCode,    type: string, nullable: true  }
+  - { name: Email,         type: string, nullable: false }
+  - { name: SupportRepId,  type: int,    nullable: true  }
+
+dimensions:
+  - { name: country,       column: Country }
+  - { name: city,          column: City }
+  - { name: state,         column: State }
+  - { name: company,       column: Company }
+  - { name: support_rep_id, column: SupportRepId }
+
+joins:
+  - to: employees
+    on: 'customers."SupportRepId" = employees."EmployeeId"'
+    relationship: many_to_one
+
+meta:
+  provenance: human_curated

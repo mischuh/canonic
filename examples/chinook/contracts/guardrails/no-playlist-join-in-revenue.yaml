@@ -1,0 +1,7 @@
+id: no-playlist-join-in-revenue
+applies_to:
+  source: invoice_lines
+  measure: line_revenue
+kind: restrict_source
+severity: error
+rationale: "PlaylistTrack is a many-to-many bridge (one track appears in multiple playlists). Joining it to invoice_lines fans out every line item once per playlist membership, multiplying revenue and tracks_sold by an unpredictable factor. Always analyse playlist content and purchase data in separate queries."

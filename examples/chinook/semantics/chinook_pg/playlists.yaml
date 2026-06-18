@@ -1,0 +1,25 @@
+name: playlists
+connection: chinook_pg
+table: 'chinook."Playlist"'
+grain: [PlaylistId]
+description: "One row per playlist. A playlist is a named, ordered collection of tracks curated by the store or a user."
+
+columns:
+  - { name: PlaylistId, type: int,    nullable: false }
+  - { name: Name,       type: string, nullable: true  }
+
+measures:
+  - name: playlist_count
+    expr: 'count("PlaylistId")'
+    additivity: additive
+
+dimensions:
+  - { name: playlist_name, column: Name }
+
+joins:
+  - to: playlist_tracks
+    on: 'playlists."PlaylistId" = playlist_tracks."PlaylistId"'
+    relationship: one_to_many
+
+meta:
+  provenance: human_curated
