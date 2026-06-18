@@ -174,12 +174,13 @@ class KeywordEmbedder:
     both-arms hit, deterministically.
     """
 
-    def __init__(self, groups: list[list[str]]) -> None:
+    def __init__(self, groups: list[list[str]], *, identity: str = "keyword-stub@v1") -> None:
         self._word_to_dim: dict[str, int] = {}
         for dim, group in enumerate(groups):
             for word in group:
                 self._word_to_dim[word] = dim
         self._dim = len(groups)
+        self._identity = identity
 
     def embed(self, texts: Sequence[str]) -> np.ndarray:
         out = np.zeros((len(texts), self._dim), dtype=np.float32)
@@ -189,6 +190,9 @@ class KeywordEmbedder:
                 if dim is not None:
                     out[i, dim] += 1.0
         return out
+
+    def model_identity(self) -> str:
+        return self._identity
 
 
 @pytest.fixture
