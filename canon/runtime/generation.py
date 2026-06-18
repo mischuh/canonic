@@ -28,6 +28,7 @@ from canon.runtime.resolver import Task, resolve_model
 if TYPE_CHECKING:
     from pydantic import BaseModel
 
+    from canon.airgap import EgressPolicy
     from canon.config import LLMConfig
 
 __all__ = ["GenerationRuntime"]
@@ -48,7 +49,13 @@ class GenerationRuntime:
     supported, with a clear error when an endpoint cannot honor it.
     """
 
-    def __init__(self, config: LLMConfig, *, max_retries: int = _DEFAULT_MAX_RETRIES) -> None:
+    def __init__(
+        self,
+        config: LLMConfig,
+        *,
+        max_retries: int = _DEFAULT_MAX_RETRIES,
+        policy: EgressPolicy | None = None,
+    ) -> None:
         if config.provider != _OPENAI_COMPATIBLE:
             # NOTE (#62/#67): other litellm providers are reachable through the same
             # interface; #61 tests only openai_compatible as the first-class path.
@@ -56,6 +63,14 @@ class GenerationRuntime:
                 f"unsupported llm provider {config.provider!r}: "
                 f"{_OPENAI_COMPATIBLE!r} is the supported path"
             )
+        # Air-gapped egress guard (SPEC-E10 §4). When set, the same EgressPolicy that
+        # validated config at load time blocks any call to a non-allowlisted host before
+        # egress. Construction-time check fails fast even before the first generate().
+        # `None` (the default for the test/headless paths) means no enforcement; the E4
+        # ingest wiring threads a policy when runtime.air_gapped is set.
+        self._policy = policy
+        if policy is not None:
+            policy.check_url(config.base_url, what="llm.base_url")
         self._config = config
         # Bounded retries on transient provider failures; total attempts = max_retries + 1.
         # Injected here (not on LLMConfig, whose shape E1 owns) so it stays testable.
@@ -104,6 +119,12 @@ class GenerationRuntime:
         if system is not None:
             messages.append({"role": "system", "content": system})
         messages.append({"role": "user", "content": prompt})
+
+        # Block egress to a non-allowlisted host before the request leaves the process
+        # (SPEC-E10 §4, S3/AC2). Re-checked here, not only at construction, so a guard is
+        # in place at the exact point of egress.
+        if self._policy is not None:
+            self._policy.check_url(self._config.base_url, what="llm.base_url")
 
         last_exc: APIError | None = None
         for _ in range(self._max_retries + 1):

@@ -35,6 +35,9 @@ class ErrorCode(StrEnum):
     GENERATION_FAILED = "generation_failed"
     STRUCTURED_OUTPUT_INVALID = "structured_output_invalid"
     STRUCTURED_OUTPUT_UNSUPPORTED = "structured_output_unsupported"
+    # Air-gapped egress guard (SPEC-E10 §4); raised at config load and before any model
+    # call when air_gapped mode would allow context to leave the machine/network.
+    AIR_GAPPED_VIOLATION = "air_gapped_violation"
 
 
 EXIT_CODES: dict[ErrorCode, int] = {
@@ -54,6 +57,7 @@ EXIT_CODES: dict[ErrorCode, int] = {
     ErrorCode.GENERATION_FAILED: 15,
     ErrorCode.STRUCTURED_OUTPUT_INVALID: 16,
     ErrorCode.STRUCTURED_OUTPUT_UNSUPPORTED: 17,
+    ErrorCode.AIR_GAPPED_VIOLATION: 18,
 }
 
 
@@ -192,6 +196,19 @@ class StructuredOutputUnsupported(CanonError):
     """
 
     code = ErrorCode.STRUCTURED_OUTPUT_UNSUPPORTED
+
+
+class AirGappedViolation(CanonError):
+    """Raised when air-gapped mode would let warehouse content or context leave the machine.
+
+    The enforced privacy guarantee of SPEC-E10 §4: under ``runtime.air_gapped: true`` every
+    model endpoint must resolve to a local/allowlisted address. Raised at config load when a
+    public endpoint, enabled telemetry, or a remote secret-service ``*_ref`` is configured,
+    and at call time before any request leaves the process. Defense-in-depth, like DB
+    read-only (E2 §3) — not advisory.
+    """
+
+    code = ErrorCode.AIR_GAPPED_VIOLATION
 
 
 class CredentialError(CanonError):
