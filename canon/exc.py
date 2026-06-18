@@ -211,6 +211,18 @@ class AirGappedViolation(CanonError):
     code = ErrorCode.AIR_GAPPED_VIOLATION
 
 
+class EmbeddingUnavailable(CanonError):
+    """Raised when the embedding runtime is asked to embed while unavailable (SPEC-E10 §5).
+
+    The local embedding backend (``sentence-transformers``) is an optional add-on. When it
+    is not installed or its model failed to load, :meth:`EmbeddingRuntime.is_available`
+    reports false and E6 degrades to lexical-only — never an error. This is raised only when
+    a caller invokes ``embed`` without first gating on ``is_available()``; it carries no wire
+    ``ErrorCode`` (default exit ``1``) since it signals a caller contract slip, not a
+    user-facing failure mode.
+    """
+
+
 class CredentialError(CanonError):
     """Raised when a credentials_ref cannot be resolved to a secret."""
 

@@ -99,6 +99,24 @@ class TestLoadConfig:
         cfg = load_config(_canon_yaml(tmp_path, content))
         assert cfg.telemetry.enabled is False
 
+    def test_embeddings_defaults_when_block_absent(self, tmp_path: Path) -> None:
+        cfg = load_config(_canon_yaml(tmp_path, _VALID))
+        assert cfg.embeddings.model == "all-MiniLM-L6-v2"
+
+    def test_embeddings_model_override(self, tmp_path: Path) -> None:
+        content = _VALID + "embeddings:\n  model: bge-small-en\n"
+        cfg = load_config(_canon_yaml(tmp_path, content))
+        assert cfg.embeddings.model == "bge-small-en"
+
+    def test_embeddings_model_round_trips(self, tmp_path: Path) -> None:
+        from canon.config import dump_config
+
+        content = _VALID + "embeddings:\n  model: bge-small-en\n"
+        cfg = load_config(_canon_yaml(tmp_path, content))
+        out = tmp_path / "out.yaml"
+        dump_config(cfg, out)
+        assert load_config(out).embeddings.model == "bge-small-en"
+
     def test_llm_tasks_per_task_override(self, tmp_path: Path) -> None:
         content = _VALID.replace(
             "  model: llama3", "  model: llama3\n  tasks:\n    reconcile: gpt-4"
