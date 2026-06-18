@@ -6,10 +6,12 @@ import re
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from pydantic import BaseModel, Field, ValidationError, field_validator
+from pydantic import BaseModel, Field, ValidationError, field_validator, model_validator
 from pydantic_settings import BaseSettings, PydanticBaseSettingsSource, SettingsConfigDict
 from ruamel.yaml import YAML
 
+from canon.airgap import EgressPolicy
+from canon.exc import AirGappedViolation
 from canon.semantic.models import Provenance
 
 if TYPE_CHECKING:
@@ -65,6 +67,19 @@ class LLMConfig(BaseModel):
 
 class TelemetryConfig(BaseModel):
     enabled: bool = False
+
+
+class RuntimeConfig(BaseModel):
+    """Runtime behavior block from canon.yaml (SPEC-E10 §4).
+
+    ``air_gapped`` turns on the enforced privacy guarantee: every model endpoint must be
+    local/allowlisted and no context may leave the machine. ``allow_cidrs`` opts in
+    explicit private/LAN ranges for a separate on-prem inference host; it is only
+    consulted when ``air_gapped`` is set (default: localhost-only).
+    """
+
+    air_gapped: bool = False
+    allow_cidrs: list[str] = []
 
 
 class AutoApplyConfig(BaseModel):
@@ -126,6 +141,33 @@ class CanonConfig(BaseSettings):
     llm: LLMConfig
     telemetry: TelemetryConfig = TelemetryConfig()
     reconcile: ReconcileConfig = ReconcileConfig()
+    runtime: RuntimeConfig = RuntimeConfig()
+
+    @model_validator(mode="after")
+    def _enforce_air_gapped(self) -> CanonConfig:
+        """Load-time air-gapped enforcement (SPEC-E10 §4, S3/AC1+AC3).
+
+        When ``runtime.air_gapped`` is set, refuse to load a config that could leak
+        context off-machine: a public model endpoint, enabled telemetry, or a remote
+        secret-service ``*_ref``. The daemon never starts mis-configured.
+        """
+        if not self.runtime.air_gapped:
+            return self
+        policy = EgressPolicy(allow_cidrs=self.runtime.allow_cidrs)
+        # NOTE: the embeddings endpoint is validated here too once that config block
+        # lands (#64/#67); today embeddings is local-provider-only, so nothing to check.
+        policy.check_url(self.llm.base_url, what="llm.base_url")
+        if self.telemetry.enabled:
+            raise AirGappedViolation(
+                "air-gapped: telemetry.enabled must be false when runtime.air_gapped is true"
+            )
+        if self.llm.api_key_ref is not None:
+            policy.check_ref_local(self.llm.api_key_ref, what="llm.api_key_ref")
+        for conn in self.connections:
+            policy.check_ref_local(
+                conn.credentials_ref, what=f"connections[{conn.id}].credentials_ref"
+            )
+        return self
 
     @classmethod
     def settings_customise_sources(
