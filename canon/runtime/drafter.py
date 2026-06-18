@@ -13,14 +13,17 @@ from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel
 
-from canon.ingestion.builder import LLM_GRAIN_CONFIDENCE, GrainDraft
+from canon.ingestion.builder import LLM_GRAIN_CONFIDENCE, GrainDraft, NullLLMDrafter
 from canon.runtime.resolver import Task
 
 if TYPE_CHECKING:
+    from canon.airgap import EgressPolicy
+    from canon.config import LLMConfig, RuntimeConfig
     from canon.connectors.base import RelationSchema
+    from canon.ingestion.builder import LLMDrafter
     from canon.runtime.generation import GenerationRuntime
 
-__all__ = ["RuntimeLLMDrafter"]
+__all__ = ["RuntimeLLMDrafter", "make_drafter"]
 
 _GRAIN_SYSTEM = (
     "You infer the grain (the minimal set of columns that uniquely identifies a row) of a "
@@ -79,3 +82,27 @@ def _grain_prompt(schema: RelationSchema) -> str:
         f"Relation {schema.relation!r} has these columns:\n{columns}\n\n"
         'Return the grain as a JSON object {"grain": [<column names>]}.'
     )
+
+
+def make_drafter(
+    llm: LLMConfig | None,
+    runtime: RuntimeConfig,
+    *,
+    headless: bool,
+) -> LLMDrafter:
+    """Return the right LLMDrafter for the operating mode (SPEC-E10 §9).
+
+    Headless or no LLM configured → NullLLMDrafter (zero model calls, fully deterministic).
+    Interactive with LLM → RuntimeLLMDrafter backed by GenerationRuntime.
+    Air-gapped policy is threaded into the runtime so the egress guard fires at
+    construction time (before any call) even in interactive mode.
+    """
+    if headless or llm is None:
+        return NullLLMDrafter()
+    from canon.airgap import EgressPolicy
+    from canon.runtime.generation import GenerationRuntime
+
+    policy: EgressPolicy | None = (
+        EgressPolicy(allow_cidrs=runtime.allow_cidrs) if runtime.air_gapped else None
+    )
+    return RuntimeLLMDrafter(GenerationRuntime(llm, policy=policy))
