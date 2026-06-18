@@ -12,6 +12,7 @@ from canon.airgap import EgressPolicy
 from canon.config import LLMConfig
 from canon.exc import (
     AirGappedViolation,
+    CredentialError,
     ErrorCode,
     GenerationError,
     StructuredOutputError,
@@ -84,6 +85,58 @@ async def test_nullable_key_passes_placeholder(fake_litellm: dict[str, Any]) -> 
     )
     await GenerationRuntime(config).generate("hi")
     assert fake_litellm["api_key"] == "not-needed"
+
+
+# --- call-time key resolution (#65, SPEC-E10 §6) ------------------------------
+
+
+async def test_key_resolved_at_call_time_not_construction(
+    llm_config: LLMConfig, fake_litellm: dict[str, Any], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # With the ref's env var unset, construction still succeeds — the key is only needed
+    # at the point of egress, so a missing key fails the call, not the wiring.
+    monkeypatch.delenv("CANON_LLM_KEY", raising=False)
+    runtime = GenerationRuntime(llm_config)
+    with pytest.raises(CredentialError):
+        await runtime.generate("hi", task=Task.DRAFT)
+    assert len(fake_litellm["_calls"]) == 0
+
+
+def test_key_never_stored_on_instance(llm_config: LLMConfig) -> None:
+    # The secret must not live as instance state where it could leak into a repr/dump.
+    runtime = GenerationRuntime(llm_config)
+    assert not hasattr(runtime, "_api_key")
+    assert "secret-token" not in repr(runtime)
+    assert "secret-token" not in str(vars(runtime))
+
+
+async def test_key_resolved_fresh_each_call(
+    llm_config: LLMConfig, fake_litellm: dict[str, Any], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # No caching: a changed env var is reflected on the next call.
+    runtime = GenerationRuntime(llm_config)
+    await runtime.generate("hi", task=Task.DRAFT)
+    assert fake_litellm["api_key"] == "secret-token"
+
+    monkeypatch.setenv("CANON_LLM_KEY", "rotated-token")
+    await runtime.generate("hi", task=Task.DRAFT)
+    assert fake_litellm["api_key"] == "rotated-token"
+
+
+async def test_required_ref_resolving_to_nothing_fails_at_call(
+    llm_config: LLMConfig, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Missing and empty both count as "resolves to nothing"; the message names the
+    # variable, never the value.
+    runtime = GenerationRuntime(llm_config)
+
+    monkeypatch.delenv("CANON_LLM_KEY", raising=False)
+    with pytest.raises(CredentialError, match="CANON_LLM_KEY"):
+        await runtime.generate("hi", task=Task.DRAFT)
+
+    monkeypatch.setenv("CANON_LLM_KEY", "   ")
+    with pytest.raises(CredentialError, match="CANON_LLM_KEY"):
+        await runtime.generate("hi", task=Task.DRAFT)
 
 
 # --- structured output (b) ----------------------------------------------------

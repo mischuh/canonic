@@ -75,12 +75,21 @@ class GenerationRuntime:
         # Bounded retries on transient provider failures; total attempts = max_retries + 1.
         # Injected here (not on LLMConfig, whose shape E1 owns) so it stays testable.
         self._max_retries = max_retries
-        # NOTE (#65): resolved eagerly here; #65 moves resolution to call time and
-        # guarantees the value is never logged or written to the event log. A nullable
-        # ref is valid — local endpoints typically need no key.
-        self._api_key: str | None = (
-            resolve_credential(config.api_key_ref) if config.api_key_ref else None
-        )
+        # The api_key_ref is resolved at call time, not here (#65): the secret never lives
+        # as instance state, so it cannot leak into a repr/dump/log or the event log. A
+        # nullable ref is valid — local endpoints typically need no key.
+
+    def _resolve_api_key(self) -> str:
+        """Resolve ``api_key_ref`` to a secret at call time (SPEC-E10 §6, #65).
+
+        Returns the resolved secret, or the local-server placeholder when no ref is
+        configured. Raises :class:`~canon.exc.CredentialError` when a required ref
+        resolves to nothing — a clear, structured failure, never silent. The returned
+        value is used immediately and never retained on the instance.
+        """
+        if self._config.api_key_ref:
+            return resolve_credential(self._config.api_key_ref)
+        return _NO_KEY_PLACEHOLDER
 
     async def generate(
         self,
@@ -126,6 +135,11 @@ class GenerationRuntime:
         if self._policy is not None:
             self._policy.check_url(self._config.base_url, what="llm.base_url")
 
+        # Resolve the key here, at the point of egress (#65): a required ref that resolves
+        # to nothing fails now with a clear CredentialError. The secret lives only in this
+        # local for the duration of the call — never on the instance, never logged.
+        api_key = self._resolve_api_key()
+
         last_exc: APIError | None = None
         for _ in range(self._max_retries + 1):
             try:
@@ -133,7 +147,7 @@ class GenerationRuntime:
                     model=model_str,
                     messages=messages,
                     api_base=self._config.base_url,
-                    api_key=self._api_key or _NO_KEY_PLACEHOLDER,
+                    api_key=api_key,
                     temperature=temperature,
                     response_format=response_model,
                 )
