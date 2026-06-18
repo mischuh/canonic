@@ -19,7 +19,7 @@ llm:
   provider: openai_compatible
   base_url: http://127.0.0.1:8765/v1  # Ollama; swap for OpenAI/Anthropic in Phase 1
   model: gemma-4-e2b-it-4bit
-  api_key_ref: 
+  api_key_ref: env:CANON_LLM_API_KEY  
 
 reconcile:
   strict_contradictions: false   # set to true to gate CI on any contradiction (exit 14)
