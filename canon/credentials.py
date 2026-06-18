@@ -40,9 +40,12 @@ def resolve_credential(ref: str) -> str:
         if not target:
             raise CredentialError("env: credentials_ref is missing a variable name")
         try:
-            return os.environ[target]
+            value = os.environ[target]
         except KeyError as exc:
             raise CredentialError(f"environment variable {target!r} is not set") from exc
+        if not value.strip():
+            raise CredentialError(f"environment variable {target!r} is set but empty")
+        return value
 
     if scheme in ("file", "keyring"):
         raise CredentialError(
