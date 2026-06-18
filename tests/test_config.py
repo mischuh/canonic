@@ -10,6 +10,7 @@ from canon.config import (
     find_project_root,
     load_config,
 )
+from canon.exc import AirGappedViolation
 
 _VALID = """\
 version: 1
@@ -134,6 +135,68 @@ class TestLoadConfig:
         )
         cfg = load_config(_canon_yaml(tmp_path, content))
         assert cfg.project.default_connection == "warehouse_pg"
+
+
+class TestAirGapped:
+    """Load-time air-gapped enforcement (SPEC-E10 §4, GH-63, S3/AC1+AC3)."""
+
+    def test_air_gapped_with_local_endpoint_loads(self, tmp_path: Path) -> None:
+        content = _VALID + "runtime:\n  air_gapped: true\n"
+        cfg = load_config(_canon_yaml(tmp_path, content))
+        assert cfg.runtime.air_gapped is True
+
+    def test_air_gapped_defaults_to_false(self, tmp_path: Path) -> None:
+        cfg = load_config(_canon_yaml(tmp_path, _VALID))
+        assert cfg.runtime.air_gapped is False
+        assert cfg.runtime.allow_cidrs == []
+
+    def test_air_gapped_with_public_base_url_refuses_to_start(self, tmp_path: Path) -> None:
+        content = (
+            _VALID.replace(
+                "base_url: http://localhost:11434/v1", "base_url: https://api.openai.com/v1"
+            )
+            + "runtime:\n  air_gapped: true\n"
+        )
+        with pytest.raises(AirGappedViolation) as exc:
+            load_config(_canon_yaml(tmp_path, content))
+        assert exc.value.exit_code == 18
+        assert "llm.base_url" in str(exc.value)
+
+    def test_air_gapped_forces_telemetry_off(self, tmp_path: Path) -> None:
+        content = (
+            _VALID.replace("telemetry:\n  enabled: false", "telemetry:\n  enabled: true")
+            + "runtime:\n  air_gapped: true\n"
+        )
+        with pytest.raises(AirGappedViolation, match="telemetry.enabled must be false"):
+            load_config(_canon_yaml(tmp_path, content))
+
+    def test_air_gapped_allows_lan_host_via_allow_cidrs(self, tmp_path: Path) -> None:
+        content = (
+            _VALID.replace(
+                "base_url: http://localhost:11434/v1", "base_url: http://10.1.2.3:11434/v1"
+            )
+            + "runtime:\n  air_gapped: true\n  allow_cidrs:\n    - 10.0.0.0/8\n"
+        )
+        cfg = load_config(_canon_yaml(tmp_path, content))
+        assert cfg.runtime.allow_cidrs == ["10.0.0.0/8"]
+
+    def test_air_gapped_rejects_unlisted_lan_host(self, tmp_path: Path) -> None:
+        content = (
+            _VALID.replace(
+                "base_url: http://localhost:11434/v1", "base_url: http://10.1.2.3:11434/v1"
+            )
+            + "runtime:\n  air_gapped: true\n"
+        )
+        with pytest.raises(AirGappedViolation, match="not local or allowlisted"):
+            load_config(_canon_yaml(tmp_path, content))
+
+    def test_not_air_gapped_allows_public_base_url(self, tmp_path: Path) -> None:
+        # Regression guard: without air_gapped, a hosted endpoint is perfectly valid.
+        content = _VALID.replace(
+            "base_url: http://localhost:11434/v1", "base_url: https://api.openai.com/v1"
+        )
+        cfg = load_config(_canon_yaml(tmp_path, content))
+        assert cfg.llm.base_url == "https://api.openai.com/v1"
 
 
 class TestFindProjectRoot:

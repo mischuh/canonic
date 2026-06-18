@@ -8,8 +8,10 @@ import litellm
 import pytest
 from pydantic import BaseModel
 
+from canon.airgap import EgressPolicy
 from canon.config import LLMConfig
 from canon.exc import (
+    AirGappedViolation,
     ErrorCode,
     GenerationError,
     StructuredOutputError,
@@ -210,3 +212,37 @@ async def test_repoint_changes_only_base_url_and_key(
     differing = {k for k in local_call if local_call[k] != hosted_call.get(k)}
     assert differing == {"api_base", "api_key"}
     assert local_call["model"] == hosted_call["model"] == "openai/small-local"
+
+
+# --- air-gapped call-time enforcement: S3/AC2 ---------------------------------
+
+
+async def test_air_gapped_policy_allows_local_call(
+    llm_config: LLMConfig, fake_litellm: dict[str, Any]
+) -> None:
+    runtime = GenerationRuntime(llm_config, policy=EgressPolicy())
+    await runtime.generate("hi", task=Task.DRAFT)
+    assert len(fake_litellm["_calls"]) == 1
+
+
+def test_air_gapped_policy_blocks_public_endpoint_at_construction(
+    fake_litellm: dict[str, Any],
+) -> None:
+    hosted = LLMConfig(
+        provider="openai_compatible", base_url="https://api.openai.com/v1", model="m"
+    )
+    with pytest.raises(AirGappedViolation):
+        GenerationRuntime(hosted, policy=EgressPolicy())
+    # Blocked before any model call leaves the process.
+    assert len(fake_litellm["_calls"]) == 0
+
+
+async def test_no_policy_leaves_behavior_unchanged(
+    fake_litellm: dict[str, Any],
+) -> None:
+    # Default (policy=None) keeps the existing path: a hosted endpoint is callable.
+    hosted = LLMConfig(
+        provider="openai_compatible", base_url="https://api.vendor.com/v1", model="m"
+    )
+    await GenerationRuntime(hosted).generate("hi")
+    assert len(fake_litellm["_calls"]) == 1
