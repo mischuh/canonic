@@ -15,11 +15,12 @@ from canon.exc import (
     CredentialError,
     ErrorCode,
     GenerationError,
+    RetriesExhausted,
     StructuredOutputError,
     StructuredOutputUnsupported,
 )
 from canon.runtime.generation import GenerationRuntime
-from canon.runtime.models import Completion
+from canon.runtime.models import Completion, Usage
 from canon.runtime.resolver import Task
 
 if TYPE_CHECKING:
@@ -192,15 +193,16 @@ def _api_error() -> litellm.APIError:
     return litellm.APIError(status_code=500, message="boom", llm_provider="openai", model="m")
 
 
-async def test_provider_failure_raises_generation_error_after_bounded_retries(
+async def test_retries_exhausted_after_bounded_transient_failures(
     llm_config: LLMConfig, fake_litellm: dict[str, Any], set_fake: Callable[..., None]
 ) -> None:
     set_fake(raises=_api_error())  # raises on every call
     runtime = GenerationRuntime(llm_config, max_retries=1)
-    with pytest.raises(GenerationError) as err:
+    with pytest.raises(RetriesExhausted) as err:
         await runtime.generate("draft", task=Task.RECONCILE)
 
-    assert err.value.exit_code == 15
+    assert err.value.code is ErrorCode.RETRIES_EXHAUSTED
+    assert err.value.exit_code == 19
     # Bounded: exactly max_retries + 1 attempts, all on the same resolved model (no swap).
     assert len(fake_litellm["_calls"]) == 2
     assert {c["model"] for c in fake_litellm["_calls"]} == {"openai/stronger-model"}
@@ -298,4 +300,84 @@ async def test_no_policy_leaves_behavior_unchanged(
         provider="openai_compatible", base_url="https://api.vendor.com/v1", model="m"
     )
     await GenerationRuntime(hosted).generate("hi")
+    assert len(fake_litellm["_calls"]) == 1
+
+
+# --- usage metrics (#67, SPEC-E10 §8) -----------------------------------------
+
+
+async def test_usage_populated_on_plain_completion(
+    llm_config: LLMConfig, fake_litellm: dict[str, Any], set_fake: Callable[..., None]
+) -> None:
+    set_fake(content="hello")
+    completion = await GenerationRuntime(llm_config).generate("prompt")
+
+    assert isinstance(completion.usage, Usage)
+    assert completion.usage.prompt_tokens == 10
+    assert completion.usage.completion_tokens == 5
+    assert completion.usage.total_tokens == 15
+    assert completion.usage.calls == 1
+    assert completion.usage.latency_ms >= 0
+
+
+async def test_usage_populated_on_structured_completion(
+    llm_config: LLMConfig, fake_litellm: dict[str, Any], set_fake: Callable[..., None]
+) -> None:
+    set_fake(content='{"grain": ["order_id"]}')
+    completion = await GenerationRuntime(llm_config).generate("draft", response_model=_Grain)
+
+    assert completion.usage.total_tokens == 15
+    assert completion.usage.calls == 1
+
+
+async def test_usage_tokens_degrade_to_none_when_missing(
+    llm_config: LLMConfig, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from types import SimpleNamespace
+
+    async def _no_usage_response(**kwargs: Any) -> SimpleNamespace:
+        message = SimpleNamespace(content="ok")
+        return SimpleNamespace(choices=[SimpleNamespace(message=message)])  # no .usage attr
+
+    monkeypatch.setattr("litellm.acompletion", _no_usage_response)
+    completion = await GenerationRuntime(llm_config).generate("prompt")
+
+    assert completion.usage.prompt_tokens is None
+    assert completion.usage.completion_tokens is None
+    assert completion.usage.total_tokens is None
+    assert completion.usage.calls == 1
+    assert completion.usage.latency_ms >= 0
+
+
+async def test_usage_calls_reflects_retries(
+    llm_config: LLMConfig, fake_litellm: dict[str, Any], set_fake: Callable[..., None]
+) -> None:
+    # Two transient failures then success → calls == 3.
+    set_fake(raises=_api_error(), raises_times=2)
+    completion = await GenerationRuntime(llm_config, max_retries=2).generate("prompt")
+
+    assert completion.usage.calls == 3
+
+
+# --- structured error taxonomy (#67) ------------------------------------------
+
+
+async def test_retries_exhausted_has_correct_code_and_exit(
+    llm_config: LLMConfig, set_fake: Callable[..., None]
+) -> None:
+    set_fake(raises=_api_error())
+    with pytest.raises(RetriesExhausted) as err:
+        await GenerationRuntime(llm_config, max_retries=0).generate("prompt")
+
+    assert err.value.code is ErrorCode.RETRIES_EXHAUSTED
+    assert err.value.exit_code == 19
+
+
+async def test_deterministic_bad_request_raises_generation_error_not_retries_exhausted(
+    llm_config: LLMConfig, fake_litellm: dict[str, Any], set_fake: Callable[..., None]
+) -> None:
+    set_fake(raises=litellm.BadRequestError(message="bad", model="m", llm_provider="openai"))
+    with pytest.raises(GenerationError):
+        await GenerationRuntime(llm_config).generate("prompt")
+    # Deterministic — surfaced after exactly one attempt, not retried.
     assert len(fake_litellm["_calls"]) == 1
