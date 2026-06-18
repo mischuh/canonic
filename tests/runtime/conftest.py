@@ -1,0 +1,70 @@
+"""Fixtures for the E10 generation runtime tests.
+
+No mock library: the litellm call is replaced with an ``async`` fake that records its
+kwargs and returns a canned response, matching the codebase's Fake-implementation style.
+"""
+
+from __future__ import annotations
+
+from types import SimpleNamespace
+from typing import TYPE_CHECKING, Any
+
+import litellm
+import pytest
+
+from canon.config import LLMConfig
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
+
+
+def _response(content: str) -> SimpleNamespace:
+    """A minimal stand-in for a litellm ModelResponse exposing the content path used."""
+    message = SimpleNamespace(content=content)
+    return SimpleNamespace(choices=[SimpleNamespace(message=message)])
+
+
+@pytest.fixture
+def llm_config() -> LLMConfig:
+    """A local openai_compatible config with a keyed ref (env resolved in tests)."""
+    return LLMConfig(
+        provider="openai_compatible",
+        base_url="http://localhost:11434/v1",
+        model="small-local",
+        api_key_ref="env:CANON_LLM_KEY",
+        tasks={"reconcile": "stronger-model"},
+    )
+
+
+@pytest.fixture
+def fake_litellm(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
+    """Patch ``litellm.acompletion`` with a recording fake.
+
+    Returns the captured-kwargs dict. The canned content defaults to a valid grain payload;
+    a test can override behaviour with :func:`set_fake`.
+    """
+    captured: dict[str, Any] = {}
+    state: dict[str, Any] = {"content": '{"grain": ["id"]}', "raises": None}
+
+    async def fake_acompletion(**kwargs: Any) -> SimpleNamespace:
+        captured.clear()
+        captured.update(kwargs)
+        if state["raises"] is not None:
+            raise state["raises"]
+        return _response(state["content"])
+
+    monkeypatch.setattr(litellm, "acompletion", fake_acompletion)
+    captured["_state"] = state
+    return captured
+
+
+@pytest.fixture
+def set_fake(fake_litellm: dict[str, Any]) -> Callable[..., None]:
+    """Helper to set the fake's canned content or a raised exception."""
+
+    def _set(*, content: str | None = None, raises: BaseException | None = None) -> None:
+        if content is not None:
+            fake_litellm["_state"]["content"] = content
+        fake_litellm["_state"]["raises"] = raises
+
+    return _set
