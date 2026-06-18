@@ -151,7 +151,7 @@ class CanonConfig(BaseSettings):
     version: int
     project: ProjectConfig
     connections: list[Connection] = []
-    llm: LLMConfig
+    llm: LLMConfig | None = None
     embeddings: EmbeddingConfig = EmbeddingConfig()
     telemetry: TelemetryConfig = TelemetryConfig()
     reconcile: ReconcileConfig = ReconcileConfig()
@@ -171,13 +171,14 @@ class CanonConfig(BaseSettings):
         # NOTE: ``embeddings`` is local-provider-only (sentence-transformers, no egress), so
         # there is no endpoint to validate under air-gapped. A future hosted embeddings
         # provider (#67) would validate its ``base_url`` here, mirroring ``llm.base_url``.
-        policy.check_url(self.llm.base_url, what="llm.base_url")
+        if self.llm is not None:
+            policy.check_url(self.llm.base_url, what="llm.base_url")
+            if self.llm.api_key_ref is not None:
+                policy.check_ref_local(self.llm.api_key_ref, what="llm.api_key_ref")
         if self.telemetry.enabled:
             raise AirGappedViolation(
                 "air-gapped: telemetry.enabled must be false when runtime.air_gapped is true"
             )
-        if self.llm.api_key_ref is not None:
-            policy.check_ref_local(self.llm.api_key_ref, what="llm.api_key_ref")
         for conn in self.connections:
             policy.check_ref_local(
                 conn.credentials_ref, what=f"connections[{conn.id}].credentials_ref"

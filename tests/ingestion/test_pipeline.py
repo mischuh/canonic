@@ -2,16 +2,24 @@
 
 Drives the full four-stage pipeline through a fake connector (no live DB) so the proposal and
 file shapes are exactly production. Covers idempotency (S6), determinism (S9-AC1), the
-validation gate (S8), the bootstrap write path (§8), and dry-run write suppression.
+validation gate (S8), the bootstrap write path (§8), dry-run write suppression, and the
+E10 mode switch (GH-68): headless pins NullLLMDrafter; interactive with LLM uses
+RuntimeLLMDrafter; no-models configured uses NullLLMDrafter deterministically.
 """
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import pytest
 
-from canon.config import LOCAL_STATE_DIR, ReconcileConfig, scaffold_project
+from canon.config import (
+    LOCAL_STATE_DIR,
+    LLMConfig,
+    ReconcileConfig,
+    RuntimeConfig,
+    scaffold_project,
+)
 from canon.connectors.base import (
     Capability,
     ColumnInfo,
@@ -26,6 +34,7 @@ from canon.exc import ValidationFailed
 from canon.ingestion.models import ProposalOp, ReconciliationDecision
 from canon.ingestion.pipeline import IngestionPipeline
 from canon.ingestion.source import evidence_from_introspection
+from canon.runtime.drafter import make_drafter
 from canon.semantic.loader import load_semantic_source
 
 if TYPE_CHECKING:
@@ -208,3 +217,109 @@ async def test_dry_run_touches_no_file(tmp_path: Path) -> None:
     assert not list((tmp_path / "raw-sources").rglob("*.jsonl"))
     assert not (tmp_path / LOCAL_STATE_DIR / "ingest-events.jsonl").exists()
     assert not (tmp_path / "semantics" / _CONN).exists()
+
+
+# ---------------------------------------------------------------------------
+# GH-68 — E10 mode switch: headless off, interactive on, no-models deterministic
+# ---------------------------------------------------------------------------
+
+
+def _no_pk_schema() -> RelationSchema:
+    """A relation with no primary key — triggers drafter.draft_grain() when active."""
+    return _schema(
+        "analytics.events",
+        [
+            ColumnInfo(name="event_id", type="uuid", nullable=False),
+            ColumnInfo(name="user_id", type="int", nullable=False),
+            ColumnInfo(name="ts", type="timestamp", nullable=False),
+        ],
+        [],  # no primary key → grain is drafted
+    )
+
+
+_LLM_CONFIG = LLMConfig(
+    provider="openai_compatible",
+    base_url="http://localhost:11434/v1",
+    model="small-local",
+)
+
+
+async def test_headless_mode_makes_zero_model_calls(
+    tmp_path: Path, fake_litellm: dict[str, Any]
+) -> None:
+    """Headless + LLM configured → NullLLMDrafter is pinned, zero litellm calls (GH-68 S7)."""
+    drafter = make_drafter(_LLM_CONFIG, RuntimeConfig(), headless=True)
+    scaffold_project(tmp_path)
+    pipeline = IngestionPipeline(
+        tmp_path,
+        {_CONN: FakeConnector([_no_pk_schema()])},
+        ReconcileConfig(),
+        headless=True,
+        drafter=drafter,
+    )
+    evidence = await evidence_from_introspection(FakeConnector([_no_pk_schema()]), _CONN)
+
+    await pipeline.run(evidence)
+
+    assert len(fake_litellm["_calls"]) == 0
+
+
+async def test_headless_mode_is_byte_identical_across_runs(
+    tmp_path: Path, fake_litellm: dict[str, Any]
+) -> None:
+    """Headless with a relation lacking PK → deterministic NullLLMDrafter, byte-identical output."""
+    drafter = make_drafter(_LLM_CONFIG, RuntimeConfig(), headless=True)
+    scaffold_project(tmp_path)
+    pipeline = IngestionPipeline(
+        tmp_path,
+        {_CONN: FakeConnector([_no_pk_schema()])},
+        ReconcileConfig(),
+        headless=True,
+        drafter=drafter,
+    )
+    evidence = await evidence_from_introspection(FakeConnector([_no_pk_schema()]), _CONN)
+
+    first = await pipeline.run(evidence)
+    second = await pipeline.run(evidence)
+
+    assert first.emission.to_json() == second.emission.to_json()
+    assert len(fake_litellm["_calls"]) == 0
+
+
+async def test_interactive_mode_calls_drafter_for_no_pk_relation(
+    tmp_path: Path, fake_litellm: dict[str, Any]
+) -> None:
+    """Interactive + LLM configured → RuntimeLLMDrafter is used; one model call per no-PK relation."""
+    drafter = make_drafter(_LLM_CONFIG, RuntimeConfig(), headless=False)
+    scaffold_project(tmp_path)
+    pipeline = IngestionPipeline(
+        tmp_path,
+        {_CONN: FakeConnector([_no_pk_schema()])},
+        ReconcileConfig(),
+        headless=False,
+        drafter=drafter,
+    )
+    evidence = await evidence_from_introspection(FakeConnector([_no_pk_schema()]), _CONN)
+
+    await pipeline.run(evidence)
+
+    assert len(fake_litellm["_calls"]) == 1
+
+
+async def test_no_models_configured_headless_is_deterministic(tmp_path: Path) -> None:
+    """llm=None + headless → NullLLMDrafter, zero model calls, deterministic emission (GH-68 S7)."""
+    drafter = make_drafter(None, RuntimeConfig(), headless=True)
+    scaffold_project(tmp_path)
+    pipeline = IngestionPipeline(
+        tmp_path,
+        {_CONN: FakeConnector([_no_pk_schema()])},
+        ReconcileConfig(),
+        headless=True,
+        drafter=drafter,
+    )
+    evidence = await evidence_from_introspection(FakeConnector([_no_pk_schema()]), _CONN)
+
+    first = await pipeline.run(evidence)
+    second = await pipeline.run(evidence)
+
+    assert first.emission.to_json() == second.emission.to_json()
