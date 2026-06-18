@@ -316,7 +316,7 @@ class TestDeterminism:
 
 
 class TestBuilderIntegration:
-    def test_builder_proposals_reconcile_to_add_against_empty_store(self) -> None:
+    async def test_builder_proposals_reconcile_to_add_against_empty_store(self) -> None:
         cols = [
             ColumnInfo(name="order_id", type="int", nullable=False, position=1),
             ColumnInfo(name="amount", type="decimal", nullable=True, position=2),
@@ -339,7 +339,7 @@ class TestBuilderIntegration:
             source_fingerprint=schema.source_fingerprint or "sha256:none",
             observed_at="2026-06-15T12:00:00Z",  # type: ignore[arg-type]
         )
-        proposals = ContextBuilder().build([evidence]).proposals
+        proposals = (await ContextBuilder().build([evidence])).proposals
         report = ReconciliationEngine().reconcile(proposals, _store())
         assert [e.decision for e in report.entries] == [ReconciliationDecision.ADD]
 

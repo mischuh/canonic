@@ -9,8 +9,8 @@ from canon.eval.report import render_markdown
 from tests.eval.conftest import StubDrafter, StubUsageReader, make_candidate
 
 
-def _report(grain_cases):
-    return run_baseline(
+async def _report(grain_cases):
+    return await run_baseline(
         [make_candidate("small-local", "qwen2.5:3b")],
         grain_cases,
         drafter_factory=lambda _config: StubDrafter(grain=["id"]),
@@ -19,8 +19,8 @@ def _report(grain_cases):
     )
 
 
-def test_render_includes_table_and_metadata(grain_cases) -> None:
-    md = render_markdown(_report(grain_cases))
+async def test_render_includes_table_and_metadata(grain_cases) -> None:
+    md = render_markdown(await _report(grain_cases))
 
     assert "# Canon local-model baseline" in md
     assert "2026-06-18T12:00:00+00:00" in md
@@ -29,16 +29,16 @@ def test_render_includes_table_and_metadata(grain_cases) -> None:
     assert "`canon eval baseline`" in md  # re-run instructions
 
 
-def test_render_marks_recommended_and_notes_reconcile_pending(grain_cases) -> None:
-    md = render_markdown(_report(grain_cases))
+async def test_render_marks_recommended_and_notes_reconcile_pending(grain_cases) -> None:
+    md = render_markdown(await _report(grain_cases))
 
     assert "✅" in md  # the recommended candidate
     assert "**Recommended for `draft`:** small-local." in md
     assert "Pending E4 reconciliation drafting" in md
 
 
-def test_render_states_when_no_candidate_recommended(grain_cases) -> None:
-    report = run_baseline(
+async def test_render_states_when_no_candidate_recommended(grain_cases) -> None:
+    report = await run_baseline(
         [make_candidate("weak", "weak")],
         grain_cases,
         drafter_factory=lambda _config: StubDrafter(grain=["wrong_col"]),

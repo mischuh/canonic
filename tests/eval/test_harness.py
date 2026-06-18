@@ -27,12 +27,12 @@ def _factory(mapping: dict[str, StubDrafter]):
     return build
 
 
-def test_honored_run_scores_grain_and_records_usage(grain_cases) -> None:
+async def test_honored_run_scores_grain_and_records_usage(grain_cases) -> None:
     # Drafter always answers "id" — correct for app.orders, wrong for the composite case.
     drafter = StubDrafter(grain=["id"])
     candidate = make_candidate("small", "qwen2.5:3b")
 
-    report = run_baseline(
+    report = await run_baseline(
         [candidate],
         grain_cases,
         drafter_factory=_factory({"qwen2.5:3b": drafter}),
@@ -58,9 +58,9 @@ def test_honored_run_scores_grain_and_records_usage(grain_cases) -> None:
         (CredentialError("missing key"), StructuredOutcome.ERROR),
     ],
 )
-def test_each_generation_error_maps_to_outcome(grain_cases, exc, expected) -> None:
+async def test_each_generation_error_maps_to_outcome(grain_cases, exc, expected) -> None:
     candidate = make_candidate("flaky", "m")
-    report = run_baseline(
+    report = await run_baseline(
         [candidate],
         grain_cases,
         drafter_factory=_factory({"m": StubDrafter(raises=exc)}),
@@ -78,7 +78,7 @@ def test_each_generation_error_maps_to_outcome(grain_cases, exc, expected) -> No
     assert report.recommended is None  # nothing clears the adherence floor
 
 
-def test_recommendation_gates_on_adherence_then_accuracy(grain_cases) -> None:
+async def test_recommendation_gates_on_adherence_then_accuracy(grain_cases) -> None:
     # accurate_but_broken: perfect grain knowledge but never honors the schema -> unusable.
     # solid: honors the schema and gets the surrogate-key case right.
     factory = _factory(
@@ -87,7 +87,7 @@ def test_recommendation_gates_on_adherence_then_accuracy(grain_cases) -> None:
             "solid": StubDrafter(grain=["id"]),
         }
     )
-    report = run_baseline(
+    report = await run_baseline(
         [make_candidate("accurate-but-broken", "broken"), make_candidate("solid", "solid")],
         grain_cases,
         drafter_factory=factory,
@@ -98,8 +98,8 @@ def test_recommendation_gates_on_adherence_then_accuracy(grain_cases) -> None:
     assert report.recommended == "solid"
 
 
-def test_no_recommendation_when_none_clear_floor(grain_cases) -> None:
-    report = run_baseline(
+async def test_no_recommendation_when_none_clear_floor(grain_cases) -> None:
+    report = await run_baseline(
         [make_candidate("a", "a")],
         grain_cases,
         drafter_factory=_factory({"a": StubDrafter(raises=GenerationError("x"))}),

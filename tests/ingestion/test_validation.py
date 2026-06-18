@@ -91,10 +91,10 @@ def _evidence(schema: RelationSchema, tier: AcquisitionTier) -> EvidenceItem:
     )
 
 
-def _proposal_for(schema: RelationSchema) -> Proposal:
+async def _proposal_for(schema: RelationSchema) -> Proposal:
     """Run the real builder so the proposal's content is exactly production shape."""
     evidence = _evidence(schema, schema.acquisition_tier)
-    result = ContextBuilder().build([evidence])
+    result = await ContextBuilder().build([evidence])
     return result.proposals[0]
 
 
@@ -114,7 +114,7 @@ class TestSemanticValidation:
             primary_key=["ghost"],
             tier=AcquisitionTier.LIVE,
         )
-        proposal = _proposal_for(schema)
+        proposal = await _proposal_for(schema)
         gate = ValidationGate(
             tmp_path, connectors={}, evidence=[_evidence(schema, schema.acquisition_tier)]
         )
@@ -135,7 +135,7 @@ class TestSemanticValidation:
             primary_key=["order_id"],
             tier=AcquisitionTier.LIVE,
         )
-        proposal = _proposal_for(schema)
+        proposal = await _proposal_for(schema)
         gate = ValidationGate(
             tmp_path, connectors={}, evidence=[_evidence(schema, schema.acquisition_tier)]
         )
@@ -160,7 +160,7 @@ class TestSchemaProbe:
             primary_key=["order_id"],
             tier=AcquisitionTier.DECLARATIVE,
         )
-        proposal = _proposal_for(schema)
+        proposal = await _proposal_for(schema)
         connector = FakeConnector(observed={"analytics.orders": _columns(("order_id", "int"))})
         gate = ValidationGate(
             tmp_path,
@@ -184,7 +184,7 @@ class TestSchemaProbe:
             primary_key=["order_id"],
             tier=AcquisitionTier.HAND_AUTHORED,
         )
-        proposal = _proposal_for(schema)
+        proposal = await _proposal_for(schema)
         gate = ValidationGate(
             tmp_path,
             connectors={},  # no connector for warehouse_pg
@@ -205,7 +205,7 @@ class TestSchemaProbe:
             primary_key=["order_id"],
             tier=AcquisitionTier.LIVE,
         )
-        proposal = _proposal_for(schema)
+        proposal = await _proposal_for(schema)
         gate = ValidationGate(
             tmp_path, connectors={}, evidence=[_evidence(schema, AcquisitionTier.LIVE)]
         )
@@ -233,7 +233,7 @@ class TestAggregationAndContract:
             tier=AcquisitionTier.LIVE,
             relation="analytics.customers",
         )
-        proposals = [_proposal_for(probe_schema_rel), _proposal_for(live_schema_rel)]
+        proposals = [await _proposal_for(probe_schema_rel), await _proposal_for(live_schema_rel)]
         connector = FakeConnector(observed={"analytics.orders": _columns(("order_id", "int"))})
         gate = ValidationGate(
             tmp_path,

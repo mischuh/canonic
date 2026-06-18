@@ -83,10 +83,10 @@ def _customer_fk() -> ForeignKey:
 
 
 class TestDeterministicCore:
-    def test_pk_relation_produces_deterministic_proposal(self) -> None:
+    async def test_pk_relation_produces_deterministic_proposal(self) -> None:
         """AC1 — PK-bearing relation maps to a fully deterministic proposal."""
         schema = _relation_schema(foreign_keys=[_customer_fk()])
-        result = ContextBuilder().build([_evidence(schema)])
+        result = await ContextBuilder().build([_evidence(schema)])
 
         assert len(result.proposals) == 1
         assert result.skipped == []
@@ -97,13 +97,13 @@ class TestDeterministicCore:
         assert p.confidence == 1.0
         assert p.anchored_to == [schema.source_fingerprint]
 
-    def test_target_derived_from_connection_and_relation(self) -> None:
-        result = ContextBuilder().build([_evidence(_relation_schema())])
+    async def test_target_derived_from_connection_and_relation(self) -> None:
+        result = await ContextBuilder().build([_evidence(_relation_schema())])
         assert result.proposals[0].target == "semantics/warehouse_pg/fct_orders.yaml"
 
-    def test_content_carries_grain_columns_and_meta(self) -> None:
+    async def test_content_carries_grain_columns_and_meta(self) -> None:
         schema = _relation_schema()
-        content = ContextBuilder().build([_evidence(schema)]).proposals[0].content
+        content = (await ContextBuilder().build([_evidence(schema)])).proposals[0].content
 
         assert content["name"] == "fct_orders"
         assert content["connection"] == "warehouse_pg"
@@ -117,9 +117,9 @@ class TestDeterministicCore:
         assert content["meta"]["source_fingerprint"] == schema.source_fingerprint
         assert "grain_draft" not in content["meta"]
 
-    def test_joins_derived_from_foreign_keys(self) -> None:
+    async def test_joins_derived_from_foreign_keys(self) -> None:
         schema = _relation_schema(foreign_keys=[_customer_fk()])
-        joins = ContextBuilder().build([_evidence(schema)]).proposals[0].content["joins"]
+        joins = (await ContextBuilder().build([_evidence(schema)])).proposals[0].content["joins"]
 
         assert joins == [
             {
@@ -129,13 +129,13 @@ class TestDeterministicCore:
             }
         ]
 
-    def test_composite_foreign_key_joined_with_and(self) -> None:
+    async def test_composite_foreign_key_joined_with_and(self) -> None:
         fk = ForeignKey(
             columns=["customer_id", "region_id"],
             references=ForeignKeyRef(relation="analytics.dim_customers", columns=["id", "region"]),
         )
         schema = _relation_schema(foreign_keys=[fk])
-        join = ContextBuilder().build([_evidence(schema)]).proposals[0].content["joins"][0]
+        join = (await ContextBuilder().build([_evidence(schema)])).proposals[0].content["joins"][0]
         assert join["on"] == (
             "fct_orders.customer_id = dim_customers.id "
             "AND fct_orders.region_id = dim_customers.region"
@@ -148,10 +148,10 @@ class TestDeterministicCore:
 
 
 class TestNoPrimaryKey:
-    def test_no_pk_yields_llm_drafted_grain(self) -> None:
+    async def test_no_pk_yields_llm_drafted_grain(self) -> None:
         """AC2 — no PK ⇒ labelled LLM draft, reduced confidence, grain not asserted."""
         schema = _relation_schema(primary_key=[])
-        p = ContextBuilder().build([_evidence(schema)]).proposals[0]
+        p = (await ContextBuilder().build([_evidence(schema)])).proposals[0]
 
         assert p.drafted_by is DraftedBy.LLM
         assert p.confidence < 1.0
@@ -159,13 +159,13 @@ class TestNoPrimaryKey:
         assert p.content["grain"] == []
         assert p.content["meta"]["grain_draft"] is True
 
-    def test_injected_drafter_is_used(self) -> None:
+    async def test_injected_drafter_is_used(self) -> None:
         class _StubDrafter(NullLLMDrafter):
-            def draft_grain(self, schema: RelationSchema) -> GrainDraft:
+            async def draft_grain(self, schema: RelationSchema) -> GrainDraft:
                 return GrainDraft(grain=["order_id"], confidence=0.6)
 
         schema = _relation_schema(primary_key=[])
-        p = ContextBuilder(llm_drafter=_StubDrafter()).build([_evidence(schema)]).proposals[0]
+        p = (await ContextBuilder(llm_drafter=_StubDrafter()).build([_evidence(schema)])).proposals[0]
         assert p.content["grain"] == ["order_id"]
         assert p.confidence == 0.6
         assert p.drafted_by is DraftedBy.LLM
@@ -177,10 +177,10 @@ class TestNoPrimaryKey:
 
 
 class TestDeterminism:
-    def test_identical_evidence_yields_identical_proposals(self) -> None:
+    async def test_identical_evidence_yields_identical_proposals(self) -> None:
         schema = _relation_schema(foreign_keys=[_customer_fk()])
-        first = ContextBuilder().build([_evidence(schema)])
-        second = ContextBuilder().build([_evidence(schema)])
+        first = await ContextBuilder().build([_evidence(schema)])
+        second = await ContextBuilder().build([_evidence(schema)])
         assert first.proposals == second.proposals
 
 
@@ -190,9 +190,9 @@ class TestDeterminism:
 
 
 class TestSkipping:
-    def test_unknown_kind_skipped_without_exception(self) -> None:
+    async def test_unknown_kind_skipped_without_exception(self) -> None:
         schema = _relation_schema()
-        result = ContextBuilder().build([_evidence(schema, kind="answer_outcome")])
+        result = await ContextBuilder().build([_evidence(schema, kind="answer_outcome")])
 
         assert result.proposals == []
         assert result.skipped == [
@@ -201,16 +201,16 @@ class TestSkipping:
             )
         ]
 
-    def test_known_kind_without_handler_skipped(self) -> None:
+    async def test_known_kind_without_handler_skipped(self) -> None:
         schema = _relation_schema()
-        result = ContextBuilder().build([_evidence(schema, kind="observed_query")])
+        result = await ContextBuilder().build([_evidence(schema, kind="observed_query")])
         assert result.proposals == []
         assert len(result.skipped) == 1
         assert result.skipped[0].kind == "observed_query"
 
-    def test_mixed_batch_builds_and_skips(self) -> None:
+    async def test_mixed_batch_builds_and_skips(self) -> None:
         schema = _relation_schema()
-        result = ContextBuilder().build(
+        result = await ContextBuilder().build(
             [
                 _evidence(schema),
                 _evidence(schema, kind="doc_evidence"),
@@ -220,8 +220,8 @@ class TestSkipping:
         assert len(result.proposals) == 1
         assert {s.kind for s in result.skipped} == {"doc_evidence", "totally_unknown"}
 
-    def test_empty_evidence_is_empty_result(self) -> None:
-        result = ContextBuilder().build([])
+    async def test_empty_evidence_is_empty_result(self) -> None:
+        result = await ContextBuilder().build([])
         assert result == BuildResult()
 
 
@@ -231,11 +231,11 @@ class TestSkipping:
 
 
 class TestNullLLMDrafter:
-    def test_draft_grain_is_empty_candidate(self) -> None:
-        draft = NullLLMDrafter().draft_grain(_relation_schema(primary_key=[]))
+    async def test_draft_grain_is_empty_candidate(self) -> None:
+        draft = await NullLLMDrafter().draft_grain(_relation_schema(primary_key=[]))
         assert draft.grain == []
         assert draft.confidence == LLM_GRAIN_CONFIDENCE
 
-    def test_draft_joins_is_empty(self) -> None:
+    async def test_draft_joins_is_empty(self) -> None:
         observed: dict[str, Any] = {"joins_observed": [{"a": "b"}]}
-        assert NullLLMDrafter().draft_joins(observed) == []
+        assert await NullLLMDrafter().draft_joins(observed) == []
