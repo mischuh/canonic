@@ -44,17 +44,25 @@ def fake_litellm(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
     a test can override behaviour with :func:`set_fake`.
     """
     captured: dict[str, Any] = {}
-    state: dict[str, Any] = {"content": '{"grain": ["id"]}', "raises": None}
+    state: dict[str, Any] = {"content": '{"grain": ["id"]}', "raises": None, "raises_times": 0}
+    calls: list[dict[str, Any]] = []
 
     async def fake_acompletion(**kwargs: Any) -> SimpleNamespace:
-        captured.clear()
+        # No clear(): the kwargs keys are stable across calls, so update() overwrites them
+        # while preserving the bookkeeping keys (_state, _calls) the fixtures rely on.
         captured.update(kwargs)
-        if state["raises"] is not None:
+        calls.append(dict(kwargs))
+        # Raise for the first ``raises_times`` calls (transient), then succeed; an unbounded
+        # ``raises`` (raises_times == 0 with a set exception) raises on every call.
+        if state["raises"] is not None and (
+            state["raises_times"] == 0 or len(calls) <= state["raises_times"]
+        ):
             raise state["raises"]
         return _response(state["content"])
 
     monkeypatch.setattr(litellm, "acompletion", fake_acompletion)
     captured["_state"] = state
+    captured["_calls"] = calls
     return captured
 
 
@@ -62,9 +70,16 @@ def fake_litellm(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
 def set_fake(fake_litellm: dict[str, Any]) -> Callable[..., None]:
     """Helper to set the fake's canned content or a raised exception."""
 
-    def _set(*, content: str | None = None, raises: BaseException | None = None) -> None:
+    def _set(
+        *,
+        content: str | None = None,
+        raises: BaseException | None = None,
+        raises_times: int = 0,
+    ) -> None:
         if content is not None:
             fake_litellm["_state"]["content"] = content
         fake_litellm["_state"]["raises"] = raises
+        # 0 → raise on every call (unbounded); N → raise for the first N calls, then succeed.
+        fake_litellm["_state"]["raises_times"] = raises_times
 
     return _set
