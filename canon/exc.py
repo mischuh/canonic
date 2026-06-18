@@ -31,6 +31,10 @@ class ErrorCode(StrEnum):
     # Additive contradiction gate for headless strict mode (SPEC-E4 §5.4); does not
     # touch the frozen serving contract.
     CONTRADICTION = "contradiction"
+    # LLM runtime errors (SPEC-E10 §8); structured so E4 callers act programmatically.
+    GENERATION_FAILED = "generation_failed"
+    STRUCTURED_OUTPUT_INVALID = "structured_output_invalid"
+    STRUCTURED_OUTPUT_UNSUPPORTED = "structured_output_unsupported"
 
 
 EXIT_CODES: dict[ErrorCode, int] = {
@@ -47,6 +51,9 @@ EXIT_CODES: dict[ErrorCode, int] = {
     ErrorCode.SCHEMA_MISMATCH: 12,
     ErrorCode.CONNECTION_ERROR: 13,
     ErrorCode.CONTRADICTION: 14,
+    ErrorCode.GENERATION_FAILED: 15,
+    ErrorCode.STRUCTURED_OUTPUT_INVALID: 16,
+    ErrorCode.STRUCTURED_OUTPUT_UNSUPPORTED: 17,
 }
 
 
@@ -154,6 +161,37 @@ class ContradictionsFound(CanonError):
     """Raised by headless ``--strict`` ingest when a run flags any contradiction (E4 §5.4)."""
 
     code = ErrorCode.CONTRADICTION
+
+
+class GenerationError(CanonError):
+    """A generation call failed (provider error, transport, or non-OpenAI-compatible provider).
+
+    The catch-all for the E10 generation runtime (SPEC-E10 §8). No silent model
+    substitution: a failed call surfaces this structured error rather than quietly
+    falling back to a different model.
+    """
+
+    code = ErrorCode.GENERATION_FAILED
+
+
+class StructuredOutputError(CanonError):
+    """The model returned output that does not satisfy the requested JSON schema (SPEC-E10 §2).
+
+    Distinct from :class:`StructuredOutputUnsupported`: here the endpoint accepted the
+    schema-constrained request but produced output that fails validation.
+    """
+
+    code = ErrorCode.STRUCTURED_OUTPUT_INVALID
+
+
+class StructuredOutputUnsupported(CanonError):
+    """The endpoint/model cannot honor JSON-schema-constrained output at all (SPEC-E10 §2).
+
+    Raised when the backend rejects a structured-output request outright, so the caller
+    gets a clear error instead of unparseable prose to scrape (baseline caveat, §7).
+    """
+
+    code = ErrorCode.STRUCTURED_OUTPUT_UNSUPPORTED
 
 
 class CredentialError(CanonError):
