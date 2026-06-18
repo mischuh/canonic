@@ -140,7 +140,7 @@ class IngestionPipeline:
         self, evidence: list[EvidenceItem]
     ) -> tuple[EmissionResult, list[SkippedEvidence]]:
         """Stages 1–4: build → reconcile → validate → emit (no side effects)."""
-        build = self._builder.build(evidence)
+        build = await self._builder.build(evidence)
         report = self._engine.reconcile(build.proposals, DiskAcceptedStore(self._project_root))
         gate = ValidationGate(self._project_root, self._connectors, evidence)
         await gate.validate(build.proposals)  # raises before emit (S8)

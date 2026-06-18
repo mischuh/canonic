@@ -7,6 +7,7 @@ path over a labeled set and writes the per-release baseline doc.
 
 from __future__ import annotations
 
+import asyncio
 import json
 from pathlib import Path
 from typing import Annotated
@@ -64,7 +65,7 @@ def baseline(
 
     named = load_candidates(candidates)
     cases = load_grain_cases(dataset if dataset is not None else default_dataset_path())
-    report = run_baseline(named, cases, task=Task.DRAFT, adherence_floor=adherence_floor)
+    report = asyncio.run(run_baseline(named, cases, task=Task.DRAFT, adherence_floor=adherence_floor))
 
     if get_cli_context(ctx).json_output:
         typer.echo(json.dumps(report.model_dump(mode="json")))
