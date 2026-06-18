@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING, Any
 from pydantic import BaseModel
 
 from canon.ingestion.builder import LLM_GRAIN_CONFIDENCE, GrainDraft
+from canon.runtime.resolver import Task
 
 if TYPE_CHECKING:
     from canon.connectors.base import RelationSchema
@@ -53,7 +54,7 @@ class RuntimeLLMDrafter:
         completion = asyncio.run(
             self._runtime.generate(
                 _grain_prompt(schema),
-                task="draft",
+                task=Task.DRAFT,
                 system=_GRAIN_SYSTEM,
                 response_model=_GrainResponse,
             )

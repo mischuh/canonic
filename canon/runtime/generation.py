@@ -23,7 +23,7 @@ from canon.exc import (
     StructuredOutputUnsupported,
 )
 from canon.runtime.models import Completion
-from canon.runtime.resolver import resolve_model
+from canon.runtime.resolver import Task, resolve_model
 
 if TYPE_CHECKING:
     from pydantic import BaseModel
@@ -36,6 +36,8 @@ __all__ = ["GenerationRuntime"]
 _OPENAI_COMPATIBLE = "openai_compatible"
 #: Placeholder passed to litellm when no key is configured — local servers need none.
 _NO_KEY_PLACEHOLDER = "not-needed"
+#: Default retry budget for transient provider failures (SPEC-E10 §3, S6).
+_DEFAULT_MAX_RETRIES = 2
 
 
 class GenerationRuntime:
@@ -46,7 +48,7 @@ class GenerationRuntime:
     supported, with a clear error when an endpoint cannot honor it.
     """
 
-    def __init__(self, config: LLMConfig) -> None:
+    def __init__(self, config: LLMConfig, *, max_retries: int = _DEFAULT_MAX_RETRIES) -> None:
         if config.provider != _OPENAI_COMPATIBLE:
             # NOTE (#62/#67): other litellm providers are reachable through the same
             # interface; #61 tests only openai_compatible as the first-class path.
@@ -55,6 +57,9 @@ class GenerationRuntime:
                 f"{_OPENAI_COMPATIBLE!r} is the supported path"
             )
         self._config = config
+        # Bounded retries on transient provider failures; total attempts = max_retries + 1.
+        # Injected here (not on LLMConfig, whose shape E1 owns) so it stays testable.
+        self._max_retries = max_retries
         # NOTE (#65): resolved eagerly here; #65 moves resolution to call time and
         # guarantees the value is never logged or written to the event log. A nullable
         # ref is valid — local endpoints typically need no key.
@@ -66,16 +71,22 @@ class GenerationRuntime:
         self,
         prompt: str,
         *,
-        task: str | None = None,
+        task: Task | None = None,
         system: str | None = None,
         response_model: type[BaseModel] | None = None,
         temperature: float = 0.0,
     ) -> Completion:
         """Run one generation call, optionally constrained to a JSON schema.
 
+        The model is resolved from ``task`` once and held across all retry attempts: a
+        transient provider failure is retried on the **same** model up to the configured
+        bound, then surfaced as a structured :class:`GenerationError` — never a quiet switch
+        to a different model (§3, S6). The runtime honors the config it was handed;
+        per-invocation override / flag-vs-config precedence is E1's (§9).
+
         Args:
             prompt: The user message.
-            task: Named task (e.g. ``draft``, ``reconcile``) resolved to a model (§3).
+            task: Named task (``Task.DRAFT``, ``Task.RECONCILE``) resolved to a model (§3).
             system: Optional system message.
             response_model: A pydantic model the response must satisfy. When given, the
                 call requests schema-constrained output and the result is validated into
@@ -85,7 +96,8 @@ class GenerationRuntime:
         Raises:
             StructuredOutputUnsupported: The endpoint cannot honor schema-constrained output.
             StructuredOutputError: The model returned output that fails schema validation.
-            GenerationError: Any other provider/transport failure (no silent fallback).
+            GenerationError: A provider/transport failure persisting past bounded retries
+                (no silent fallback to a different model).
         """
         model_str = f"openai/{resolve_model(self._config, task)}"
         messages: list[dict[str, str]] = []
@@ -93,24 +105,34 @@ class GenerationRuntime:
             messages.append({"role": "system", "content": system})
         messages.append({"role": "user", "content": prompt})
 
-        try:
-            response = await litellm.acompletion(
-                model=model_str,
-                messages=messages,
-                api_base=self._config.base_url,
-                api_key=self._api_key or _NO_KEY_PLACEHOLDER,
-                temperature=temperature,
-                response_format=response_model,
-            )
-        except (UnsupportedParamsError, BadRequestError) as exc:
-            if response_model is not None:
-                raise StructuredOutputUnsupported(
-                    f"endpoint {self._config.base_url!r} (model {model_str!r}) cannot honor "
-                    f"JSON-schema-constrained output: {exc}"
-                ) from exc
-            raise GenerationError(f"generation call to {model_str!r} failed: {exc}") from exc
-        except APIError as exc:
-            raise GenerationError(f"generation call to {model_str!r} failed: {exc}") from exc
+        last_exc: APIError | None = None
+        for _ in range(self._max_retries + 1):
+            try:
+                response = await litellm.acompletion(
+                    model=model_str,
+                    messages=messages,
+                    api_base=self._config.base_url,
+                    api_key=self._api_key or _NO_KEY_PLACEHOLDER,
+                    temperature=temperature,
+                    response_format=response_model,
+                )
+                break
+            except (UnsupportedParamsError, BadRequestError) as exc:
+                # Deterministic rejections — retrying the same request cannot help.
+                if response_model is not None:
+                    raise StructuredOutputUnsupported(
+                        f"endpoint {self._config.base_url!r} (model {model_str!r}) cannot honor "
+                        f"JSON-schema-constrained output: {exc}"
+                    ) from exc
+                raise GenerationError(f"generation call to {model_str!r} failed: {exc}") from exc
+            except APIError as exc:
+                # Transient transport/provider failure — retry on the same model.
+                last_exc = exc
+        else:
+            attempts = self._max_retries + 1
+            raise GenerationError(
+                f"generation call to {model_str!r} failed after {attempts} attempts: {last_exc}"
+            ) from last_exc
 
         content = response.choices[0].message.content or ""
         if response_model is None:

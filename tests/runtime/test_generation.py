@@ -17,6 +17,7 @@ from canon.exc import (
 )
 from canon.runtime.generation import GenerationRuntime
 from canon.runtime.models import Completion
+from canon.runtime.resolver import Task
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -38,7 +39,7 @@ async def test_openai_compatible_request_construction(
     llm_config: LLMConfig, fake_litellm: dict[str, Any]
 ) -> None:
     runtime = GenerationRuntime(llm_config)
-    completion = await runtime.generate("hello", task="draft")
+    completion = await runtime.generate("hello", task=Task.DRAFT)
 
     assert isinstance(completion, Completion)
     # The model is provider-routed via the "openai/" prefix — no per-engine branch.
@@ -53,15 +54,17 @@ async def test_task_override_resolves_to_configured_model(
     llm_config: LLMConfig, fake_litellm: dict[str, Any]
 ) -> None:
     runtime = GenerationRuntime(llm_config)
-    await runtime.generate("hi", task="reconcile")
+    await runtime.generate("hi", task=Task.RECONCILE)
     assert fake_litellm["model"] == "openai/stronger-model"
 
 
-async def test_unmapped_task_falls_back_to_default_model(
+async def test_task_without_override_resolves_to_default_model(
     llm_config: LLMConfig, fake_litellm: dict[str, Any]
 ) -> None:
+    # The fixture only overrides `reconcile`; `draft` has no entry, so it uses the default —
+    # the documented §3 contract, not a silent swap.
     runtime = GenerationRuntime(llm_config)
-    await runtime.generate("hi", task="unknown")
+    await runtime.generate("hi", task=Task.DRAFT)
     assert fake_litellm["model"] == "openai/small-local"
 
 
@@ -130,16 +133,45 @@ async def test_unsupported_structured_output_raises(
     assert err.value.exit_code == 17
 
 
-async def test_provider_failure_raises_generation_error(
-    llm_config: LLMConfig, set_fake: Callable[..., None]
+def _api_error() -> litellm.APIError:
+    return litellm.APIError(status_code=500, message="boom", llm_provider="openai", model="m")
+
+
+async def test_provider_failure_raises_generation_error_after_bounded_retries(
+    llm_config: LLMConfig, fake_litellm: dict[str, Any], set_fake: Callable[..., None]
 ) -> None:
-    set_fake(
-        raises=litellm.APIError(status_code=500, message="boom", llm_provider="openai", model="m")
-    )
-    runtime = GenerationRuntime(llm_config)
+    set_fake(raises=_api_error())  # raises on every call
+    runtime = GenerationRuntime(llm_config, max_retries=1)
     with pytest.raises(GenerationError) as err:
-        await runtime.generate("draft")
+        await runtime.generate("draft", task=Task.RECONCILE)
+
     assert err.value.exit_code == 15
+    # Bounded: exactly max_retries + 1 attempts, all on the same resolved model (no swap).
+    assert len(fake_litellm["_calls"]) == 2
+    assert {c["model"] for c in fake_litellm["_calls"]} == {"openai/stronger-model"}
+
+
+async def test_transient_failure_retried_then_succeeds(
+    llm_config: LLMConfig, fake_litellm: dict[str, Any], set_fake: Callable[..., None]
+) -> None:
+    set_fake(raises=_api_error(), raises_times=2)  # two transient failures, then success
+    runtime = GenerationRuntime(llm_config, max_retries=2)
+    completion = await runtime.generate("draft", task=Task.RECONCILE)
+
+    assert completion.model == "openai/stronger-model"
+    assert len(fake_litellm["_calls"]) == 3
+    assert {c["model"] for c in fake_litellm["_calls"]} == {"openai/stronger-model"}
+
+
+async def test_bad_request_is_not_retried(
+    llm_config: LLMConfig, fake_litellm: dict[str, Any], set_fake: Callable[..., None]
+) -> None:
+    set_fake(raises=litellm.BadRequestError(message="bad", model="m", llm_provider="openai"))
+    runtime = GenerationRuntime(llm_config, max_retries=3)
+    with pytest.raises(GenerationError):
+        await runtime.generate("draft")
+    # Deterministic rejection — surfaced on the first attempt, never retried.
+    assert len(fake_litellm["_calls"]) == 1
 
 
 def test_non_openai_compatible_provider_rejected() -> None:
@@ -169,10 +201,10 @@ async def test_repoint_changes_only_base_url_and_key(
         api_key_ref="env:HOSTED_KEY",
     )
 
-    await GenerationRuntime(local).generate("hi", task="draft")
+    await GenerationRuntime(local).generate("hi", task=Task.DRAFT)
     local_call = {k: v for k, v in fake_litellm.items() if not k.startswith("_")}
 
-    await GenerationRuntime(hosted).generate("hi", task="draft")
+    await GenerationRuntime(hosted).generate("hi", task=Task.DRAFT)
     hosted_call = {k: v for k, v in fake_litellm.items() if not k.startswith("_")}
 
     differing = {k for k in local_call if local_call[k] != hosted_call.get(k)}
