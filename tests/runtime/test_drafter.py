@@ -1,8 +1,4 @@
-"""AC1 — an E4 draft succeeds over openai_compatible with no engine-specific code path.
-
-These are sync tests on purpose: ``RuntimeLLMDrafter`` bridges the sync ``LLMDrafter`` seam
-to the async runtime with ``asyncio.run``, so they must not run inside an event loop.
-"""
+"""AC1 — an E4 draft succeeds over openai_compatible with no engine-specific code path."""
 
 from __future__ import annotations
 
@@ -57,14 +53,14 @@ def _evidence(schema: RelationSchema) -> EvidenceItem:
     )
 
 
-def test_e4_draft_succeeds_over_runtime(
+async def test_e4_draft_succeeds_over_runtime(
     llm_config: LLMConfig, set_fake: Callable[..., None]
 ) -> None:
     set_fake(content='{"grain": ["id"]}')
     drafter = RuntimeLLMDrafter(GenerationRuntime(llm_config))
     builder = ContextBuilder(llm_drafter=drafter)
 
-    result = builder.build([_evidence(_schema_without_pk())])
+    result = await builder.build([_evidence(_schema_without_pk())])
 
     assert len(result.proposals) == 1
     proposal = result.proposals[0]
@@ -73,11 +69,11 @@ def test_e4_draft_succeeds_over_runtime(
     assert proposal.confidence == LLM_GRAIN_CONFIDENCE
 
 
-def test_draft_uses_openai_compatible_path(
+async def test_draft_uses_openai_compatible_path(
     llm_config: LLMConfig, fake_litellm: dict[str, Any]
 ) -> None:
     drafter = RuntimeLLMDrafter(GenerationRuntime(llm_config))
-    ContextBuilder(llm_drafter=drafter).build([_evidence(_schema_without_pk())])
+    await ContextBuilder(llm_drafter=drafter).build([_evidence(_schema_without_pk())])
 
     # The draft task resolves to the default model via the openai-compatible route.
     assert fake_litellm["model"] == "openai/small-local"

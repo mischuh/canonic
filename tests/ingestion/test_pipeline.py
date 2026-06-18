@@ -229,7 +229,7 @@ def _no_pk_schema() -> RelationSchema:
     return _schema(
         "analytics.events",
         [
-            ColumnInfo(name="event_id", type="uuid", nullable=False),
+            ColumnInfo(name="event_id", type="string", nullable=False),
             ColumnInfo(name="user_id", type="int", nullable=False),
             ColumnInfo(name="ts", type="timestamp", nullable=False),
         ],
@@ -286,24 +286,34 @@ async def test_headless_mode_is_byte_identical_across_runs(
     assert len(fake_litellm["_calls"]) == 0
 
 
-async def test_interactive_mode_calls_drafter_for_no_pk_relation(
-    tmp_path: Path, fake_litellm: dict[str, Any]
-) -> None:
-    """Interactive + LLM configured → RuntimeLLMDrafter is used; one model call per no-PK relation."""
-    drafter = make_drafter(_LLM_CONFIG, RuntimeConfig(), headless=False)
+async def test_interactive_mode_calls_drafter_for_no_pk_relation(tmp_path: Path) -> None:
+    """Interactive mode wires the injected drafter; draft_grain is called for a no-PK relation."""
+    from canon.ingestion.builder import GrainDraft
+
+    grain_calls: list[Any] = []
+
+    class SpyDrafter:
+        async def draft_grain(self, schema: Any) -> GrainDraft:
+            grain_calls.append(schema)
+            return GrainDraft(grain=[], confidence=0.5)
+
+        async def draft_joins(self, observed: dict[str, Any]) -> list[dict[str, Any]]:
+            return []
+
     scaffold_project(tmp_path)
     pipeline = IngestionPipeline(
         tmp_path,
         {_CONN: FakeConnector([_no_pk_schema()])},
         ReconcileConfig(),
         headless=False,
-        drafter=drafter,
+        drafter=SpyDrafter(),
     )
     evidence = await evidence_from_introspection(FakeConnector([_no_pk_schema()]), _CONN)
 
     await pipeline.run(evidence)
 
-    assert len(fake_litellm["_calls"]) == 1
+    assert len(grain_calls) == 1
+    assert grain_calls[0].relation == "analytics.events"
 
 
 async def test_no_models_configured_headless_is_deterministic(tmp_path: Path) -> None:

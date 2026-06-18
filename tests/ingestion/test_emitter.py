@@ -341,7 +341,7 @@ class TestDeterminism:
 
 
 class TestPipelineIntegration:
-    def test_build_reconcile_emit_writes_audit_trail(self, tmp_path: Path) -> None:
+    async def test_build_reconcile_emit_writes_audit_trail(self, tmp_path: Path) -> None:
         cols = [
             ColumnInfo(name="order_id", type="int", nullable=False, position=1),
             ColumnInfo(name="amount", type="decimal", nullable=True, position=2),
@@ -366,7 +366,7 @@ class TestPipelineIntegration:
             observed_at="2026-06-15T12:00:00Z",  # type: ignore[arg-type]
         )
 
-        proposals = ContextBuilder().build([evidence]).proposals
+        proposals = (await ContextBuilder().build([evidence])).proposals
         report = ReconciliationEngine().reconcile(proposals, InMemoryAcceptedStore())
         result = DiffEmitter().emit(report)
         AuditTrailWriter.for_project(tmp_path).write([evidence], report)
