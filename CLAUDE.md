@@ -7,6 +7,9 @@
 - Type check: `mypy src/`
 - All checks: `make check`
 
+## Before every commit
+Run `ruff check . && ruff format --check .` and fix any issues before committing — the CI pipeline enforces this and will fail if skipped.
+
 ## Project structure
 - `canon/` — main package code
 - `tests/` — pytest tests (mirrors src/ structure)

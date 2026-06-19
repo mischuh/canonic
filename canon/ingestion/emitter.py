@@ -25,15 +25,14 @@ from typing import TYPE_CHECKING, Any, Protocol
 from pydantic import BaseModel, ConfigDict
 from ruamel.yaml import YAML
 
-from canon.config import LOCAL_STATE_DIR
-from canon.instrumentation.events import DiskAnswerEventLog
-from canon.instrumentation.models import ReconcileDecisionEvent
 from canon.ingestion.models import (
     ProposalOp,
     ReconciliationDecision,
     ReconciliationEntry,
     ReconciliationReport,
 )
+from canon.instrumentation.events import DiskAnswerEventLog
+from canon.instrumentation.models import ReconcileDecisionEvent
 from canon.semantic.models import Provenance  # noqa: TC001 — Pydantic resolves at runtime
 
 if TYPE_CHECKING:

@@ -35,8 +35,7 @@ from canon.ingestion.models import (
 from canon.instrumentation.events import DiskAnswerEventLog
 from canon.instrumentation.models import AnswerEvent, ReconcileDecisionEvent, _sha256_json
 from canon.instrumentation.report import read_events
-from canon.semantic.models import Provenance
-from canon.semantic.models import Column, Dimension, Measure, SemanticSource
+from canon.semantic.models import Column, Dimension, Measure, Provenance, SemanticSource
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -388,7 +387,9 @@ def _reconcile_entry() -> ReconciliationEntry:
         anchored_to=["sha256:abc"],
         drafted_by=DraftedBy.DETERMINISTIC,
     )
-    return ReconciliationEntry(decision=ReconciliationDecision.ADD, target=proposal.target, proposal=proposal)
+    return ReconciliationEntry(
+        decision=ReconciliationDecision.ADD, target=proposal.target, proposal=proposal
+    )
 
 
 def _answer_event() -> AnswerEvent:
