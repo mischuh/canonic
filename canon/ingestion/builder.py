@@ -219,6 +219,7 @@ class ContextBuilder:
             confidence=confidence,
             anchored_to=[schema.source_fingerprint] if schema.source_fingerprint else [],
             drafted_by=drafted_by,
+            acquisition_tier=schema.acquisition_tier,
         )
 
     @staticmethod
@@ -271,6 +272,7 @@ class ContextBuilder:
                     confidence=DETERMINISTIC_CONFIDENCE,
                     anchored_to=[fingerprint] if fingerprint else [],
                     drafted_by=DraftedBy.DETERMINISTIC,
+                    acquisition_tier=item.acquisition_tier,
                 )
             ]
 
@@ -295,6 +297,7 @@ class ContextBuilder:
                     confidence=DETERMINISTIC_CONFIDENCE,
                     anchored_to=[fingerprint] if fingerprint else [],
                     drafted_by=DraftedBy.DETERMINISTIC,
+                    acquisition_tier=item.acquisition_tier,
                 )
             ]
 
