@@ -5,18 +5,16 @@ from __future__ import annotations
 import json
 import math
 from json import JSONDecodeError
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING, Literal, overload
 
 from pydantic import BaseModel, ConfigDict, ValidationError
 
 from canon.config import LOCAL_STATE_DIR
-from canon.instrumentation.events import _EVENTS_FILE
+from canon.instrumentation.events import _EVENTS_FILE, CanonEvent
 from canon.instrumentation.models import AnswerEvent, ReconcileDecisionEvent
 
 if TYPE_CHECKING:
     from pathlib import Path
-
-    from canon.instrumentation.events import CanonEvent
 
 __all__ = ["EventReport", "LatencySummary", "BytesSummary", "read_events", "build_report"]
 
@@ -78,11 +76,39 @@ def _parse_line(line: str) -> CanonEvent | None:
     return None
 
 
+@overload
+def read_events(
+    project_root: Path,
+    last: int | None = ...,
+    *,
+    kind: Literal["served_answer"],
+) -> list[AnswerEvent]: ...
+
+
+@overload
+def read_events(
+    project_root: Path,
+    last: int | None = ...,
+    *,
+    kind: Literal["reconcile_decision"],
+) -> list[ReconcileDecisionEvent]: ...
+
+
+@overload
+def read_events(
+    project_root: Path,
+    last: int | None = ...,
+    *,
+    kind: None = ...,
+) -> list[AnswerEvent | ReconcileDecisionEvent]: ...
+
+
 def read_events(
     project_root: Path,
     last: int | None = None,
+    *,
     kind: Literal["served_answer", "reconcile_decision"] | None = None,
-) -> list[CanonEvent]:
+) -> list[AnswerEvent] | list[ReconcileDecisionEvent] | list[AnswerEvent | ReconcileDecisionEvent]:
     """Read and parse events from the local event log.
 
     Returns an empty list if the log file is missing. Malformed or unknown lines

@@ -8,7 +8,12 @@
 - All checks: `make check`
 
 ## Before every commit
-Run `ruff check . && ruff format --check .` and fix any issues before committing — the CI pipeline enforces this and will fail if skipped.
+Run all three checks and fix any issues before committing — CI enforces all of them:
+```
+ruff check . && ruff format --check .
+mypy canon/
+pytest tests/ -x --tb=short
+```
 
 ## Project structure
 - `canon/` — main package code
