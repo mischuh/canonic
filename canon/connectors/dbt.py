@@ -184,7 +184,9 @@ class DbtConnector:
         manifest = json.loads(self._path.read_text())
         nodes: dict[str, Any] = manifest.get("nodes", {})
         raw_sm = manifest.get("semantic_models", {})
-        semantic_models: list[dict[str, Any]] = list(raw_sm.values()) if isinstance(raw_sm, dict) else list(raw_sm)
+        semantic_models: list[dict[str, Any]] = (
+            list(raw_sm.values()) if isinstance(raw_sm, dict) else list(raw_sm)
+        )
         metrics: dict[str, Any] = manifest.get("metrics", {})
 
         relations: list[RelationSchema] = []
