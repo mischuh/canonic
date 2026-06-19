@@ -8,16 +8,21 @@ every vendor shape out of the engine. Both the full ingest and the fast bootstra
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
+from pydantic import ValidationError
+
 from canon.connectors.base import (
     AcquisitionTier,
     Capability,
+    DefinitionEvidence,
     DefinitionExtractable,
     DocEvidence,
     EvidenceExtractable,
+    RelationSchema,
     SchemaIntrospectable,
     UsageEvidence,
 )
@@ -26,12 +31,33 @@ from canon.ingestion.models import EvidenceItem, EvidenceKind
 if TYPE_CHECKING:
     from canon.connectors.base import ConnectorBase
 
+logger = logging.getLogger(__name__)
+
 __all__ = [
     "evidence_from_definitions",
     "evidence_from_docs",
     "evidence_from_introspection",
     "gather_evidence",
 ]
+
+
+def _revalidate[M](item: Any, model_cls: type[M], source: str) -> M | None:
+    """Re-validate a connector item against its normalized model before it crosses into E4.
+
+    Returns the validated model or None on failure. On failure logs an error with
+    source and native_ref so the drop is always recorded (SPEC-E3 §9 S7-AC1).
+    """
+    try:
+        return model_cls.model_validate(item.model_dump())  # type: ignore[attr-defined,no-any-return]
+    except (ValidationError, AttributeError) as exc:
+        logger.error(
+            "dropping schema-invalid %s from source %r (native_ref=%s): %s",
+            model_cls.__name__,
+            source,
+            getattr(item, "native_ref", "?"),
+            exc,
+        )
+        return None
 
 
 async def evidence_from_introspection(
@@ -46,17 +72,22 @@ async def evidence_from_introspection(
     """
     observed_at = datetime.now(UTC)
     schemas = await connector.introspect_schema()
-    return [
-        EvidenceItem(
-            source=source,
-            kind=EvidenceKind.RELATION_SCHEMA,
-            acquisition_tier=schema.acquisition_tier,
-            payload=schema.model_dump(mode="json"),
-            source_fingerprint=schema.source_fingerprint or "",
-            observed_at=observed_at,
+    result: list[EvidenceItem] = []
+    for schema in schemas:
+        validated = _revalidate(schema, RelationSchema, source)
+        if validated is None:
+            continue
+        result.append(
+            EvidenceItem(
+                source=source,
+                kind=EvidenceKind.RELATION_SCHEMA,
+                acquisition_tier=validated.acquisition_tier,
+                payload=validated.model_dump(mode="json"),
+                source_fingerprint=validated.source_fingerprint or "",
+                observed_at=observed_at,
+            )
         )
-        for schema in schemas
-    ]
+    return result
 
 
 async def evidence_from_definitions(
@@ -73,24 +104,30 @@ async def evidence_from_definitions(
     extract = await connector.extract_definitions()
     items: list[EvidenceItem] = []
     for schema in extract.relations:
+        validated_schema = _revalidate(schema, RelationSchema, source)
+        if validated_schema is None:
+            continue
         items.append(
             EvidenceItem(
                 source=source,
                 kind=EvidenceKind.RELATION_SCHEMA,
-                acquisition_tier=schema.acquisition_tier,
-                payload=schema.model_dump(mode="json"),
-                source_fingerprint=schema.source_fingerprint or "",
+                acquisition_tier=validated_schema.acquisition_tier,
+                payload=validated_schema.model_dump(mode="json"),
+                source_fingerprint=validated_schema.source_fingerprint or "",
                 observed_at=observed_at,
             )
         )
     for defn in extract.definitions:
+        validated_defn = _revalidate(defn, DefinitionEvidence, source)
+        if validated_defn is None:
+            continue
         items.append(
             EvidenceItem(
                 source=source,
                 kind=EvidenceKind.DEFINITION,
                 acquisition_tier=AcquisitionTier.MODELING,
-                payload=defn.model_dump(mode="json"),
-                source_fingerprint=defn.source_fingerprint or "",
+                payload=validated_defn.model_dump(mode="json"),
+                source_fingerprint=validated_defn.source_fingerprint or "",
                 observed_at=observed_at,
             )
         )
@@ -110,26 +147,39 @@ async def evidence_from_docs(connector: EvidenceExtractable, source: str) -> lis
     result: list[EvidenceItem] = []
     for item in items:
         if isinstance(item, UsageEvidence):
+            validated = _revalidate(item, UsageEvidence, source)
+            if validated is None:
+                continue
             result.append(
                 EvidenceItem(
                     source=source,
                     kind=EvidenceKind.USAGE_EVIDENCE,
                     acquisition_tier=AcquisitionTier.QUERY_HISTORY,
-                    payload=item.model_dump(mode="json"),
-                    source_fingerprint=item.source_fingerprint or "",
-                    observed_at=item.observed_at,
+                    payload=validated.model_dump(mode="json"),
+                    source_fingerprint=validated.source_fingerprint or "",
+                    observed_at=validated.observed_at,
                 )
             )
         elif isinstance(item, DocEvidence):
+            validated_doc = _revalidate(item, DocEvidence, source)
+            if validated_doc is None:
+                continue
             result.append(
                 EvidenceItem(
                     source=source,
                     kind=EvidenceKind.DOC_EVIDENCE,
                     acquisition_tier=AcquisitionTier.HAND_AUTHORED,
-                    payload=item.model_dump(mode="json"),
-                    source_fingerprint=item.source_fingerprint or "",
-                    observed_at=item.observed_at,
+                    payload=validated_doc.model_dump(mode="json"),
+                    source_fingerprint=validated_doc.source_fingerprint or "",
+                    observed_at=validated_doc.observed_at,
                 )
+            )
+        else:
+            logger.error(
+                "dropping unknown evidence kind from source %r: type=%s native_ref=%s",
+                source,
+                type(item).__name__,
+                getattr(item, "native_ref", "?"),
             )
     return result
 
