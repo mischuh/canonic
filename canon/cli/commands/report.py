@@ -44,7 +44,7 @@ def report(
     with contextlib.suppress(ConfigError):
         telemetry_enabled = load_config(root / "canon.yaml").telemetry.enabled
 
-    events = read_events(root, last=last)
+    events = read_events(root, last=last, kind="served_answer")
     rep = build_report(events, recent=recent)
 
     if json_output:

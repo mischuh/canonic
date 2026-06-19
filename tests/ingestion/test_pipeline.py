@@ -215,7 +215,7 @@ async def test_dry_run_touches_no_file(tmp_path: Path) -> None:
 
     assert {d.op for d in result.emission.diffs} == {ProposalOp.ADD}  # would-be adds
     assert not list((tmp_path / "raw-sources").rglob("*.jsonl"))
-    assert not (tmp_path / LOCAL_STATE_DIR / "ingest-events.jsonl").exists()
+    assert not (tmp_path / LOCAL_STATE_DIR / "events.jsonl").exists()
     assert not (tmp_path / "semantics" / _CONN).exists()
 
 

@@ -270,10 +270,12 @@ class TestEventLog:
             _entry(ReconciliationDecision.NO_OP),
         )
         DiskEventLog(tmp_path).append(report.entries)
-        log = (tmp_path / ".canon" / "ingest-events.jsonl").read_text()
+        log = (tmp_path / ".canon" / "events.jsonl").read_text()
         events = [json.loads(line) for line in log.splitlines()]
         assert len(events) == 2
         add_event = events[0]
+        assert add_event["kind"] == "reconcile_decision"
+        assert add_event["ts"]
         assert add_event["decision"] == "add"
         assert add_event["provenance"] == "inferred"
         assert add_event["confidence"] == 1.0
@@ -283,7 +285,7 @@ class TestEventLog:
         log = DiskEventLog(tmp_path)
         log.append(_report(_entry(ReconciliationDecision.ADD)).entries)
         log.append(_report(_entry(ReconciliationDecision.EDIT)).entries)
-        text = (tmp_path / ".canon" / "ingest-events.jsonl").read_text()
+        text = (tmp_path / ".canon" / "events.jsonl").read_text()
         assert len(text.splitlines()) == 2
 
 
@@ -380,5 +382,7 @@ class TestPipelineIntegration:
         snap_fps = {json.loads(line)["source_fingerprint"] for line in snapshot.splitlines()}
         assert fingerprint in snap_fps
 
-        events = (tmp_path / ".canon" / "ingest-events.jsonl").read_text().splitlines()
-        assert json.loads(events[0])["decision"] == "add"
+        events = (tmp_path / ".canon" / "events.jsonl").read_text().splitlines()
+        ev = json.loads(events[0])
+        assert ev["kind"] == "reconcile_decision"
+        assert ev["decision"] == "add"

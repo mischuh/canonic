@@ -34,7 +34,7 @@ def status(ctx: typer.Context) -> None:
 
     dotcanon_present = (root / ".canon").is_dir()
 
-    events = read_events(root)
+    events = read_events(root, kind="served_answer")
     rep = build_report(events)
     error_count = rep.count - rep.error_distribution.get("ok", 0)
     latency_p95: int | None = rep.latency.p95_ms if rep.latency is not None else None

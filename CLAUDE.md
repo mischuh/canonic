@@ -7,6 +7,14 @@
 - Type check: `mypy src/`
 - All checks: `make check`
 
+## Before every commit
+Run all three checks and fix any issues before committing — CI enforces all of them:
+```
+ruff check . && ruff format --check .
+mypy canon/
+pytest tests/ -x --tb=short
+```
+
 ## Project structure
 - `canon/` — main package code
 - `tests/` — pytest tests (mirrors src/ structure)
