@@ -438,3 +438,19 @@ def test_s4_read_events_kind_filter(tmp_path: Path) -> None:
     reconcile = read_events(tmp_path, kind="reconcile_decision")
     assert len(reconcile) == 1
     assert all(e.kind == "reconcile_decision" for e in reconcile)
+
+
+def test_s5_logging_works_under_air_gapped(tmp_path: Path) -> None:
+    """AC1 (GH-81) — local event logging is unaffected when runtime.air_gapped is true.
+
+    The event log is pure local I/O; the air-gapped flag only blocks telemetry egress,
+    not the write to .canon/events.jsonl.
+    """
+    log = DiskAnswerEventLog(tmp_path)
+    log.append(_answer_event())
+
+    log_path = tmp_path / ".canon" / "events.jsonl"
+    assert log_path.exists(), "events.jsonl must be written regardless of air-gapped mode"
+    lines = log_path.read_text().splitlines()
+    assert len(lines) == 1
+    assert json.loads(lines[0])["kind"] == "served_answer"
