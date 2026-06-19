@@ -1,0 +1,118 @@
+{
+  "metadata": {
+    "dbt_schema_version": "https://schemas.getdbt.com/dbt/manifest/v11.json",
+    "dbt_version": "1.7.0",
+    "generated_at": "2026-06-01T00:00:00.000000Z",
+    "invocation_id": "abc123"
+  },
+  "nodes": {
+    "model.analytics.fct_orders": {
+      "unique_id": "model.analytics.fct_orders",
+      "resource_type": "model",
+      "name": "fct_orders",
+      "schema": "analytics",
+      "alias": "fct_orders",
+      "database": null,
+      "description": "One row per order.",
+      "config": {"materialized": "table"},
+      "primary_key": ["order_id"],
+      "columns": {
+        "order_id": {"name": "order_id", "data_type": "bigint", "constraints": []},
+        "customer_id": {"name": "customer_id", "data_type": "integer", "constraints": []},
+        "amount": {"name": "amount", "data_type": "numeric", "constraints": []},
+        "order_date": {"name": "order_date", "data_type": "date", "constraints": []},
+        "geom": {"name": "geom", "data_type": "geometry", "constraints": []}
+      }
+    },
+    "model.analytics.dim_customers": {
+      "unique_id": "model.analytics.dim_customers",
+      "resource_type": "model",
+      "name": "dim_customers",
+      "schema": "analytics",
+      "alias": "dim_customers",
+      "database": null,
+      "description": "Customer dimension.",
+      "config": {"materialized": "table"},
+      "columns": {
+        "customer_id": {
+          "name": "customer_id",
+          "data_type": "integer",
+          "constraints": [{"type": "primary_key"}]
+        },
+        "name": {"name": "name", "data_type": "text", "constraints": []}
+      }
+    },
+    "test.analytics.not_null": {
+      "unique_id": "test.analytics.not_null",
+      "resource_type": "test",
+      "name": "not_null_fct_orders_order_id",
+      "schema": "analytics"
+    }
+  },
+  "semantic_models": {
+    "semantic_model.analytics.orders": {
+      "unique_id": "semantic_model.analytics.orders",
+      "name": "orders",
+      "description": "Orders semantic model.",
+      "model": {"ref_name": "analytics.fct_orders"},
+      "entities": [
+        {"name": "order_id", "type": "primary", "expr": "order_id"},
+        {"name": "customer_id", "type": "foreign", "expr": "customer_id"}
+      ],
+      "measures": [
+        {
+          "name": "total_revenue",
+          "agg": "sum",
+          "expr": "amount",
+          "non_additive_dimension": null
+        },
+        {
+          "name": "unique_customers",
+          "agg": "count_distinct",
+          "expr": "customer_id",
+          "non_additive_dimension": null
+        },
+        {
+          "name": "avg_order_value",
+          "agg": "average",
+          "expr": "amount",
+          "non_additive_dimension": null
+        },
+        {
+          "name": "active_customers",
+          "agg": "hyperloglog",
+          "expr": "customer_id",
+          "non_additive_dimension": null
+        },
+        {
+          "name": "balance",
+          "agg": "sum",
+          "expr": "amount",
+          "non_additive_dimension": {"name": "order_date", "window_choice": "max"}
+        }
+      ],
+      "dimensions": [
+        {"name": "order_date", "type": "time", "expr": "order_date"},
+        {"name": "status", "type": "categorical", "expr": "status"}
+      ]
+    }
+  },
+  "metrics": {
+    "metric.analytics.revenue": {
+      "unique_id": "metric.analytics.revenue",
+      "name": "revenue",
+      "description": "Total revenue.",
+      "type": "simple",
+      "type_params": {
+        "measure": {"name": "total_revenue"}
+      }
+    },
+    "metric.analytics.revenue_ratio": {
+      "unique_id": "metric.analytics.revenue_ratio",
+      "name": "revenue_ratio",
+      "description": "Ratio metric.",
+      "type": "ratio",
+      "type_params": {}
+    }
+  }
+}

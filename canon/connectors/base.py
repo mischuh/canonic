@@ -12,6 +12,10 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict
 
 from canon.exc import CanonError, ConnectionError, ReadOnlyViolation, SchemaMismatch
+from canon.semantic.models import (
+    Additivity,  # noqa: TC001 — Pydantic resolves field annotations at runtime
+    Relationship,  # noqa: TC001 — Pydantic resolves field annotations at runtime
+)
 
 __all__ = [
     "AcquisitionTier",
@@ -20,9 +24,13 @@ __all__ = [
     "ColumnInfo",
     "ConnectorBase",
     "ConnectionError",
+    "DefinitionEntityType",
+    "DefinitionEvidence",
+    "DefinitionExtract",
     "ForeignKey",
     "ForeignKeyRef",
     "Health",
+    "JoinSpec",
     "ObservedQuery",
     "ReadOnlyViolation",
     "RelationSchema",
@@ -41,6 +49,7 @@ class Capability(StrEnum):
     RUN_READ_ONLY_SQL = "run_read_only_sql"
     TEST_CONNECTION = "test_connection"
     CAPABILITIES = "capabilities"
+    EXTRACT_DEFINITIONS = "extract_definitions"
 
 
 class AcquisitionTier(StrEnum):
@@ -158,6 +167,60 @@ def compute_fingerprint(
     return f"sha256:{digest}"
 
 
+class DefinitionEntityType(StrEnum):
+    """The kind of semantic entity a DefinitionEvidence record describes (SPEC-E3 §3.1)."""
+
+    MEASURE = "measure"
+    DIMENSION = "dimension"
+    MODEL = "model"
+    JOIN = "join"
+    ENTITY = "entity"
+
+
+class JoinSpec(BaseModel):
+    """One side of a join relationship within a DefinitionEvidence record."""
+
+    model_config = ConfigDict(frozen=True)
+
+    left: str
+    right: str
+    relationship: Relationship
+
+
+class DefinitionEvidence(BaseModel):
+    """Normalized definition evidence from a definition connector (SPEC-E3 §3.1).
+
+    Carries the semantic intent of a modeling artifact (measure, join, model, etc.)
+    in Canon's normalized shape so no vendor-specific structure reaches E4.
+    ``native_ref`` is the vendor back-pointer (e.g. dbt ``unique_id``) for provenance.
+    ``additivity=None`` encodes the spec's ``unknown`` value for unrecognized aggregations.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    source: str
+    entity: str
+    entity_type: DefinitionEntityType
+    expr: str | None = None
+    additivity: Additivity | None = None
+    references: list[str] = []
+    grain: list[str] = []
+    joins: list[JoinSpec] = []
+    description: str | None = None
+    native_ref: str
+    acquisition_tier: AcquisitionTier
+    source_fingerprint: str | None = None
+
+
+class DefinitionExtract(BaseModel):
+    """The combined output of extract_definitions() — schemas and definitions (SPEC-E3 §2)."""
+
+    model_config = ConfigDict(frozen=True)
+
+    relations: list[RelationSchema] = []
+    definitions: list[DefinitionEvidence] = []
+
+
 class ConnectorBase(ABC):
     """Abstract base class for all Canon connectors.
 
@@ -195,6 +258,15 @@ class ConnectorBase(ABC):
         catalog introspection is blocked.
         """
         raise NotImplementedError(f"{type(self).__name__} does not support describe_relation")
+
+    async def extract_definitions(self) -> DefinitionExtract:
+        """Extract normalized definition evidence from this source (SPEC-E3 §2, §4).
+
+        Returns a :class:`DefinitionExtract` with both relation schemas (tier 2) and
+        definition evidence records. Definition connectors implement this; primary
+        connectors (E2) do not.
+        """
+        raise NotImplementedError(f"{type(self).__name__} does not support extract_definitions")
 
     async def aclose(self) -> None:  # noqa: B027 — intentional no-op default; stateful subclasses override
         """Release any held resources (connection pools, sockets).
