@@ -119,7 +119,9 @@ class Proposal(BaseModel):
     ``provenance`` defaults to ``INFERRED`` because all new evidence enters at the
     lowest tier; the reconciliation engine enforces that it can never overwrite a
     higher tier (§5.1).  ``confidence`` is bounded [0, 1] and drives the
-    propose-vs-auto-apply decision (§5.5).
+    propose-vs-auto-apply decision (§5.5).  ``acquisition_tier`` carries the curation
+    rank of the originating evidence so the engine can prefer modeling-tier evidence
+    over raw introspection within the inferred provenance band (SPEC-E3 §7, S6).
     """
 
     model_config = ConfigDict(frozen=True)
@@ -131,6 +133,7 @@ class Proposal(BaseModel):
     confidence: float = Field(ge=0.0, le=1.0)
     anchored_to: list[str] = []
     drafted_by: DraftedBy = DraftedBy.DETERMINISTIC
+    acquisition_tier: AcquisitionTier = AcquisitionTier.LIVE
 
 
 class ReconciliationEntry(BaseModel):

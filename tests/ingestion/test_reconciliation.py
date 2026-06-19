@@ -35,6 +35,7 @@ def _proposal(
     provenance: Provenance = Provenance.INFERRED,
     confidence: float = 1.0,
     content: dict[str, Any] | None = None,
+    tier: AcquisitionTier = AcquisitionTier.LIVE,
 ) -> Proposal:
     base: dict[str, Any] = {
         "name": "orders",
@@ -52,6 +53,7 @@ def _proposal(
         provenance=provenance,
         confidence=confidence,
         anchored_to=[fingerprint],
+        acquisition_tier=tier,
     )
 
 
@@ -349,3 +351,162 @@ class TestBuilderIntegration:
         )
         rerun = ReconciliationEngine().reconcile(proposals, _store(accepted))
         assert [e.decision for e in rerun.entries] == [ReconciliationDecision.NO_OP]
+
+
+# ---------------------------------------------------------------------------
+# Modeling-tier preference (SPEC-E3 §7, S6)
+# ---------------------------------------------------------------------------
+
+_COLS_DECIMAL = [{"name": "amount", "type": "decimal", "nullable": True}]
+_COLS_INT = [{"name": "amount", "type": "int", "nullable": True}]
+
+
+class TestModelingTierPreference:
+    def test_modeling_wins_over_live_when_no_type_conflict(self) -> None:
+        """AC1 default — modeling-tier evidence is preferred when column types agree."""
+        modeling = _proposal(
+            fingerprint="sha256:modeling",
+            tier=AcquisitionTier.MODELING,
+            content={"columns": _COLS_DECIMAL, "description": "curated"},
+        )
+        live = _proposal(
+            fingerprint="sha256:live",
+            tier=AcquisitionTier.LIVE,
+            content={"columns": _COLS_DECIMAL},
+        )
+        report = ReconciliationEngine().reconcile([modeling, live], _store())
+        assert len(report.entries) == 1
+        entry = report.entries[0]
+        assert entry.decision is ReconciliationDecision.ADD
+        assert entry.proposal.acquisition_tier is AcquisitionTier.MODELING
+
+    def test_type_conflict_flags_contradiction_with_both_tiers(self) -> None:
+        """AC1 conflict — a genuine column-type disagreement surfaces as a contradiction."""
+        modeling = _proposal(
+            fingerprint="sha256:modeling",
+            tier=AcquisitionTier.MODELING,
+            content={"columns": _COLS_DECIMAL},
+        )
+        live = _proposal(
+            fingerprint="sha256:live",
+            tier=AcquisitionTier.LIVE,
+            content={"columns": _COLS_INT},
+        )
+        report = ReconciliationEngine().reconcile([modeling, live], _store())
+        assert len(report.entries) == 2
+        assert all(e.decision is ReconciliationDecision.CONTRADICTION for e in report.entries)
+        tiers = {e.proposal.acquisition_tier for e in report.entries}
+        assert tiers == {AcquisitionTier.MODELING, AcquisitionTier.LIVE}
+
+    def test_type_conflict_recommended_action_names_tiers(self) -> None:
+        """Type-conflict contradiction message distinguishes modeling vs introspection."""
+        modeling = _proposal(
+            fingerprint="sha256:modeling",
+            tier=AcquisitionTier.MODELING,
+            content={"columns": _COLS_DECIMAL},
+        )
+        live = _proposal(
+            fingerprint="sha256:live",
+            tier=AcquisitionTier.LIVE,
+            content={"columns": _COLS_INT},
+        )
+        report = ReconciliationEngine().reconcile([modeling, live], _store())
+        action = report.entries[0].recommended_action or ""
+        assert "modeling" in action
+        assert "introspection" in action
+
+    def test_provenance_boundary_modeling_never_overwrites_curated(self) -> None:
+        """Provenance boundary — modeling (inferred) never replaces a human_curated fact."""
+        modeling = _proposal(
+            fingerprint="sha256:modeling",
+            tier=AcquisitionTier.MODELING,
+            content={"columns": _COLS_DECIMAL},
+        )
+        live = _proposal(
+            fingerprint="sha256:live",
+            tier=AcquisitionTier.LIVE,
+            content={"columns": _COLS_DECIMAL},
+        )
+        curated = _existing(provenance=Provenance.HUMAN_CURATED, fingerprint="sha256:curated")
+        report = ReconciliationEngine().reconcile([modeling, live], _store(curated))
+        assert len(report.entries) == 1
+        assert report.entries[0].decision is ReconciliationDecision.CONTRADICTION
+        assert report.entries[0].existing_provenance is Provenance.HUMAN_CURATED
+
+    def test_two_live_proposals_still_contradict(self) -> None:
+        """S4 guard — two equal-rank proposals with different signatures still contradict."""
+        live_a = _proposal(
+            fingerprint="sha256:a",
+            tier=AcquisitionTier.LIVE,
+            content={"columns": _COLS_DECIMAL},
+        )
+        live_b = _proposal(
+            fingerprint="sha256:b",
+            tier=AcquisitionTier.LIVE,
+            content={"columns": _COLS_INT},
+        )
+        report = ReconciliationEngine().reconcile([live_a, live_b], _store())
+        assert len(report.entries) == 2
+        assert all(e.decision is ReconciliationDecision.CONTRADICTION for e in report.entries)
+
+    def test_two_modeling_proposals_disagree_contradict(self) -> None:
+        """Two modeling-tier proposals with different types are a tie at top rank → contradiction."""
+        modeling_a = _proposal(
+            fingerprint="sha256:a",
+            tier=AcquisitionTier.MODELING,
+            content={"columns": _COLS_DECIMAL},
+        )
+        modeling_b = _proposal(
+            fingerprint="sha256:b",
+            tier=AcquisitionTier.MODELING,
+            content={"columns": _COLS_INT},
+        )
+        report = ReconciliationEngine().reconcile([modeling_a, modeling_b], _store())
+        assert len(report.entries) == 2
+        assert all(e.decision is ReconciliationDecision.CONTRADICTION for e in report.entries)
+
+    async def test_builder_propagates_modeling_tier_end_to_end(self) -> None:
+        """End-to-end: builder propagates MODELING tier and it wins over a LIVE proposal."""
+        cols = [ColumnInfo(name="order_id", type="int", nullable=False, position=1)]
+        modeling_schema = RelationSchema(
+            connection="warehouse_pg",
+            relation="analytics.orders",
+            kind="table",
+            columns=cols,
+            primary_key=["order_id"],
+            foreign_keys=[],
+            acquisition_tier=AcquisitionTier.MODELING,
+            source_fingerprint=compute_fingerprint(cols, ["order_id"], []),
+        )
+        live_schema = RelationSchema(
+            connection="warehouse_pg",
+            relation="analytics.orders",
+            kind="table",
+            columns=cols,
+            primary_key=["order_id"],
+            foreign_keys=[],
+            acquisition_tier=AcquisitionTier.LIVE,
+            source_fingerprint="sha256:live-fp",
+        )
+        modeling_item = EvidenceItem(
+            source="warehouse_pg",
+            kind="relation_schema",
+            acquisition_tier=AcquisitionTier.MODELING,
+            payload=modeling_schema.model_dump(mode="json"),
+            source_fingerprint=modeling_schema.source_fingerprint or "sha256:none",
+            observed_at="2026-06-15T12:00:00Z",  # type: ignore[arg-type]
+        )
+        live_item = EvidenceItem(
+            source="warehouse_pg",
+            kind="relation_schema",
+            acquisition_tier=AcquisitionTier.LIVE,
+            payload=live_schema.model_dump(mode="json"),
+            source_fingerprint="sha256:live-fp",
+            observed_at="2026-06-15T12:00:00Z",  # type: ignore[arg-type]
+        )
+        proposals = (await ContextBuilder().build([modeling_item, live_item])).proposals
+        assert all(p.target == "semantics/warehouse_pg/orders.yaml" for p in proposals)
+        report = ReconciliationEngine().reconcile(proposals, _store())
+        assert len(report.entries) == 1
+        assert report.entries[0].decision is ReconciliationDecision.ADD
+        assert report.entries[0].proposal.acquisition_tier is AcquisitionTier.MODELING

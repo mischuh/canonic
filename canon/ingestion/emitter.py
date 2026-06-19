@@ -25,6 +25,7 @@ from typing import TYPE_CHECKING, Any, Protocol
 from pydantic import BaseModel, ConfigDict
 from ruamel.yaml import YAML
 
+from canon.connectors.base import AcquisitionTier  # noqa: TC001 — Pydantic resolves at runtime
 from canon.ingestion.models import (
     ProposalOp,
     ReconciliationDecision,
@@ -123,7 +124,8 @@ class ContradictionNote(BaseModel):
 
     Rides alongside the diff set (a PR comment in headless mode) for a human to resolve;
     both sides are recorded so neither silently wins (S4). ``existing_frozen`` marks that the
-    conflict was driven by a frozen fact (S3).
+    conflict was driven by a frozen fact (S3). ``incoming_tier`` carries the acquisition-tier
+    of the incoming proposal so both tiers are visible in type-conflict notes (SPEC-E3 §7, S6).
     """
 
     model_config = ConfigDict(frozen=True)
@@ -132,6 +134,7 @@ class ContradictionNote(BaseModel):
     recommended_action: str | None = None
     incoming: dict[str, Any]
     incoming_provenance: Provenance
+    incoming_tier: AcquisitionTier
     existing: dict[str, Any] | None = None
     existing_provenance: Provenance | None = None
     existing_frozen: bool = False
@@ -198,7 +201,10 @@ class EmissionResult(BaseModel):
             existing = note.existing_provenance.value if note.existing_provenance else "—"
             frozen = " (frozen)" if note.existing_frozen else ""
             lines.append(f"### `{note.target}`{frozen}")
-            lines.append(f"- existing: {existing}, incoming: {note.incoming_provenance.value}")
+            lines.append(
+                f"- existing: {existing},"
+                f" incoming: {note.incoming_provenance.value} (tier: {note.incoming_tier.value})"
+            )
             lines.append(f"- recommended action: {note.recommended_action or '—'}")
             lines.append("")
         return lines
@@ -280,6 +286,7 @@ class DiffEmitter:
             recommended_action=entry.recommended_action,
             incoming=entry.proposal.content,
             incoming_provenance=entry.proposal.provenance,
+            incoming_tier=entry.proposal.acquisition_tier,
             existing=entry.existing,
             existing_provenance=entry.existing_provenance,
             existing_frozen=entry.existing_frozen,

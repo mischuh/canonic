@@ -235,6 +235,44 @@ class TestContradictionNotes:
         # The same block is embedded in the full markdown body.
         assert block.strip() in result.render_markdown()
 
+    def test_contradiction_note_carries_incoming_tier(self) -> None:
+        """SPEC-E3 §7, S6 — ContradictionNote exposes the incoming acquisition tier."""
+        proposal = Proposal(
+            target=_TARGET,
+            op=ProposalOp.ADD,
+            content={"name": "orders"},
+            provenance=Provenance.INFERRED,
+            confidence=1.0,
+            acquisition_tier=AcquisitionTier.MODELING,
+        )
+        entry = _entry(
+            ReconciliationDecision.CONTRADICTION,
+            proposal=proposal,
+            existing={"name": "orders"},
+            existing_provenance=Provenance.HUMAN_CURATED,
+        )
+        note = DiffEmitter().emit(_report(entry)).notes[0]
+        assert note.incoming_tier is AcquisitionTier.MODELING
+
+    def test_contradiction_markdown_includes_tier(self) -> None:
+        """Rendered contradiction block shows the incoming tier so both sides are visible."""
+        proposal = Proposal(
+            target=_TARGET,
+            op=ProposalOp.ADD,
+            content={"name": "orders"},
+            provenance=Provenance.INFERRED,
+            confidence=1.0,
+            acquisition_tier=AcquisitionTier.MODELING,
+        )
+        entry = _entry(
+            ReconciliationDecision.CONTRADICTION,
+            proposal=proposal,
+            existing={"name": "orders"},
+            existing_provenance=Provenance.INFERRED,
+        )
+        block = DiffEmitter().emit(_report(entry)).render_contradictions()
+        assert "modeling" in block
+
 
 # ---------------------------------------------------------------------------
 # Scan snapshot (S7-AC1)

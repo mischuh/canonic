@@ -18,6 +18,7 @@ from typing import TYPE_CHECKING, Any, Protocol
 from pydantic import BaseModel, ConfigDict
 
 from canon.config import ReconcileConfig
+from canon.connectors.base import AcquisitionTier
 from canon.contracts.loader import load_metric_bindings
 from canon.ingestion.builder import _DA_SENTINEL
 from canon.ingestion.models import (
@@ -55,6 +56,51 @@ _TIER_ORDER: dict[Provenance, int] = {
 def _tier(provenance: Provenance) -> int:
     """Numeric authority rank for a provenance tier (SPEC-E4 §5.1)."""
     return _TIER_ORDER[provenance]
+
+
+# Curation rank within the inferred provenance band (SPEC-E3 §7, S6).
+# MODELING (dbt/LookML) is better-curated than raw introspection; all other tiers rank
+# equally so any disagreement among them still surfaces as a contradiction (S4).
+_CURATION_RANK: dict[AcquisitionTier, int] = {
+    AcquisitionTier.LIVE: 0,
+    AcquisitionTier.QUERY_HISTORY: 0,
+    AcquisitionTier.DECLARATIVE: 0,
+    AcquisitionTier.SAMPLE: 0,
+    AcquisitionTier.HAND_AUTHORED: 0,
+    AcquisitionTier.MODELING: 1,
+}
+
+
+def _curation_rank(tier: AcquisitionTier) -> int:
+    """Numeric curation rank for an acquisition tier within the inferred band (SPEC-E3 §7)."""
+    return _CURATION_RANK.get(tier, 0)
+
+
+def _column_types(content: dict[str, Any]) -> dict[str, str]:
+    """Extract column-name → normalized-type from a proposal's content dict."""
+    cols = content.get("columns")
+    if not isinstance(cols, list):
+        return {}
+    return {
+        c["name"]: c["type"] for c in cols if isinstance(c, dict) and "name" in c and "type" in c
+    }
+
+
+def _has_type_conflict(winner: Proposal, others: list[Proposal]) -> bool:
+    """True if any lower-tier proposal disagrees on a column type with the winner.
+
+    Missing or extra columns are not type conflicts — only same-name/different-type
+    divergence triggers a contradiction (mirrors acquisition.TypeConflict semantics).
+    """
+    winner_types = _column_types(winner.content)
+    if not winner_types:
+        return False
+    for other in others:
+        other_types = _column_types(other.content)
+        for col, typ in other_types.items():
+            if col in winner_types and winner_types[col] != typ:
+                return True
+    return False
 
 
 class ExistingFact(BaseModel):
@@ -198,7 +244,7 @@ class ReconciliationEngine:
 
         for target, group in groups.items():
             if len({_signature(p) for p in group}) > 1:
-                entries.extend(self._contradicting_sources(target, group))
+                entries.extend(self._resolve_group(target, group, accepted))
             else:
                 entries.append(self._reconcile_one(group[0], accepted.get(target)))
 
@@ -220,10 +266,41 @@ class ReconciliationEngine:
             groups.setdefault(proposal.target, []).append(proposal)
         return groups
 
+    def _resolve_group(
+        self, target: str, group: list[Proposal], accepted: AcceptedStore
+    ) -> list[ReconciliationEntry]:
+        """Resolve a disagreeing group using tier preference (SPEC-E3 §7, S6).
+
+        If a single modeling-tier proposal unambiguously wins over all lower-tier ones
+        and there is no column-type conflict, it is passed to the normal decision table.
+        Any genuine type conflict, or a tie at the top rank, falls back to contradiction
+        so neither side silently wins (S4).
+
+        Provenance boundary: the winning proposal still carries ``provenance=INFERRED``
+        and runs through ``_reconcile_one``, where the existing tier check (§5.1) prevents
+        it from overwriting any ``human_curated`` or ``board_approved`` fact.
+        """
+        max_rank = max(_curation_rank(p.acquisition_tier) for p in group)
+        winners = [p for p in group if _curation_rank(p.acquisition_tier) == max_rank]
+        losers = [p for p in group if _curation_rank(p.acquisition_tier) < max_rank]
+
+        if losers and len({_signature(p) for p in winners}) == 1:
+            winner = winners[0]
+            if not _has_type_conflict(winner, losers):
+                return [self._reconcile_one(winner, accepted.get(target))]
+            action = f"modeling and introspection disagree on column types for {target}; resolve manually"
+        else:
+            action = f"multiple sources disagree on {target}; resolve manually"
+
+        return self._contradicting_sources(target, group, action)
+
     @staticmethod
-    def _contradicting_sources(target: str, group: list[Proposal]) -> list[ReconciliationEntry]:
+    def _contradicting_sources(
+        target: str, group: list[Proposal], action: str | None = None
+    ) -> list[ReconciliationEntry]:
         """Flag every side of an intra-run disagreement so none silently wins (§5.4 / S4)."""
-        action = f"multiple sources disagree on {target}; resolve manually"
+        if action is None:
+            action = f"multiple sources disagree on {target}; resolve manually"
         return [
             ReconciliationEntry(
                 decision=ReconciliationDecision.CONTRADICTION,

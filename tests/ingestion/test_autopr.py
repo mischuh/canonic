@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
+from canon.connectors.base import AcquisitionTier
 from canon.exc import CanonError
 from canon.ingestion.autopr import AutoPRPublisher, SubprocessPublisher
 from canon.ingestion.emitter import ContradictionNote, DiffFormat, EmissionResult, EmittedDiff
@@ -98,6 +99,7 @@ async def test_publish_posts_contradiction_comment(tmp_path: Path) -> None:
         target="semantics/c/a.yaml",
         incoming={"x": 1},
         incoming_provenance=Provenance.INFERRED,
+        incoming_tier=AcquisitionTier.LIVE,
         existing_provenance=Provenance.HUMAN_CURATED,
     )
     result = _result([_diff("semantics/c/b.yaml", ProposalOp.ADD, "name: b\n")], notes=[note])
