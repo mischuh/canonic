@@ -27,6 +27,7 @@ __all__ = [
     "DefinitionEntityType",
     "DefinitionEvidence",
     "DefinitionExtract",
+    "DocEvidence",
     "ForeignKey",
     "ForeignKeyRef",
     "Health",
@@ -37,6 +38,7 @@ __all__ = [
     "ResultColumn",
     "ResultSet",
     "SchemaMismatch",
+    "UsageHint",
     "compute_fingerprint",
 ]
 
@@ -50,6 +52,7 @@ class Capability(StrEnum):
     TEST_CONNECTION = "test_connection"
     CAPABILITIES = "capabilities"
     EXTRACT_DEFINITIONS = "extract_definitions"
+    EXTRACT_EVIDENCE = "extract_evidence"
 
 
 class AcquisitionTier(StrEnum):
@@ -221,6 +224,43 @@ class DefinitionExtract(BaseModel):
     definitions: list[DefinitionEvidence] = []
 
 
+class UsageHint(StrEnum):
+    """How a doc-evidence page should be used by E6 (SPEC-E3 §3.2, §5).
+
+    Values intentionally mirror ``canon.knowledge.models.UsageMode`` so E6 maps
+    ``usage_hint`` → ``usage_mode`` 1:1 without a round-trip through connectors.
+    The two enums are kept parallel (not imported from each other) to preserve the
+    correct dependency direction: knowledge → connectors is not allowed.
+    """
+
+    REFERENCE = "reference"
+    CAVEAT = "caveat"
+    POLICY = "policy"
+    DEFINITION = "definition"
+
+
+class DocEvidence(BaseModel):
+    """Normalized prose evidence from an evidence connector (SPEC-E3 §3.2, §5).
+
+    ``usage_hint`` maps to E6 ``usage_mode`` so a caveat in Notion becomes a
+    ``caveat`` knowledge page.  ``topic_refs`` are *candidates* — unresolved ones
+    are surfaced for review on write (E6 §3.1), never written as broken refs.
+    ``native_ref`` carries the vendor back-pointer for provenance (e.g. ``notion:page:<id>``).
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    source: str
+    kind: Literal["doc_evidence"] = "doc_evidence"
+    title: str
+    body: str
+    topic_refs: list[str] = []
+    usage_hint: UsageHint
+    native_ref: str
+    source_fingerprint: str | None = None
+    observed_at: datetime
+
+
 class ConnectorBase(ABC):
     """Abstract base class for all Canon connectors.
 
@@ -267,6 +307,14 @@ class ConnectorBase(ABC):
         connectors (E2) do not.
         """
         raise NotImplementedError(f"{type(self).__name__} does not support extract_definitions")
+
+    async def extract_evidence(self) -> list[DocEvidence]:
+        """Extract normalized prose evidence from this source (SPEC-E3 §3.2, §5).
+
+        Evidence connectors (e.g. Notion, arbitrary text) implement this; definition
+        and primary connectors do not.
+        """
+        raise NotImplementedError(f"{type(self).__name__} does not support extract_evidence")
 
     async def aclose(self) -> None:  # noqa: B027 — intentional no-op default; stateful subclasses override
         """Release any held resources (connection pools, sockets).

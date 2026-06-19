@@ -1,0 +1,91 @@
+[
+  {
+    "id": "abc123",
+    "object": "page",
+    "url": "https://notion.so/abc123",
+    "properties": {
+      "Name": {
+        "type": "title",
+        "title": [
+          {"plain_text": "Test account policy"}
+        ]
+      },
+      "Canon Type": {
+        "type": "select",
+        "select": {"name": "policy"}
+      },
+      "Canon Topics": {
+        "type": "multi_select",
+        "multi_select": [
+          {"name": "customers"},
+          {"name": "test_accounts"}
+        ]
+      }
+    },
+    "_body": "Test accounts (email domain @acme-test.com) are excluded from active counts."
+  },
+  {
+    "id": "def456",
+    "object": "page",
+    "url": "https://notion.so/def456",
+    "properties": {
+      "Name": {
+        "type": "title",
+        "title": [
+          {"plain_text": "Revenue caveat — refunds"}
+        ]
+      },
+      "Canon Type": {
+        "type": "select",
+        "select": {"name": "caveat"}
+      },
+      "Canon Topics": {
+        "type": "multi_select",
+        "multi_select": [
+          {"name": "revenue"}
+        ]
+      }
+    },
+    "_body": "Gross revenue includes refunds until the refund_at date."
+  },
+  {
+    "id": "ghi789",
+    "object": "page",
+    "url": "https://notion.so/ghi789",
+    "properties": {
+      "Name": {
+        "type": "title",
+        "title": [
+          {"plain_text": "General data glossary"}
+        ]
+      },
+      "Canon Topics": {
+        "type": "multi_select",
+        "multi_select": []
+      }
+    },
+    "_body": "Glossary of data terms used across the organization."
+  },
+  {
+    "id": "jkl012",
+    "object": "page",
+    "url": "https://notion.so/jkl012",
+    "properties": {
+      "Name": {
+        "type": "title",
+        "title": [
+          {"plain_text": "Unknown page type"}
+        ]
+      },
+      "Canon Type": {
+        "type": "select",
+        "select": {"name": "unknown_kind"}
+      },
+      "Canon Topics": {
+        "type": "multi_select",
+        "multi_select": []
+      }
+    },
+    "_body": "This page has an unrecognized Canon Type."
+  }
+]

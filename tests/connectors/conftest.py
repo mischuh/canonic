@@ -63,6 +63,12 @@ def dbt_manifest_path() -> Path:
 
 
 @pytest.fixture
+def notion_pages_path() -> Path:
+    """Path to the Notion pages fixture used by Notion connector tests."""
+    return Path(__file__).parent / "fixtures" / "notion_pages.json"
+
+
+@pytest.fixture
 def offline_connector(monkeypatch: pytest.MonkeyPatch) -> PostgresConnector:
     """A connector that resolves credentials but never connects (unit tests)."""
     monkeypatch.setenv("CANON_TEST_PG_PASSWORD", "secret")
