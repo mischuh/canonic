@@ -53,7 +53,9 @@ def report(
         typer.echo(json.dumps(payload))
         return
 
-    _console.print(f"[bold]canon report[/bold]  (telemetry: {'on' if telemetry_enabled else 'off'})")
+    _console.print(
+        f"[bold]canon report[/bold]  (telemetry: {'on' if telemetry_enabled else 'off'})"
+    )
     _console.print()
 
     if rep.count == 0:
@@ -91,7 +93,9 @@ def report(
 
     if rep.recent:
         _console.print()
-        recent_table = Table(title=f"Last {len(rep.recent)} answers", show_header=True, header_style="bold")
+        recent_table = Table(
+            title=f"Last {len(rep.recent)} answers", show_header=True, header_style="bold"
+        )
         recent_table.add_column("timestamp")
         recent_table.add_column("result")
         recent_table.add_column("latency_ms", justify="right")

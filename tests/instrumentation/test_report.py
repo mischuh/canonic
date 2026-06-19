@@ -72,9 +72,11 @@ def test_read_events_skips_malformed_line(tmp_path: Path) -> None:
     log = tmp_path / ".canon" / "events.jsonl"
     log.parent.mkdir(parents=True)
     log.write_text(
-        json.dumps(_event(), sort_keys=True) + "\n"
+        json.dumps(_event(), sort_keys=True)
+        + "\n"
         + "not-valid-json\n"
-        + json.dumps(_event(latency_ms=300), sort_keys=True) + "\n"
+        + json.dumps(_event(latency_ms=300), sort_keys=True)
+        + "\n"
     )
     events = read_events(tmp_path)
     assert len(events) == 2
@@ -83,10 +85,7 @@ def test_read_events_skips_malformed_line(tmp_path: Path) -> None:
 def test_read_events_skips_invalid_schema(tmp_path: Path) -> None:
     log = tmp_path / ".canon" / "events.jsonl"
     log.parent.mkdir(parents=True)
-    log.write_text(
-        json.dumps(_event(), sort_keys=True) + "\n"
-        + json.dumps({"ts": "x"}) + "\n"
-    )
+    log.write_text(json.dumps(_event(), sort_keys=True) + "\n" + json.dumps({"ts": "x"}) + "\n")
     events = read_events(tmp_path)
     assert len(events) == 1
 
@@ -199,8 +198,12 @@ def test_build_report_bytes_summary() -> None:
 
 def test_build_report_stale_answers() -> None:
     events = [
-        AnswerEvent.model_validate(_event(freshness=[{"source": "a", "stale": False, "age_days": 0}])),
-        AnswerEvent.model_validate(_event(freshness=[{"source": "b", "stale": True, "age_days": 5}])),
+        AnswerEvent.model_validate(
+            _event(freshness=[{"source": "a", "stale": False, "age_days": 0}])
+        ),
+        AnswerEvent.model_validate(
+            _event(freshness=[{"source": "b", "stale": True, "age_days": 5}])
+        ),
         AnswerEvent.model_validate(_event(freshness=[])),
     ]
     rep = build_report(events)
