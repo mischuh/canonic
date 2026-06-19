@@ -11,7 +11,13 @@ from typing import Any, Literal, Protocol
 
 from pydantic import BaseModel, ConfigDict
 
-from canon.exc import CanonError, ConnectionError, ReadOnlyViolation, SchemaMismatch
+from canon.exc import (
+    CanonError,
+    CapabilityNotSupportedError,
+    ConnectionError,
+    ReadOnlyViolation,
+    SchemaMismatch,
+)
 from canon.semantic.models import (
     Additivity,  # noqa: TC001 — Pydantic resolves field annotations at runtime
     Relationship,  # noqa: TC001 — Pydantic resolves field annotations at runtime
@@ -20,6 +26,7 @@ from canon.semantic.models import (
 __all__ = [
     "AcquisitionTier",
     "CanonError",
+    "CapabilityNotSupportedError",
     "Capability",
     "ColumnInfo",
     "ConnectorBase",
@@ -47,6 +54,7 @@ __all__ = [
     "UsageHint",
     "UsageRole",
     "compute_fingerprint",
+    "require_capability",
 ]
 
 
@@ -389,3 +397,17 @@ class ConnectorBase(ABC):
         The default implementation is a no-op; stateful connectors override it.
         Called by the core after each use so callers never manage engine lifecycles.
         """
+
+
+def require_capability(connector: ConnectorBase, cap: Capability) -> ConnectorBase:
+    """Assert ``connector`` declares ``cap`` before a capability-specific call.
+
+    Dispatches on declared Capability (never vendor identity, per ConnectorBase). Raises
+    :class:`~canon.exc.CapabilityNotSupportedError` when the connector does not advertise
+    it — the E3 no-execution guard (SPEC-E3 §2, S8).
+    """
+    if cap not in connector.capabilities():
+        raise CapabilityNotSupportedError(
+            f"{type(connector).__name__!r} does not support capability {cap.value!r}"
+        )
+    return connector

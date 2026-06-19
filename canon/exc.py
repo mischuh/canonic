@@ -159,6 +159,17 @@ class SchemaMismatch(CanonError):
     code = ErrorCode.SCHEMA_MISMATCH
 
 
+class CapabilityNotSupportedError(CanonError):
+    """Raised when a connector is asked to honor a Capability it does not declare.
+
+    The hard E3 no-execution boundary (SPEC-E3 §2, S8): definition/evidence connectors
+    never expose ``run_read_only_sql`` or ``introspect_schema``. Asking one to execute SQL
+    or introspect is a caller contract slip — surfaced as this typed error (default exit 1)
+    rather than a bare ``AttributeError``. Carries no wire ``ErrorCode`` for the same reason
+    as :class:`EmbeddingUnavailable`.
+    """
+
+
 class ConnectionError(CanonError):  # noqa: A001 — intentionally shadows builtin in this namespace
     """Raised when a connector cannot establish or maintain a connection."""
 
