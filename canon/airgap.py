@@ -24,7 +24,7 @@ from canon.exc import AirGappedViolation
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
-__all__ = ["LOCAL_REF_SCHEMES", "EgressPolicy"]
+__all__ = ["LOCAL_REF_SCHEMES", "EgressPolicy", "guard_telemetry"]
 
 #: Secret-reference schemes that resolve on-machine. A ``*_ref`` using any other scheme
 #: (e.g. a future ``vault:``/``https:`` remote secret service) is rejected under air-gapped.
@@ -35,6 +35,18 @@ _LOOPBACK_NETWORKS: tuple[ipaddress.IPv4Network | ipaddress.IPv6Network, ...] = 
     ipaddress.ip_network("127.0.0.0/8"),
     ipaddress.ip_network("::1/128"),
 )
+
+
+def guard_telemetry(*, air_gapped: bool, telemetry_enabled: bool) -> None:
+    """Raise AirGappedViolation if telemetry would be on while air-gapped (SPEC-E16 §9, S5).
+
+    The single chokepoint for the air-gapped telemetry guarantee. Load-time config validation
+    and any future opt-in telemetry-enable path both call this so the guard cannot be bypassed.
+    """
+    if air_gapped and telemetry_enabled:
+        raise AirGappedViolation(
+            "air-gapped: telemetry.enabled must be false when runtime.air_gapped is true"
+        )
 
 
 class EgressPolicy:

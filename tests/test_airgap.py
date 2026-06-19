@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from canon.airgap import LOCAL_REF_SCHEMES, EgressPolicy
+from canon.airgap import LOCAL_REF_SCHEMES, EgressPolicy, guard_telemetry
 from canon.exc import AirGappedViolation, ErrorCode
 
 if TYPE_CHECKING:
@@ -112,3 +112,22 @@ def test_check_ref_local_rejects_remote_schemes(ref: str) -> None:
 def test_local_ref_schemes_match_credentials_layer() -> None:
     # Guard against drift: the local schemes mirror what credentials.py recognizes.
     assert set(LOCAL_REF_SCHEMES) == {"env", "keyring", "file"}
+
+
+# --- guard_telemetry (SPEC-E16 §9, S5) ----------------------------------------
+
+
+def test_guard_telemetry_raises_when_air_gapped_and_enabled() -> None:
+    with pytest.raises(AirGappedViolation) as exc:
+        guard_telemetry(air_gapped=True, telemetry_enabled=True)
+    assert exc.value.code is ErrorCode.AIR_GAPPED_VIOLATION
+    assert exc.value.exit_code == 18
+    assert "telemetry.enabled must be false" in str(exc.value)
+
+
+def test_guard_telemetry_passes_when_air_gapped_and_disabled() -> None:
+    guard_telemetry(air_gapped=True, telemetry_enabled=False)  # no raise
+
+
+def test_guard_telemetry_passes_when_not_air_gapped_and_enabled() -> None:
+    guard_telemetry(air_gapped=False, telemetry_enabled=True)  # no raise

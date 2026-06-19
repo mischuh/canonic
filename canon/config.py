@@ -10,8 +10,7 @@ from pydantic import BaseModel, Field, ValidationError, field_validator, model_v
 from pydantic_settings import BaseSettings, PydanticBaseSettingsSource, SettingsConfigDict
 from ruamel.yaml import YAML
 
-from canon.airgap import EgressPolicy
-from canon.exc import AirGappedViolation
+from canon.airgap import EgressPolicy, guard_telemetry
 from canon.semantic.models import Provenance
 
 if TYPE_CHECKING:
@@ -175,10 +174,9 @@ class CanonConfig(BaseSettings):
             policy.check_url(self.llm.base_url, what="llm.base_url")
             if self.llm.api_key_ref is not None:
                 policy.check_ref_local(self.llm.api_key_ref, what="llm.api_key_ref")
-        if self.telemetry.enabled:
-            raise AirGappedViolation(
-                "air-gapped: telemetry.enabled must be false when runtime.air_gapped is true"
-            )
+        guard_telemetry(
+            air_gapped=self.runtime.air_gapped, telemetry_enabled=self.telemetry.enabled
+        )
         for conn in self.connections:
             policy.check_ref_local(
                 conn.credentials_ref, what=f"connections[{conn.id}].credentials_ref"
