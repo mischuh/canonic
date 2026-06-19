@@ -17,7 +17,7 @@ from canon.ingestion.models import EvidenceItem, EvidenceKind
 if TYPE_CHECKING:
     from canon.connectors.base import ConnectorBase
 
-__all__ = ["evidence_from_definitions", "evidence_from_introspection"]
+__all__ = ["evidence_from_definitions", "evidence_from_docs", "evidence_from_introspection"]
 
 
 async def evidence_from_introspection(connector: ConnectorBase, source: str) -> list[EvidenceItem]:
@@ -77,3 +77,24 @@ async def evidence_from_definitions(connector: ConnectorBase, source: str) -> li
             )
         )
     return items
+
+
+async def evidence_from_docs(connector: ConnectorBase, source: str) -> list[EvidenceItem]:
+    """Extract prose evidence from ``connector`` and wrap each as a normalized evidence item.
+
+    The E3 evidence seam (SPEC-E3 §5, §8): each :class:`DocEvidence` becomes a
+    ``doc_evidence`` item at ``hand_authored`` acquisition tier — no vendor-specific
+    shape crosses into E4.  ``topic_refs`` are candidates; E6 resolves them on write.
+    """
+    docs = await connector.extract_evidence()
+    return [
+        EvidenceItem(
+            source=source,
+            kind=EvidenceKind.DOC_EVIDENCE,
+            acquisition_tier=AcquisitionTier.HAND_AUTHORED,
+            payload=doc.model_dump(mode="json"),
+            source_fingerprint=doc.source_fingerprint or "",
+            observed_at=doc.observed_at,
+        )
+        for doc in docs
+    ]
