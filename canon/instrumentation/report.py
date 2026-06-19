@@ -1,20 +1,22 @@
-"""Read path for the local event log — aggregates served-answer records (SPEC-E16 §4)."""
+"""Read path for the local event log — aggregates served-answer records (SPEC-E16 §4, §11 S4)."""
 
 from __future__ import annotations
 
 import json
 import math
 from json import JSONDecodeError
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
 from pydantic import BaseModel, ConfigDict, ValidationError
 
 from canon.config import LOCAL_STATE_DIR
 from canon.instrumentation.events import _EVENTS_FILE
-from canon.instrumentation.models import AnswerEvent
+from canon.instrumentation.models import AnswerEvent, ReconcileDecisionEvent
 
 if TYPE_CHECKING:
     from pathlib import Path
+
+    from canon.instrumentation.events import CanonEvent
 
 __all__ = ["EventReport", "LatencySummary", "BytesSummary", "read_events", "build_report"]
 
@@ -59,10 +61,32 @@ def _percentile(sorted_values: list[int], p: float) -> int:
     return sorted_values[rank - 1]
 
 
-def read_events(project_root: Path, last: int | None = None) -> list[AnswerEvent]:
+def _parse_line(line: str) -> CanonEvent | None:
+    """Parse one NDJSON line into the appropriate event type; return None on failure."""
+    try:
+        data = json.loads(line)
+    except JSONDecodeError:
+        return None
+    kind = data.get("kind")
+    try:
+        if kind == "served_answer":
+            return AnswerEvent.model_validate(data)
+        if kind == "reconcile_decision":
+            return ReconcileDecisionEvent.model_validate(data)
+    except ValidationError:
+        pass
+    return None
+
+
+def read_events(
+    project_root: Path,
+    last: int | None = None,
+    kind: Literal["served_answer", "reconcile_decision"] | None = None,
+) -> list[CanonEvent]:
     """Read and parse events from the local event log.
 
-    Returns an empty list if the log file is missing. Malformed lines are skipped.
+    Returns an empty list if the log file is missing. Malformed or unknown lines
+    are skipped. Pass ``kind`` to filter to one event type.
     """
     log_path = project_root / LOCAL_STATE_DIR / _EVENTS_FILE
     if not log_path.exists():
@@ -72,16 +96,17 @@ def read_events(project_root: Path, last: int | None = None) -> list[AnswerEvent
     if last is not None:
         lines = lines[-last:]
 
-    events: list[AnswerEvent] = []
+    events: list[CanonEvent] = []
     for line in lines:
         line = line.strip()
         if not line:
             continue
-        try:
-            data = json.loads(line)
-            events.append(AnswerEvent.model_validate(data))
-        except (JSONDecodeError, ValidationError):
+        event = _parse_line(line)
+        if event is None:
             continue
+        if kind is not None and event.kind != kind:
+            continue
+        events.append(event)
     return events
 
 

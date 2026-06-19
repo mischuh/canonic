@@ -1,4 +1,4 @@
-"""Tests for E16-S1/S3: AnswerEvent emitter on the serving path (issues #77, #79)."""
+"""Tests for E16-S1/S3/S4: AnswerEvent emitter on the serving path (issues #77, #79, #80)."""
 
 from __future__ import annotations
 
@@ -24,8 +24,18 @@ from canon.contracts.models import (
 from canon.contracts.resolver import ContractResolver
 from canon.core.service import CanonService
 from canon.exc import Unresolved
+from canon.ingestion.emitter import DiskEventLog
+from canon.ingestion.models import (
+    DraftedBy,
+    Proposal,
+    ProposalOp,
+    ReconciliationDecision,
+    ReconciliationEntry,
+)
 from canon.instrumentation.events import DiskAnswerEventLog
-from canon.instrumentation.models import AnswerEvent, _sha256_json
+from canon.instrumentation.models import AnswerEvent, ReconcileDecisionEvent, _sha256_json
+from canon.instrumentation.report import read_events
+from canon.semantic.models import Provenance
 from canon.semantic.models import Column, Dimension, Measure, SemanticSource
 
 # ---------------------------------------------------------------------------
@@ -196,6 +206,14 @@ def test_answer_event_schema_unchanged() -> None:
     )
 
 
+def test_reconcile_decision_event_schema_unchanged() -> None:
+    golden = json.loads((_SNAPSHOTS / "reconcile_decision_event.json").read_text())
+    assert ReconcileDecisionEvent.model_json_schema() == golden, (
+        "ReconcileDecisionEvent schema changed — update "
+        "tests/snapshots/contract_schema_v1/reconcile_decision_event.json per SPEC-P0 §4"
+    )
+
+
 def test_s3_reserved_fields_present_and_null() -> None:
     ev = AnswerEvent(
         ts="2026-06-15T12:00:00+00:00",
@@ -353,3 +371,69 @@ def test_sha256_json_format() -> None:
     result = _sha256_json({"key": "value"})
     assert result.startswith("sha256:")
     assert len(result) == len("sha256:") + 64  # hex digest is 64 chars
+
+
+# ---------------------------------------------------------------------------
+# E16-S4 AC1 — both kinds land in one file, filterable by kind
+# ---------------------------------------------------------------------------
+
+
+def _reconcile_entry() -> ReconciliationEntry:
+    proposal = Proposal(
+        target="semantics/warehouse_pg/orders.yaml",
+        op=ProposalOp.ADD,
+        content={"name": "orders"},
+        provenance=Provenance.INFERRED,
+        confidence=0.9,
+        anchored_to=["sha256:abc"],
+        drafted_by=DraftedBy.DETERMINISTIC,
+    )
+    return ReconciliationEntry(decision=ReconciliationDecision.ADD, target=proposal.target, proposal=proposal)
+
+
+def _answer_event() -> AnswerEvent:
+    return AnswerEvent(
+        ts="2026-06-19T12:00:00+00:00",
+        contract_schema="1.1",
+        query_hash="sha256:aaa",
+        compiled_sql_hash="sha256:bbb",
+        connection="warehouse_pg",
+        latency_ms=50,
+    )
+
+
+def test_s4_both_kinds_in_one_file(tmp_path: Path) -> None:
+    """AC1 — served_answer and reconcile_decision both land in .canon/events.jsonl."""
+    DiskAnswerEventLog(tmp_path).append(_answer_event())
+    DiskEventLog(tmp_path).append([_reconcile_entry()])
+
+    log_path = tmp_path / ".canon" / "events.jsonl"
+    assert log_path.exists()
+    lines = log_path.read_text().splitlines()
+    assert len(lines) == 2
+    kinds = {json.loads(line)["kind"] for line in lines}
+    assert kinds == {"served_answer", "reconcile_decision"}
+
+
+def test_s4_read_events_returns_both_kinds(tmp_path: Path) -> None:
+    """AC1 — read_events() returns both kinds from the same file."""
+    DiskAnswerEventLog(tmp_path).append(_answer_event())
+    DiskEventLog(tmp_path).append([_reconcile_entry()])
+
+    all_events = read_events(tmp_path)
+    assert len(all_events) == 2
+    assert {e.kind for e in all_events} == {"served_answer", "reconcile_decision"}
+
+
+def test_s4_read_events_kind_filter(tmp_path: Path) -> None:
+    """AC1 — read_events(kind=...) filters to one event type."""
+    DiskAnswerEventLog(tmp_path).append(_answer_event())
+    DiskEventLog(tmp_path).append([_reconcile_entry()])
+
+    served = read_events(tmp_path, kind="served_answer")
+    assert len(served) == 1
+    assert all(e.kind == "served_answer" for e in served)
+
+    reconcile = read_events(tmp_path, kind="reconcile_decision")
+    assert len(reconcile) == 1
+    assert all(e.kind == "reconcile_decision" for e in reconcile)

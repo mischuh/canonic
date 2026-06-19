@@ -1,0 +1,73 @@
+{
+  "description": "One reconcile-decision record appended to ``.canon/events.jsonl`` (SPEC-E16 \u00a711 S4).\n\nField set owned by E4 \u00a76; E16 owns the substrate (the shared file and writer).\n``ts`` unifies the timestamp key across both event kinds for \u00a77 metric joins.",
+  "properties": {
+    "anchored_to": {
+      "default": [],
+      "items": {
+        "type": "string"
+      },
+      "title": "Anchored To",
+      "type": "array"
+    },
+    "auto_apply": {
+      "default": false,
+      "title": "Auto Apply",
+      "type": "boolean"
+    },
+    "confidence": {
+      "title": "Confidence",
+      "type": "number"
+    },
+    "decision": {
+      "title": "Decision",
+      "type": "string"
+    },
+    "drafted_by": {
+      "title": "Drafted By",
+      "type": "string"
+    },
+    "existing_frozen": {
+      "default": false,
+      "title": "Existing Frozen",
+      "type": "boolean"
+    },
+    "kind": {
+      "const": "reconcile_decision",
+      "default": "reconcile_decision",
+      "title": "Kind",
+      "type": "string"
+    },
+    "low_confidence": {
+      "default": false,
+      "title": "Low Confidence",
+      "type": "boolean"
+    },
+    "op": {
+      "title": "Op",
+      "type": "string"
+    },
+    "provenance": {
+      "title": "Provenance",
+      "type": "string"
+    },
+    "target": {
+      "title": "Target",
+      "type": "string"
+    },
+    "ts": {
+      "title": "Ts",
+      "type": "string"
+    }
+  },
+  "required": [
+    "ts",
+    "decision",
+    "target",
+    "op",
+    "provenance",
+    "confidence",
+    "drafted_by"
+  ],
+  "title": "ReconcileDecisionEvent",
+  "type": "object"
+}

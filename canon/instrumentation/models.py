@@ -1,4 +1,4 @@
-"""AnswerEvent model for SPEC-E16 §3 — the served-answer record shape."""
+"""AnswerEvent and ReconcileDecisionEvent models for SPEC-E16 §3 / §11 S4."""
 
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict
 
-__all__ = ["AnswerEvent"]
+__all__ = ["AnswerEvent", "ReconcileDecisionEvent"]
 
 
 def _sha256_json(payload: Any) -> str:
@@ -58,3 +58,26 @@ class AnswerEvent(BaseModel):
     trust_score: float | None = None
     cache_hit: bool | None = None
     over_limit_blocked: bool | None = None
+
+
+class ReconcileDecisionEvent(BaseModel):
+    """One reconcile-decision record appended to ``.canon/events.jsonl`` (SPEC-E16 §11 S4).
+
+    Field set owned by E4 §6; E16 owns the substrate (the shared file and writer).
+    ``ts`` unifies the timestamp key across both event kinds for §7 metric joins.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    ts: str
+    kind: Literal["reconcile_decision"] = "reconcile_decision"
+    decision: str
+    target: str
+    op: str
+    provenance: str
+    confidence: float
+    anchored_to: list[str] = []
+    drafted_by: str
+    auto_apply: bool = False
+    low_confidence: bool = False
+    existing_frozen: bool = False

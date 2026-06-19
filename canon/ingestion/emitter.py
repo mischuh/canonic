@@ -26,6 +26,8 @@ from pydantic import BaseModel, ConfigDict
 from ruamel.yaml import YAML
 
 from canon.config import LOCAL_STATE_DIR
+from canon.instrumentation.events import DiskAnswerEventLog
+from canon.instrumentation.models import ReconcileDecisionEvent
 from canon.ingestion.models import (
     ProposalOp,
     ReconciliationDecision,
@@ -55,7 +57,6 @@ __all__ = [
 
 #: File names for the two audit-trail artefacts (SPEC-E4 §6).
 _SNAPSHOT_FILE = "evidence.jsonl"
-_EVENT_LOG_FILE = "ingest-events.jsonl"
 #: Committed, reproducible scan-snapshot root (SPEC-E1 §2 / SPEC-E4 §6).
 _RAW_SOURCES_DIR = "raw-sources"
 
@@ -362,38 +363,37 @@ class DiskSnapshotStore:
 
 
 class DiskEventLog:
-    """Appends ``.canon/ingest-events.jsonl`` — one event per decision, local only (§6).
+    """Writes reconcile-decision events into the shared ``.canon/events.jsonl`` substrate (SPEC-E16 §11 S4).
 
-    Each event records the decision type, target, tier (provenance), confidence, and anchored
-    evidence fingerprints (S7-AC2). The directory is git-ignored (``LOCAL_STATE_DIR``), so the
-    log never enters version control.
+    Each entry is mapped to a :class:`~canon.instrumentation.models.ReconcileDecisionEvent`
+    and appended through :class:`~canon.instrumentation.events.DiskAnswerEventLog` so both
+    ``served_answer`` and ``reconcile_decision`` events share one file and are queryable
+    together by ``kind`` (S4-AC1).
     """
 
     def __init__(self, project_root: Path) -> None:
-        self._path = project_root / LOCAL_STATE_DIR / _EVENT_LOG_FILE
+        self._sink = DiskAnswerEventLog(project_root)
 
     def append(self, entries: Iterable[ReconciliationEntry]) -> None:
-        self._path.parent.mkdir(parents=True, exist_ok=True)
-        recorded_at = datetime.now(UTC).isoformat()
-        with self._path.open("a") as f:
-            for entry in entries:
-                f.write(json.dumps(self._event(entry, recorded_at), sort_keys=True) + "\n")
+        ts = datetime.now(UTC).isoformat()
+        for entry in entries:
+            self._sink.append(self._event(entry, ts))
 
     @staticmethod
-    def _event(entry: ReconciliationEntry, recorded_at: str) -> dict[str, Any]:
-        return {
-            "recorded_at": recorded_at,
-            "decision": entry.decision.value,
-            "target": entry.target,
-            "op": entry.proposal.op.value,
-            "provenance": entry.proposal.provenance.value,
-            "confidence": entry.proposal.confidence,
-            "anchored_to": list(entry.proposal.anchored_to),
-            "drafted_by": entry.proposal.drafted_by.value,
-            "auto_apply": entry.auto_apply,
-            "low_confidence": entry.low_confidence,
-            "existing_frozen": entry.existing_frozen,
-        }
+    def _event(entry: ReconciliationEntry, ts: str) -> ReconcileDecisionEvent:
+        return ReconcileDecisionEvent(
+            ts=ts,
+            decision=entry.decision.value,
+            target=entry.target,
+            op=entry.proposal.op.value,
+            provenance=entry.proposal.provenance.value,
+            confidence=entry.proposal.confidence,
+            anchored_to=list(entry.proposal.anchored_to),
+            drafted_by=entry.proposal.drafted_by.value,
+            auto_apply=entry.auto_apply,
+            low_confidence=entry.low_confidence,
+            existing_frozen=entry.existing_frozen,
+        )
 
 
 class AuditTrailWriter:
