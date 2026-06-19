@@ -27,4 +27,7 @@ reconcile:
     enabled: false               # propose-only by default; reviewed diffs become the commit
 
 telemetry:
-  enabled: false
+  enabled: false   # local event log only — nothing is sent off-machine
+
+runtime:
+  air_gapped: false   # set to true to enforce local-only endpoints at load time (SPEC-E16 §9)

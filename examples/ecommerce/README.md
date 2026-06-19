@@ -419,6 +419,96 @@ the same `CanonService` and serialize via the same Pydantic model. The walking-s
 E2E test (`tests/e2e/test_walking_skeleton.py::test_parity`) asserts byte-identical
 payloads against live Postgres on every CI run.
 
+## Event log & observability (`canon report`)
+
+Every query the MCP server or CLI serves appends a `served_answer` event to
+`.canon/events.jsonl` — a local, append-only NDJSON file that is git-ignored. Every
+`canon ingest` run appends `reconcile_decision` events to the same file. Both kinds share
+one unified log; nothing leaves the machine.
+
+**Human report — counts, latency, bytes scanned, error distribution:**
+
+```sh
+canon report
+# canon report  (telemetry: off)
+#
+# answers:        42  (2026-06-01T08:00:00Z → 2026-06-19T16:45:12Z)
+# latency:        p50 310ms  p95 1240ms  min 85ms  max 2110ms  avg 420ms
+# bytes scanned:  total 1,234,567  min 1,024  max 512,000  avg 29,395
+# stale answers:  0
+# guardrail hits: 38
+# ┌──────────────────┬───────┐
+# │ code             │ count │
+# ├──────────────────┼───────┤
+# │ ok               │   40  │
+# │ unresolved       │    2  │
+# └──────────────────┴───────┘
+```
+
+**Restrict to the last N events:**
+
+```sh
+canon report --last 100
+```
+
+**Machine-readable — for dashboards or CI:**
+
+```sh
+canon --json report --last 50
+# {"count": 42, "error_distribution": {"ok": 40, "unresolved": 2},
+#  "latency": {"p50_ms": 310, "p95_ms": 1240, …},
+#  "bytes_scanned": {"total": 1234567, …},
+#  "telemetry_enabled": false, …}
+```
+
+**What is logged — and what is not:**
+
+| Logged | Not logged |
+| --- | --- |
+| `query_hash` (SHA-256 of request) | SQL text |
+| `compiled_sql_hash` (SHA-256 of compiled SQL) | Result rows |
+| `latency_ms`, `bytes_scanned` | Guardrail filter literals |
+| `guardrails_fired` (IDs only) | LLM prompts or completions |
+| `error` (code string or null) | Any user-supplied query text |
+
+The schema is frozen at contract version `1.1` (SPEC-E16 §6); reserved fields
+(`trust_score`, `cache_hit`, `over_limit_blocked`) are present and null until Phase 2.
+
+## Privacy & air-gapped mode
+
+`telemetry.enabled: false` is the default — the local event log is pure local I/O and
+nothing is sent off-machine. To enforce this at the config level and prevent it from ever
+being enabled accidentally, set `runtime.air_gapped: true`:
+
+```yaml
+# canon.yaml
+runtime:
+  air_gapped: true   # blocks telemetry.enabled: true at load time (exit 18)
+```
+
+With `air_gapped: true`, Canon also validates at load time that:
+
+- The LLM `base_url` resolves only to a loopback or explicitly allowlisted address.
+- Secret refs (`credentials_ref`, `api_key_ref`) use only local schemes — `env:`, `file:`,
+  or `keyring:`. Remote secret services (e.g. `vault:`) are rejected.
+
+The daemon never starts mis-configured — any violation is a hard exit 18 before the first
+query is served. `canon status` is the fastest way to confirm a config passes:
+
+```sh
+canon status
+# Canon project: ecommerce-demo (version 1)   ← load succeeded, all constraints satisfied
+```
+
+To add an on-prem inference host outside loopback:
+
+```yaml
+runtime:
+  air_gapped: true
+  allow_cidrs:
+    - 10.0.0.0/8   # private inference server at 10.x.x.x
+```
+
 ## What the guardrail does
 
 The `revenue-excludes-refunds` guardrail is a `mandatory_filter`. Every time a query

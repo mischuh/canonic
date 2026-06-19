@@ -143,6 +143,46 @@ query(source="invoices", measures=["total_revenue", "invoice_count"],
       joins=["customers", "employees"], dimensions=["employee_title"])
 ```
 
+## Event log & observability (`canon report`)
+
+Every query served by the MCP server or CLI appends a `served_answer` event to
+`.canon/events.jsonl` (local, git-ignored). Every `canon ingest` run appends
+`reconcile_decision` events to the same file. Both kinds share one unified log.
+
+```sh
+canon report
+# canon report  (telemetry: off)
+#
+# answers:        17  (2026-06-01T… → 2026-06-19T…)
+# latency:        p50 420ms  p95 1800ms  min 200ms  max 2300ms  avg 550ms
+# bytes scanned:  total 891,234  …
+# stale answers:  0
+# guardrail hits: 12
+```
+
+```sh
+canon --json report          # machine-readable summary
+canon report --last 50       # restrict to the most recent 50 events
+```
+
+Events log SHA-256 hashes of the request and compiled SQL, latency, bytes scanned, and
+which guardrail IDs fired — never SQL text, result rows, or user input.
+
+## Privacy & air-gapped mode
+
+`telemetry.enabled: false` (the default) keeps the event log purely local. To harden
+this at config-load time so it can never be enabled accidentally:
+
+```yaml
+# canon.yaml
+runtime:
+  air_gapped: true
+```
+
+With `air_gapped: true` Canon also rejects any LLM `base_url` that resolves outside
+loopback (or an explicit `allow_cidrs` range) and any secret ref that uses a remote
+scheme. The daemon refuses to start mis-configured — `canon status` confirms load success.
+
 ## Key design notes
 
 ### PascalCase columns
