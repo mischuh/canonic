@@ -26,8 +26,10 @@ from typing import Any, Protocol, runtime_checkable
 
 from canon.connectors.base import (
     Capability,
+    ConnectorBase,
     DocEvidence,
     Health,
+    UsageEvidence,
     UsageHint,
 )
 from canon.exc import ConnectionError
@@ -210,7 +212,7 @@ def _block_text(block: dict[str, Any]) -> str:
     return "".join(t.get("plain_text", "") for t in rich_text)
 
 
-class NotionConnector:
+class NotionConnector(ConnectorBase):
     """Evidence connector for Notion pages → normalized DocEvidence (SPEC-E3 §5, §9 S2).
 
     ``usage_hint`` is read from the ``Canon Type`` select property on each page
@@ -262,7 +264,7 @@ class NotionConnector:
             return Health(status="error", message=f"Notion API unreachable: {exc}")
         return Health(status="ok", message=f"Notion API {self._api_version}")
 
-    async def extract_evidence(self) -> list[DocEvidence]:
+    async def extract_evidence(self) -> list[DocEvidence | UsageEvidence]:
         """Fetch Notion pages and return one DocEvidence per page.
 
         Fails with :exc:`ConnectionError` on an unsupported API version so no
@@ -276,7 +278,7 @@ class NotionConnector:
 
         observed_at = datetime.now(UTC)
         pages = await self._page_source.list_pages()
-        evidence: list[DocEvidence] = []
+        evidence: list[DocEvidence | UsageEvidence] = []
 
         for page in pages:
             page_id: str = page.get("id", "")

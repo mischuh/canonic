@@ -8,7 +8,7 @@ from __future__ import annotations
 import time
 from datetime import UTC, datetime
 from pathlib import Path  # noqa: TC003 — used in function bodies, not just annotations
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from canon.compiler import SemanticQuery, compile
 from canon.config import CanonConfig, load_config
@@ -26,7 +26,7 @@ from canon.semantic.loader import list_semantic_sources
 
 if TYPE_CHECKING:
     from canon.compiler.result import CompileResult
-    from canon.connectors.base import ResultSet
+    from canon.connectors.base import ResultSet, SQLExecutable
     from canon.knowledge.results import SearchResult
     from canon.semantic.models import SemanticSource
 
@@ -199,7 +199,7 @@ class CanonService:
             connection_id = self._connection_for_sql(compiled)
             connector = connector_by_id(self._config, connection_id)
             try:
-                result = await connector.run_read_only_sql(compiled.sql)
+                result = await cast("SQLExecutable", connector).run_read_only_sql(compiled.sql)
             finally:
                 await connector.aclose()
             return QueryResult.from_parts(compiled, result)
@@ -261,7 +261,7 @@ class CanonService:
         """
         connector = connector_by_id(self._config, connection)
         try:
-            return await connector.run_read_only_sql(sql)
+            return await cast("SQLExecutable", connector).run_read_only_sql(sql)
         finally:
             await connector.aclose()
 

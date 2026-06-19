@@ -4,9 +4,18 @@ This skeleton asserts the GH-3 contract properties.  Full conformance probes
 (truthful capabilities, evidence validity against a live fixture, read-only
 enforcement) are stubbed with pytest.mark.skip and will be filled in when the
 first concrete connector (PostgreSQL, GH-4) lands.
+
+E3-S4 (GH-90) extends coverage to all E3 connector classes: capability
+truthfulness across the full connector matrix, evidence schema validity, and
+acceptance criteria for multi-capability dispatch (AC1) and lying-connector
+rejection (AC2).
 """
 
 from __future__ import annotations
+
+import json
+from datetime import UTC, datetime
+from typing import TYPE_CHECKING, Any
 
 import pytest
 from pydantic import ValidationError
@@ -15,12 +24,22 @@ from canon.connectors.base import (
     AcquisitionTier,
     Capability,
     ConnectorBase,
+    DefinitionEvidence,
+    DefinitionExtract,
+    DocEvidence,
     Health,
     RelationSchema,
     ResultColumn,
     ResultSet,
+    UsageEvidence,
+    UsageHint,
 )
 from canon.exc import CanonError, ConnectionError, ReadOnlyViolation, SchemaMismatch
+from canon.ingestion.models import EvidenceKind
+from canon.ingestion.source import gather_evidence
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 
 class _MinimalConnector(ConnectorBase):
@@ -31,6 +50,17 @@ class _MinimalConnector(ConnectorBase):
 
     async def test_connection(self) -> Health:
         return Health(status="ok")
+
+
+_TESTABLE_CAPS = frozenset(
+    {
+        Capability.INTROSPECT_SCHEMA,
+        Capability.READ_QUERY_HISTORY,
+        Capability.RUN_READ_ONLY_SQL,
+        Capability.EXTRACT_DEFINITIONS,
+        Capability.EXTRACT_EVIDENCE,
+    }
+)
 
 
 class TestRelationSchema:
@@ -106,26 +136,6 @@ class TestConnectorBase:
         assert isinstance(health, Health)
         assert health.status in ("ok", "error")
 
-    @pytest.mark.asyncio
-    async def test_unimplemented_introspect_schema_raises(self) -> None:
-        conn = _MinimalConnector()
-        with pytest.raises(NotImplementedError):
-            await conn.introspect_schema()
-
-    @pytest.mark.asyncio
-    async def test_unimplemented_run_read_only_sql_raises(self) -> None:
-        conn = _MinimalConnector()
-        with pytest.raises(NotImplementedError):
-            await conn.run_read_only_sql("SELECT 1")
-
-    @pytest.mark.asyncio
-    async def test_unimplemented_read_query_history_raises(self) -> None:
-        from datetime import UTC, datetime
-
-        conn = _MinimalConnector()
-        with pytest.raises(NotImplementedError):
-            await conn.read_query_history(datetime.now(tz=UTC))
-
 
 class TestExceptions:
     def test_read_only_violation_is_canon_error(self) -> None:
@@ -143,9 +153,7 @@ class TestExceptions:
 
 @pytest.mark.asyncio
 async def test_capabilities_are_truthful(offline_connector) -> None:  # noqa: ANN001
-    """Advertised capabilities are overridden; unadvertised ones raise."""
-    from datetime import UTC, datetime
-
+    """Advertised capabilities have implementations; unadvertised ones are absent."""
     advertised = set(offline_connector.capabilities())
     for cap in (
         Capability.INTROSPECT_SCHEMA,
@@ -153,12 +161,10 @@ async def test_capabilities_are_truthful(offline_connector) -> None:  # noqa: AN
         Capability.TEST_CONNECTION,
     ):
         assert cap in advertised
-        method = getattr(type(offline_connector), cap.value)
-        assert method is not getattr(ConnectorBase, cap.value)
+        assert hasattr(type(offline_connector), cap.value)
 
     assert Capability.READ_QUERY_HISTORY not in advertised
-    with pytest.raises(NotImplementedError):
-        await offline_connector.read_query_history(datetime.now(tz=UTC))
+    assert not hasattr(type(offline_connector), Capability.READ_QUERY_HISTORY.value)
 
 
 @pytest.mark.parametrize(
@@ -190,3 +196,240 @@ async def test_fixture_round_trip(pg_connector) -> None:  # noqa: ANN001
     orders = schemas["analytics.fct_orders"]
     assert orders.acquisition_tier == AcquisitionTier.LIVE
     assert orders.primary_key == ["order_id"]
+
+
+# ---------------------------------------------------------------------------
+# E3-S4 (GH-90): E3 class conformance — all connectors (SPEC-E3 §2.3, §9 S4)
+# ---------------------------------------------------------------------------
+
+
+class _FixtureNotionPageSource:
+    def __init__(self, path: Path) -> None:
+        self._path = path
+
+    async def list_pages(self) -> list[dict[str, Any]]:
+        return json.loads(self._path.read_text())
+
+
+class _FixtureMetabaseQuestionSource:
+    def __init__(self, path: Path, *, version: str = "v0.48.7") -> None:
+        self._path = path
+        self._version = version
+
+    async def list_questions(self) -> list[dict[str, Any]]:
+        return json.loads(self._path.read_text())
+
+    async def server_version(self) -> str:
+        return self._version
+
+
+class _FixtureLookerLookSource:
+    def __init__(self, path: Path, *, version: str = "4.0") -> None:
+        self._path = path
+        self._version = version
+
+    async def list_looks(self) -> list[dict[str, Any]]:
+        return json.loads(self._path.read_text())
+
+    async def api_version(self) -> str:
+        return self._version
+
+
+@pytest.fixture(
+    params=["postgres", "dbt", "notion", "metabase", "looker"],
+    ids=["postgres", "dbt", "notion", "metabase", "looker"],
+)
+def any_offline_connector(
+    request: pytest.FixtureRequest,
+    offline_connector,  # noqa: ANN001
+    dbt_manifest_path: Path,
+    notion_pages_path: Path,
+    metabase_questions_path: Path,
+    looker_looks_path: Path,
+) -> ConnectorBase:
+    """Offline instance of each registered connector type."""
+    from canon.config import Connection
+    from canon.connectors.dbt import DbtConnector
+    from canon.connectors.looker import LookerConnector
+    from canon.connectors.metabase import MetabaseConnector
+    from canon.connectors.notion import NotionConnector
+
+    match request.param:
+        case "postgres":
+            return offline_connector
+        case "dbt":
+            return DbtConnector(dbt_manifest_path)
+        case "notion":
+            return NotionConnector(page_source=_FixtureNotionPageSource(notion_pages_path))
+        case "metabase":
+            conn = Connection(
+                id="metabase_prod",
+                type="metabase",
+                params={"base_url": "https://metabase.example.com"},
+                credentials_ref="env:METABASE_API_KEY",
+            )
+            return MetabaseConnector(
+                conn, question_source=_FixtureMetabaseQuestionSource(metabase_questions_path)
+            )
+        case "looker":
+            conn = Connection(
+                id="looker_prod",
+                type="looker",
+                params={"base_url": "https://looker.example.com"},
+                credentials_ref="env:LOOKER_API_TOKEN",
+            )
+            return LookerConnector(conn, look_source=_FixtureLookerLookSource(looker_looks_path))
+        case _:
+            pytest.fail(f"unknown connector param: {request.param!r}")
+
+
+def test_e3_capabilities_truthful(any_offline_connector: ConnectorBase) -> None:
+    """Declared capabilities have implementations; undeclared ones are absent (AC2).
+
+    For every testable capability: if the connector advertises it, the method must
+    be defined on the class; if not advertised, the method must not exist on it.
+    """
+    advertised = set(any_offline_connector.capabilities())
+    name = type(any_offline_connector).__name__
+    for cap in _TESTABLE_CAPS:
+        method_name = cap.value
+        has_method = hasattr(type(any_offline_connector), method_name)
+        if cap in advertised:
+            assert has_method, f"{name} declares {cap.value!r} but {method_name}() is not defined"
+        else:
+            assert not has_method, (
+                f"{name} does not declare {cap.value!r} but {method_name}() appears defined"
+            )
+
+
+@pytest.mark.asyncio
+async def test_e3_evidence_schema_valid(any_offline_connector: ConnectorBase) -> None:
+    """Emitted evidence is schema-valid and round-trips through model_validate (AC2 positive).
+
+    Evidence connectors (``EXTRACT_EVIDENCE``) emit only :class:`DocEvidence` and
+    :class:`UsageEvidence`.  Definition connectors (``EXTRACT_DEFINITIONS``) emit
+    :class:`DefinitionEvidence` and optional :class:`RelationSchema`.
+    """
+    caps = set(any_offline_connector.capabilities())
+
+    if Capability.EXTRACT_EVIDENCE in caps:
+        items = await any_offline_connector.extract_evidence()
+        assert items, f"{type(any_offline_connector).__name__}.extract_evidence() returned no items"
+        for item in items:
+            assert isinstance(item, DocEvidence | UsageEvidence)
+            restored = type(item).model_validate(item.model_dump())
+            assert restored == item
+
+    if Capability.EXTRACT_DEFINITIONS in caps:
+        extract = await any_offline_connector.extract_definitions()
+        for defn in extract.definitions:
+            restored = DefinitionEvidence.model_validate(defn.model_dump())
+            assert restored == defn
+        for schema in extract.relations:
+            restored_schema = RelationSchema.model_validate(schema.model_dump())
+            assert restored_schema == schema
+
+
+# ---------------------------------------------------------------------------
+# AC1 — multi-capability connector: each capability invoked without vendor branch
+# ---------------------------------------------------------------------------
+
+
+class _DualCapabilityConnector(ConnectorBase):
+    """Connector declaring both EXTRACT_DEFINITIONS and EXTRACT_EVIDENCE (S4 AC1)."""
+
+    def capabilities(self) -> list[Capability]:
+        return [
+            Capability.CAPABILITIES,
+            Capability.TEST_CONNECTION,
+            Capability.EXTRACT_DEFINITIONS,
+            Capability.EXTRACT_EVIDENCE,
+        ]
+
+    async def test_connection(self) -> Health:
+        return Health(status="ok")
+
+    async def extract_definitions(self) -> DefinitionExtract:
+        from canon.connectors.base import (
+            AcquisitionTier,
+            DefinitionEntityType,
+            DefinitionEvidence,
+            DefinitionExtract,
+        )
+
+        return DefinitionExtract(
+            definitions=[
+                DefinitionEvidence(
+                    source="dual",
+                    entity="revenue",
+                    entity_type=DefinitionEntityType.MEASURE,
+                    expr="SUM(amount)",
+                    native_ref="dual::revenue",
+                    acquisition_tier=AcquisitionTier.MODELING,
+                )
+            ]
+        )
+
+    async def extract_evidence(self) -> list[DocEvidence]:
+        return [
+            DocEvidence(
+                source="dual",
+                title="Revenue Policy",
+                body="Revenue is recognized on shipment date.",
+                usage_hint=UsageHint.POLICY,
+                native_ref="dual:page:1",
+                observed_at=datetime.now(UTC),
+            )
+        ]
+
+
+@pytest.mark.asyncio
+async def test_ac1_multi_capability_dispatch() -> None:
+    """AC1: a connector declaring both extract_definitions and extract_evidence has each invoked.
+
+    ``gather_evidence`` dispatches on ``Capability`` membership — zero vendor-name branches.
+    Both a ``definition`` item and a ``doc_evidence`` item must appear in the output.
+    """
+    connector = _DualCapabilityConnector()
+    items = await gather_evidence(connector, "dual")
+
+    kinds = {item.kind for item in items}
+    assert EvidenceKind.DEFINITION in kinds, "extract_definitions seam was not invoked"
+    assert EvidenceKind.DOC_EVIDENCE in kinds, "extract_evidence seam was not invoked"
+
+
+# ---------------------------------------------------------------------------
+# AC2 — connector advertising a capability it cannot honor fails the harness
+# ---------------------------------------------------------------------------
+
+
+class _LyingConnector(ConnectorBase):
+    """Advertises EXTRACT_EVIDENCE but never overrides it (S4 AC2)."""
+
+    def capabilities(self) -> list[Capability]:
+        return [
+            Capability.CAPABILITIES,
+            Capability.TEST_CONNECTION,
+            Capability.EXTRACT_EVIDENCE,
+        ]
+
+    async def test_connection(self) -> Health:
+        return Health(status="ok")
+
+
+def test_ac2_lying_connector_fails_harness() -> None:
+    """AC2: a connector advertising a capability it cannot honor is caught by the harness.
+
+    ``_LyingConnector`` declares ``EXTRACT_EVIDENCE`` but never defines
+    ``extract_evidence()``.  The truthfulness check must detect this — the method
+    is absent from the class and ``has_method`` is ``False`` for an advertised capability.
+    """
+    connector = _LyingConnector()
+    advertised = set(connector.capabilities())
+    assert Capability.EXTRACT_EVIDENCE in advertised
+
+    has_method = hasattr(type(connector), "extract_evidence")
+    assert not has_method, (
+        "_LyingConnector should not define extract_evidence — "
+        "this test proves the harness would catch it"
+    )

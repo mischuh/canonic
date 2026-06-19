@@ -8,19 +8,35 @@ every vendor shape out of the engine. Both the full ingest and the fast bootstra
 
 from __future__ import annotations
 
+from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
-from canon.connectors.base import AcquisitionTier, DocEvidence, UsageEvidence
+from canon.connectors.base import (
+    AcquisitionTier,
+    Capability,
+    DefinitionExtractable,
+    DocEvidence,
+    EvidenceExtractable,
+    SchemaIntrospectable,
+    UsageEvidence,
+)
 from canon.ingestion.models import EvidenceItem, EvidenceKind
 
 if TYPE_CHECKING:
     from canon.connectors.base import ConnectorBase
 
-__all__ = ["evidence_from_definitions", "evidence_from_docs", "evidence_from_introspection"]
+__all__ = [
+    "evidence_from_definitions",
+    "evidence_from_docs",
+    "evidence_from_introspection",
+    "gather_evidence",
+]
 
 
-async def evidence_from_introspection(connector: ConnectorBase, source: str) -> list[EvidenceItem]:
+async def evidence_from_introspection(
+    connector: SchemaIntrospectable, source: str
+) -> list[EvidenceItem]:
     """Introspect ``connector`` and wrap each relation as a ``relation_schema`` evidence item.
 
     Tier-1 live introspection (SPEC-E2 §4): every discovered :class:`RelationSchema` becomes one
@@ -43,7 +59,9 @@ async def evidence_from_introspection(connector: ConnectorBase, source: str) -> 
     ]
 
 
-async def evidence_from_definitions(connector: ConnectorBase, source: str) -> list[EvidenceItem]:
+async def evidence_from_definitions(
+    connector: DefinitionExtractable, source: str
+) -> list[EvidenceItem]:
     """Extract definitions from ``connector`` and wrap each as a normalized evidence item.
 
     The E3 seam (SPEC-E3 §2, §8): each :class:`RelationSchema` at modeling tier becomes a
@@ -79,7 +97,7 @@ async def evidence_from_definitions(connector: ConnectorBase, source: str) -> li
     return items
 
 
-async def evidence_from_docs(connector: ConnectorBase, source: str) -> list[EvidenceItem]:
+async def evidence_from_docs(connector: EvidenceExtractable, source: str) -> list[EvidenceItem]:
     """Extract evidence from ``connector`` and wrap each as a normalized evidence item.
 
     The E3 evidence seam (SPEC-E3 §5, §8): dispatches on the concrete evidence type.
@@ -114,3 +132,29 @@ async def evidence_from_docs(connector: ConnectorBase, source: str) -> list[Evid
                 )
             )
     return result
+
+
+_EvidenceSeam = Callable[[Any, str], Awaitable[list[EvidenceItem]]]
+
+_SEAM_BY_CAPABILITY: dict[Capability, _EvidenceSeam] = {
+    Capability.INTROSPECT_SCHEMA: evidence_from_introspection,
+    Capability.EXTRACT_DEFINITIONS: evidence_from_definitions,
+    Capability.EXTRACT_EVIDENCE: evidence_from_docs,
+}
+
+
+async def gather_evidence(connector: ConnectorBase, source: str) -> list[EvidenceItem]:
+    """Dispatch on declared capabilities and invoke the matching evidence seam for each.
+
+    The core evidence-gathering entry point (SPEC-E3 §2, S4): iterates
+    ``connector.capabilities()`` and invokes the seam mapped to each evidence-producing
+    capability.  A connector declaring both ``extract_definitions`` and ``extract_evidence``
+    has both seams called — multi-capability, zero vendor-name branches.
+    Capabilities with no mapped seam (e.g. ``test_connection``) are silently skipped.
+    """
+    items: list[EvidenceItem] = []
+    for cap in connector.capabilities():
+        seam = _SEAM_BY_CAPABILITY.get(cap)
+        if seam is not None:
+            items.extend(await seam(connector, source))
+    return items

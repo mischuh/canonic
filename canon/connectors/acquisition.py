@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import logging
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 import sqlglot
 from pydantic import BaseModel, ConfigDict
@@ -23,6 +23,7 @@ from canon.connectors.base import (
     ColumnInfo,
     ConnectorBase,
     RelationSchema,
+    SchemaIntrospectable,
     compute_fingerprint,
 )
 from canon.exc import SchemaMismatch
@@ -147,7 +148,9 @@ class AcquisitionResult(BaseModel):
     gap: GapReport
 
 
-async def probe_schema(connector: ConnectorBase, relation_schema: RelationSchema) -> ProbeResult:
+async def probe_schema(
+    connector: SchemaIntrospectable, relation_schema: RelationSchema
+) -> ProbeResult:
     """Validate a declared/hand-authored schema against the live source (§5).
 
     Observes the relation via a zero-scan probe and diffs declared columns/types
@@ -326,7 +329,7 @@ class AcquisitionLadder:
 
         if Capability.INTROSPECT_SCHEMA in self._connector.capabilities():
             try:
-                live = await self._connector.introspect_schema()
+                live = await cast("SchemaIntrospectable", self._connector).introspect_schema()
             except Exception as exc:  # noqa: BLE001 — blocked catalog ⇒ descend the ladder
                 logger.warning("live introspection failed (%s); using declarative tiers", exc)
                 live = []
@@ -347,7 +350,7 @@ class AcquisitionLadder:
             if schema.relation in acquired:
                 continue  # live introspection wins
             if probe:
-                result = await probe_schema(self._connector, schema)
+                result = await probe_schema(cast("SchemaIntrospectable", self._connector), schema)
                 result.raise_for_status()
                 assert result.validated is not None  # noqa: S101 — guaranteed by raise_for_status
                 acquired[schema.relation] = result.validated

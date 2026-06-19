@@ -39,7 +39,7 @@ from canon.ingestion.reconciliation import (
     InMemoryAcceptedStore,
     ReconciliationEngine,
 )
-from canon.ingestion.source import evidence_from_introspection
+from canon.ingestion.source import evidence_from_introspection, gather_evidence
 from canon.ingestion.validation import (
     ValidationGate,
     ValidationReport,
@@ -85,4 +85,5 @@ __all__ = [
     "Violation",
     "ViolationKind",
     "evidence_from_introspection",
+    "gather_evidence",
 ]

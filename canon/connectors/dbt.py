@@ -22,6 +22,7 @@ from canon.connectors.base import (
     AcquisitionTier,
     Capability,
     ColumnInfo,
+    ConnectorBase,
     DefinitionEntityType,
     DefinitionEvidence,
     DefinitionExtract,
@@ -147,7 +148,7 @@ def _parse_manifest_version(schema_url: str | None) -> str | None:
     return m.group(1) if m else None
 
 
-class DbtConnector:
+class DbtConnector(ConnectorBase):
     """Definition connector for a compiled dbt ``manifest.json`` (SPEC-E3 §4, dbt Core 1.6+).
 
     Constructed directly from a manifest path (no live database connection).

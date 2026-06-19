@@ -1,29 +1,49 @@
 """Connection-id → connector resolution (SPEC-E2 §6, SPEC-E7-E8 §2).
 
 The core dispatches on a connection's declared ``type`` via a small registry,
-never on vendor identity at the call site. Phase 0 registers only PostgreSQL.
+never on vendor identity at the call site.
 """
 
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from canon.connectors.base import ConnectorBase  # noqa: TC001 — used in _REGISTRY annotation
+from canon.connectors.dbt import DbtConnector
 from canon.connectors.looker import LookerConnector
 from canon.connectors.metabase import MetabaseConnector
+from canon.connectors.notion import DEFAULT_API_VERSION as _NOTION_DEFAULT_API_VERSION
+from canon.connectors.notion import NotionConnector
 from canon.connectors.postgres import PostgresConnector
 from canon.exc import ConnectionError
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from canon.config import CanonConfig, Connection
+    from canon.connectors.base import ConnectorBase
 
 __all__ = ["connector_by_id", "connector_for"]
 
-# Declared connection type → connector class. New primary connectors register here.
-# The value type is intentionally broad so the factory can call cls(conn) uniformly.
-_REGISTRY: dict[str, type] = {
+
+def _make_dbt(conn: Connection) -> DbtConnector:
+    manifest_path = conn.params.get("manifest_path", "manifest.json")
+    return DbtConnector(manifest_path, source=conn.id)
+
+
+def _make_notion(conn: Connection) -> NotionConnector:
+    from canon.credentials import resolve_credential
+
+    token = resolve_credential(conn.credentials_ref)
+    api_version = conn.params.get("api_version", _NOTION_DEFAULT_API_VERSION)
+    return NotionConnector(token, source=conn.id, api_version=api_version)
+
+
+# Declared connection type → factory callable. New connectors register here.
+_REGISTRY: dict[str, Callable[[Connection], ConnectorBase]] = {
+    "dbt": _make_dbt,
     "looker": LookerConnector,
     "metabase": MetabaseConnector,
+    "notion": _make_notion,
     "postgres": PostgresConnector,
 }
 
@@ -34,14 +54,13 @@ def connector_for(conn: Connection) -> ConnectorBase:
     Raises :class:`ConnectionError` (exit 13) when the type has no registered
     connector.
     """
-    connector_cls = _REGISTRY.get(conn.type)
-    if connector_cls is None:
+    factory = _REGISTRY.get(conn.type)
+    if factory is None:
         known = ", ".join(sorted(_REGISTRY)) or "(none)"
         raise ConnectionError(
             f"connection {conn.id!r} has unsupported type {conn.type!r}; known types: {known}"
         )
-    instance: ConnectorBase = connector_cls(conn)
-    return instance
+    return factory(conn)
 
 
 def connector_by_id(config: CanonConfig, connection_id: str | None) -> ConnectorBase:
