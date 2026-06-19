@@ -1,13 +1,14 @@
 """Fixtures for connector tests.
 
-Unit fixtures (``offline_connector``) need no database. Integration fixtures
-(``postgres_container``, ``pg_connector``) spin up a real PostgreSQL via
+Unit fixtures (``offline_connector``, ``dbt_manifest_path``) need no database. Integration
+fixtures (``postgres_container``, ``pg_connector``) spin up a real PostgreSQL via
 testcontainers and are skipped cleanly when Docker/testcontainers is absent.
 """
 
 from __future__ import annotations
 
 import asyncio
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import pytest
@@ -53,6 +54,12 @@ async def _seed(dsn: str) -> None:
         await conn.execute(_SEED_SQL)
     finally:
         await conn.close()
+
+
+@pytest.fixture
+def dbt_manifest_path() -> Path:
+    """Path to the compiled dbt manifest fixture used by dbt connector tests."""
+    return Path(__file__).parent / "fixtures" / "dbt_manifest.json"
 
 
 @pytest.fixture
