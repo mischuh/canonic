@@ -8,6 +8,7 @@ from rich.console import Console
 from canon.cli._errors import get_cli_context
 from canon.config import ConfigError, find_project_root, load_config
 from canon.contract import CONTRACT_SCHEMA
+from canon.instrumentation.report import build_report, read_events
 
 _console = Console(soft_wrap=True)
 
@@ -33,6 +34,11 @@ def status(ctx: typer.Context) -> None:
 
     dotcanon_present = (root / ".canon").is_dir()
 
+    events = read_events(root)
+    rep = build_report(events)
+    error_count = rep.count - rep.error_distribution.get("ok", 0)
+    latency_p95: int | None = rep.latency.p95_ms if rep.latency is not None else None
+
     if json_output:
         typer.echo(
             json.dumps(
@@ -42,6 +48,11 @@ def status(ctx: typer.Context) -> None:
                     "config_error": config_error,
                     "dotcanon_present": dotcanon_present,
                     "contract_schema": CONTRACT_SCHEMA,
+                    "events": {
+                        "count": rep.count,
+                        "error_count": error_count,
+                        "latency_p95_ms": latency_p95,
+                    },
                 }
             )
         )
@@ -54,3 +65,6 @@ def status(ctx: typer.Context) -> None:
         _console.print(f"config version: {config_version}")
     _console.print(f".canon/:        {'present' if dotcanon_present else 'absent'}")
     _console.print(f"contract:       {CONTRACT_SCHEMA}")
+    if rep.count > 0:
+        p95_str = f"  p95 {latency_p95}ms" if latency_p95 is not None else ""
+        _console.print(f"events:         {rep.count} served · errors {error_count}{p95_str}")

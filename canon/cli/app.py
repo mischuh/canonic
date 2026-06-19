@@ -19,6 +19,7 @@ from canon.cli.commands import (
     knowledge,
     mcp,
     query,
+    report,
     setup,
     sl,
     sql,
@@ -81,4 +82,5 @@ app.command("ingest")(ingest.ingest)
 app.command("query")(query.query)
 app.command("sql")(sql.sql)
 app.command("status")(status.status)
+app.command("report")(report.report)
 app.command("completion")(completion.completion)
