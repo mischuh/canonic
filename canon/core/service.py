@@ -5,18 +5,23 @@ MCP and CLI adapters call this service; they do not duplicate any logic (SPEC §
 
 from __future__ import annotations
 
+import time
+from datetime import UTC, datetime
 from pathlib import Path  # noqa: TC003 — used in function bodies, not just annotations
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from canon.compiler import SemanticQuery, compile
 from canon.config import CanonConfig, load_config
 from canon.connectors.factory import connector_by_id
+from canon.contract import CONTRACT_SCHEMA
 from canon.contracts import ContractResolver
 from canon.contracts.resolver import Ambiguous as ResolverAmbiguous
 from canon.contracts.resolver import Binding
 from canon.contracts.resolver import Unresolved as ResolverUnresolved
 from canon.core.models import MetricDetail, MetricSummary, QueryResult, SourceFreshnessOut
-from canon.exc import Ambiguous, Unresolved
+from canon.exc import Ambiguous, CanonError, Unresolved
+from canon.instrumentation.events import AnswerEventLog, DiskAnswerEventLog, NullAnswerEventLog
+from canon.instrumentation.models import AnswerEvent, _age_days, _sha256_json
 from canon.semantic.loader import list_semantic_sources
 
 if TYPE_CHECKING:
@@ -41,11 +46,15 @@ class CanonService:
         sources: list[SemanticSource],
         *,
         project_root: Path | None = None,
+        event_log: AnswerEventLog | None = None,
     ) -> None:
         self._config = config
         self._resolver = resolver
         self._sources = sources
         self._project_root = project_root
+        self._event_log: AnswerEventLog = (
+            event_log if event_log is not None else NullAnswerEventLog()
+        )
         # name → source for fast lookup (sources have unique names within project)
         self._source_by_name: dict[str, SemanticSource] = {s.name: s for s in sources}
 
@@ -55,7 +64,13 @@ class CanonService:
         config = load_config(root / "canon.yaml")
         resolver = ContractResolver.from_project(root)
         sources = list_semantic_sources(root)
-        return cls(config=config, resolver=resolver, sources=sources, project_root=root)
+        return cls(
+            config=config,
+            resolver=resolver,
+            sources=sources,
+            project_root=root,
+            event_log=DiskAnswerEventLog(root),
+        )
 
     # ------------------------------------------------------------------
     # Discovery
@@ -174,14 +189,69 @@ class CanonService:
 
         Derives the connection from the primary metric's owning source.
         """
-        compiled = compile(query, self._resolver, self._sources)
-        connection_id = self._connection_for_sql(compiled)
-        connector = connector_by_id(self._config, connection_id)
+        started = time.perf_counter()
+        compiled: CompileResult | None = None
+        connection_id: str | None = None
+        result: ResultSet | None = None
+        error_code: str | None = None
         try:
-            result: ResultSet = await connector.run_read_only_sql(compiled.sql)
+            compiled = compile(query, self._resolver, self._sources)
+            connection_id = self._connection_for_sql(compiled)
+            connector = connector_by_id(self._config, connection_id)
+            try:
+                result = await connector.run_read_only_sql(compiled.sql)
+            finally:
+                await connector.aclose()
+            return QueryResult.from_parts(compiled, result)
+        except CanonError as err:
+            error_code = err.code.value if err.code is not None else None
+            raise
         finally:
-            await connector.aclose()
-        return QueryResult.from_parts(compiled, result)
+            latency_ms = round((time.perf_counter() - started) * 1000)
+            self._emit_answer_event(query, compiled, connection_id, result, latency_ms, error_code)
+
+    def _emit_answer_event(
+        self,
+        query: SemanticQuery,
+        compiled: CompileResult | None,
+        connection_id: str | None,
+        result: ResultSet | None,
+        latency_ms: int,
+        error_code: str | None,
+    ) -> None:
+        try:
+            freshness: list[dict[str, Any]] = (
+                [
+                    {
+                        "age_days": _age_days(f.last_validated_at),
+                        "source": f.source,
+                        "stale": f.stale,
+                    }
+                    for f in compiled.freshness
+                ]
+                if compiled is not None
+                else []
+            )
+            event = AnswerEvent(
+                ts=datetime.now(UTC).isoformat(),
+                contract_schema=CONTRACT_SCHEMA,
+                query_hash=_sha256_json(query.model_dump(mode="json")),
+                compiled_sql_hash=_sha256_json({"sql": compiled.sql})
+                if compiled is not None
+                else None,
+                connection=connection_id,
+                resolved={"metrics": dict(compiled.resolved)} if compiled is not None else {},
+                guardrails_fired=[g.id for g in compiled.guardrails_fired]
+                if compiled is not None
+                else [],
+                freshness=freshness,
+                latency_ms=latency_ms,
+                bytes_scanned=result.bytes_scanned if result is not None else None,
+                error=error_code,
+            )
+            self._event_log.append(event)
+        except Exception:
+            pass  # emission is a side effect — never raises into the serving path (SPEC-E16 §9)
 
     async def run_sql(self, sql: str, connection: str | None = None) -> ResultSet:
         """Execute a raw read-only SQL string on the named connection (SPEC §2).
