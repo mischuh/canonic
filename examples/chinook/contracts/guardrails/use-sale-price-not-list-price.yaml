@@ -1,0 +1,7 @@
+id: use-sale-price-not-list-price
+applies_to:
+  source: invoice_lines
+  measure: line_revenue
+kind: restrict_source
+severity: warn
+rationale: "Revenue must be calculated from InvoiceLine.UnitPrice (the price at time of sale), never from Track.UnitPrice (the current list price). List prices change over time; using them for historical revenue produces inflated or deflated figures that do not match actual receipts."

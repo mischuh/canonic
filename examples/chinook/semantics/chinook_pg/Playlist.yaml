@@ -1,0 +1,16 @@
+name: Playlist
+connection: chinook_pg
+table: chinook.Playlist
+grain:
+- PlaylistId
+columns:
+- name: PlaylistId
+  type: int
+  nullable: false
+- name: Name
+  type: string
+  nullable: true
+joins: []
+meta:
+  source_fingerprint: 
+    sha256:59d851c0e6662a204a9e46730bc8a005f21999f7f4aa367977f6cc63a54f13d6

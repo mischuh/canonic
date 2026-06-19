@@ -29,6 +29,7 @@ from canon.ingestion.autopr import AutoPRPublisher, PullRequestPublisher, Subpro
 from canon.ingestion.models import ReconciliationDecision
 from canon.ingestion.pipeline import IngestionPipeline
 from canon.ingestion.source import evidence_from_introspection
+from canon.runtime.drafter import make_drafter
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable
@@ -161,7 +162,10 @@ async def _ingest(
 ) -> PipelineResult:
     """Build connectors, gather evidence, and drive the pipeline; always closes connectors."""
     connectors: dict[str, ConnectorBase] = {conn.id: connector_for(conn) for conn in targets}
-    pipeline = IngestionPipeline(root, connectors, config.reconcile, headless=headless)
+    drafter = make_drafter(config.llm, config.runtime, headless=headless)
+    pipeline = IngestionPipeline(
+        root, connectors, config.reconcile, headless=headless, drafter=drafter
+    )
     try:
         if bootstrap:
             return await _guard_connection(targets[0].id, pipeline.bootstrap(targets[0].id))

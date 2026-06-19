@@ -152,4 +152,45 @@ def build_server(service: CanonService) -> FastMCP:
         result = await service.run_sql(sql, connection=connection)
         return result.model_dump()
 
+    # ------------------------------------------------------------------
+    # Tool: search_knowledge  (E6, P1)
+    # ------------------------------------------------------------------
+
+    @mcp.tool(
+        description=(
+            "Search the project's knowledge pages for business context: definitions, "
+            "caveats, and policies. Returns ranked hits plus any caveats auto-surfaced "
+            "because a hit references their bound semantic entity. "
+            "Call alongside query() to get executable SQL and business meaning together. "
+            "Returns empty hits when the project has no knowledge pages."
+        )
+    )
+    @canon_error_response
+    async def search_knowledge(
+        query: str,
+        user: str | None = None,
+        limit: int = 5,
+    ) -> dict[str, Any]:
+        result = service.search_knowledge(query, user=user, limit=limit)
+        return {
+            "hits": [
+                {
+                    "page": h.page,
+                    "summary": h.summary,
+                    "usage_mode": h.usage_mode,
+                    "matched_on": [m.value for m in h.matched_on],
+                    "sl_refs": h.sl_refs,
+                }
+                for h in result.hits
+            ],
+            "caveats": [
+                {
+                    "page": c.page,
+                    "summary": c.summary,
+                    "triggered_by": c.triggered_by,
+                }
+                for c in result.caveats
+            ],
+        }
+
     return mcp

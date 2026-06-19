@@ -19,7 +19,7 @@ from typing import TYPE_CHECKING
 
 from pydantic import BaseModel, ConfigDict
 
-from canon.ingestion.builder import ContextBuilder, NullLLMDrafter, SkippedEvidence
+from canon.ingestion.builder import ContextBuilder, LLMDrafter, NullLLMDrafter, SkippedEvidence
 from canon.ingestion.emitter import AuditTrailWriter, DiffEmitter, EmissionResult, EmittedDiff
 from canon.ingestion.models import ProposalOp, ReconciliationDecision, ReconciliationReport
 from canon.ingestion.reconciliation import DiskAcceptedStore, ReconciliationEngine
@@ -90,15 +90,17 @@ class IngestionPipeline:
         config: ReconcileConfig,
         *,
         headless: bool = False,
+        drafter: LLMDrafter | None = None,
     ) -> None:
         self._project_root = project_root
         self._connectors = connectors
         self._config = config
-        # In headless mode the builder is pinned to the deterministic ``NullLLMDrafter`` so the
-        # critical path stays LLM-free (SPEC-E4 §9 / S9-AC1) even once a real drafter (E10) is
-        # injected for interactive runs. Today the default is already deterministic; this hard-
-        # guarantees it.
-        self._builder = ContextBuilder(NullLLMDrafter()) if headless else ContextBuilder()
+        # Headless mode hard-pins NullLLMDrafter regardless of what drafter was injected
+        # (SPEC-E4 §9 / S9-AC1): the deterministic builder core is guaranteed LLM-free even
+        # if a caller mistakenly passes a real drafter in headless mode.
+        # Interactive mode uses the injected drafter (or falls back to NullLLMDrafter when
+        # None, e.g. "no models configured" operating point).
+        self._builder = ContextBuilder(NullLLMDrafter()) if headless else ContextBuilder(drafter)
         self._engine = ReconciliationEngine(config)
         self._emitter = DiffEmitter()
 
@@ -138,7 +140,7 @@ class IngestionPipeline:
         self, evidence: list[EvidenceItem]
     ) -> tuple[EmissionResult, list[SkippedEvidence]]:
         """Stages 1–4: build → reconcile → validate → emit (no side effects)."""
-        build = self._builder.build(evidence)
+        build = await self._builder.build(evidence)
         report = self._engine.reconcile(build.proposals, DiskAcceptedStore(self._project_root))
         gate = ValidationGate(self._project_root, self._connectors, evidence)
         await gate.validate(build.proposals)  # raises before emit (S8)

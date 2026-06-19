@@ -1,0 +1,9 @@
+# Labeled grain-inference cases for the ecommerce demo (SPEC-E10 §7).
+# Mirrors the analytics schema in setup.sql — primary keys intentionally omitted
+# so the drafter must infer the grain from column names and types.
+# Run: canon eval baseline --candidates candidates.yaml --dataset eval/grain_cases.jsonl
+{"relation": "analytics.dim_customers", "columns": [{"name": "customer_id", "type": "int", "nullable": false}, {"name": "email", "type": "string", "nullable": false}, {"name": "country", "type": "string", "nullable": false}], "expected_grain": ["customer_id"]}
+{"relation": "analytics.dim_products", "columns": [{"name": "product_id", "type": "int", "nullable": false}, {"name": "name", "type": "string", "nullable": false}, {"name": "category", "type": "string", "nullable": false}, {"name": "unit_price", "type": "decimal", "nullable": false}], "expected_grain": ["product_id"]}
+{"relation": "analytics.dim_channels", "columns": [{"name": "channel_id", "type": "int", "nullable": false}, {"name": "name", "type": "string", "nullable": false}], "expected_grain": ["channel_id"]}
+{"relation": "analytics.fct_orders", "columns": [{"name": "order_id", "type": "int", "nullable": false}, {"name": "customer_id", "type": "int", "nullable": false}, {"name": "channel_id", "type": "int", "nullable": false}, {"name": "amount", "type": "decimal", "nullable": false}, {"name": "status", "type": "string", "nullable": false}, {"name": "created_at", "type": "timestamp", "nullable": false}], "expected_grain": ["order_id"]}
+{"relation": "analytics.fct_order_items", "columns": [{"name": "order_item_id", "type": "int", "nullable": false}, {"name": "order_id", "type": "int", "nullable": false}, {"name": "product_id", "type": "int", "nullable": false}, {"name": "quantity", "type": "int", "nullable": false}, {"name": "line_amount", "type": "decimal", "nullable": false}], "expected_grain": ["order_item_id"]}

@@ -1,0 +1,15 @@
+name: media_types
+connection: chinook_pg
+table: 'chinook."MediaType"'
+grain: [MediaTypeId]
+description: "Delivery format lookup (AAC, MP3, MPEG, etc.). Join target for tracks."
+
+columns:
+  - { name: MediaTypeId, type: int,    nullable: false }
+  - { name: Name,        type: string, nullable: true  }
+
+dimensions:
+  - { name: media_type_name, column: Name }
+
+meta:
+  provenance: human_curated

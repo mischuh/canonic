@@ -1,8 +1,28 @@
 # Canon ecommerce demo
 
 A small but end-to-end Canon project: one Postgres connection, a four-source star schema
-(two facts, three dimensions), three canonical metrics, and one enforced guardrail. Enough
-to run `canon mcp start` and let an agent call the `query` tool and get real rows back.
+(two facts, three dimensions), three canonical metrics, and one enforced guardrail.
+Covers the complete **Phase 1 loop**: ingest bootstraps context from a real stack, the
+MCP server gives agents both executable definitions and business meaning, and `canon eval`
+tracks accuracy.
+
+## Phase 1 loop
+
+```
+canon ingest --bootstrap          # 1. bootstrap: introspect Postgres → write semantics/*.yaml
+canon mcp start                   # 2. serve: agents call query() + search_knowledge() together
+canon eval baseline \             # 3. track: measure grain-inference accuracy on the live schema
+  --candidates candidates.yaml \
+  --dataset eval/grain_cases.jsonl
+```
+
+Each step proves one Phase 1 exit criterion:
+
+| Step | Criterion |
+| --- | --- |
+| `canon ingest --bootstrap` | Bootstraps context from a real stack |
+| `query()` + `search_knowledge()` | Agents get both executable definitions and business meaning |
+| `canon eval baseline` | Accuracy is tracked |
 
 ## What's in here
 
@@ -10,6 +30,8 @@ to run `canon mcp start` and let an agent call the `query` tool and get real row
 canon.yaml                              ← project config + Postgres connection
 setup.sql                               ← CREATE TABLE + seed data (10 orders, 17 line items,
                                           5 customers, 5 products, 3 channels)
+candidates.yaml                         ← local model candidates for canon eval baseline
+eval/grain_cases.jsonl                  ← labeled grain-inference cases for the ecommerce schema
 semantics/warehouse_pg/
   orders.yaml                           ← fact: revenue/order_count measures, joins to customers + channels
   order_items.yaml                      ← fact: line_revenue/units_sold, joins to orders + products
@@ -177,6 +199,47 @@ resolve_metric("rev")
 → {"metric": "revenue", "source": "orders", "measure": "total_revenue"}
 ```
 
+**Business meaning alongside executable SQL — search_knowledge:**
+```json
+search_knowledge("revenue reporting policy")
+→ {
+    "hits": [
+      {
+        "page": "revenue-reporting-policy",
+        "summary": "Month-end cutoff rules for revenue reporting.",
+        "usage_mode": "policy",
+        "matched_on": ["lexical"],
+        "sl_refs": ["warehouse_pg.orders.total_revenue"]
+      }
+    ],
+    "caveats": [
+      {
+        "page": "revenue-excludes-refunds-caveat",
+        "summary": "Revenue figures exclude orders with status = 'refunded'.",
+        "triggered_by": ["warehouse_pg.orders.total_revenue"]
+      }
+    ]
+  }
+```
+
+The `search_knowledge()` tool surfaces knowledge pages by topic. Caveats are
+**auto-surfaced** whenever a hit's bound semantic entity (`sl_refs`) matches a caveat
+page — so the refund caveat rides along whenever any revenue topic is returned, even
+if the query was about reporting policy, not refunds.
+
+A typical agent pattern is `query()` for executable SQL + `search_knowledge()` for
+business context — both calls together, one decision:
+
+```json
+// Step 1: get rows
+query({"metrics": ["revenue"], "dimensions": ["order_date"]})
+
+// Step 2: understand the business rules
+search_knowledge("revenue definition")
+→ { "hits": [{"page": "revenue-definition", "usage_mode": "definition", …}],
+    "caveats": [{"page": "revenue-excludes-refunds-caveat", …}] }
+```
+
 ## Ingestion — keep semantics current as the schema evolves
 
 `canon ingest` refreshes the semantic files from the live Postgres schema.  The demo project
@@ -247,6 +310,36 @@ Postgres schema diverges from those definitions (e.g. a column type changes), in
 `contradiction` entry in the report but **keeps the curated file untouched**.  With `--strict`
 the run exits 14; without it, the contradiction note rides into the PR body for a human to
 resolve.
+
+## Accuracy tracking — `canon eval baseline`
+
+`canon eval` measures how accurately a local model infers grain from schema alone (SPEC-E10
+§7). The harness runs the production `draft` path over the labeled cases in
+`eval/grain_cases.jsonl` and writes a markdown report.
+
+**Run the baseline against your local model:**
+
+```sh
+# Point candidates.yaml at your running model server, then:
+canon eval baseline \
+  --candidates candidates.yaml \
+  --dataset eval/grain_cases.jsonl \
+  --out docs/baseline-models.md
+# gemma-4-e2b-it-4bit: accuracy 80%, structured-output 100%, p50 310 ms ✓ recommended
+```
+
+The harness scores each case as correct/incorrect (exact grain match), records structured-output
+adherence (did the model honor the JSON schema), and reports p50 latency + median tokens. A
+model must clear 90% structured-output adherence to be recommendable — accuracy alone is not
+enough if the output is frequently unparseable.
+
+**The five ecommerce cases** in `eval/grain_cases.jsonl` exercise the shape of the live schema:
+single surrogate key (`dim_customers`, `dim_channels`, `fct_orders`), descriptive surrogate key
+(`dim_products`), and a line-item fact (`fct_order_items`) where `order_item_id` is the grain
+rather than the composite `(order_id, product_id)`.
+
+No LLM config is needed to run the rest of the project — `canon eval baseline` is the only
+command that makes live model calls.
 
 ## CLI usage
 
