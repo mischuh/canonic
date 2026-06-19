@@ -34,6 +34,7 @@ from canon.connectors.base import (
     UsageRole,
     _usage_fingerprint,
 )
+from canon.exc import ConnectionError, UnsupportedSourceVersionError
 
 if TYPE_CHECKING:
     from canon.config import Connection
@@ -231,32 +232,43 @@ class MetabaseConnector(ConnectorBase):
     def capabilities(self) -> list[Capability]:
         return [Capability.CAPABILITIES, Capability.TEST_CONNECTION, Capability.EXTRACT_EVIDENCE]
 
-    async def test_connection(self) -> Health:
-        """Verify API connectivity and validate the server version is ≥ 0.48."""
+    async def _assert_supported_version(self) -> str:
+        """Fetch and enforce the pinned server version floor; raise if out of range.
+
+        Returns the detected version tag on success. Transport failures surface as
+        :exc:`ConnectionError`; a too-low version as :exc:`UnsupportedSourceVersionError`.
+        """
         try:
             version_tag = await self._question_source.server_version()
         except Exception as exc:
-            return Health(status="error", message=f"Metabase API unreachable: {exc}")
-
+            raise ConnectionError(f"Metabase API unreachable: {exc}") from exc
         parsed = _parse_version(version_tag)
         if parsed is None or parsed < MIN_API_VERSION:
             min_str = ".".join(str(v) for v in MIN_API_VERSION)
-            return Health(
-                status="error",
-                message=(
-                    f"Metabase server version {version_tag!r} is below minimum {min_str}; "
-                    "upgrade Metabase or pin a supported version"
-                ),
+            raise UnsupportedSourceVersionError(
+                "Metabase server", detected=version_tag, supported=f"{min_str}+"
             )
+        return version_tag
+
+    async def test_connection(self) -> Health:
+        """Verify API connectivity and validate the server version is ≥ 0.48."""
+        try:
+            version_tag = await self._assert_supported_version()
+        except ConnectionError as exc:
+            return Health(status="error", message=str(exc))
         return Health(status="ok", message=f"Metabase {version_tag}")
 
     async def extract_evidence(self) -> list[DocEvidence | UsageEvidence]:
         """Fetch Metabase questions and return one UsageEvidence per question.
 
+        Enforces the pinned server version first, raising :exc:`UnsupportedSourceVersionError`
+        on an out-of-range server so no partial ingest occurs (SPEC-E3 §6, S5).
+
         Every question is emitted — none are dropped.  Unmappable expressions are
         recorded as ``unknown`` with a WARNING so the evidence stream is complete
         (SPEC-E3 §4, S2 AC2 pattern).
         """
+        await self._assert_supported_version()
         observed_at = datetime.now(UTC)
         questions = await self._question_source.list_questions()
         evidence: list[DocEvidence | UsageEvidence] = []

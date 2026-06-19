@@ -165,6 +165,22 @@ class ConnectionError(CanonError):  # noqa: A001 — intentionally shadows built
     code = ErrorCode.CONNECTION_ERROR
 
 
+class UnsupportedSourceVersionError(ConnectionError):
+    """A connector's source version falls outside its pinned supported range (SPEC-E3 §6, S5).
+
+    Subclasses :class:`ConnectionError` (exit 13) so existing connection-error handling still
+    catches it, while callers that care can catch this specifically and read the structured
+    ``detected`` / ``supported`` fields. Raised at ``test_connection``/extract time before any
+    data lands, so an out-of-range source ingests nothing — no silent partial ingest.
+    """
+
+    def __init__(self, source: str, *, detected: str, supported: str) -> None:
+        self.source = source
+        self.detected = detected
+        self.supported = supported
+        super().__init__(f"{source} version {detected!r} is unsupported; supported: {supported}")
+
+
 class ContradictionsFound(CanonError):
     """Raised by headless ``--strict`` ingest when a run flags any contradiction (E4 §5.4)."""
 
