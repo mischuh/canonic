@@ -36,6 +36,7 @@ from canon.connectors.base import (
     UsageRole,
     _usage_fingerprint,
 )
+from canon.exc import ConnectionError, UnsupportedSourceVersionError
 
 if TYPE_CHECKING:
     from canon.config import Connection
@@ -204,30 +205,41 @@ class LookerConnector(ConnectorBase):
     def capabilities(self) -> list[Capability]:
         return [Capability.CAPABILITIES, Capability.TEST_CONNECTION, Capability.EXTRACT_EVIDENCE]
 
-    async def test_connection(self) -> Health:
-        """Verify API connectivity and validate the API version is 4.0."""
+    async def _assert_supported_version(self) -> str:
+        """Fetch and enforce the pinned API version; raise if out of range.
+
+        Returns the detected version on success. Transport failures surface as
+        :exc:`ConnectionError`; a version mismatch as :exc:`UnsupportedSourceVersionError`.
+        """
         try:
             version = await self._look_source.api_version()
         except Exception as exc:
-            return Health(status="error", message=f"Looker API unreachable: {exc}")
-
+            raise ConnectionError(f"Looker API unreachable: {exc}") from exc
         if version != SUPPORTED_API_VERSION:
-            return Health(
-                status="error",
-                message=(
-                    f"Looker API version {version!r} is not supported; "
-                    f"expected {SUPPORTED_API_VERSION!r}"
-                ),
+            raise UnsupportedSourceVersionError(
+                "Looker API", detected=version, supported=SUPPORTED_API_VERSION
             )
+        return version
+
+    async def test_connection(self) -> Health:
+        """Verify API connectivity and validate the API version is 4.0."""
+        try:
+            version = await self._assert_supported_version()
+        except ConnectionError as exc:
+            return Health(status="error", message=str(exc))
         return Health(status="ok", message=f"Looker API {version}")
 
     async def extract_evidence(self) -> list[DocEvidence | UsageEvidence]:
         """Fetch Looker Looks and return one UsageEvidence per Look.
 
+        Enforces the pinned API version first, raising :exc:`UnsupportedSourceVersionError`
+        on an out-of-range server so no partial ingest occurs (SPEC-E3 §6, S5).
+
         Every Look is emitted — none are dropped.  Unmappable expressions are
         recorded as ``unknown`` with a WARNING so the evidence stream is complete
         (SPEC-E3 §4, S2 AC2 pattern).
         """
+        await self._assert_supported_version()
         observed_at = datetime.now(UTC)
         looks = await self._look_source.list_looks()
         evidence: list[DocEvidence | UsageEvidence] = []

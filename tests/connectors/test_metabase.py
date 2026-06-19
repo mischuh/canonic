@@ -112,6 +112,26 @@ class TestTestConnection:
         health = await bad.test_connection()
         assert health.status == "error"
 
+    async def test_extract_raises_on_old_version(self, metabase_questions_path: Path) -> None:
+        """SPEC-E3 §6, S5 — out-of-range server ingests nothing (AC1)."""
+        from canon.config import Connection
+        from canon.exc import ConnectionError, UnsupportedSourceVersionError
+
+        conn = Connection(
+            id="metabase_prod",
+            type="metabase",
+            params={"base_url": "https://metabase.example.com"},
+            credentials_ref="env:METABASE_API_KEY",
+        )
+        old_source = FixtureMetabaseQuestionSource(metabase_questions_path, version="v0.45.0")
+        bad = MetabaseConnector(conn, question_source=old_source)
+        with pytest.raises(UnsupportedSourceVersionError) as excinfo:
+            await bad.extract_evidence()
+        exc = excinfo.value
+        assert "0.45" in exc.detected
+        assert exc.exit_code == 13
+        assert isinstance(exc, ConnectionError)
+
 
 class TestExprExtraction:
     def test_native_sql_uses_query(self) -> None:

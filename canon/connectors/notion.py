@@ -32,7 +32,7 @@ from canon.connectors.base import (
     UsageEvidence,
     UsageHint,
 )
-from canon.exc import ConnectionError
+from canon.exc import UnsupportedSourceVersionError
 
 logger = logging.getLogger(__name__)
 
@@ -248,16 +248,21 @@ class NotionConnector(ConnectorBase):
     def capabilities(self) -> list[Capability]:
         return [Capability.CAPABILITIES, Capability.TEST_CONNECTION, Capability.EXTRACT_EVIDENCE]
 
+    def _assert_supported_version(self) -> None:
+        """Enforce the pinned API-version allowlist; raise if out of range."""
+        if self._api_version not in SUPPORTED_API_VERSIONS:
+            raise UnsupportedSourceVersionError(
+                "Notion API",
+                detected=self._api_version,
+                supported=", ".join(sorted(SUPPORTED_API_VERSIONS)),
+            )
+
     async def test_connection(self) -> Health:
         """Verify the configured API version is supported and the page source is reachable."""
-        if self._api_version not in SUPPORTED_API_VERSIONS:
-            supported = ", ".join(sorted(SUPPORTED_API_VERSIONS))
-            return Health(
-                status="error",
-                message=(
-                    f"unsupported Notion API version {self._api_version!r}; supported: {supported}"
-                ),
-            )
+        try:
+            self._assert_supported_version()
+        except UnsupportedSourceVersionError as exc:
+            return Health(status="error", message=str(exc))
         try:
             await self._page_source.list_pages()
         except Exception as exc:
@@ -267,14 +272,10 @@ class NotionConnector(ConnectorBase):
     async def extract_evidence(self) -> list[DocEvidence | UsageEvidence]:
         """Fetch Notion pages and return one DocEvidence per page.
 
-        Fails with :exc:`ConnectionError` on an unsupported API version so no
-        partial ingest occurs (SPEC-E3 §6, PRD FR-2).
+        Fails with :exc:`UnsupportedSourceVersionError` on an unsupported API version
+        so no partial ingest occurs (SPEC-E3 §6, PRD FR-2).
         """
-        if self._api_version not in SUPPORTED_API_VERSIONS:
-            supported = ", ".join(sorted(SUPPORTED_API_VERSIONS))
-            raise ConnectionError(
-                f"unsupported Notion API version {self._api_version!r}; supported: {supported}"
-            )
+        self._assert_supported_version()
 
         observed_at = datetime.now(UTC)
         pages = await self._page_source.list_pages()

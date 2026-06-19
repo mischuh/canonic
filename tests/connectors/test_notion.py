@@ -185,10 +185,15 @@ class TestExtractEvidence:
         self, page_source: FixtureNotionPageSource
     ) -> None:
         from canon.exc import ConnectionError as CanonConnectionError
+        from canon.exc import UnsupportedSourceVersionError
 
         bad = NotionConnector(page_source=page_source, api_version="2020-01-01")
-        with pytest.raises(CanonConnectionError, match="unsupported"):
+        with pytest.raises(UnsupportedSourceVersionError, match="unsupported") as excinfo:
             await bad.extract_evidence()
+        exc = excinfo.value
+        assert exc.detected == "2020-01-01"
+        assert exc.exit_code == 13
+        assert isinstance(exc, CanonConnectionError)
 
     async def test_doc_evidence_round_trips(self, connector: NotionConnector) -> None:
         docs = await connector.extract_evidence()

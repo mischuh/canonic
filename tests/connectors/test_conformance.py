@@ -433,3 +433,100 @@ def test_ac2_lying_connector_fails_harness() -> None:
         "_LyingConnector should not define extract_evidence — "
         "this test proves the harness would catch it"
     )
+
+
+# ---------------------------------------------------------------------------
+# S5 (GH-91) — out-of-range source version fails loudly, ingests nothing (AC1)
+# ---------------------------------------------------------------------------
+
+
+def _out_of_range_connector(
+    param: str,
+    *,
+    tmp_path: Path,
+    notion_pages_path: Path,
+    metabase_questions_path: Path,
+    looker_looks_path: Path,
+) -> ConnectorBase:
+    """Build each evidence connector pinned to an unsupported source version."""
+    from canon.config import Connection
+    from canon.connectors.dbt import DbtConnector
+    from canon.connectors.looker import LookerConnector
+    from canon.connectors.metabase import MetabaseConnector
+    from canon.connectors.notion import NotionConnector
+
+    match param:
+        case "dbt":
+            manifest = tmp_path / "old_manifest.json"
+            manifest.write_text(
+                json.dumps(
+                    {
+                        "metadata": {
+                            "dbt_schema_version": (
+                                "https://schemas.getdbt.com/dbt/manifest/v9.json"
+                            ),
+                            "dbt_version": "1.5.0",
+                        },
+                        "nodes": {},
+                    }
+                )
+            )
+            return DbtConnector(manifest)
+        case "notion":
+            return NotionConnector(
+                page_source=_FixtureNotionPageSource(notion_pages_path),
+                api_version="2020-01-01",
+            )
+        case "metabase":
+            conn = Connection(
+                id="metabase_prod",
+                type="metabase",
+                params={"base_url": "https://metabase.example.com"},
+                credentials_ref="env:METABASE_API_KEY",
+            )
+            return MetabaseConnector(
+                conn,
+                question_source=_FixtureMetabaseQuestionSource(
+                    metabase_questions_path, version="v0.45.0"
+                ),
+            )
+        case "looker":
+            conn = Connection(
+                id="looker_prod",
+                type="looker",
+                params={"base_url": "https://looker.example.com"},
+                credentials_ref="env:LOOKER_API_TOKEN",
+            )
+            return LookerConnector(
+                conn,
+                look_source=_FixtureLookerLookSource(looker_looks_path, version="3.1"),
+            )
+        case _:
+            pytest.fail(f"unknown connector param: {param!r}")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("param", ["dbt", "notion", "metabase", "looker"])
+async def test_e3_unsupported_version_ingests_nothing(
+    param: str,
+    tmp_path: Path,
+    notion_pages_path: Path,
+    metabase_questions_path: Path,
+    looker_looks_path: Path,
+) -> None:
+    """AC1 across the matrix: an out-of-range version raises and yields zero evidence.
+
+    ``gather_evidence`` dispatches on capabilities with no vendor branches; the
+    connector's own version guard must abort before any item is produced.
+    """
+    from canon.exc import UnsupportedSourceVersionError
+
+    connector = _out_of_range_connector(
+        param,
+        tmp_path=tmp_path,
+        notion_pages_path=notion_pages_path,
+        metabase_questions_path=metabase_questions_path,
+        looker_looks_path=looker_looks_path,
+    )
+    with pytest.raises(UnsupportedSourceVersionError):
+        await gather_evidence(connector, param)

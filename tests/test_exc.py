@@ -53,3 +53,14 @@ def test_errors_without_registry_code_use_exit_one() -> None:
 def test_all_subclasses_derive_from_canon_error() -> None:
     for error_cls, _ in _REGISTRY:
         assert issubclass(error_cls, CanonError)
+
+
+def test_unsupported_source_version_reuses_connection_error() -> None:
+    # S5 (GH-91): version mismatch is a flavor of ConnectionError — same exit code,
+    # specific catchable type, structured detected/supported fields.
+    err = exc.UnsupportedSourceVersionError("dbt", detected="v9", supported="v10+")
+    assert issubclass(exc.UnsupportedSourceVersionError, exc.ConnectionError)
+    assert err.exit_code == 13
+    assert err.detected == "v9"
+    assert err.supported == "v10+"
+    assert "v9" in str(err)

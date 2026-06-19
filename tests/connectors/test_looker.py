@@ -99,6 +99,26 @@ class TestTestConnection:
         assert health.status == "error"
         assert "3.1" in (health.message or "")
 
+    async def test_extract_raises_on_unsupported_version(self, looker_looks_path: Path) -> None:
+        """SPEC-E3 §6, S5 — out-of-range server ingests nothing (AC1)."""
+        from canon.config import Connection
+        from canon.exc import ConnectionError, UnsupportedSourceVersionError
+
+        conn = Connection(
+            id="looker_prod",
+            type="looker",
+            params={"base_url": "https://looker.example.com"},
+            credentials_ref="env:LOOKER_API_TOKEN",
+        )
+        old_source = FixtureLookerLookSource(looker_looks_path, version="3.1")
+        bad = LookerConnector(conn, look_source=old_source)
+        with pytest.raises(UnsupportedSourceVersionError) as excinfo:
+            await bad.extract_evidence()
+        exc = excinfo.value
+        assert exc.detected == "3.1"
+        assert exc.exit_code == 13
+        assert isinstance(exc, ConnectionError)
+
 
 class TestExprExtraction:
     def test_measures_used_as_expr(self) -> None:

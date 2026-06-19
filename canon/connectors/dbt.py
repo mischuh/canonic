@@ -5,8 +5,10 @@ Emits :class:`RelationSchema` at acquisition tier ``modeling`` (ladder tier 2) a
 structure crosses the boundary into E4; ``native_ref`` carries the dbt ``unique_id`` as the
 sole back-pointer for provenance (SPEC-E3 §3.1).
 
-Version handling: the manifest schema version and dbt version are detected and logged at
-``test_connection`` time but never block extraction in v1 (hard out-of-range rejection is S5).
+Version pinning: the manifest schema version is detected and enforced at
+``test_connection``/extract time (SPEC-E3 §6, S5).  A manifest below schema ``v10``
+(dbt Core 1.6+) fails with a clear :exc:`UnsupportedSourceVersionError` and ingests
+nothing — partial ingest from an incompatible manifest is never silently accepted (PRD FR-2).
 """
 
 from __future__ import annotations
@@ -33,11 +35,15 @@ from canon.connectors.base import (
     RelationSchema,
     compute_fingerprint,
 )
+from canon.exc import UnsupportedSourceVersionError
 from canon.semantic.models import Additivity, Relationship
 
 logger = logging.getLogger(__name__)
 
 __all__ = ["DbtConnector"]
+
+# Minimum supported dbt manifest schema version (dbt Core 1.6+ emits v10+).
+MIN_MANIFEST_SCHEMA_VERSION = 10
 
 # dbt aggregate function name → Canon Additivity.  All others are recorded
 # with a warning and omitted (additivity=None → "unknown" per SPEC-E3 §3.1).
@@ -152,8 +158,9 @@ class DbtConnector(ConnectorBase):
     """Definition connector for a compiled dbt ``manifest.json`` (SPEC-E3 §4, dbt Core 1.6+).
 
     Constructed directly from a manifest path (no live database connection).
-    Version detection is performed at ``test_connection`` time; out-of-range rejection
-    is deferred to a future S5 PR.
+    Version detection and enforcement run at both ``test_connection`` and
+    ``extract_definitions`` time; a manifest below schema ``v10`` (dbt Core 1.6+) is
+    rejected with :exc:`UnsupportedSourceVersionError` and ingests nothing (S5).
 
     Args:
         manifest_path: Path to the compiled ``manifest.json``.
@@ -167,8 +174,22 @@ class DbtConnector(ConnectorBase):
     def capabilities(self) -> list[Capability]:
         return [Capability.CAPABILITIES, Capability.TEST_CONNECTION, Capability.EXTRACT_DEFINITIONS]
 
+    def _assert_supported_version(self, metadata: dict[str, Any]) -> str:
+        """Enforce the pinned manifest schema floor; raise if out of range.
+
+        Returns the detected ``vN`` schema label on success.
+        """
+        schema_version = _parse_manifest_version(metadata.get("dbt_schema_version"))
+        if schema_version is None or int(schema_version[1:]) < MIN_MANIFEST_SCHEMA_VERSION:
+            raise UnsupportedSourceVersionError(
+                "dbt manifest schema",
+                detected=schema_version or "unknown",
+                supported=f"v{MIN_MANIFEST_SCHEMA_VERSION}+ (dbt Core 1.6+)",
+            )
+        return schema_version
+
     async def test_connection(self) -> Health:
-        """Verify the manifest exists, parses as JSON, and carry version metadata."""
+        """Verify the manifest exists, parses as JSON, and meets the pinned schema floor."""
         if not self._path.exists():
             return Health(status="error", message=f"manifest not found: {self._path}")
         try:
@@ -176,13 +197,21 @@ class DbtConnector(ConnectorBase):
         except (json.JSONDecodeError, OSError) as exc:
             return Health(status="error", message=f"cannot read manifest: {exc}")
         metadata = manifest.get("metadata", {})
+        try:
+            schema_version = self._assert_supported_version(metadata)
+        except UnsupportedSourceVersionError as exc:
+            return Health(status="error", message=str(exc))
         dbt_version = metadata.get("dbt_version", "unknown")
-        schema_version = _parse_manifest_version(metadata.get("dbt_schema_version")) or "unknown"
         return Health(status="ok", message=f"dbt {dbt_version}, manifest {schema_version}")
 
     async def extract_definitions(self) -> DefinitionExtract:
-        """Parse the manifest and return normalized schemas + definition evidence."""
+        """Parse the manifest and return normalized schemas + definition evidence.
+
+        Enforces the pinned schema floor first, raising :exc:`UnsupportedSourceVersionError`
+        on an out-of-range manifest so no partial ingest occurs (SPEC-E3 §6, S5).
+        """
         manifest = json.loads(self._path.read_text())
+        self._assert_supported_version(manifest.get("metadata", {}))
         nodes: dict[str, Any] = manifest.get("nodes", {})
         raw_sm = manifest.get("semantic_models", {})
         semantic_models: list[dict[str, Any]] = (

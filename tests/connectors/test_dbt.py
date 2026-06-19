@@ -19,6 +19,7 @@ from canon.connectors.base import (
     RelationSchema,
 )
 from canon.connectors.dbt import DbtConnector, _normalize_type
+from canon.exc import ConnectionError, UnsupportedSourceVersionError
 from canon.ingestion.models import EvidenceKind
 from canon.ingestion.source import evidence_from_definitions
 from canon.semantic.models import Additivity, Relationship
@@ -56,6 +57,63 @@ class TestTestConnection:
         connector = DbtConnector(bad)
         health = await connector.test_connection()
         assert health.status == "error"
+
+
+def _write_manifest(path: Path, schema_version: str, *, dbt_version: str = "1.5.0") -> Path:
+    """Write a minimal manifest pinned to a given schema version (e.g. ``v9``)."""
+    import json
+
+    path.write_text(
+        json.dumps(
+            {
+                "metadata": {
+                    "dbt_schema_version": (
+                        f"https://schemas.getdbt.com/dbt/manifest/{schema_version}.json"
+                    ),
+                    "dbt_version": dbt_version,
+                },
+                "nodes": {},
+            }
+        )
+    )
+    return path
+
+
+class TestVersionPinning:
+    """SPEC-E3 §6, S5 — out-of-range manifest fails loudly, ingests nothing (AC1)."""
+
+    async def test_connection_error_on_below_floor_manifest(self, tmp_path: Path) -> None:
+        manifest = _write_manifest(tmp_path / "old.json", "v9")
+        connector = DbtConnector(manifest)
+        health = await connector.test_connection()
+        assert health.status == "error"
+        assert "v9" in (health.message or "")
+        assert "v10" in (health.message or "")
+
+    async def test_extract_raises_on_below_floor_manifest(self, tmp_path: Path) -> None:
+        manifest = _write_manifest(tmp_path / "old.json", "v9")
+        connector = DbtConnector(manifest)
+        with pytest.raises(UnsupportedSourceVersionError) as excinfo:
+            await connector.extract_definitions()
+        exc = excinfo.value
+        assert exc.detected == "v9"
+        assert "v10" in exc.supported
+        assert exc.exit_code == 13
+        assert isinstance(exc, ConnectionError)
+
+    async def test_unknown_schema_version_is_rejected(self, tmp_path: Path) -> None:
+        import json
+
+        manifest = tmp_path / "no_version.json"
+        manifest.write_text(json.dumps({"metadata": {"dbt_version": "1.5.0"}, "nodes": {}}))
+        connector = DbtConnector(manifest)
+        with pytest.raises(UnsupportedSourceVersionError):
+            await connector.extract_definitions()
+
+    async def test_supported_manifest_extracts(self, dbt_manifest_path: Path) -> None:
+        connector = DbtConnector(dbt_manifest_path)
+        result = await connector.extract_definitions()
+        assert isinstance(result, DefinitionExtract)
 
 
 class TestTypeMapping:
