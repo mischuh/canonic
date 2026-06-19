@@ -1,8 +1,9 @@
-"""Tests for E16-S1: AnswerEvent emitter on the serving path (issue #77)."""
+"""Tests for E16-S1/S3: AnswerEvent emitter on the serving path (issues #77, #79)."""
 
 from __future__ import annotations
 
 import json
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 from unittest.mock import AsyncMock, MagicMock
 
@@ -188,6 +189,17 @@ async def test_ac2_log_contains_no_sql_or_rows(
 # ---------------------------------------------------------------------------
 
 
+_SNAPSHOTS = Path(__file__).parent.parent / "snapshots" / "contract_schema_v1"
+
+
+def test_answer_event_schema_unchanged() -> None:
+    golden = json.loads((_SNAPSHOTS / "answer_event.json").read_text())
+    assert AnswerEvent.model_json_schema() == golden, (
+        "AnswerEvent schema changed — update tests/snapshots/contract_schema_v1/answer_event.json "
+        "and bump contract_schema per SPEC-P0 §4"
+    )
+
+
 def test_s3_reserved_fields_present_and_null() -> None:
     ev = AnswerEvent(
         ts="2026-06-15T12:00:00+00:00",
@@ -202,6 +214,27 @@ def test_s3_reserved_fields_present_and_null() -> None:
     assert dumped["cache_hit"] is None
     assert dumped["over_limit_blocked"] is None
     # Round-trip
+    reloaded = AnswerEvent.model_validate(dumped)
+    assert reloaded == ev
+
+
+def test_s3_populated_reserved_fields_validate() -> None:
+    """AC2: populated values validate against the same v1 shape (no migration needed)."""
+    ev = AnswerEvent(
+        ts="2026-06-15T12:00:00+00:00",
+        contract_schema="1.1",
+        query_hash="sha256:abc",
+        compiled_sql_hash="sha256:def",
+        connection="warehouse_pg",
+        latency_ms=42,
+        trust_score=0.92,
+        cache_hit=True,
+        over_limit_blocked=False,
+    )
+    dumped = ev.model_dump(mode="json")
+    assert dumped["trust_score"] == 0.92
+    assert dumped["cache_hit"] is True
+    assert dumped["over_limit_blocked"] is False
     reloaded = AnswerEvent.model_validate(dumped)
     assert reloaded == ev
 

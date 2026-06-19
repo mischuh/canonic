@@ -1,0 +1,162 @@
+{
+  "description": "One served-answer record appended to ``.canon/events.jsonl`` (SPEC-E16 §3).\n\nReserved fields (``trust_score``, ``cache_hit``, ``over_limit_blocked``) are\npresent in the v1 shape as ``null`` so E13/E14 can populate them later without\na schema migration (S3-AC1).",
+  "properties": {
+    "bytes_scanned": {
+      "anyOf": [
+        {
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Bytes Scanned"
+    },
+    "cache_hit": {
+      "anyOf": [
+        {
+          "type": "boolean"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Cache Hit"
+    },
+    "compiled_sql_hash": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Compiled Sql Hash"
+    },
+    "connection": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Connection"
+    },
+    "contract_schema": {
+      "title": "Contract Schema",
+      "type": "string"
+    },
+    "error": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Error"
+    },
+    "finality": {
+      "anyOf": [
+        {
+          "additionalProperties": {
+            "type": "integer"
+          },
+          "type": "object"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Finality"
+    },
+    "freshness": {
+      "default": [],
+      "items": {
+        "additionalProperties": true,
+        "type": "object"
+      },
+      "title": "Freshness",
+      "type": "array"
+    },
+    "guardrails_fired": {
+      "default": [],
+      "items": {
+        "type": "string"
+      },
+      "title": "Guardrails Fired",
+      "type": "array"
+    },
+    "kind": {
+      "const": "served_answer",
+      "default": "served_answer",
+      "title": "Kind",
+      "type": "string"
+    },
+    "latency_ms": {
+      "title": "Latency Ms",
+      "type": "integer"
+    },
+    "over_limit_blocked": {
+      "anyOf": [
+        {
+          "type": "boolean"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Over Limit Blocked"
+    },
+    "query_hash": {
+      "title": "Query Hash",
+      "type": "string"
+    },
+    "resolved": {
+      "additionalProperties": {
+        "additionalProperties": {
+          "type": "string"
+        },
+        "type": "object"
+      },
+      "default": {},
+      "title": "Resolved",
+      "type": "object"
+    },
+    "trust_score": {
+      "anyOf": [
+        {
+          "type": "number"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Trust Score"
+    },
+    "ts": {
+      "title": "Ts",
+      "type": "string"
+    }
+  },
+  "required": [
+    "ts",
+    "contract_schema",
+    "query_hash",
+    "compiled_sql_hash",
+    "connection",
+    "latency_ms"
+  ],
+  "title": "AnswerEvent",
+  "type": "object"
+}
