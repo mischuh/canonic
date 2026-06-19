@@ -3,17 +3,13 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
-from typing import Any
-
-import pytest
+from typing import TYPE_CHECKING, Any
 
 from canon.instrumentation.models import AnswerEvent
-from canon.instrumentation.report import (
-    EventReport,
-    build_report,
-    read_events,
-)
+from canon.instrumentation.report import build_report, read_events
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 
 # ---------------------------------------------------------------------------

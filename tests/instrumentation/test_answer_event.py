@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -27,10 +27,6 @@ from canon.exc import Unresolved
 from canon.instrumentation.events import DiskAnswerEventLog
 from canon.instrumentation.models import AnswerEvent, _sha256_json
 from canon.semantic.models import Column, Dimension, Measure, SemanticSource
-
-if TYPE_CHECKING:
-    from pathlib import Path
-
 
 # ---------------------------------------------------------------------------
 # Helpers

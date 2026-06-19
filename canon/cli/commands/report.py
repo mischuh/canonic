@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import json
 from typing import Annotated
 
@@ -40,10 +41,8 @@ def report(
         return
 
     telemetry_enabled: bool = False
-    try:
+    with contextlib.suppress(ConfigError):
         telemetry_enabled = load_config(root / "canon.yaml").telemetry.enabled
-    except ConfigError:
-        pass
 
     events = read_events(root, last=last)
     rep = build_report(events, recent=recent)
