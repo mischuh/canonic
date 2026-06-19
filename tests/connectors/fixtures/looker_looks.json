@@ -1,0 +1,44 @@
+[
+  {
+    "id": 1,
+    "title": "Orders Revenue",
+    "query": {
+      "model": "analytics",
+      "view": "fct_orders",
+      "measures": ["fct_orders.total_revenue"],
+      "fields": ["fct_orders.order_date"]
+    },
+    "view_count": 5,
+    "public": false,
+    "updated_at": "2026-06-10T12:00:00Z",
+    "created_at": "2026-01-01T00:00:00Z"
+  },
+  {
+    "id": 2,
+    "title": "Weekly KPI Dashboard",
+    "query": {
+      "model": "analytics",
+      "view": "dim_customers",
+      "measures": ["dim_customers.count"],
+      "fields": []
+    },
+    "view_count": 150,
+    "public": true,
+    "updated_at": "2026-06-15T08:00:00Z",
+    "created_at": "2026-02-01T00:00:00Z"
+  },
+  {
+    "id": 3,
+    "title": "Empty Query Look",
+    "query": {
+      "model": "analytics",
+      "view": "fct_orders",
+      "measures": [],
+      "fields": []
+    },
+    "view_count": 1,
+    "public": false,
+    "updated_at": "2026-06-01T00:00:00Z",
+    "created_at": "2026-06-01T00:00:00Z"
+  }
+]

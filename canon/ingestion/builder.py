@@ -10,6 +10,7 @@ behind an injected ``LLMDrafter``; the default is a deterministic null stub.
 
 from __future__ import annotations
 
+import re
 from typing import Any, Protocol
 
 from pydantic import BaseModel, ConfigDict
@@ -17,6 +18,8 @@ from pydantic import BaseModel, ConfigDict
 from canon.connectors.base import (
     ForeignKey,
     RelationSchema,
+    UsageEvidence,
+    UsageRole,
 )
 from canon.ingestion.models import (
     DraftedBy,
@@ -41,6 +44,28 @@ __all__ = [
 # candidate carrying lower certainty so it sorts behind deterministic facts in review.
 DETERMINISTIC_CONFIDENCE = 1.0
 LLM_GRAIN_CONFIDENCE = 0.3
+
+# Sentinel key in a proposal's content that signals an additive deprecated-alternative
+# merge rather than a full MetricBinding replacement (SPEC-E3 §3.3, E15 §2.2).
+# Reconciliation detects this key and performs an idempotent append to the target binding's
+# deprecated_alternatives list without touching canonical (FR-13).
+_DA_SENTINEL = "_deprecated_alternative"
+
+
+def _metric_slug(title: str) -> str:
+    """Derive a ``contracts/metrics/<slug>.yaml`` filename from a question title.
+
+    Normalises to lowercase, replaces non-alphanumeric runs with underscores, and
+    caps the result at 64 characters so filenames stay filesystem-safe.
+    """
+    slug = re.sub(r"[^a-z0-9]+", "_", title.lower()).strip("_")
+    return slug[:64] if slug else "unknown"
+
+
+def _assertion_slug(source: str, artifact: str) -> str:
+    """Derive an assertion id from the connector source and artifact identifier."""
+    combined = f"{source}_{artifact}"
+    return re.sub(r"[^a-z0-9]+", "_", combined.lower()).strip("_")[:64]
 
 
 class SkippedEvidence(BaseModel):
@@ -137,6 +162,8 @@ class ContextBuilder:
                 continue
             if item.kind == EvidenceKind.RELATION_SCHEMA:
                 proposals.append(await self._build_relation_schema(item))
+            elif item.kind == EvidenceKind.USAGE_EVIDENCE:
+                proposals.extend(self._build_usage_evidence(item))
             else:
                 skipped.append(
                     SkippedEvidence(
@@ -208,3 +235,67 @@ class ContextBuilder:
             for col, ref in zip(fk.columns, fk.references.columns, strict=False)
         )
         return {"to": to, "on": on, "relationship": Relationship.MANY_TO_ONE.value}
+
+    def _build_usage_evidence(self, item: EvidenceItem) -> list[Proposal]:
+        """Map one ``UsageEvidence`` to a proposal against the contracts surface (SPEC-E3 §3.3).
+
+        ``role: alternative`` → an additive ``deprecated_alternative`` patch against
+        ``contracts/metrics/<slug>.yaml`` (detected by the :data:`_DA_SENTINEL` key).
+        Reconciliation merges the entry into the existing binding's
+        ``deprecated_alternatives`` list without touching ``canonical`` (FR-13).
+
+        ``role: trusted_example`` → a full :class:`Assertion` candidate added at
+        ``contracts/assertions/<id>.yaml``.  Expected values are left empty for human
+        completion; the assertion id and source are derived deterministically.
+
+        Neither path produces a ``CanonicalRef`` — the builder-level FR-13 guarantee.
+        """
+        payload = UsageEvidence.model_validate(item.payload)
+        fingerprint = item.source_fingerprint
+
+        if payload.role is UsageRole.ALTERNATIVE:
+            slug = _metric_slug(payload.title)
+            content: dict[str, Any] = {
+                _DA_SENTINEL: {
+                    "source": payload.source,
+                    "ref": payload.artifact,
+                    "reason": payload.title,
+                }
+            }
+            return [
+                Proposal(
+                    target=f"contracts/metrics/{slug}.yaml",
+                    op=ProposalOp.EDIT,
+                    content=content,
+                    provenance=Provenance.INFERRED,
+                    confidence=DETERMINISTIC_CONFIDENCE,
+                    anchored_to=[fingerprint] if fingerprint else [],
+                    drafted_by=DraftedBy.DETERMINISTIC,
+                )
+            ]
+
+        if payload.role is UsageRole.TRUSTED_EXAMPLE:
+            assertion_slug = _assertion_slug(payload.source, payload.artifact)
+            assertion_id = f"usage-{assertion_slug}"
+            assertion_content: dict[str, Any] = {
+                "id": assertion_id,
+                "query": {
+                    "native": payload.defines.expr,
+                    "references": list(payload.defines.references),
+                },
+                "expect": {},
+                "source_of_truth": payload.native_ref,
+            }
+            return [
+                Proposal(
+                    target=f"contracts/assertions/{assertion_id}.yaml",
+                    op=ProposalOp.ADD,
+                    content=assertion_content,
+                    provenance=Provenance.INFERRED,
+                    confidence=DETERMINISTIC_CONFIDENCE,
+                    anchored_to=[fingerprint] if fingerprint else [],
+                    drafted_by=DraftedBy.DETERMINISTIC,
+                )
+            ]
+
+        return []
