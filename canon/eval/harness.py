@@ -45,7 +45,7 @@ DEFAULT_ADHERENCE_FLOOR = 0.9
 class GrainDrafter(Protocol):
     """The production grain-drafting seam the harness measures (RuntimeLLMDrafter satisfies it)."""
 
-    def draft_grain(self, schema: RelationSchema) -> GrainDraft: ...
+    async def draft_grain(self, schema: RelationSchema) -> GrainDraft: ...
 
 
 class UsageReader(Protocol):
@@ -109,13 +109,13 @@ class LiteLLMUsageReader:
         return self._tokens
 
 
-def _run_case(drafter: GrainDrafter, case: GrainCase, reader: UsageReader) -> CaseOutcome:
+async def _run_case(drafter: GrainDrafter, case: GrainCase, reader: UsageReader) -> CaseOutcome:
     """Run one labeled case through the drafter, classifying the structured-output outcome."""
     schema = case.to_schema()
     reader.reset()
     start = perf_counter()
     try:
-        draft = drafter.draft_grain(schema)
+        draft = await drafter.draft_grain(schema)
     except StructuredOutputUnsupported as exc:
         return _failure(case, StructuredOutcome.UNSUPPORTED, start, exc)
     except StructuredOutputError as exc:
@@ -162,7 +162,7 @@ def _recommend(summaries: Sequence[ModelTaskSummary], adherence_floor: float) ->
     return best.name
 
 
-def run_baseline(
+async def run_baseline(
     candidates: Sequence[NamedCandidate],
     cases: Sequence[GrainCase],
     *,
@@ -190,7 +190,7 @@ def run_baseline(
     with reader:
         for candidate in candidates:
             drafter = drafter_factory(candidate.config)
-            outcomes = [_run_case(drafter, case, reader) for case in cases]
+            outcomes = [await _run_case(drafter, case, reader) for case in cases]
             summaries.append(summarize(candidate.name, candidate.config.model, task, outcomes))
 
     return BaselineReport(

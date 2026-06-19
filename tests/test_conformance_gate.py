@@ -58,3 +58,29 @@ def test_contract_schema_stamped_in_snapshots() -> None:
             f"contract_schema default in snapshot ({default!r}) != "
             f"current CONTRACT_SCHEMA ({CONTRACT_SCHEMA!r})"
         )
+
+
+_COMPILER_ROOT = Path(__file__).parent.parent / "canon" / "compiler"
+_RUNTIME_SYMBOLS = (
+    "canon.runtime",
+    "GenerationRuntime",
+    "EmbeddingRuntime",
+    "RuntimeLLMDrafter",
+)
+
+
+def test_e5_compiler_never_imports_e10() -> None:
+    """E5 (compiler) must never reference E10 (generation/embedding runtime).
+
+    E5 is LLM-free by construction (SPEC-E10 §9 / GH-68): identical inputs yield
+    byte-identical SQL with no randomness. This static scan locks that property so a
+    future edit that pulls E10 into the compiler fails CI immediately.
+    """
+    violations: list[str] = []
+    for py_file in sorted(_COMPILER_ROOT.rglob("*.py")):
+        source = py_file.read_text()
+        for symbol in _RUNTIME_SYMBOLS:
+            if symbol in source:
+                rel = py_file.relative_to(_COMPILER_ROOT.parent.parent)
+                violations.append(f"{rel}: found {symbol!r}")
+    assert not violations, "E5 compiler must not reference E10 runtime:\n" + "\n".join(violations)

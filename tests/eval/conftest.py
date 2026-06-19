@@ -27,7 +27,7 @@ class StubDrafter:
         self._grain = grain
         self._raises = raises
 
-    def draft_grain(self, schema: RelationSchema) -> GrainDraft:  # noqa: ARG002
+    async def draft_grain(self, schema: RelationSchema) -> GrainDraft:  # noqa: ARG002
         if self._raises is not None:
             raise self._raises
         return GrainDraft(grain=list(self._grain) if self._grain is not None else [])

@@ -1,0 +1,22 @@
+name: albums
+connection: chinook_pg
+table: 'chinook."Album"'
+grain: [AlbumId]
+description: "One row per album. Join target for tracks."
+
+columns:
+  - { name: AlbumId,  type: int,    nullable: false }
+  - { name: Title,    type: string, nullable: false }
+  - { name: ArtistId, type: int,    nullable: false }
+
+dimensions:
+  - { name: album_title, column: Title }
+  - { name: artist_id,   column: ArtistId }
+
+joins:
+  - to: artists
+    on: 'albums."ArtistId" = artists."ArtistId"'
+    relationship: many_to_one
+
+meta:
+  provenance: human_curated

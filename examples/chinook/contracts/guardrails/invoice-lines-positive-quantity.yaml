@@ -1,0 +1,8 @@
+id: invoice-lines-positive-quantity
+applies_to:
+  source: invoice_lines
+  measure: tracks_sold
+kind: mandatory_filter
+filter: '"Quantity" > 0'
+severity: error
+rationale: "Only line items with a positive quantity represent actual track purchases. Zero or negative quantities indicate data errors and must never contribute to sales metrics."

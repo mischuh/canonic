@@ -83,11 +83,11 @@ class LLMDrafter(Protocol):
     result is labelled ``drafted_by: llm`` by the builder and carries reduced confidence.
     """
 
-    def draft_grain(self, schema: RelationSchema) -> GrainDraft:
+    async def draft_grain(self, schema: RelationSchema) -> GrainDraft:
         """Propose a grain for a relation that declares no primary key."""
         ...
 
-    def draft_joins(self, observed: dict[str, Any]) -> list[dict[str, Any]]:
+    async def draft_joins(self, observed: dict[str, Any]) -> list[dict[str, Any]]:
         """Propose joins from an ``observed_query`` payload."""
         ...
 
@@ -100,10 +100,10 @@ class NullLLMDrafter:
     is injected to replace it in interactive mode.
     """
 
-    def draft_grain(self, schema: RelationSchema) -> GrainDraft:  # noqa: ARG002 — stub
+    async def draft_grain(self, schema: RelationSchema) -> GrainDraft:  # noqa: ARG002 — stub
         return GrainDraft(grain=[], confidence=LLM_GRAIN_CONFIDENCE)
 
-    def draft_joins(self, observed: dict[str, Any]) -> list[dict[str, Any]]:  # noqa: ARG002
+    async def draft_joins(self, observed: dict[str, Any]) -> list[dict[str, Any]]:  # noqa: ARG002
         return []
 
 
@@ -118,7 +118,7 @@ class ContextBuilder:
     def __init__(self, llm_drafter: LLMDrafter | None = None) -> None:
         self._llm_drafter: LLMDrafter = llm_drafter or NullLLMDrafter()
 
-    def build(self, evidence: list[EvidenceItem]) -> BuildResult:
+    async def build(self, evidence: list[EvidenceItem]) -> BuildResult:
         """Turn evidence into proposals, recording anything it cannot handle.
 
         Iterates in input order for determinism. Unknown kinds — and known kinds without
@@ -136,7 +136,7 @@ class ContextBuilder:
                 )
                 continue
             if item.kind == EvidenceKind.RELATION_SCHEMA:
-                proposals.append(self._build_relation_schema(item))
+                proposals.append(await self._build_relation_schema(item))
             else:
                 skipped.append(
                     SkippedEvidence(
@@ -148,7 +148,7 @@ class ContextBuilder:
 
         return BuildResult(proposals=proposals, skipped=skipped)
 
-    def _build_relation_schema(self, item: EvidenceItem) -> Proposal:
+    async def _build_relation_schema(self, item: EvidenceItem) -> Proposal:
         """Map one ``RelationSchema`` to a ``semantics/<conn>/<name>.yaml`` draft proposal.
 
         With a declared primary key the grain is asserted deterministically with full
@@ -166,7 +166,7 @@ class ContextBuilder:
             drafted_by = DraftedBy.DETERMINISTIC
             confidence = DETERMINISTIC_CONFIDENCE
         else:
-            draft = self._llm_drafter.draft_grain(schema)
+            draft = await self._llm_drafter.draft_grain(schema)
             grain = list(draft.grain)
             meta["grain_draft"] = True
             drafted_by = DraftedBy.LLM

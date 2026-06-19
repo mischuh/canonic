@@ -1,0 +1,42 @@
+name: invoices
+connection: chinook_pg
+table: 'chinook."Invoice"'
+grain: [InvoiceId]
+description: "One row per customer invoice. The primary sales fact for the digital music store."
+
+columns:
+  - { name: InvoiceId,         type: int,       nullable: false }
+  - { name: CustomerId,        type: int,       nullable: false }
+  - { name: InvoiceDate,       type: timestamp, nullable: false }
+  - { name: BillingAddress,    type: string,    nullable: true  }
+  - { name: BillingCity,       type: string,    nullable: true  }
+  - { name: BillingState,      type: string,    nullable: true  }
+  - { name: BillingCountry,    type: string,    nullable: true  }
+  - { name: BillingPostalCode, type: string,    nullable: true  }
+  - { name: Total,             type: decimal,   nullable: false }
+
+measures:
+  - name: total_revenue
+    expr: 'sum("Total")'
+    additivity: additive
+  - name: invoice_count
+    expr: 'count("InvoiceId")'
+    additivity: additive
+  - name: avg_invoice_value
+    expr: 'avg("Total")'
+    additivity: non_additive
+
+dimensions:
+  - { name: billing_country, column: BillingCountry }
+  - { name: billing_city,    column: BillingCity }
+  - { name: billing_state,   column: BillingState }
+  - { name: invoice_date,    column: InvoiceDate }
+  - { name: customer_id,     column: CustomerId }
+
+joins:
+  - to: customers
+    on: 'invoices."CustomerId" = customers."CustomerId"'
+    relationship: many_to_one
+
+meta:
+  provenance: human_curated

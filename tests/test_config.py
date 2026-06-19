@@ -249,3 +249,32 @@ class TestFindProjectRoot:
         (inner / "canon.yaml").touch()
         monkeypatch.chdir(inner)
         assert find_project_root() == inner
+
+
+_NO_LLM = """\
+version: 1
+project:
+  name: no-models-project
+connections:
+  - id: warehouse_pg
+    type: postgres
+    credentials_ref: env:CANON_PG_DSN
+"""
+
+
+class TestNoModelsOperatingPoint:
+    """No-models-configured is a valid, fully-deterministic operating point (GH-68 S7)."""
+
+    def test_config_without_llm_block_loads(self, tmp_path: Path) -> None:
+        cfg = load_config(_canon_yaml(tmp_path, _NO_LLM))
+        assert cfg.llm is None
+
+    def test_no_llm_with_air_gapped_loads(self, tmp_path: Path) -> None:
+        content = _NO_LLM + "runtime:\n  air_gapped: true\n"
+        cfg = load_config(_canon_yaml(tmp_path, content))
+        assert cfg.llm is None
+        assert cfg.runtime.air_gapped is True
+
+    def test_no_llm_embeddings_defaults_apply(self, tmp_path: Path) -> None:
+        cfg = load_config(_canon_yaml(tmp_path, _NO_LLM))
+        assert cfg.embeddings.model == "all-MiniLM-L6-v2"

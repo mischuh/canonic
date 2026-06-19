@@ -1,0 +1,38 @@
+name: invoice_lines
+connection: chinook_pg
+table: 'chinook."InvoiceLine"'
+grain: [InvoiceLineId]
+description: "One row per track sold within an invoice. Joins to invoices and tracks."
+
+columns:
+  - { name: InvoiceLineId, type: int,     nullable: false }
+  - { name: InvoiceId,     type: int,     nullable: false }
+  - { name: TrackId,       type: int,     nullable: false }
+  - { name: UnitPrice,     type: decimal, nullable: false }
+  - { name: Quantity,      type: int,     nullable: false }
+
+measures:
+  - name: line_revenue
+    expr: 'sum("UnitPrice" * "Quantity")'
+    additivity: additive
+  - name: tracks_sold
+    expr: 'sum("Quantity")'
+    additivity: additive
+  - name: line_count
+    expr: 'count("InvoiceLineId")'
+    additivity: additive
+
+dimensions:
+  - { name: invoice_id, column: InvoiceId }
+  - { name: track_id,   column: TrackId }
+
+joins:
+  - to: invoices
+    on: 'invoice_lines."InvoiceId" = invoices."InvoiceId"'
+    relationship: many_to_one
+  - to: tracks
+    on: 'invoice_lines."TrackId" = tracks."TrackId"'
+    relationship: many_to_one
+
+meta:
+  provenance: human_curated
