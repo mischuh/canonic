@@ -3,13 +3,14 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
-from typing import Any
-
-import pytest
-from typer.testing import CliRunner
+from typing import TYPE_CHECKING, Any
 
 from canon.cli.app import app
+
+if TYPE_CHECKING:
+    from pathlib import Path
+
+    from typer.testing import CliRunner
 
 _BASE_EVENT: dict[str, Any] = {
     "ts": "2026-01-01T00:00:00+00:00",

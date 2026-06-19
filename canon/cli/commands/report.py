@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import json
 from typing import Annotated
 
@@ -40,10 +41,8 @@ def report(
         return
 
     telemetry_enabled: bool = False
-    try:
+    with contextlib.suppress(ConfigError):
         telemetry_enabled = load_config(root / "canon.yaml").telemetry.enabled
-    except ConfigError:
-        pass
 
     events = read_events(root, last=last)
     rep = build_report(events, recent=recent)
@@ -54,7 +53,9 @@ def report(
         typer.echo(json.dumps(payload))
         return
 
-    _console.print(f"[bold]canon report[/bold]  (telemetry: {'on' if telemetry_enabled else 'off'})")
+    _console.print(
+        f"[bold]canon report[/bold]  (telemetry: {'on' if telemetry_enabled else 'off'})"
+    )
     _console.print()
 
     if rep.count == 0:
@@ -92,7 +93,9 @@ def report(
 
     if rep.recent:
         _console.print()
-        recent_table = Table(title=f"Last {len(rep.recent)} answers", show_header=True, header_style="bold")
+        recent_table = Table(
+            title=f"Last {len(rep.recent)} answers", show_header=True, header_style="bold"
+        )
         recent_table.add_column("timestamp")
         recent_table.add_column("result")
         recent_table.add_column("latency_ms", justify="right")
