@@ -165,7 +165,9 @@ class TestNoPrimaryKey:
                 return GrainDraft(grain=["order_id"], confidence=0.6)
 
         schema = _relation_schema(primary_key=[])
-        p = (await ContextBuilder(llm_drafter=_StubDrafter()).build([_evidence(schema)])).proposals[0]
+        p = (await ContextBuilder(llm_drafter=_StubDrafter()).build([_evidence(schema)])).proposals[
+            0
+        ]
         assert p.content["grain"] == ["order_id"]
         assert p.confidence == 0.6
         assert p.drafted_by is DraftedBy.LLM
