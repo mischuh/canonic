@@ -26,6 +26,8 @@ from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
 from canon.connectors.base import (
     Capability,
+    ConnectorBase,
+    DocEvidence,
     Health,
     UsageDefinition,
     UsageEvidence,
@@ -194,7 +196,7 @@ class HttpMetabaseQuestionSource:
             return str(data.get("version", {}).get("tag", ""))
 
 
-class MetabaseConnector:
+class MetabaseConnector(ConnectorBase):
     """Evidence connector for Metabase questions → normalized UsageEvidence (SPEC-E3 §3.3, §5).
 
     Questions are extracted as ``UsageEvidence`` with role ``alternative`` or
@@ -248,7 +250,7 @@ class MetabaseConnector:
             )
         return Health(status="ok", message=f"Metabase {version_tag}")
 
-    async def extract_evidence(self) -> list[UsageEvidence]:
+    async def extract_evidence(self) -> list[DocEvidence | UsageEvidence]:
         """Fetch Metabase questions and return one UsageEvidence per question.
 
         Every question is emitted — none are dropped.  Unmappable expressions are
@@ -257,7 +259,7 @@ class MetabaseConnector:
         """
         observed_at = datetime.now(UTC)
         questions = await self._question_source.list_questions()
-        evidence: list[UsageEvidence] = []
+        evidence: list[DocEvidence | UsageEvidence] = []
 
         for card in questions:
             card_id = card.get("id", "")

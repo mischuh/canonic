@@ -15,7 +15,7 @@ carved out by §5.2/§7; it touches no proposal and no decision.
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 from pydantic import BaseModel, ConfigDict
 
@@ -31,7 +31,7 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from canon.config import ReconcileConfig
-    from canon.connectors.base import ConnectorBase
+    from canon.connectors.base import ConnectorBase, SchemaIntrospectable
     from canon.ingestion.models import EvidenceItem
 
 __all__ = ["IngestionPipeline", "PipelineResult", "write_emitted_diffs"]
@@ -129,7 +129,9 @@ class IngestionPipeline:
         from canon.ingestion.source import evidence_from_introspection
 
         connector = self._connectors[connection]
-        evidence = await evidence_from_introspection(connector, connection)
+        evidence = await evidence_from_introspection(
+            cast("SchemaIntrospectable", connector), connection
+        )
 
         emission, skipped = await self._emit(evidence)
         self._persist(evidence, emission)

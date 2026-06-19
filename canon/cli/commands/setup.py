@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import asyncio
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 import typer
 from rich.panel import Panel
@@ -43,7 +43,7 @@ from canon.connectors.factory import connector_for
 from canon.exc import ConnectionError, CredentialError
 
 if TYPE_CHECKING:
-    from canon.connectors.base import Health
+    from canon.connectors.base import Health, SchemaIntrospectable
 
 _DEFAULT_TYPE = "postgres"
 
@@ -242,6 +242,6 @@ def _maybe_preview_schema(conn: Connection | None) -> bool:
 async def _introspect(conn: Connection) -> list[object]:
     connector = connector_for(conn)
     try:
-        return list(await connector.introspect_schema())
+        return list(await cast("SchemaIntrospectable", connector).introspect_schema())
     finally:
         await connector.aclose()

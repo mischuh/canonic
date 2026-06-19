@@ -26,7 +26,7 @@ import shutil
 import tempfile
 from enum import StrEnum
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 from pydantic import BaseModel, ConfigDict
 from ruamel.yaml import YAML
@@ -35,6 +35,7 @@ from canon.connectors.acquisition import probe_schema
 from canon.connectors.base import (
     AcquisitionTier,  # noqa: TC001 — used at runtime in the probe-tier set
     RelationSchema,
+    SchemaIntrospectable,
 )
 from canon.contracts.validate import validate_contracts
 from canon.exc import ContractError, SchemaMismatch, SemanticSourceError, ValidationFailed
@@ -169,7 +170,7 @@ class ValidationGate:
                 continue
 
             schema = RelationSchema.model_validate(evidence.payload)
-            result = await probe_schema(connector, schema)
+            result = await probe_schema(cast("SchemaIntrospectable", connector), schema)
             if result.ok:
                 continue
             try:

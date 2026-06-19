@@ -7,7 +7,7 @@ import json
 from abc import ABC, abstractmethod
 from datetime import datetime  # noqa: TC003 — Pydantic resolves annotations at runtime
 from enum import StrEnum
-from typing import Any, Literal
+from typing import Any, Literal, Protocol
 
 from pydantic import BaseModel, ConfigDict
 
@@ -27,7 +27,9 @@ __all__ = [
     "DefinitionEntityType",
     "DefinitionEvidence",
     "DefinitionExtract",
+    "DefinitionExtractable",
     "DocEvidence",
+    "EvidenceExtractable",
     "ForeignKey",
     "ForeignKeyRef",
     "Health",
@@ -37,7 +39,9 @@ __all__ = [
     "RelationSchema",
     "ResultColumn",
     "ResultSet",
+    "SQLExecutable",
     "SchemaMismatch",
+    "SchemaIntrospectable",
     "UsageDefinition",
     "UsageEvidence",
     "UsageHint",
@@ -335,12 +339,40 @@ class UsageEvidence(BaseModel):
     observed_at: datetime
 
 
+class SchemaIntrospectable(Protocol):
+    """Connector capability: live schema introspection and zero-scan relation description."""
+
+    async def introspect_schema(self) -> list[RelationSchema]: ...
+
+    async def describe_relation(self, relation: str) -> list[ColumnInfo]: ...
+
+
+class DefinitionExtractable(Protocol):
+    """Connector capability: normalized definition extraction (dbt, SPEC-E3 §2)."""
+
+    async def extract_definitions(self) -> DefinitionExtract: ...
+
+
+class EvidenceExtractable(Protocol):
+    """Connector capability: normalized doc/usage evidence extraction (Notion, Metabase, Looker)."""
+
+    async def extract_evidence(self) -> list[DocEvidence | UsageEvidence]: ...
+
+
+class SQLExecutable(Protocol):
+    """Connector capability: read-only SQL execution (SPEC-E2 §3)."""
+
+    async def run_read_only_sql(self, sql: str) -> ResultSet: ...
+
+
 class ConnectorBase(ABC):
     """Abstract base class for all Canon connectors.
 
     Connectors declare their capabilities via capabilities() and implement only
     the methods they support. Core dispatches on Capability values, never on
-    vendor identity.
+    vendor identity. Capability-specific method contracts are expressed as
+    Protocol classes (SchemaIntrospectable, DefinitionExtractable, etc.) so
+    each seam function receives only the interface it actually uses.
     """
 
     @abstractmethod
@@ -350,45 +382,6 @@ class ConnectorBase(ABC):
     @abstractmethod
     async def test_connection(self) -> Health:
         """Test reachability and credentials; return Health."""
-
-    async def introspect_schema(self) -> list[RelationSchema]:
-        """Return normalized schema evidence for all discoverable relations."""
-        raise NotImplementedError(f"{type(self).__name__} does not support introspect_schema")
-
-    async def read_query_history(self, since: datetime) -> list[ObservedQuery]:
-        """[P1] Return observed queries executed since the given datetime."""
-        raise NotImplementedError(f"{type(self).__name__} does not support read_query_history")
-
-    async def run_read_only_sql(self, sql: str) -> ResultSet:
-        """Execute a read-only SELECT and return a normalized ResultSet."""
-        raise NotImplementedError(f"{type(self).__name__} does not support run_read_only_sql")
-
-    async def describe_relation(self, relation: str) -> list[ColumnInfo]:
-        """Observe a relation's columns with zero data scanned (SPEC-E2 §5).
-
-        Backs the schema validation probe: a ``SELECT … WHERE false`` against the
-        live source whose result description yields observed column names and
-        normalized types, used to diff declared-vs-observed schema even when
-        catalog introspection is blocked.
-        """
-        raise NotImplementedError(f"{type(self).__name__} does not support describe_relation")
-
-    async def extract_definitions(self) -> DefinitionExtract:
-        """Extract normalized definition evidence from this source (SPEC-E3 §2, §4).
-
-        Returns a :class:`DefinitionExtract` with both relation schemas (tier 2) and
-        definition evidence records. Definition connectors implement this; primary
-        connectors (E2) do not.
-        """
-        raise NotImplementedError(f"{type(self).__name__} does not support extract_definitions")
-
-    async def extract_evidence(self) -> list[DocEvidence | UsageEvidence]:
-        """Extract normalized evidence from this source (SPEC-E3 §3.2, §3.3, §5).
-
-        Evidence connectors (Notion → DocEvidence, Metabase/Looker → UsageEvidence)
-        implement this; definition and primary connectors do not.
-        """
-        raise NotImplementedError(f"{type(self).__name__} does not support extract_evidence")
 
     async def aclose(self) -> None:  # noqa: B027 — intentional no-op default; stateful subclasses override
         """Release any held resources (connection pools, sockets).

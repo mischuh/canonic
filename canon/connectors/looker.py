@@ -28,6 +28,8 @@ from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
 from canon.connectors.base import (
     Capability,
+    ConnectorBase,
+    DocEvidence,
     Health,
     UsageDefinition,
     UsageEvidence,
@@ -167,7 +169,7 @@ class HttpLookerLookSource:
             return str(data.get("looker_api_version", ""))
 
 
-class LookerConnector:
+class LookerConnector(ConnectorBase):
     """Evidence connector for Looker Looks → normalized UsageEvidence (SPEC-E3 §3.3, §5).
 
     Looks are extracted as ``UsageEvidence`` with role ``alternative`` or
@@ -219,7 +221,7 @@ class LookerConnector:
             )
         return Health(status="ok", message=f"Looker API {version}")
 
-    async def extract_evidence(self) -> list[UsageEvidence]:
+    async def extract_evidence(self) -> list[DocEvidence | UsageEvidence]:
         """Fetch Looker Looks and return one UsageEvidence per Look.
 
         Every Look is emitted — none are dropped.  Unmappable expressions are
@@ -228,7 +230,7 @@ class LookerConnector:
         """
         observed_at = datetime.now(UTC)
         looks = await self._look_source.list_looks()
-        evidence: list[UsageEvidence] = []
+        evidence: list[DocEvidence | UsageEvidence] = []
 
         for look in looks:
             look_id = look.get("id", "")

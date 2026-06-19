@@ -28,7 +28,7 @@ from canon.exc import CanonError, ConnectionError, ContradictionsFound
 from canon.ingestion.autopr import AutoPRPublisher, PullRequestPublisher, SubprocessPublisher
 from canon.ingestion.models import ReconciliationDecision
 from canon.ingestion.pipeline import IngestionPipeline
-from canon.ingestion.source import evidence_from_introspection
+from canon.ingestion.source import gather_evidence
 from canon.runtime.drafter import make_drafter
 
 if TYPE_CHECKING:
@@ -181,9 +181,12 @@ async def _ingest(
 
 
 async def _gather_evidence(connector: ConnectorBase, conn_id: str) -> list[EvidenceItem]:
-    """Introspect a connection, translating transport failures into ``CONNECTION_ERROR`` (exit 13)."""
+    """Gather evidence by dispatching on declared capabilities (SPEC-E3 §2, S4).
+
+    Translates transport failures into ``CONNECTION_ERROR`` (exit 13).
+    """
     try:
-        return await evidence_from_introspection(connector, conn_id)
+        return await gather_evidence(connector, conn_id)
     except CanonError:
         raise
     except Exception as exc:  # noqa: BLE001 — any connector/transport failure ⇒ unreachable source
