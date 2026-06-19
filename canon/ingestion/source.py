@@ -11,7 +11,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
-from canon.connectors.base import AcquisitionTier
+from canon.connectors.base import AcquisitionTier, DocEvidence, UsageEvidence
 from canon.ingestion.models import EvidenceItem, EvidenceKind
 
 if TYPE_CHECKING:
@@ -80,21 +80,37 @@ async def evidence_from_definitions(connector: ConnectorBase, source: str) -> li
 
 
 async def evidence_from_docs(connector: ConnectorBase, source: str) -> list[EvidenceItem]:
-    """Extract prose evidence from ``connector`` and wrap each as a normalized evidence item.
+    """Extract evidence from ``connector`` and wrap each as a normalized evidence item.
 
-    The E3 evidence seam (SPEC-E3 §5, §8): each :class:`DocEvidence` becomes a
-    ``doc_evidence`` item at ``hand_authored`` acquisition tier — no vendor-specific
-    shape crosses into E4.  ``topic_refs`` are candidates; E6 resolves them on write.
+    The E3 evidence seam (SPEC-E3 §5, §8): dispatches on the concrete evidence type.
+    :class:`DocEvidence` → ``doc_evidence`` at ``hand_authored`` tier (Notion, prose).
+    :class:`UsageEvidence` → ``usage_evidence`` at ``query_history`` tier (Metabase,
+    Looker) — it is observed BI usage, a reconciliation signal, not hand-authored prose.
+    No vendor-specific shape crosses into E4.
     """
-    docs = await connector.extract_evidence()
-    return [
-        EvidenceItem(
-            source=source,
-            kind=EvidenceKind.DOC_EVIDENCE,
-            acquisition_tier=AcquisitionTier.HAND_AUTHORED,
-            payload=doc.model_dump(mode="json"),
-            source_fingerprint=doc.source_fingerprint or "",
-            observed_at=doc.observed_at,
-        )
-        for doc in docs
-    ]
+    items = await connector.extract_evidence()
+    result: list[EvidenceItem] = []
+    for item in items:
+        if isinstance(item, UsageEvidence):
+            result.append(
+                EvidenceItem(
+                    source=source,
+                    kind=EvidenceKind.USAGE_EVIDENCE,
+                    acquisition_tier=AcquisitionTier.QUERY_HISTORY,
+                    payload=item.model_dump(mode="json"),
+                    source_fingerprint=item.source_fingerprint or "",
+                    observed_at=item.observed_at,
+                )
+            )
+        elif isinstance(item, DocEvidence):
+            result.append(
+                EvidenceItem(
+                    source=source,
+                    kind=EvidenceKind.DOC_EVIDENCE,
+                    acquisition_tier=AcquisitionTier.HAND_AUTHORED,
+                    payload=item.model_dump(mode="json"),
+                    source_fingerprint=item.source_fingerprint or "",
+                    observed_at=item.observed_at,
+                )
+            )
+    return result

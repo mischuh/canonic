@@ -69,6 +69,18 @@ def notion_pages_path() -> Path:
 
 
 @pytest.fixture
+def metabase_questions_path() -> Path:
+    """Path to the Metabase questions fixture used by Metabase connector tests."""
+    return Path(__file__).parent / "fixtures" / "metabase_questions.json"
+
+
+@pytest.fixture
+def looker_looks_path() -> Path:
+    """Path to the Looker looks fixture used by Looker connector tests."""
+    return Path(__file__).parent / "fixtures" / "looker_looks.json"
+
+
+@pytest.fixture
 def offline_connector(monkeypatch: pytest.MonkeyPatch) -> PostgresConnector:
     """A connector that resolves credentials but never connects (unit tests)."""
     monkeypatch.setenv("CANON_TEST_PG_PASSWORD", "secret")

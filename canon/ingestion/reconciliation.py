@@ -18,6 +18,8 @@ from typing import TYPE_CHECKING, Any, Protocol
 from pydantic import BaseModel, ConfigDict
 
 from canon.config import ReconcileConfig
+from canon.contracts.loader import load_metric_bindings
+from canon.ingestion.builder import _DA_SENTINEL
 from canon.ingestion.models import (
     DraftedBy,
     Proposal,
@@ -103,18 +105,19 @@ class InMemoryAcceptedStore:
 
 
 class DiskAcceptedStore:
-    """:class:`AcceptedStore` backed by the committed ``semantics/*.yaml`` files (SPEC-E4 §5).
+    """:class:`AcceptedStore` backed by committed ``semantics/*.yaml`` and contract files.
 
-    Loads every accepted semantic source under ``project_root`` once (eagerly, so a re-run
-    over an unchanged tree yields identical facts) and projects each onto an
-    :class:`ExistingFact`: its ``meta.provenance`` and ``meta.source_fingerprint`` drive the
-    §5.1 tier check and the §7 fingerprint idempotency. The ``target`` is the file's path
-    relative to ``project_root`` — the same ``semantics/<conn>/<name>.yaml`` shape the builder
-    emits — so a proposal and its accepted fact line up.
+    Loads every accepted semantic source and every ``contracts/metrics/*.yaml``
+    :class:`~canon.contracts.models.MetricBinding` under ``project_root`` once (eagerly,
+    so a re-run over an unchanged tree yields identical facts) and projects each onto an
+    :class:`ExistingFact`.  Contract files are loaded with ``provenance=human_curated``
+    (the default binding provenance) so the tier check in ``_reconcile_one`` reflects the
+    correct authority — a deprecated-alternative EDIT proposal never outranks the binding.
     """
 
     def __init__(self, project_root: Path) -> None:
         self._facts: dict[str, ExistingFact] = {}
+
         for source in list_semantic_sources(project_root):
             target = f"semantics/{source.connection}/{source.name}.yaml"
             self._facts[target] = ExistingFact(
@@ -125,6 +128,17 @@ class DiskAcceptedStore:
                 # Once E5 adds it, read it here; until then no accepted fact is frozen.
                 frozen=False,
                 source_fingerprint=source.meta.source_fingerprint,
+            )
+
+        for binding in load_metric_bindings(project_root):
+            slug = binding.metric.replace(" ", "_").lower()
+            target = f"contracts/metrics/{slug}.yaml"
+            self._facts[target] = ExistingFact(
+                target=target,
+                content=binding.model_dump(mode="json"),
+                provenance=binding.provenance,
+                frozen=False,
+                source_fingerprint=None,
             )
 
     def get(self, target: str) -> ExistingFact | None:
@@ -255,6 +269,13 @@ class ReconciliationEngine:
         if self._fingerprints_match(existing, proposal):
             return entry(ReconciliationDecision.NO_OP)
 
+        # Deprecated-alternative additive merge (SPEC-E3 §3.3, FR-13).
+        # When the proposal carries the DA sentinel the engine merges the entry into the
+        # existing MetricBinding's deprecated_alternatives list rather than applying the
+        # normal tier rules — the canonical binding is never touched.
+        if _DA_SENTINEL in proposal.content:
+            return self._merge_deprecated_alternative(proposal, existing)
+
         # Conflict: a higher-tier or frozen fact is flagged, never edited.
         if existing.frozen:
             return entry(
@@ -279,6 +300,67 @@ class ReconciliationEngine:
             ReconciliationDecision.EDIT,
             low_confidence=proposal.confidence < self._config.auto_apply.min_confidence,
             auto_apply=self._auto_apply_eligible(proposal, existing, ReconciliationDecision.EDIT),
+        )
+
+    def _merge_deprecated_alternative(
+        self, proposal: Proposal, existing: ExistingFact
+    ) -> ReconciliationEntry:
+        """Additively merge a deprecated-alternative entry into an existing MetricBinding.
+
+        Reads the existing binding's ``deprecated_alternatives`` list and appends the
+        incoming entry if it is not already present (idempotent on ``ref``).  The
+        resulting full binding content becomes the merged proposal the emitter renders.
+        If the entry already exists the decision is ``no_op``.
+
+        The ``canonical`` field is never modified — FR-13 invariant at the reconciliation
+        layer.  Frozen bindings are respected: a frozen binding never receives additive
+        updates from inferred evidence.
+        """
+        if existing.frozen:
+            return ReconciliationEntry(
+                decision=ReconciliationDecision.CONTRADICTION,
+                target=proposal.target,
+                proposal=proposal,
+                existing=existing.content,
+                existing_provenance=existing.provenance,
+                existing_frozen=True,
+                recommended_action=(
+                    "binding is frozen; deprecated-alternative evidence recorded but not merged"
+                ),
+            )
+
+        da_fragment: dict[str, Any] = dict(proposal.content[_DA_SENTINEL])
+        incoming_ref: str = str(da_fragment.get("ref", ""))
+
+        existing_das: list[dict[str, Any]] = list(
+            existing.content.get("deprecated_alternatives", []) or []
+        )
+        if any(str(da.get("ref", "")) == incoming_ref for da in existing_das):
+            # Already recorded — idempotent no-op.
+            return ReconciliationEntry(
+                decision=ReconciliationDecision.NO_OP,
+                target=proposal.target,
+                proposal=proposal,
+                existing=existing.content,
+                existing_provenance=existing.provenance,
+            )
+
+        merged_das = existing_das + [da_fragment]
+        merged_content: dict[str, Any] = dict(existing.content)
+        merged_content["deprecated_alternatives"] = merged_das
+
+        merged_proposal = proposal.model_copy(
+            update={"content": merged_content, "op": ProposalOp.EDIT}
+        )
+        return ReconciliationEntry(
+            decision=ReconciliationDecision.EDIT,
+            target=proposal.target,
+            proposal=merged_proposal,
+            existing=existing.content,
+            existing_provenance=existing.provenance,
+            auto_apply=self._auto_apply_eligible(
+                merged_proposal, existing, ReconciliationDecision.EDIT
+            ),
         )
 
     def _prune_disappeared(

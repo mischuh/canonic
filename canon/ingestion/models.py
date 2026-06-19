@@ -51,6 +51,7 @@ class EvidenceKind(StrEnum):
     OBSERVED_QUERY = "observed_query"
     DEFINITION = "definition"
     DOC_EVIDENCE = "doc_evidence"
+    USAGE_EVIDENCE = "usage_evidence"
 
 
 class DraftedBy(StrEnum):

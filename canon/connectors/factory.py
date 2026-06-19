@@ -9,6 +9,8 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from canon.connectors.base import ConnectorBase  # noqa: TC001 — used in _REGISTRY annotation
+from canon.connectors.looker import LookerConnector
+from canon.connectors.metabase import MetabaseConnector
 from canon.connectors.postgres import PostgresConnector
 from canon.exc import ConnectionError
 
@@ -20,6 +22,8 @@ __all__ = ["connector_by_id", "connector_for"]
 # Declared connection type → connector class. New primary connectors register here.
 # The value type is intentionally broad so the factory can call cls(conn) uniformly.
 _REGISTRY: dict[str, type] = {
+    "looker": LookerConnector,
+    "metabase": MetabaseConnector,
     "postgres": PostgresConnector,
 }
 

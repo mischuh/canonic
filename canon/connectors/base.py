@@ -38,7 +38,10 @@ __all__ = [
     "ResultColumn",
     "ResultSet",
     "SchemaMismatch",
+    "UsageDefinition",
+    "UsageEvidence",
     "UsageHint",
+    "UsageRole",
     "compute_fingerprint",
 ]
 
@@ -261,6 +264,77 @@ class DocEvidence(BaseModel):
     observed_at: datetime
 
 
+class UsageRole(StrEnum):
+    """Role a BI usage evidence record plays in reconciliation (SPEC-E3 §3.3).
+
+    Intentionally has no ``canonical`` member — BI questions are candidates, never canon
+    (PRD FR-13). A ``UsageEvidence`` can propose being a deprecated alternative or a
+    trusted assertion candidate; it can never be auto-promoted to a canonical binding.
+    """
+
+    ALTERNATIVE = "alternative"
+    TRUSTED_EXAMPLE = "trusted_example"
+
+
+class UsageDefinition(BaseModel):
+    """The metric expression a BI artifact encodes, as a candidate (SPEC-E3 §3.3).
+
+    Carries the SQL expression and the relations it references so reconciliation can
+    compare it against the canonical definition without touching vendor-specific shapes.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    expr: str
+    references: list[str] = []
+
+
+def _usage_fingerprint(
+    artifact: str,
+    title: str,
+    expr: str,
+    references: list[str],
+    role: str,
+) -> str:
+    """SHA-256 over normalized UsageEvidence semantic fields for drift detection."""
+    payload = {
+        "artifact": artifact,
+        "title": title,
+        "expr": expr,
+        "references": sorted(references),
+        "role": role,
+    }
+    digest = hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()
+    return f"sha256:{digest}"
+
+
+class UsageEvidence(BaseModel):
+    """Normalized BI-usage evidence from a Metabase or Looker connector (SPEC-E3 §3.3).
+
+    BI questions are *candidates*, never canon: ``role`` is bounded to
+    :class:`UsageRole` (no ``canonical`` member) so auto-promotion is unrepresentable.
+    ``role: alternative`` feeds E15 ``deprecated_alternatives``; ``role: trusted_example``
+    feeds E15 assertion candidates — both proposed-only through E4.
+    ``defines`` encodes the metric expression the artifact uses so reconciliation can
+    compare it against the canonical definition. ``native_ref`` is the vendor back-pointer
+    for provenance.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    source: str
+    kind: Literal["usage_evidence"] = "usage_evidence"
+    artifact: str
+    title: str
+    defines: UsageDefinition
+    role: UsageRole
+    frequency: int = 0
+    last_seen: datetime | None = None
+    native_ref: str
+    source_fingerprint: str | None = None
+    observed_at: datetime
+
+
 class ConnectorBase(ABC):
     """Abstract base class for all Canon connectors.
 
@@ -308,11 +382,11 @@ class ConnectorBase(ABC):
         """
         raise NotImplementedError(f"{type(self).__name__} does not support extract_definitions")
 
-    async def extract_evidence(self) -> list[DocEvidence]:
-        """Extract normalized prose evidence from this source (SPEC-E3 §3.2, §5).
+    async def extract_evidence(self) -> list[DocEvidence | UsageEvidence]:
+        """Extract normalized evidence from this source (SPEC-E3 §3.2, §3.3, §5).
 
-        Evidence connectors (e.g. Notion, arbitrary text) implement this; definition
-        and primary connectors do not.
+        Evidence connectors (Notion → DocEvidence, Metabase/Looker → UsageEvidence)
+        implement this; definition and primary connectors do not.
         """
         raise NotImplementedError(f"{type(self).__name__} does not support extract_evidence")
 

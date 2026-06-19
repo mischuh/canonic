@@ -91,6 +91,7 @@ class TestEvidenceItem:
             "observed_query",
             "definition",
             "doc_evidence",
+            "usage_evidence",
         } == KNOWN_EVIDENCE_KINDS
 
 
