@@ -1,0 +1,30 @@
+name: orders_rt
+connection: warehouse_pg
+table: fct_orders_rt
+grain: [order_id]
+description: "Intraday real-time order estimates. Provisional source for the current business day."
+
+columns:
+  - { name: order_id,    type: int,       nullable: false }
+  - { name: customer_id, type: int,       nullable: false }
+  - { name: channel_id,  type: int,       nullable: false }
+  - { name: amount,      type: decimal,   nullable: false }
+  - { name: status,      type: string,    nullable: false }
+  - { name: created_at,  type: timestamp, nullable: false }
+
+measures:
+  - name: total_revenue
+    expr: "sum(amount)"
+    additivity: additive
+  - name: order_count
+    expr: "count(order_id)"
+    additivity: additive
+
+dimensions:
+  - { name: status,      column: status }
+  - { name: order_date,  column: created_at }
+  - { name: customer_id, column: customer_id }
+  - { name: channel_id,  column: channel_id }
+
+meta:
+  provenance: human_curated

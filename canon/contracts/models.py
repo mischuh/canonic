@@ -169,6 +169,16 @@ class FinalityRule(BaseModel):
     result_flag: str | None = None
     board_only_final: bool = False
 
+    @model_validator(mode="after")
+    def _validate_structure(self) -> FinalityRule:
+        from canon.contracts.finality import validate_finality_rule
+
+        try:
+            validate_finality_rule(self)
+        except ValueError as exc:
+            raise ContractValidationError(("realizations",), str(exc)) from exc
+        return self
+
 
 class Assertion(BaseModel):
     """A trusted query→expected-result check for CI regression (SPEC-E15 §2.5)."""  # [P1]

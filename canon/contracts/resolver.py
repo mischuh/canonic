@@ -14,9 +14,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from canon.contracts.loader import load_guardrails, load_metric_bindings
+from canon.contracts.loader import load_finality, load_guardrails, load_metric_bindings
 from canon.contracts.models import (
     CanonicalRef,
+    FinalityRule,
     Guardrail,
     MetricBinding,
     Status,
@@ -27,7 +28,7 @@ if TYPE_CHECKING:
     from pathlib import Path
     from typing import Any
 
-    from canon.contracts.models import Assertion, FinalityRule
+    from canon.contracts.models import Assertion
 
 __all__ = [
     "Ambiguous",
@@ -88,8 +89,10 @@ class ContractResolver:
         self,
         bindings: Iterable[MetricBinding],
         guardrails: Iterable[Guardrail],
+        finality: Iterable[FinalityRule] = (),
     ) -> None:
         self._guardrails: list[Guardrail] = list(guardrails)
+        self._finality_by_metric: dict[str, FinalityRule] = {r.metric: r for r in finality}
 
         # name/alias -> active bindings; multiple entries for a name means ambiguity
         name_index: dict[str, list[MetricBinding]] = {}
@@ -106,10 +109,11 @@ class ContractResolver:
 
     @classmethod
     def from_project(cls, project_root: Path) -> ContractResolver:
-        """Load bindings and guardrails from a project root and build the resolver."""
+        """Load bindings, guardrails, and finality rules from a project root."""
         return cls(
             bindings=load_metric_bindings(project_root),
             guardrails=load_guardrails(project_root),
+            finality=load_finality(project_root),
         )
 
     def resolve_metric(self, name: str, context: str | None = None) -> MetricResolution:
@@ -161,8 +165,8 @@ class ContractResolver:
         return False
 
     def finality_for(self, metric: str) -> FinalityRule | None:
-        """Finality rule for a metric — always ``None`` in P0 (SPEC-E5-E15 §2.4 is P1)."""
-        return None
+        """Return the finality rule for a metric, or ``None`` if no rule is defined."""
+        return self._finality_by_metric.get(metric)
 
     def assertions_for(self, query: dict[str, Any]) -> list[Assertion]:
         """Assertions relevant to a query — always ``[]`` in P0 (SPEC-E5-E15 §2.5 is P1)."""

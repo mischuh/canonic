@@ -127,7 +127,12 @@ class TestP1Stubs:
         rule = FinalityRule(
             metric="revenue",
             realizations=[
-                Realization(source="orders", role="final", watermark="business_day - 1 day"),
+                Realization(
+                    source="orders",
+                    role="final",
+                    watermark="business_day - 1 day",
+                    tz="America/New_York",
+                ),
                 Realization(source="orders_rt", role="provisional"),
             ],
             board_only_final=True,

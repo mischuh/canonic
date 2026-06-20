@@ -7,9 +7,11 @@ import pytest
 from canon.contracts.models import (
     AppliesTo,
     CanonicalRef,
+    FinalityRule,
     Guardrail,
     GuardrailKind,
     MetricBinding,
+    Realization,
     Severity,
 )
 from canon.contracts.resolver import ContractResolver
@@ -97,12 +99,38 @@ def order_items() -> SemanticSource:
 
 
 @pytest.fixture
+def orders_rt() -> SemanticSource:
+    """Real-time intraday orders — same schema as orders, provisional realization."""
+    return SemanticSource(
+        name="orders_rt",
+        connection="warehouse_pg",
+        table="analytics.fct_orders_rt",
+        grain=["order_id"],
+        columns=[
+            Column(name="order_id", type="string", nullable=False),
+            Column(name="customer_id", type="string", nullable=False),
+            Column(name="status", type="string", nullable=False),
+            Column(name="amount", type="decimal", nullable=False),
+            Column(name="created_at", type="timestamp", nullable=False),
+        ],
+        measures=[
+            Measure(name="total_revenue", expr="sum(amount)", additivity="additive"),
+        ],
+        dimensions=[
+            Dimension(name="order_date", column="created_at", granularity="day"),
+            Dimension(name="status", column="status"),
+        ],
+    )
+
+
+@pytest.fixture
 def sources(
     orders: SemanticSource,
     customers: SemanticSource,
     order_items: SemanticSource,
+    orders_rt: SemanticSource,
 ) -> list[SemanticSource]:
-    return [orders, customers, order_items]
+    return [orders, customers, order_items, orders_rt]
 
 
 @pytest.fixture
@@ -134,3 +162,36 @@ def resolver(revenue_binding: MetricBinding, refund_guardrail: Guardrail) -> Con
         canonical=CanonicalRef(source="orders", measure="distinct_orders"),
     )
     return ContractResolver(bindings=[revenue_binding, uniques], guardrails=[refund_guardrail])
+
+
+@pytest.fixture
+def finality_rule() -> FinalityRule:
+    """Finality rule for revenue: orders=final (watermark T-1), orders_rt=provisional."""
+    return FinalityRule(
+        metric="revenue",
+        realizations=[
+            Realization(
+                source="orders",
+                role="final",
+                watermark="business_day - 1 day",
+                tz="America/New_York",
+            ),
+            Realization(source="orders_rt", role="provisional"),
+        ],
+        coalescing="window <= watermark ? final : provisional",
+        result_flag="per_row",
+    )
+
+
+@pytest.fixture
+def finality_resolver(
+    revenue_binding: MetricBinding,
+    refund_guardrail: Guardrail,
+    finality_rule: FinalityRule,
+) -> ContractResolver:
+    """Resolver with finality rule wired for revenue."""
+    return ContractResolver(
+        bindings=[revenue_binding],
+        guardrails=[refund_guardrail],
+        finality=[finality_rule],
+    )

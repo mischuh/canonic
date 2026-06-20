@@ -4,7 +4,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from canon.contracts.loader import load_guardrails, load_metric_bindings
+from canon.contracts.finality import validate_finality_rule
+from canon.contracts.loader import load_finality, load_guardrails, load_metric_bindings
 from canon.contracts.models import Status
 from canon.exc import ContractError
 from canon.semantic.loader import list_semantic_sources
@@ -21,10 +22,13 @@ def validate_contracts(project_root: Path) -> None:
     Raises ContractError on the first cross-surface violation:
     - Active binding's canonical.source/measure does not exist in semantics/.
     - Guardrail applies_to.source (or .measure) does not exist in semantics/.
-    - Guardrail applies_to.metric does not resolve to an active binding.
+    - Guardrail applies_to.metric does not resolve to an active metric binding.
+    - Finality rule's metric does not resolve to an active binding (§5.1).
+    - Finality rule's realization sources do not exist in semantics/ (§5.1).
     """
     sources = list_semantic_sources(project_root)
     source_measures: dict[str, set[str]] = {s.name: {m.name for m in s.measures} for s in sources}
+    source_names = set(source_measures)
 
     bindings = load_metric_bindings(project_root)
     active_metrics = {b.metric for b in bindings if b.status is Status.ACTIVE}
@@ -64,3 +68,14 @@ def validate_contracts(project_root: Path) -> None:
                     f"guardrail {guardrail.id!r}: applies_to.metric {at.metric!r} "
                     f"does not resolve to an active metric binding"
                 )
+
+    finality_rules = load_finality(project_root)
+    for rule in finality_rules:
+        if rule.metric not in active_metrics:
+            raise ContractError(
+                f"finality rule for metric {rule.metric!r} does not resolve to an active binding"
+            )
+        try:
+            validate_finality_rule(rule, source_names=source_names)
+        except ValueError as exc:
+            raise ContractError(f"finality rule for metric {rule.metric!r}: {exc}") from exc

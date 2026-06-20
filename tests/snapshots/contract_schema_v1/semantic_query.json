@@ -1,17 +1,12 @@
 {
   "description": "A resolved-by-name request the compiler turns into dialect-correct SQL (\u00a73).",
   "properties": {
-    "context": {
-      "anyOf": [
-        {
-          "type": "string"
-        },
-        {
-          "type": "null"
-        }
-      ],
-      "default": null,
-      "title": "Context"
+    "metrics": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Metrics",
+      "type": "array"
     },
     "dimensions": {
       "default": [],
@@ -29,6 +24,18 @@
       "title": "Filters",
       "type": "array"
     },
+    "context": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Context"
+    },
     "limit": {
       "anyOf": [
         {
@@ -41,12 +48,18 @@
       "default": null,
       "title": "Limit"
     },
-    "metrics": {
-      "items": {
-        "type": "string"
-      },
-      "title": "Metrics",
-      "type": "array"
+    "as_of": {
+      "anyOf": [
+        {
+          "format": "date-time",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "As Of"
     }
   },
   "required": [

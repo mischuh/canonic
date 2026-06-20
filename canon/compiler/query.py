@@ -7,6 +7,8 @@ resolved by the compiler against bindings and semantic sources.
 
 from __future__ import annotations
 
+from datetime import datetime  # noqa: TC003 — Pydantic resolves field annotations at runtime
+
 from pydantic import BaseModel, ConfigDict
 
 __all__ = ["SemanticQuery"]
@@ -22,3 +24,4 @@ class SemanticQuery(BaseModel):
     filters: list[str] = []  # [P0] predicate strings over dimension/column names
     context: str | None = None  # [P1] tag activating context-scoped guardrails
     limit: int | None = None  # [P0] row cap injected by the dialect adapter
+    as_of: datetime | None = None  # [P1] reference point for finality watermark evaluation
