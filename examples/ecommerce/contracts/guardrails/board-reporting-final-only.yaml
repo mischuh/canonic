@@ -1,0 +1,9 @@
+id: board-final-only
+applies_to:
+  metric: revenue
+kind: restrict_source
+restrict_to:
+  role: final
+context: board_reporting
+severity: error
+rationale: "Board reporting requires authoritative data through T-1."

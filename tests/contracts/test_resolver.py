@@ -14,6 +14,7 @@ from canon.contracts.models import (
     Guardrail,
     GuardrailKind,
     MetricBinding,
+    RestrictTo,
     Status,
 )
 from canon.contracts.resolver import (
@@ -145,6 +146,55 @@ class TestGuardrailsFor:
         first = resolver.guardrails_for("orders", "total_revenue")
         second = resolver.guardrails_for("orders", "total_revenue")
         assert [g.id for g in first] == [g.id for g in second]
+
+
+def _restrict_guardrail(gid: str, *, metric: str, context: str) -> Guardrail:
+    return Guardrail(
+        id=gid,
+        applies_to=AppliesTo(metric=metric),
+        kind=GuardrailKind.RESTRICT_SOURCE,
+        restrict_to=RestrictTo(role="final"),
+        context=context,
+        rationale="test restrict_source",
+    )
+
+
+class TestRestrictSourceFor:
+    def test_returns_guardrail_on_matching_context(self) -> None:
+        revenue = _binding("revenue")
+        g = _restrict_guardrail("board-final-only", metric="revenue", context="board_reporting")
+        resolver = ContractResolver(bindings=[revenue], guardrails=[g])
+        result = resolver.restrict_source_for("orders", "total_revenue", "board_reporting")
+        assert [r.id for r in result] == ["board-final-only"]
+
+    def test_returns_empty_on_wrong_context(self) -> None:
+        revenue = _binding("revenue")
+        g = _restrict_guardrail("board-final-only", metric="revenue", context="board_reporting")
+        resolver = ContractResolver(bindings=[revenue], guardrails=[g])
+        result = resolver.restrict_source_for("orders", "total_revenue", "internal_dashboard")
+        assert result == []
+
+    def test_returns_empty_when_context_is_none(self) -> None:
+        revenue = _binding("revenue")
+        g = _restrict_guardrail("board-final-only", metric="revenue", context="board_reporting")
+        resolver = ContractResolver(bindings=[revenue], guardrails=[g])
+        result = resolver.restrict_source_for("orders", "total_revenue", None)
+        assert result == []
+
+    def test_does_not_return_mandatory_filter_guardrails(self) -> None:
+        revenue = _binding("revenue")
+        mf = _guardrail("mf", source="orders", measure="total_revenue")
+        resolver = ContractResolver(bindings=[revenue], guardrails=[mf])
+        result = resolver.restrict_source_for("orders", "total_revenue", "board_reporting")
+        assert result == []
+
+    def test_stable_sort_by_id(self) -> None:
+        revenue = _binding("revenue")
+        g1 = _restrict_guardrail("z-guard", metric="revenue", context="board_reporting")
+        g2 = _restrict_guardrail("a-guard", metric="revenue", context="board_reporting")
+        resolver = ContractResolver(bindings=[revenue], guardrails=[g1, g2])
+        result = resolver.restrict_source_for("orders", "total_revenue", "board_reporting")
+        assert [r.id for r in result] == ["a-guard", "z-guard"]
 
 
 class TestP0Stubs:

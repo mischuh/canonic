@@ -20,6 +20,7 @@ __all__ = [
     "GuardrailKind",
     "MetricBinding",
     "Realization",
+    "RestrictTo",
     "Severity",
     "Status",
 ]
@@ -103,6 +104,23 @@ class MetricBinding(BaseModel):
         return self
 
 
+class RestrictTo(BaseModel):
+    """Target role for a restrict_source guardrail (SPEC-E15 §2.4)."""
+
+    model_config = ConfigDict(frozen=True)
+
+    role: str  # "final" | "provisional"
+
+    @model_validator(mode="after")
+    def _validate_role(self) -> RestrictTo:
+        if self.role not in {"final", "provisional"}:
+            raise ContractValidationError(
+                ("role",),
+                f"restrict_to.role must be 'final' or 'provisional', got {self.role!r}",
+            )
+        return self
+
+
 class AppliesTo(BaseModel):
     """Target of a guardrail — either a source(+measure) or a metric name."""
 
@@ -133,17 +151,30 @@ class Guardrail(BaseModel):
     applies_to: AppliesTo
     kind: GuardrailKind
     filter: str | None = None
+    restrict_to: RestrictTo | None = None
+    context: str | None = None
     severity: Severity = Severity.ERROR
     rationale: str
     phase: str | None = None
 
     @model_validator(mode="after")
-    def _validate_filter(self) -> Guardrail:
+    def _validate_kind_fields(self) -> Guardrail:
         if self.kind is GuardrailKind.MANDATORY_FILTER and not self.filter:
             raise ContractValidationError(
                 ("filter",),
                 "mandatory_filter guardrail requires a non-empty 'filter' expression",
             )
+        if self.kind is GuardrailKind.RESTRICT_SOURCE:
+            if self.restrict_to is None:
+                raise ContractValidationError(
+                    ("restrict_to",),
+                    "restrict_source guardrail requires a 'restrict_to' field",
+                )
+            if not self.context:
+                raise ContractValidationError(
+                    ("context",),
+                    "restrict_source guardrail requires a non-empty 'context' field",
+                )
         return self
 
 

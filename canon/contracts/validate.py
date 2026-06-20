@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING
 
 from canon.contracts.finality import validate_finality_rule
 from canon.contracts.loader import load_finality, load_guardrails, load_metric_bindings
-from canon.contracts.models import Status
+from canon.contracts.models import GuardrailKind, Status
 from canon.exc import ContractError
 from canon.semantic.loader import list_semantic_sources
 
@@ -68,6 +68,18 @@ def validate_contracts(project_root: Path) -> None:
                     f"guardrail {guardrail.id!r}: applies_to.metric {at.metric!r} "
                     f"does not resolve to an active metric binding"
                 )
+
+    finality_metrics = {rule.metric for rule in load_finality(project_root)}
+
+    for guardrail in guardrails:
+        if guardrail.kind is not GuardrailKind.RESTRICT_SOURCE:
+            continue
+        at = guardrail.applies_to
+        if at.metric is not None and at.metric not in finality_metrics:
+            raise ContractError(
+                f"guardrail {guardrail.id!r}: restrict_source guardrail targets metric "
+                f"{at.metric!r} which has no finality rule — watermark cannot be evaluated"
+            )
 
     finality_rules = load_finality(project_root)
     for rule in finality_rules:
