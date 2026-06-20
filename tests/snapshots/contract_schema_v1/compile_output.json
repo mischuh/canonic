@@ -19,6 +19,52 @@
       "title": "Compiled",
       "type": "object"
     },
+    "FinalityOut": {
+      "description": "Finality metadata block in a query response (SPEC-E5-E15 stage 8).",
+      "properties": {
+        "watermark": {
+          "title": "Watermark",
+          "type": "string"
+        },
+        "sources_used": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Sources Used",
+          "type": "array"
+        },
+        "final_rows": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Final Rows"
+        },
+        "provisional_rows": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Provisional Rows"
+        }
+      },
+      "required": [
+        "watermark",
+        "sources_used"
+      ],
+      "title": "FinalityOut",
+      "type": "object"
+    },
     "FiredGuardrailOut": {
       "description": "A guardrail that fired during compilation (mirrors compiler ``FiredGuardrail``).",
       "properties": {
@@ -77,6 +123,17 @@
           "default": "1.1",
           "title": "Contract Schema",
           "type": "string"
+        },
+        "finality": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/FinalityOut"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         }
       },
       "required": [

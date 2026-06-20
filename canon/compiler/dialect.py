@@ -67,15 +67,13 @@ class PostgresDialectAdapter(DialectAdapter):
     }
 
     def emit(self, ast: exp.Expression, *, limit: int | None = None) -> str:
-        """Render a SELECT AST to Postgres SQL with all identifiers quoted.
+        """Render a SELECT (or UNION ALL of SELECTs) to Postgres SQL with all identifiers quoted.
 
         Raises :class:`ReadOnlyViolation` if ``ast`` is anything but a pure, read-only
-        ``SELECT``. The guarantee holds by construction — every write/lock path is
-        rejected before any string is produced. A bare ``isinstance`` check is not
-        enough: a ``SELECT`` can still write (``… INTO``), take locks (``FOR UPDATE``),
-        or wrap DML in a CTE (``WITH t AS (DELETE … RETURNING *) SELECT …``).
+        SELECT or UNION ALL of SELECTs. The guarantee holds by construction — every
+        write/lock path is rejected before any string is produced.
         """
-        if not isinstance(ast, exp.Select):
+        if not isinstance(ast, (exp.Select, exp.Union)):
             raise ReadOnlyViolation(f"refusing to emit non-SELECT statement: {type(ast).__name__}")
         if (write := ast.find(*_WRITE_NODES)) is not None:
             raise ReadOnlyViolation(
@@ -83,10 +81,21 @@ class PostgresDialectAdapter(DialectAdapter):
             )
         if ast.find(exp.Into) is not None:
             raise ReadOnlyViolation("refusing to emit SELECT ... INTO (writes a new relation)")
-        if ast.args.get("locks"):
+        if isinstance(ast, exp.Select) and ast.args.get("locks"):
             raise ReadOnlyViolation("refusing to emit locking SELECT (FOR UPDATE / FOR SHARE)")
         if limit is not None:
-            ast = ast.limit(limit)
+            # Wrap a UNION in a subquery so LIMIT applies to the combined result.
+            if isinstance(ast, exp.Union):
+                from sqlglot import exp as _exp
+
+                ast = (
+                    _exp.Select()
+                    .select(_exp.Star())
+                    .from_(_exp.alias_(ast.subquery(), "_u"))
+                    .limit(limit)
+                )
+            else:
+                ast = ast.limit(limit)
         return ast.sql(dialect=self.dialect, identify=True)
 
     def map_type(self, normalized: NormalizedType) -> str:

@@ -23,6 +23,7 @@ if TYPE_CHECKING:
 __all__ = [
     "Compiled",
     "CompileOutput",
+    "FinalityOut",
     "FiredGuardrailOut",
     "MetricDetail",
     "MetricSummary",
@@ -49,6 +50,17 @@ class SourceFreshnessOut(BaseModel):
     source: str
     last_validated_at: str | None = None
     stale: bool = False
+
+
+class FinalityOut(BaseModel):
+    """Finality metadata block in a query response (SPEC-E5-E15 stage 8)."""
+
+    model_config = ConfigDict(frozen=True)
+
+    watermark: str
+    sources_used: list[str]
+    final_rows: int | None = None
+    provisional_rows: int | None = None
 
 
 class MetricSummary(BaseModel):
@@ -97,10 +109,34 @@ class QueryMetadata(BaseModel):
     freshness: list[SourceFreshnessOut]
     warnings: list[str] = []
     contract_schema: str = CONTRACT_SCHEMA
+    finality: FinalityOut | None = None
 
     @classmethod
-    def from_compile_result(cls, compiled: CompileResult) -> QueryMetadata:
-        """Project a :class:`CompileResult` onto the §2.2 metadata shape."""
+    def from_compile_result(
+        cls, compiled: CompileResult, result: ResultSet | None = None
+    ) -> QueryMetadata:
+        """Project a :class:`CompileResult` onto the §2.2 metadata shape.
+
+        When ``result`` is provided and the compile result carries finality metadata,
+        the ``is_final`` column in the result set is used to tally ``final_rows`` and
+        ``provisional_rows``.
+        """
+        finality_out: FinalityOut | None = None
+        if compiled.finality is not None:
+            final_rows: int | None = None
+            provisional_rows: int | None = None
+            if result is not None:
+                col_names = [c.name for c in result.columns]
+                if "is_final" in col_names:
+                    idx = col_names.index("is_final")
+                    final_rows = sum(1 for row in result.rows if row[idx])
+                    provisional_rows = len(result.rows) - final_rows
+            finality_out = FinalityOut(
+                watermark=compiled.finality.watermark,
+                sources_used=compiled.finality.sources_used,
+                final_rows=final_rows,
+                provisional_rows=provisional_rows,
+            )
         return cls(
             resolved={"metrics": dict(compiled.resolved)},
             guardrails_fired=[
@@ -114,6 +150,7 @@ class QueryMetadata(BaseModel):
             ],
             warnings=list(compiled.warnings),
             contract_schema=CONTRACT_SCHEMA,
+            finality=finality_out,
         )
 
 
@@ -132,7 +169,7 @@ class QueryResult(BaseModel):
         return cls(
             result=result,
             compiled=Compiled(sql=compiled.sql, dialect=compiled.dialect),
-            metadata=QueryMetadata.from_compile_result(compiled),
+            metadata=QueryMetadata.from_compile_result(compiled, result=result),
         )
 
 

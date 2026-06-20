@@ -15,16 +15,19 @@ from sqlglot import exp
 
 from canon.compiler.dialect import DIALECT_ADAPTERS
 from canon.compiler.joins import JoinEdge, plan_joins
-from canon.compiler.result import CompileResult, FiredGuardrail, SourceFreshness
+from canon.compiler.result import CompileResult, FinalityMetadata, FiredGuardrail, SourceFreshness
 from canon.contracts.resolver import Ambiguous as ResolverAmbiguous
 from canon.contracts.resolver import Binding as ResolverBinding
 from canon.contracts.resolver import Unresolved as ResolverUnresolved
 from canon.exc import Ambiguous, Unresolved, UnsupportedMeasure
 from canon.exc import Unreachable as UnreachableError
-from canon.semantic.models import Relationship
+from canon.semantic.models import NormalizedType, Relationship
 
 if TYPE_CHECKING:
+    from datetime import datetime
+
     from canon.compiler.query import SemanticQuery
+    from canon.contracts.models import FinalityRule
     from canon.contracts.resolver import ContractResolver
     from canon.semantic.models import Dimension, Measure, SemanticSource
 
@@ -92,12 +95,44 @@ def compile(  # noqa: A001 — the public verb for this capability is "compile"
             )
     fanout = any(edge.join.relationship in _FANOUT for edge in join_edges)
 
+    # Stage 5 — finality & coalescing [P1]: evaluate watermark, select sources per window.
+    finality_rule = resolver.finality_for(metrics[0].name) if len(metrics) == 1 else None
+    time_dim_name: str | None = None
+    if finality_rule is not None:
+        time_dim_name = _find_time_dim_name(dimensions, sources_by_name)
+        if time_dim_name is None:
+            finality_rule = None  # no time dimension → all rows implicitly final
+
     # Stage 6 — enforce guardrails: AND mandatory filters into WHERE.
     guard_conditions, fired = _enforce_guardrails(metrics, resolver, query.context, sources_by_name)
     where_conditions += guard_conditions
 
     # Stage 7 — emit SQL through the dialect adapter.
-    if fanout:
+    finality_meta: FinalityMetadata | None = None
+    adapter = DIALECT_ADAPTERS["postgres"]
+    if finality_rule is not None and time_dim_name is not None:
+        from canon.contracts.finality import evaluate_watermark, watermark_to_iso
+
+        final_r = next(r for r in finality_rule.realizations if r.role == "final")
+        watermark_dt = evaluate_watermark(
+            cast("str", final_r.watermark), cast("str", final_r.tz), query.as_of
+        )
+        ast = _build_finality_union(
+            rule=finality_rule,
+            query_metrics=metrics,
+            dimensions=dimensions,
+            where_conditions=where_conditions,
+            sources_by_name=sources_by_name,
+            watermark_dt=watermark_dt,
+            time_dim_name=time_dim_name,
+            original_owner=owner,
+        )
+        finality_meta = FinalityMetadata(
+            watermark=watermark_to_iso(watermark_dt),
+            sources_used=[r.source for r in finality_rule.realizations],
+            result_flag=finality_rule.result_flag or "per_row",
+        )
+    elif fanout:
         ast = _build_deduped(
             owner, metrics, dimensions, where_conditions, join_edges, sources_by_name
         )
@@ -105,11 +140,13 @@ def compile(  # noqa: A001 — the public verb for this capability is "compile"
         ast = _build_simple(
             owner, metrics, dimensions, where_conditions, join_edges, sources_by_name
         )
-    adapter = DIALECT_ADAPTERS["postgres"]
     sql = adapter.emit(ast, limit=query.limit)
 
     # Stage 8 — attach result metadata.
-    used_sources = sorted({owner, *referenced, *{e.join.to for e in join_edges}})
+    if finality_meta is not None:
+        used_sources = sorted(finality_meta.sources_used)
+    else:
+        used_sources = sorted({owner, *referenced, *{e.join.to for e in join_edges}})
     return CompileResult(
         sql=sql,
         dialect=adapter.dialect,
@@ -117,6 +154,7 @@ def compile(  # noqa: A001 — the public verb for this capability is "compile"
         guardrails_fired=fired,
         freshness=[_freshness(sources_by_name[s]) for s in used_sources],
         warnings=[],
+        finality=finality_meta,
     )
 
 
@@ -402,3 +440,153 @@ def _freshness(source: SemanticSource) -> SourceFreshness:
         last_validated_at=last.isoformat() if last is not None else None,
         stale=False,
     )
+
+
+# --- Stage 5 helpers ---------------------------------------------------------
+
+
+_TIME_TYPES = frozenset({NormalizedType.DATE, NormalizedType.TIMESTAMP})
+
+
+def _find_time_dim_name(
+    dimensions: list[tuple[str, Dimension]],
+    sources_by_name: dict[str, SemanticSource],
+) -> str | None:
+    """Return the name of the first DATE/TIMESTAMP dimension in the query, or None."""
+    for src_name, dim in dimensions:
+        source = sources_by_name.get(src_name)
+        if source is None:
+            continue
+        col = next((c for c in source.columns if c.name == dim.column), None)
+        if col is not None and col.type in _TIME_TYPES:
+            return dim.name
+    return None
+
+
+def _requalify_source(
+    expr: exp.Expression,
+    old_source: str,
+    new_source: str,
+) -> exp.Expression:
+    """Replace every column table reference that equals old_source with new_source."""
+
+    def _transform(node: exp.Expression) -> exp.Expression:
+        if isinstance(node, exp.Column) and node.table == old_source:
+            return exp.column(node.name, table=new_source)
+        return node
+
+    return expr.transform(_transform)
+
+
+def _build_finality_union(
+    rule: FinalityRule,
+    query_metrics: list[_ResolvedMetric],
+    dimensions: list[tuple[str, Dimension]],
+    where_conditions: list[exp.Expression],
+    sources_by_name: dict[str, SemanticSource],
+    watermark_dt: datetime,
+    time_dim_name: str,
+    original_owner: str,
+) -> exp.Expression:
+    """Build a UNION ALL over finality realizations (SPEC-E5-E15 stage 5).
+
+    Each branch selects from one realization source, gated by the watermark on the time
+    dimension column, and projects an ``is_final`` boolean marker.  All WHERE conditions
+    from the original owner (user filters + guardrails) are re-qualified to each branch
+    source — this is valid because both sources share the same column/dimension schema.
+    """
+    from canon.contracts.finality import watermark_to_iso
+
+    watermark_iso = watermark_to_iso(watermark_dt)
+    watermark_lit = cast(
+        "exp.Expression",
+        exp.Cast(
+            this=exp.Literal.string(watermark_iso),
+            to=exp.DataType.build("TIMESTAMPTZ"),
+        ),
+    )
+
+    branches: list[exp.Select] = []
+    for realization in rule.realizations:
+        src_name = realization.source
+        source = sources_by_name.get(src_name)
+        if source is None:
+            raise Unresolved(
+                f"finality realization source {src_name!r} is not in the loaded sources"
+            )
+
+        # Resolve the metric's measure on this realization source.
+        branch_metrics: list[_ResolvedMetric] = []
+        for m in query_metrics:
+            measure = _find_measure(source, m.measure.name)
+            if measure is None:
+                raise Unresolved(
+                    f"finality realization source {src_name!r} does not declare measure "
+                    f"{m.measure.name!r} required by metric {m.name!r}"
+                )
+            branch_metrics.append(_ResolvedMetric(name=m.name, source=src_name, measure=measure))
+
+        # Resolve dimensions on this realization source (same names must exist).
+        branch_dims: list[tuple[str, Dimension]] = []
+        for _orig, dim in dimensions:
+            found = next((d for d in source.dimensions if d.name == dim.name), None)
+            if found is None:
+                raise UnreachableError(
+                    f"finality realization source {src_name!r} does not declare "
+                    f"dimension {dim.name!r}"
+                )
+            branch_dims.append((src_name, found))
+
+        # Find the gate column (time dimension backing column on this source).
+        gate_col: exp.Expression | None = None
+        for _src, dim in branch_dims:
+            if dim.name == time_dim_name:
+                gate_col = exp.column(dim.column, table=src_name)
+                break
+        if gate_col is None:
+            raise UnreachableError(
+                f"could not resolve time dimension {time_dim_name!r} on source {src_name!r}"
+            )
+
+        # Build gate and is_final marker.
+        if realization.role == "final":
+            gate: exp.Expression = cast(
+                "exp.Expression", exp.LTE(this=gate_col, expression=watermark_lit)
+            )
+            is_final_val: exp.Expression = cast("exp.Expression", exp.true())
+        else:
+            gate = cast("exp.Expression", exp.GT(this=gate_col, expression=watermark_lit))
+            is_final_val = cast("exp.Expression", exp.false())
+
+        # Re-qualify all shared WHERE conditions from original_owner to this branch source.
+        branch_where = [
+            _requalify_source(cond, original_owner, src_name) for cond in where_conditions
+        ]
+        branch_where.append(gate)
+
+        # Build the branch SELECT.
+        select = exp.Select()
+        projections: list[exp.Expression] = []
+        group_exprs: list[exp.Expression] = []
+        for b_src, dim in branch_dims:
+            expr = _dimension_expr(b_src, dim)
+            projections.append(_alias(expr, dim.name))
+            group_exprs.append(expr)
+        for m in branch_metrics:
+            projections.append(_alias(_measure_expr(m.source, m.measure), m.measure.name))
+        projections.append(_alias(is_final_val, "is_final"))
+        select = select.select(*projections)
+        select = select.from_(_alias(exp.to_table(source.table), src_name))
+        if branch_where:
+            select = select.where(exp.and_(*branch_where))
+        if group_exprs:
+            select = select.group_by(*group_exprs)
+        branches.append(select)
+
+    if not branches:
+        raise UnreachableError("finality rule has no realizations to build from")
+
+    combined: exp.Select | exp.Union = branches[0]
+    for branch in branches[1:]:
+        combined = combined.union(branch, distinct=False)
+    return combined

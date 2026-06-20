@@ -11,6 +11,7 @@ from ruamel.yaml import YAML
 from canon.contracts.models import (
     Assertion,
     ContractValidationError,
+    FinalityRule,
     Guardrail,
     MetricBinding,
     Status,
@@ -27,6 +28,7 @@ __all__ = [
     "dump_guardrail",
     "dump_metric_binding",
     "load_assertions",
+    "load_finality",
     "load_guardrails",
     "load_metric_bindings",
 ]
@@ -117,12 +119,21 @@ def load_metric_bindings(project_root: Path) -> list[MetricBinding]:
 
 
 def load_guardrails(project_root: Path) -> list[Guardrail]:
-    """Load every contracts/guardrails/**/*.yaml (skips finality-* stubs in P0)."""
+    """Load every contracts/guardrails/**/*.yaml (skips finality-* files)."""
     base = project_root / _GUARDRAILS_DIR
     if not base.is_dir():
         return []
     paths = [p for p in sorted(base.rglob("*.yaml")) if not p.name.startswith("finality-")]
     return [_load_one(p, Guardrail) for p in paths]
+
+
+def load_finality(project_root: Path) -> list[FinalityRule]:
+    """Load every contracts/guardrails/finality-*.yaml as FinalityRule objects."""
+    base = project_root / _GUARDRAILS_DIR
+    if not base.is_dir():
+        return []
+    paths = [p for p in sorted(base.rglob("*.yaml")) if p.name.startswith("finality-")]
+    return [_load_one(p, FinalityRule) for p in paths]
 
 
 def load_assertions(project_root: Path) -> list[Assertion]:

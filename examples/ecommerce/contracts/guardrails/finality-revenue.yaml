@@ -1,0 +1,10 @@
+metric: revenue
+realizations:
+  - source: orders
+    role: final
+    watermark: "business_day - 1 day"
+    tz: "America/New_York"
+  - source: orders_rt
+    role: provisional
+coalescing: "window <= watermark ? final : provisional"
+result_flag: per_row
