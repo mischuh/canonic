@@ -134,10 +134,12 @@ async def test_ac1_event_written_on_served_answer(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     svc = _make_service(monkeypatch, tmp_path)
-    monkeypatch.setattr(
-        "canon.core.service.connector_by_id",
-        lambda _cfg, _cid: _fake_connector(bytes_scanned=10485760),
-    )
+
+    class _StubFactory:
+        def for_id(self, _cfg, _cid):
+            return _fake_connector(bytes_scanned=10485760)
+
+    monkeypatch.setattr("canon.core.service.default_factory", _StubFactory())
 
     q = SemanticQuery(metrics=["revenue"])
     await svc.query(q)
@@ -165,10 +167,12 @@ async def test_ac2_log_contains_no_sql_or_rows(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     svc = _make_service(monkeypatch, tmp_path)
-    monkeypatch.setattr(
-        "canon.core.service.connector_by_id",
-        lambda _cfg, _cid: _fake_connector(),
-    )
+
+    class _StubFactory:
+        def for_id(self, _cfg, _cid):
+            return _fake_connector()
+
+    monkeypatch.setattr("canon.core.service.default_factory", _StubFactory())
 
     q = SemanticQuery(metrics=["revenue"])
     await svc.query(q)
@@ -286,10 +290,12 @@ async def test_append_only_two_queries_two_lines(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     svc = _make_service(monkeypatch, tmp_path)
-    monkeypatch.setattr(
-        "canon.core.service.connector_by_id",
-        lambda _cfg, _cid: _fake_connector(),
-    )
+
+    class _StubFactory:
+        def for_id(self, _cfg, _cid):
+            return _fake_connector()
+
+    monkeypatch.setattr("canon.core.service.default_factory", _StubFactory())
 
     q = SemanticQuery(metrics=["revenue"])
     await svc.query(q)
@@ -352,10 +358,12 @@ async def test_null_event_log_writes_nothing(
     )
     # No event_log — defaults to NullAnswerEventLog
     svc = CanonService(config=config, resolver=resolver, sources=[source])
-    monkeypatch.setattr(
-        "canon.core.service.connector_by_id",
-        lambda _cfg, _cid: _fake_connector(),
-    )
+
+    class _StubFactory:
+        def for_id(self, _cfg, _cid):
+            return _fake_connector()
+
+    monkeypatch.setattr("canon.core.service.default_factory", _StubFactory())
 
     await svc.query(SemanticQuery(metrics=["revenue"]))
 

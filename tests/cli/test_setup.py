@@ -33,13 +33,14 @@ class _FakeConnector:
 
 
 def _patch_connector(monkeypatch, *connectors: _FakeConnector) -> None:
-    """Patch connector_for to hand out the given fakes in call order."""
+    """Patch default_factory.create to hand out the given fakes in call order."""
     seq = iter(connectors)
 
-    def _factory(_conn):
-        return next(seq)
+    class _StubFactory:
+        def create(self, _conn):
+            return next(seq)
 
-    monkeypatch.setattr("canon.cli.commands.setup.connector_for", _factory)
+    monkeypatch.setattr("canon.cli.commands.setup.default_factory", _StubFactory())
 
 
 # Prompt answers for a happy-path fresh run (one empty Database/Model overridden).
@@ -159,7 +160,7 @@ def test_resume_skips_completed_steps(runner: CliRunner, tmp_path: Path, monkeyp
         "completed_steps": ["name", "connection"],
     }
     (dotcanon / "setup-state.json").write_text(json.dumps(state))
-    # connector_for must NOT be called — leave it unpatched to catch a stray call.
+    # default_factory.create must NOT be called — leave it unpatched to catch a stray call.
 
     resume_input = "\n".join(["", "", "m", "", ""])  # provider, url, model, api key, preview
     result = runner.invoke(app, ["setup"], input=resume_input + "\n")

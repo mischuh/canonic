@@ -192,6 +192,21 @@ class UnsupportedSourceVersionError(ConnectionError):
         super().__init__(f"{source} version {detected!r} is unsupported; supported: {supported}")
 
 
+class UnknownConnectorType(ConnectionError):
+    """A connection declares a ``type`` with no connector registered in the factory (E2 S9, GH-102).
+
+    Subclasses :class:`ConnectionError` (exit 13) so existing connection-error handling still
+    catches it, while callers that care can catch this specifically. The message lists the
+    registered types — no silent fallback (AC2).
+    """
+
+    def __init__(self, type_name: str, *, known: Sequence[str]) -> None:
+        self.type_name = type_name
+        self.known = tuple(known)
+        listed = ", ".join(self.known) or "(none)"
+        super().__init__(f"unknown connector type {type_name!r}; registered types: {listed}")
+
+
 class ContradictionsFound(CanonError):
     """Raised by headless ``--strict`` ingest when a run flags any contradiction (E4 §5.4)."""
 
