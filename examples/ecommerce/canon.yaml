@@ -15,6 +15,14 @@ connections:
       schema: analytics
     credentials_ref: env:CANON_PG_PASSWORD  # export CANON_PG_PASSWORD=<your-postgres-password>
 
+  # E3 definition connector: a compiled dbt manifest.json. No live database, no
+  # execution — Canon parses the manifest into modeling-tier evidence (measures,
+  # joins, grain) that outranks raw Postgres introspection during reconciliation.
+  - id: warehouse_dbt
+    type: dbt
+    params:
+      manifest_path: dbt/manifest.json   # relative to this canon.yaml
+
 llm:
   provider: openai_compatible
   base_url: http://127.0.0.1:8765/v1  # Ollama; swap for OpenAI/Anthropic in Phase 1

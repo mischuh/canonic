@@ -1,0 +1,167 @@
+{
+  "metadata": {
+    "dbt_schema_version": "https://schemas.getdbt.com/dbt/manifest/v11.json",
+    "dbt_version": "1.7.0",
+    "generated_at": "2026-06-01T00:00:00.000000Z",
+    "invocation_id": "chinook-demo-0001"
+  },
+  "nodes": {
+    "model.chinook.Invoice": {
+      "unique_id": "model.chinook.Invoice",
+      "resource_type": "model",
+      "name": "Invoice",
+      "schema": "chinook",
+      "alias": "Invoice",
+      "database": null,
+      "description": "One row per customer invoice. The primary sales fact for the digital music store.",
+      "config": {"materialized": "table"},
+      "columns": {
+        "InvoiceId": {
+          "name": "InvoiceId",
+          "data_type": "integer",
+          "constraints": [{"type": "primary_key"}]
+        },
+        "CustomerId": {
+          "name": "CustomerId",
+          "data_type": "integer",
+          "constraints": [
+            {"type": "foreign_key", "to": "chinook.Customer", "to_columns": ["CustomerId"]}
+          ]
+        },
+        "InvoiceDate": {"name": "InvoiceDate", "data_type": "timestamp", "constraints": []},
+        "BillingCountry": {"name": "BillingCountry", "data_type": "varchar", "constraints": []},
+        "Total": {"name": "Total", "data_type": "numeric", "constraints": []}
+      }
+    },
+    "model.chinook.InvoiceLine": {
+      "unique_id": "model.chinook.InvoiceLine",
+      "resource_type": "model",
+      "name": "InvoiceLine",
+      "schema": "chinook",
+      "alias": "InvoiceLine",
+      "database": null,
+      "description": "One row per track sold within an invoice. Joins to invoices and tracks.",
+      "config": {"materialized": "table"},
+      "columns": {
+        "InvoiceLineId": {
+          "name": "InvoiceLineId",
+          "data_type": "integer",
+          "constraints": [{"type": "primary_key"}]
+        },
+        "InvoiceId": {
+          "name": "InvoiceId",
+          "data_type": "integer",
+          "constraints": [
+            {"type": "foreign_key", "to": "chinook.Invoice", "to_columns": ["InvoiceId"]}
+          ]
+        },
+        "TrackId": {
+          "name": "TrackId",
+          "data_type": "integer",
+          "constraints": [
+            {"type": "foreign_key", "to": "chinook.Track", "to_columns": ["TrackId"]}
+          ]
+        },
+        "UnitPrice": {"name": "UnitPrice", "data_type": "numeric", "constraints": []},
+        "Quantity": {"name": "Quantity", "data_type": "integer", "constraints": []}
+      }
+    },
+    "model.chinook.Track": {
+      "unique_id": "model.chinook.Track",
+      "resource_type": "model",
+      "name": "Track",
+      "schema": "chinook",
+      "alias": "Track",
+      "database": null,
+      "description": "One row per track in the music catalog.",
+      "config": {"materialized": "table"},
+      "columns": {
+        "TrackId": {
+          "name": "TrackId",
+          "data_type": "integer",
+          "constraints": [{"type": "primary_key"}]
+        },
+        "Name": {"name": "Name", "data_type": "varchar", "constraints": []},
+        "Composer": {"name": "Composer", "data_type": "varchar", "constraints": []},
+        "Milliseconds": {"name": "Milliseconds", "data_type": "integer", "constraints": []},
+        "UnitPrice": {"name": "UnitPrice", "data_type": "numeric", "constraints": []}
+      }
+    },
+    "model.chinook.Customer": {
+      "unique_id": "model.chinook.Customer",
+      "resource_type": "model",
+      "name": "Customer",
+      "schema": "chinook",
+      "alias": "Customer",
+      "database": null,
+      "description": "One row per registered customer.",
+      "config": {"materialized": "table"},
+      "columns": {
+        "CustomerId": {
+          "name": "CustomerId",
+          "data_type": "integer",
+          "constraints": [{"type": "primary_key"}]
+        },
+        "FirstName": {"name": "FirstName", "data_type": "varchar", "constraints": []},
+        "LastName": {"name": "LastName", "data_type": "varchar", "constraints": []},
+        "Country": {"name": "Country", "data_type": "varchar", "constraints": []},
+        "Email": {"name": "Email", "data_type": "varchar", "constraints": []}
+      }
+    }
+  },
+  "semantic_models": {
+    "semantic_model.chinook.invoices": {
+      "unique_id": "semantic_model.chinook.invoices",
+      "name": "invoices",
+      "description": "Invoice semantic model — invoice grain, joins to customers.",
+      "model": {"ref_name": "chinook.Invoice"},
+      "entities": [
+        {"name": "InvoiceId", "type": "primary", "expr": "InvoiceId"},
+        {"name": "CustomerId", "type": "foreign", "expr": "CustomerId"}
+      ],
+      "measures": [
+        {"name": "total_revenue", "agg": "sum", "expr": "Total", "non_additive_dimension": null},
+        {"name": "invoice_count", "agg": "count", "expr": "InvoiceId", "non_additive_dimension": null},
+        {"name": "avg_invoice_value", "agg": "average", "expr": "Total", "non_additive_dimension": null}
+      ],
+      "dimensions": [
+        {"name": "invoice_date", "type": "time", "expr": "InvoiceDate"},
+        {"name": "billing_country", "type": "categorical", "expr": "BillingCountry"}
+      ]
+    },
+    "semantic_model.chinook.invoice_lines": {
+      "unique_id": "semantic_model.chinook.invoice_lines",
+      "name": "invoice_lines",
+      "description": "Invoice-line semantic model — line grain, joins to invoices and tracks.",
+      "model": {"ref_name": "chinook.InvoiceLine"},
+      "entities": [
+        {"name": "InvoiceLineId", "type": "primary", "expr": "InvoiceLineId"},
+        {"name": "InvoiceId", "type": "foreign", "expr": "InvoiceId"},
+        {"name": "TrackId", "type": "foreign", "expr": "TrackId"}
+      ],
+      "measures": [
+        {"name": "line_revenue", "agg": "sum", "expr": "UnitPrice * Quantity", "non_additive_dimension": null},
+        {"name": "tracks_sold", "agg": "sum", "expr": "Quantity", "non_additive_dimension": null}
+      ],
+      "dimensions": [
+        {"name": "track_id", "type": "categorical", "expr": "TrackId"}
+      ]
+    }
+  },
+  "metrics": {
+    "metric.chinook.revenue": {
+      "unique_id": "metric.chinook.revenue",
+      "name": "revenue",
+      "description": "Total revenue across invoices.",
+      "type": "simple",
+      "type_params": {"measure": {"name": "total_revenue"}}
+    },
+    "metric.chinook.tracks_sold": {
+      "unique_id": "metric.chinook.tracks_sold",
+      "name": "tracks_sold",
+      "description": "Total tracks sold across invoice lines.",
+      "type": "simple",
+      "type_params": {"measure": {"name": "tracks_sold"}}
+    }
+  }
+}
