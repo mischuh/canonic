@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING, Any, cast
 from canon.compiler import SemanticQuery, compile
 from canon.config import CanonConfig, load_config
 from canon.connectors.base import Capability, require_capability
-from canon.connectors.factory import connector_by_id
+from canon.connectors.factory import default_factory
 from canon.contract import CONTRACT_SCHEMA
 from canon.contracts import ContractResolver
 from canon.contracts.resolver import Ambiguous as ResolverAmbiguous
@@ -198,7 +198,7 @@ class CanonService:
         try:
             compiled = compile(query, self._resolver, self._sources)
             connection_id = self._connection_for_sql(compiled)
-            connector = connector_by_id(self._config, connection_id)
+            connector = default_factory.for_id(self._config, connection_id)
             try:
                 result = await cast(
                     "SQLExecutable", require_capability(connector, Capability.RUN_READ_ONLY_SQL)
@@ -262,7 +262,7 @@ class CanonService:
         ``connection`` defaults to the project's ``default_connection``.
         Raises :class:`canon.exc.ReadOnlyViolation` (exit 11) for non-SELECT.
         """
-        connector = connector_by_id(self._config, connection)
+        connector = default_factory.for_id(self._config, connection)
         try:
             return await cast(
                 "SQLExecutable", require_capability(connector, Capability.RUN_READ_ONLY_SQL)

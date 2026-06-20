@@ -39,7 +39,7 @@ from canon.config import (
     load_config,
     scaffold_project,
 )
-from canon.connectors.factory import connector_for
+from canon.connectors.factory import default_factory
 from canon.exc import ConnectionError, CredentialError
 
 if TYPE_CHECKING:
@@ -210,7 +210,7 @@ def _test_connection(conn: Connection, env_var: str) -> Health | None:
 
 
 async def _probe(conn: Connection) -> Health:
-    connector = connector_for(conn)
+    connector = default_factory.create(conn)
     try:
         return await connector.test_connection()
     finally:
@@ -240,7 +240,7 @@ def _maybe_preview_schema(conn: Connection | None) -> bool:
 
 
 async def _introspect(conn: Connection) -> list[object]:
-    connector = connector_for(conn)
+    connector = default_factory.create(conn)
     try:
         return list(await cast("SchemaIntrospectable", connector).introspect_schema())
     finally:

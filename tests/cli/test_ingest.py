@@ -117,7 +117,12 @@ def project(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     """A valid canon project with one connection; connector resolution is stubbed offline."""
     (tmp_path / "canon.yaml").write_text(_CONFIG)
     monkeypatch.chdir(tmp_path)
-    monkeypatch.setattr("canon.cli.commands.ingest.connector_for", lambda _conn: _FakeConnector())
+
+    class _StubFactory:
+        def create(self, _conn):
+            return _FakeConnector()
+
+    monkeypatch.setattr("canon.cli.commands.ingest.default_factory", _StubFactory())
     return tmp_path
 
 
@@ -170,9 +175,12 @@ def test_unreachable_source_exits_connection_error(
     project: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """A raw transport failure from the connector becomes CONNECTION_ERROR (exit 13)."""
-    monkeypatch.setattr(
-        "canon.cli.commands.ingest.connector_for", lambda _conn: _UnreachableConnector()
-    )
+
+    class _UnreachableFactory:
+        def create(self, _conn):
+            return _UnreachableConnector()
+
+    monkeypatch.setattr("canon.cli.commands.ingest.default_factory", _UnreachableFactory())
 
     result = CliRunner().invoke(app, ["ingest"])
 

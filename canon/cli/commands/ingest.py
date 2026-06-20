@@ -23,7 +23,7 @@ import typer
 from canon.cli._errors import get_cli_context, handle_errors
 from canon.cli.commands import _console
 from canon.config import find_project_root, load_config
-from canon.connectors.factory import connector_for
+from canon.connectors.factory import default_factory
 from canon.exc import CanonError, ConnectionError, ContradictionsFound
 from canon.ingestion.autopr import AutoPRPublisher, PullRequestPublisher, SubprocessPublisher
 from canon.ingestion.models import ReconciliationDecision
@@ -161,7 +161,9 @@ async def _ingest(
     headless: bool,
 ) -> PipelineResult:
     """Build connectors, gather evidence, and drive the pipeline; always closes connectors."""
-    connectors: dict[str, ConnectorBase] = {conn.id: connector_for(conn) for conn in targets}
+    connectors: dict[str, ConnectorBase] = {
+        conn.id: default_factory.create(conn) for conn in targets
+    }
     drafter = make_drafter(config.llm, config.runtime, headless=headless)
     pipeline = IngestionPipeline(
         root, connectors, config.reconcile, headless=headless, drafter=drafter
