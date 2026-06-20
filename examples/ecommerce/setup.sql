@@ -8,6 +8,7 @@ CREATE SCHEMA IF NOT EXISTS analytics;
 
 -- Drop in reverse FK order so constraints never block the drops.
 DROP TABLE IF EXISTS analytics.fct_order_items CASCADE;
+DROP TABLE IF EXISTS analytics.fct_orders_rt   CASCADE;
 DROP TABLE IF EXISTS analytics.fct_orders      CASCADE;
 DROP TABLE IF EXISTS analytics.dim_channels    CASCADE;
 DROP TABLE IF EXISTS analytics.dim_products    CASCADE;
@@ -88,6 +89,26 @@ INSERT INTO analytics.fct_orders (order_id, customer_id, channel_id, amount, sta
 
 -- Revenue after guardrail (status != 'refunded'):
 --   500 + 350 + 125.50 + 780 + 430 + 1200 + 310 + 95 = 3790.50
+
+-- ------------------------------------------------------------
+-- fct_orders_rt  (intraday real-time estimates for the current business day)
+-- Provisional; the finality rule coalesces this with fct_orders by watermark.
+-- ------------------------------------------------------------
+CREATE TABLE analytics.fct_orders_rt (
+    order_id     bigint          PRIMARY KEY,
+    customer_id  bigint          NOT NULL,
+    channel_id   bigint          NOT NULL,
+    amount       numeric(12, 2)  NOT NULL,
+    status       text            NOT NULL,
+    created_at   timestamp       NOT NULL
+);
+
+INSERT INTO analytics.fct_orders_rt (order_id, customer_id, channel_id, amount, status, created_at) VALUES
+    (101, 1, 1, 299.00,  'completed', CURRENT_TIMESTAMP - INTERVAL '2 hours'),
+    (102, 3, 2, 149.50,  'completed', CURRENT_TIMESTAMP - INTERVAL '1 hour'),
+    (103, 5, 1,  89.00,  'pending',   CURRENT_TIMESTAMP - INTERVAL '30 minutes');
+
+-- Real-time revenue for today (non-refunded): 299 + 149.50 + 89 = 537.50
 
 -- ------------------------------------------------------------
 -- fct_order_items  (one row per product line within an order)
