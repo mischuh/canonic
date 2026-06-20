@@ -1,10 +1,12 @@
 # Canon ecommerce demo
 
-A small but end-to-end Canon project: one Postgres connection, a four-source star schema
-(two facts, three dimensions), three canonical metrics, and one enforced guardrail.
+A small but end-to-end Canon project: a Postgres connection, a four-source star schema
+(two facts, three dimensions), three canonical metrics, one enforced guardrail, and a
+companion dbt manifest demonstrating the E3 definition connector.
 Covers the complete **Phase 1 loop**: ingest bootstraps context from a real stack, the
 MCP server gives agents both executable definitions and business meaning, and `canon eval`
-tracks accuracy.
+tracks accuracy. See [E3 connectors](#e3-connectors--definitions--evidence-beyond-the-primary-source)
+for the dbt / Notion / Metabase / Looker sources that feed meaning beyond raw introspection.
 
 ## Phase 1 loop
 
@@ -27,9 +29,11 @@ Each step proves one Phase 1 exit criterion:
 ## What's in here
 
 ```
-canon.yaml                              ← project config + Postgres connection
+canon.yaml                              ← project config + Postgres connection + dbt connection
 setup.sql                               ← CREATE TABLE + seed data (10 orders, 17 line items,
                                           5 customers, 5 products, 3 channels)
+dbt/manifest.json                       ← E3 definition connector: compiled dbt manifest mirroring
+                                          the star schema (measures, entities, joins) — runs offline
 candidates.yaml                         ← local model candidates for canon eval baseline
 eval/grain_cases.jsonl                  ← labeled grain-inference cases for the ecommerce schema
 semantics/warehouse_pg/
@@ -50,6 +54,12 @@ knowledge/global/
   revenue-reporting-policy.md           ← usage_mode: policy — month-end cutoff rules
   units-sold-definition.md              ← usage_mode: definition — what units_sold means + live expr
   order-items-fanout-caveat.md          ← usage_mode: caveat — line-item fanout trap (auto-surfaces)
+docs/notion-pages/                      ← sample Notion page sources for the DocEvidence connector
+  revenue-definition.md                 ← Canon Type: definition — prose the Notion connector ingests
+  revenue-excludes-refunds-caveat.md    ← Canon Type: caveat   — auto-surfaced next to revenue
+  revenue-reporting-policy.md           ← Canon Type: policy   — month-end cutoff rules
+  units-sold-definition.md              ← Canon Type: definition — prose for the units_sold metric
+  order-items-fanout-caveat.md          ← Canon Type: caveat   — auto-surfaced next to units_sold
 ```
 
 ## Prerequisites
@@ -310,6 +320,140 @@ Postgres schema diverges from those definitions (e.g. a column type changes), in
 `contradiction` entry in the report but **keeps the curated file untouched**.  With `--strict`
 the run exits 14; without it, the contradiction note rides into the PR body for a human to
 resolve.
+
+## E3 connectors — definitions & evidence beyond the primary source
+
+Postgres introspection (E2) tells Canon what tables *exist*; the **E3 connectors** tell it
+what those tables *mean*. They fall into two capability classes, and the core dispatches on
+the capability a connector advertises — never on the vendor name (SPEC-E3 §2):
+
+| Class | Capability | Connectors | Normalized output | Tier |
+| --- | --- | --- | --- | --- |
+| **Definition** | `extract_definitions` | dbt | `RelationSchema` + `DefinitionEvidence` | `modeling` |
+| **Evidence** | `extract_evidence` | Notion | `DocEvidence` | `hand_authored` |
+| **Evidence** | `extract_evidence` | Metabase, Looker | `UsageEvidence` | `query_history` |
+
+Two invariants hold for every E3 connector:
+
+- **No execution.** None of them advertise `run_read_only_sql` — a definition or BI source is
+  read for *meaning*, never queried for *data* (SPEC-E3 §2, S8). The no-execution guard is
+  structural: there is no code path from an E3 connector to a database.
+- **Normalized seam.** Each connector emits Canon's normalized evidence schema, re-validated
+  before it crosses into the pipeline; unknown or invalid evidence is logged and dropped, never
+  passed through half-formed (SPEC-E3 §7, S7). No vendor shape ever reaches the reconciler.
+
+### dbt — a definition connector you can run offline
+
+This demo ships a compiled dbt manifest at [`dbt/manifest.json`](dbt/manifest.json) modeling the
+same star schema (`fct_orders`, `fct_order_items`, three dimensions) with measures, entities,
+and joins. It is wired into [`canon.yaml`](canon.yaml) as a second connection — **no database,
+no credentials**:
+
+```yaml
+connections:
+  - id: warehouse_dbt
+    type: dbt
+    params:
+      manifest_path: dbt/manifest.json   # relative to canon.yaml
+    # no credentials_ref — a manifest is a local file, not a guarded endpoint
+```
+
+`canon ingest` reconciles the manifest into reviewable semantic proposals exactly like the
+Postgres path — but entirely from the file, so it runs with **no Postgres and no LLM**:
+
+```sh
+canon ingest --connection warehouse_dbt --dry-run
+# # Ingest reconciliation summary
+# ## Decisions
+# - add: 5            ← one proposal per dbt model
+# - contradiction: 0
+#
+# ### semantics/warehouse_dbt/fct_orders.yaml (add)
+# - provenance: inferred, confidence: 1.0
+# +joins:
+# +- to: dim_customers
+# +  on: fct_orders.customer_id = dim_customers.customer_id
+# +  relationship: many_to_one          ← reconstructed from the manifest's FK constraints
+```
+
+What the connector pulls out of the manifest, all at acquisition tier `modeling`:
+
+- **`RelationSchema`** per model — columns + normalized types, primary key, and foreign keys
+  lifted into Canon's join shape (`many_to_one`).
+- **`DefinitionEvidence`** for each `model`, `entity`, `join`, `measure`, and `dimension` —
+  e.g. `total_revenue` (`agg: sum` → `additive`), the `order_id` grain, the
+  `orders → customers` join.
+
+**Modeling tier outranks raw introspection.** When the same relation is described by both the
+live Postgres schema (tier `live`) and the dbt manifest (tier `modeling`), reconciliation lets
+the modeling tier win on semantics — a hand-modeled grain or additivity beats whatever could be
+guessed from raw columns. A genuine disagreement (e.g. conflicting column types) is surfaced as
+a **contradiction**, never silently merged (SPEC-E3 §6).
+
+**Version pinning fails loudly.** The connector enforces a manifest schema floor (`v10+`, dbt
+Core 1.6+). An older manifest is rejected with `UnsupportedSourceVersionError` and ingests
+**nothing** — no partial import from an incompatible artifact (SPEC-E3 §6, S5).
+
+### Evidence connectors — Notion, Metabase, Looker (need live services)
+
+These read prose and BI usage rather than schema. Unlike dbt they require a reachable endpoint
+and a credential. To make the evidence flow concrete without a live Notion workspace, this demo
+ships five sample Notion page sources in [`docs/notion-pages/`](docs/notion-pages/) — one per
+knowledge page type, in the format the Notion connector expects. You can read them to understand
+what to write in your own Notion workspace before pointing Canon at it.
+
+Add any evidence connector as another connection:
+
+```yaml
+connections:
+  # Prose → DocEvidence → E6 knowledge pages (usage_hint maps 1:1 to usage_mode)
+  - id: handbook_notion
+    type: notion
+    params:
+      api_version: "2022-06-28"        # optional; pins the Notion API version
+    credentials_ref: env:NOTION_TOKEN
+
+  # BI questions → UsageEvidence (candidates only — never auto-promoted to canon, FR-13)
+  - id: bi_metabase
+    type: metabase
+    params:
+      base_url: https://metabase.internal
+    credentials_ref: env:METABASE_API_KEY
+
+  - id: bi_looker
+    type: looker
+    params:
+      base_url: https://looker.internal
+    credentials_ref: env:LOOKER_API_TOKEN
+```
+
+- **Notion → `DocEvidence`.** A page's `usage_hint` (`reference` / `caveat` / `policy` /
+  `definition`) maps directly to an E6 knowledge page's `usage_mode`, so a caveat written in
+  Notion becomes a caveat that auto-surfaces alongside the metric it warns about (see
+  [Knowledge pages](#knowledge-pages-e6) below). Topic references are resolved as *candidates*
+  on write — unresolved ones are flagged for review, never written as broken links.
+
+  The connector reads two Notion **page properties** you set in the Notion sidebar — no body
+  markup required:
+
+  | Notion property | Type | Maps to |
+  | --- | --- | --- |
+  | `Canon Type` | select | `DocEvidence.usage_hint` → E6 `usage_mode` |
+  | `Canon Topics` | multi-select | `DocEvidence.topic_refs` (candidates for E6 to resolve) |
+
+  The sample files in [`docs/notion-pages/`](docs/notion-pages/) show this format — the YAML
+  frontmatter in those files represents the Notion sidebar properties; the Markdown body becomes
+  `DocEvidence.body`. Each file also includes a short **"How this becomes a Canon knowledge page"**
+  section explaining the ingestion chain for that specific page type.
+- **Metabase / Looker → `UsageEvidence`.** A dashboard's metric definition is observed BI
+  usage, a reconciliation *signal* — a candidate, never canon. Its `role` is bounded to
+  `alternative` (feeds deprecated-alternatives) or `trusted_example` (feeds assertion
+  candidates); there is no `canonical` role, so auto-promotion of a BI question to a canonical
+  binding is structurally unrepresentable (PRD FR-13, SPEC-E3 §3.3).
+
+Once configured, a full `canon ingest` (no `--connection`) gathers evidence from **every**
+connection in one pass — Postgres introspection, dbt definitions, and doc/usage evidence —
+dispatching on each connector's declared capabilities and merging the normalized streams.
 
 ## Accuracy tracking — `canon eval baseline`
 

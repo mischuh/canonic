@@ -286,3 +286,67 @@ class TestOpenKindPreserved:
         assert result.skipped == [
             SkippedEvidence(source=_SOURCE, kind="answer_outcome", reason="unknown evidence kind")
         ]
+
+
+# ---------------------------------------------------------------------------
+# S8 (GH-94) — BI SQL is parsed as a definition candidate, never executed (AC1)
+# ---------------------------------------------------------------------------
+
+
+class TestS8NoExecutionPath:
+    """BI question SQL surfaces as UsageEvidence metadata; it is never forwarded to a warehouse.
+
+    The EvidenceExtractable protocol has no ``run_read_only_sql`` or ``introspect_schema``
+    method, so the SQL string can only leave via the evidence metadata path (S8-AC1).
+    """
+
+    async def test_bi_sql_preserved_in_usage_evidence_expr(self) -> None:
+        """SQL from a BI question is stored in UsageEvidence.defines.expr, not executed."""
+        bi_sql = "SELECT SUM(amount) FROM fct_orders WHERE status = 'complete'"
+        evidence = UsageEvidence(
+            source=_SOURCE,
+            artifact="question:42",
+            title="Completed revenue",
+            defines=UsageDefinition(expr=bi_sql, references=["fct_orders"]),
+            role=UsageRole.TRUSTED_EXAMPLE,
+            native_ref="metabase:question:42",
+            observed_at=_NOW,
+        )
+        connector = FakeEvidenceExtractable([evidence])
+        items = await evidence_from_docs(connector, _SOURCE)
+
+        assert len(items) == 1
+        assert items[0].kind == EvidenceKind.USAGE_EVIDENCE
+        payload = UsageEvidence.model_validate(items[0].payload)
+        assert payload.defines.expr == bi_sql
+
+    async def test_evidence_extractor_has_no_run_sql_method(self) -> None:
+        """FakeEvidenceExtractable (and EvidenceExtractable protocol) exposes no SQL executor."""
+        connector = FakeEvidenceExtractable([])
+        assert not hasattr(type(connector), "run_read_only_sql"), (
+            "EvidenceExtractable must not define run_read_only_sql — E3 no-execution boundary (S8)"
+        )
+        assert not hasattr(type(connector), "introspect_schema"), (
+            "EvidenceExtractable must not define introspect_schema — E3 no-execution boundary (S8)"
+        )
+
+    async def test_definition_evidence_sql_preserved_not_executed(self) -> None:
+        """SQL in DefinitionEvidence.expr crosses the seam as metadata only."""
+        defn_sql = "SUM(amount)"
+        evidence = DefinitionEvidence(
+            source=_SOURCE,
+            entity="revenue",
+            entity_type=DefinitionEntityType.MEASURE,
+            expr=defn_sql,
+            native_ref="model.project.revenue",
+            acquisition_tier=AcquisitionTier.MODELING,
+        )
+        connector = FakeDefinitionExtractable(
+            DefinitionExtract(definitions=[evidence], relations=[])
+        )
+        items = await evidence_from_definitions(connector, _SOURCE)
+
+        defn_items = [i for i in items if i.kind == EvidenceKind.DEFINITION]
+        assert len(defn_items) == 1
+        payload = DefinitionEvidence.model_validate(defn_items[0].payload)
+        assert payload.expr == defn_sql

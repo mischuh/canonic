@@ -1,0 +1,195 @@
+{
+  "metadata": {
+    "dbt_schema_version": "https://schemas.getdbt.com/dbt/manifest/v11.json",
+    "dbt_version": "1.7.0",
+    "generated_at": "2026-06-01T00:00:00.000000Z",
+    "invocation_id": "ecommerce-demo-0001"
+  },
+  "nodes": {
+    "model.ecommerce.fct_orders": {
+      "unique_id": "model.ecommerce.fct_orders",
+      "resource_type": "model",
+      "name": "fct_orders",
+      "schema": "analytics",
+      "alias": "fct_orders",
+      "database": null,
+      "description": "One row per order. Refunds carry status = 'refunded'.",
+      "config": {"materialized": "table"},
+      "columns": {
+        "order_id": {
+          "name": "order_id",
+          "data_type": "bigint",
+          "constraints": [{"type": "primary_key"}]
+        },
+        "customer_id": {
+          "name": "customer_id",
+          "data_type": "integer",
+          "constraints": [
+            {"type": "foreign_key", "to": "analytics.dim_customers", "to_columns": ["customer_id"]}
+          ]
+        },
+        "channel_id": {
+          "name": "channel_id",
+          "data_type": "integer",
+          "constraints": [
+            {"type": "foreign_key", "to": "analytics.dim_channels", "to_columns": ["channel_id"]}
+          ]
+        },
+        "amount": {"name": "amount", "data_type": "numeric", "constraints": []},
+        "status": {"name": "status", "data_type": "text", "constraints": []},
+        "created_at": {"name": "created_at", "data_type": "timestamp", "constraints": []}
+      }
+    },
+    "model.ecommerce.fct_order_items": {
+      "unique_id": "model.ecommerce.fct_order_items",
+      "resource_type": "model",
+      "name": "fct_order_items",
+      "schema": "analytics",
+      "alias": "fct_order_items",
+      "database": null,
+      "description": "One row per product line within an order. Joins up to orders and products.",
+      "config": {"materialized": "table"},
+      "columns": {
+        "order_item_id": {
+          "name": "order_item_id",
+          "data_type": "bigint",
+          "constraints": [{"type": "primary_key"}]
+        },
+        "order_id": {
+          "name": "order_id",
+          "data_type": "bigint",
+          "constraints": [
+            {"type": "foreign_key", "to": "analytics.fct_orders", "to_columns": ["order_id"]}
+          ]
+        },
+        "product_id": {
+          "name": "product_id",
+          "data_type": "integer",
+          "constraints": [
+            {"type": "foreign_key", "to": "analytics.dim_products", "to_columns": ["product_id"]}
+          ]
+        },
+        "quantity": {"name": "quantity", "data_type": "integer", "constraints": []},
+        "line_amount": {"name": "line_amount", "data_type": "numeric", "constraints": []}
+      }
+    },
+    "model.ecommerce.dim_customers": {
+      "unique_id": "model.ecommerce.dim_customers",
+      "resource_type": "model",
+      "name": "dim_customers",
+      "schema": "analytics",
+      "alias": "dim_customers",
+      "database": null,
+      "description": "One row per registered customer.",
+      "config": {"materialized": "table"},
+      "columns": {
+        "customer_id": {
+          "name": "customer_id",
+          "data_type": "integer",
+          "constraints": [{"type": "primary_key"}]
+        },
+        "email": {"name": "email", "data_type": "text", "constraints": []},
+        "country": {"name": "country", "data_type": "text", "constraints": []}
+      }
+    },
+    "model.ecommerce.dim_products": {
+      "unique_id": "model.ecommerce.dim_products",
+      "resource_type": "model",
+      "name": "dim_products",
+      "schema": "analytics",
+      "alias": "dim_products",
+      "database": null,
+      "description": "One row per product in the catalog.",
+      "config": {"materialized": "table"},
+      "columns": {
+        "product_id": {
+          "name": "product_id",
+          "data_type": "integer",
+          "constraints": [{"type": "primary_key"}]
+        },
+        "name": {"name": "name", "data_type": "text", "constraints": []},
+        "category": {"name": "category", "data_type": "text", "constraints": []},
+        "unit_price": {"name": "unit_price", "data_type": "numeric", "constraints": []}
+      }
+    },
+    "model.ecommerce.dim_channels": {
+      "unique_id": "model.ecommerce.dim_channels",
+      "resource_type": "model",
+      "name": "dim_channels",
+      "schema": "analytics",
+      "alias": "dim_channels",
+      "database": null,
+      "description": "Sales channel an order was placed through (web, mobile, in_store).",
+      "config": {"materialized": "table"},
+      "columns": {
+        "channel_id": {
+          "name": "channel_id",
+          "data_type": "integer",
+          "constraints": [{"type": "primary_key"}]
+        },
+        "name": {"name": "name", "data_type": "text", "constraints": []}
+      }
+    },
+    "test.ecommerce.not_null_fct_orders_order_id": {
+      "unique_id": "test.ecommerce.not_null_fct_orders_order_id",
+      "resource_type": "test",
+      "name": "not_null_fct_orders_order_id",
+      "schema": "analytics"
+    }
+  },
+  "semantic_models": {
+    "semantic_model.ecommerce.orders": {
+      "unique_id": "semantic_model.ecommerce.orders",
+      "name": "orders",
+      "description": "Orders semantic model — order grain, joins to customers and channels.",
+      "model": {"ref_name": "analytics.fct_orders"},
+      "entities": [
+        {"name": "order_id", "type": "primary", "expr": "order_id"},
+        {"name": "customer_id", "type": "foreign", "expr": "customer_id"},
+        {"name": "channel_id", "type": "foreign", "expr": "channel_id"}
+      ],
+      "measures": [
+        {"name": "total_revenue", "agg": "sum", "expr": "amount", "non_additive_dimension": null},
+        {"name": "order_count", "agg": "count", "expr": "order_id", "non_additive_dimension": null}
+      ],
+      "dimensions": [
+        {"name": "order_date", "type": "time", "expr": "created_at"},
+        {"name": "status", "type": "categorical", "expr": "status"}
+      ]
+    },
+    "semantic_model.ecommerce.order_items": {
+      "unique_id": "semantic_model.ecommerce.order_items",
+      "name": "order_items",
+      "description": "Order-line semantic model — line-item grain, joins to orders and products.",
+      "model": {"ref_name": "analytics.fct_order_items"},
+      "entities": [
+        {"name": "order_item_id", "type": "primary", "expr": "order_item_id"},
+        {"name": "order_id", "type": "foreign", "expr": "order_id"},
+        {"name": "product_id", "type": "foreign", "expr": "product_id"}
+      ],
+      "measures": [
+        {"name": "line_revenue", "agg": "sum", "expr": "line_amount", "non_additive_dimension": null},
+        {"name": "units_sold", "agg": "sum", "expr": "quantity", "non_additive_dimension": null}
+      ],
+      "dimensions": [
+        {"name": "product_id", "type": "categorical", "expr": "product_id"}
+      ]
+    }
+  },
+  "metrics": {
+    "metric.ecommerce.revenue": {
+      "unique_id": "metric.ecommerce.revenue",
+      "name": "revenue",
+      "description": "Total revenue across non-refunded orders.",
+      "type": "simple",
+      "type_params": {"measure": {"name": "total_revenue"}}
+    },
+    "metric.ecommerce.units_sold": {
+      "unique_id": "metric.ecommerce.units_sold",
+      "name": "units_sold",
+      "description": "Total units sold across order lines.",
+      "type": "simple",
+      "type_params": {"measure": {"name": "units_sold"}}
+    }
+  }
+}

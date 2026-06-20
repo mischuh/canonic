@@ -11,6 +11,12 @@ connections:
     user: postgres
     dbname: postgres
   credentials_ref: env:CANON_PG_PASSWORD
+# E3 definition connector: a compiled dbt manifest.json. No live database, no
+# credentials — Canon parses it into modeling-tier evidence (measures, joins, grain).
+- id: chinook_dbt
+  type: dbt
+  params:
+    manifest_path: dbt/manifest.json
 llm:
   provider: openai_compatible
   base_url: http://127.0.0.1:11434/v1

@@ -38,13 +38,15 @@ class Connection(BaseModel):
     id: str
     type: str
     params: dict[str, Any] = {}
-    credentials_ref: str
+    credentials_ref: str | None = None
     read_only_role: str | None = None
 
     @field_validator("credentials_ref")
     @classmethod
-    def _reject_literal_secret(cls, v: str) -> str:
-        if not _REF_PATTERN.match(v):
+    def _reject_literal_secret(cls, v: str | None) -> str | None:
+        # File-based connectors (e.g. dbt manifests) carry no secret; omitting the
+        # ref is allowed. When present it must still be a reference, never a literal.
+        if v is not None and not _REF_PATTERN.match(v):
             raise ValueError("must be a reference (env:…, keyring:…, file:…), not a literal secret")
         return v
 
@@ -178,9 +180,10 @@ class CanonConfig(BaseSettings):
             air_gapped=self.runtime.air_gapped, telemetry_enabled=self.telemetry.enabled
         )
         for conn in self.connections:
-            policy.check_ref_local(
-                conn.credentials_ref, what=f"connections[{conn.id}].credentials_ref"
-            )
+            if conn.credentials_ref is not None:
+                policy.check_ref_local(
+                    conn.credentials_ref, what=f"connections[{conn.id}].credentials_ref"
+                )
         return self
 
     @classmethod

@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING, Any, cast
 
 from canon.compiler import SemanticQuery, compile
 from canon.config import CanonConfig, load_config
+from canon.connectors.base import Capability, require_capability
 from canon.connectors.factory import connector_by_id
 from canon.contract import CONTRACT_SCHEMA
 from canon.contracts import ContractResolver
@@ -199,7 +200,9 @@ class CanonService:
             connection_id = self._connection_for_sql(compiled)
             connector = connector_by_id(self._config, connection_id)
             try:
-                result = await cast("SQLExecutable", connector).run_read_only_sql(compiled.sql)
+                result = await cast(
+                    "SQLExecutable", require_capability(connector, Capability.RUN_READ_ONLY_SQL)
+                ).run_read_only_sql(compiled.sql)
             finally:
                 await connector.aclose()
             return QueryResult.from_parts(compiled, result)
@@ -261,7 +264,9 @@ class CanonService:
         """
         connector = connector_by_id(self._config, connection)
         try:
-            return await cast("SQLExecutable", connector).run_read_only_sql(sql)
+            return await cast(
+                "SQLExecutable", require_capability(connector, Capability.RUN_READ_ONLY_SQL)
+            ).run_read_only_sql(sql)
         finally:
             await connector.aclose()
 

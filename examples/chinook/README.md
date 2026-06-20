@@ -29,9 +29,16 @@ Each step proves one Phase 1 exit criterion:
 ## What's in here
 
 ```
-canon.yaml                              ← project config + Postgres connection (chinook_pg)
+canon.yaml                              ← project config + Postgres (chinook_pg) + dbt connection
 setup.sql                               ← Chinook DB dump: 11 tables, ~350 artists, ~3500 tracks,
                                           412 customers, 412 invoices
+dbt/manifest.json                       ← E3 definition connector: compiled dbt manifest for the
+                                          revenue path (invoices, lines, tracks, customers) — offline
+docs/notion-pages/
+  revenue-definition.md                 ← Canon Type: definition — prose for the revenue metric
+  tracks-sold-definition.md             ← Canon Type: definition — prose for tracks_sold
+  track-price-caveat.md                 ← Canon Type: caveat   — list price vs. sale price trap
+  invoice-line-fanout-caveat.md         ← Canon Type: caveat   — cross-grain join trap
 candidates.yaml                         ← local model candidates for canon eval baseline
 eval/grain_cases.jsonl                  ← labeled grain-inference cases for the Chinook schema
 semantics/chinook_pg/
@@ -75,6 +82,54 @@ invoices ──── invoice_lines ──── tracks ──── albums ─�
 
 The two fact tables (`invoices` and `invoice_lines`) sit at different grains — do not join
 them in the same query. See `knowledge/global/invoice-line-fanout-caveat.md`.
+
+## E3 connectors — definitions beyond raw introspection
+
+Postgres introspection (E2) discovers what tables exist; the **E3 definition connector** reads
+what they *mean*. This demo ships a compiled dbt manifest at [`dbt/manifest.json`](dbt/manifest.json)
+covering the revenue path (`Invoice`, `InvoiceLine`, `Track`, `Customer`) with measures
+(`total_revenue`, `tracks_sold`), entities, and joins. It is wired into [`canon.yaml`](canon.yaml)
+as a second connection — **no database, no credentials**:
+
+```yaml
+connections:
+  - id: chinook_dbt
+    type: dbt
+    params:
+      manifest_path: dbt/manifest.json   # relative to canon.yaml
+    # no credentials_ref — a manifest is a local file, not a guarded endpoint
+```
+
+`canon ingest` reconciles it into reviewable semantic proposals entirely from the file — **no
+Postgres, no LLM**:
+
+```sh
+canon ingest --connection chinook_dbt --dry-run
+# ## Decisions
+# - add: 4            ← one proposal per dbt model (Invoice, InvoiceLine, Track, Customer)
+#
+# ### semantics/chinook_dbt/InvoiceLine.yaml (add)
+# - provenance: inferred, confidence: 1.0
+# +joins:
+# +- to: Invoice
+# +  on: InvoiceLine.InvoiceId = Invoice.InvoiceId
+# +  relationship: many_to_one          ← reconstructed from the manifest's FK constraints
+```
+
+Every record lands at acquisition tier `modeling`, which **outranks** raw `live` introspection
+on semantics during reconciliation — a hand-modeled grain or additivity beats a guess from raw
+columns, and a genuine disagreement surfaces as a contradiction rather than a silent merge.
+Like every E3 connector, the dbt source advertises no `run_read_only_sql` capability: it is read
+for meaning, never queried for data (the no-execution invariant, SPEC-E3 §2).
+
+This demo also ships four sample Notion page sources in [`docs/notion-pages/`](docs/notion-pages/)
+showing what to write in a Notion workspace before pointing Canon at it. Each file shows the
+`Canon Type` and `Canon Topics` page properties the Notion connector reads, followed by the prose
+that becomes `DocEvidence.body`.
+
+For the full E3 connector reference — including the **evidence** connectors (Notion →
+`DocEvidence`, Metabase / Looker → `UsageEvidence`, BI usage as candidates-only per FR-13) — see
+the [ecommerce demo's E3 section](../ecommerce/README.md#e3-connectors--definitions--evidence-beyond-the-primary-source).
 
 ## Prerequisites
 

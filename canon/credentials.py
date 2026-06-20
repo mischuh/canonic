@@ -17,19 +17,24 @@ from canon.exc import CredentialError
 __all__ = ["resolve_credential"]
 
 
-def resolve_credential(ref: str) -> str:
+def resolve_credential(ref: str | None) -> str:
     """Resolve a ``credentials_ref`` into its secret value.
 
     Args:
         ref: A reference of the form ``env:VAR``, ``keyring:…`` or ``file:…``.
+            ``None`` is rejected: ``credentials_ref`` is optional in config (file-based
+            connectors like dbt need no secret), but a connector that calls this requires
+            one, so a missing ref is a clear configuration error rather than a crash.
 
     Returns:
         The resolved secret.
 
     Raises:
-        CredentialError: If the reference scheme is unsupported, malformed, or
-            the referenced secret cannot be found.
+        CredentialError: If the reference is missing, its scheme is unsupported or
+            malformed, or the referenced secret cannot be found.
     """
+    if ref is None:
+        raise CredentialError("credentials_ref is required for this connection but was not set")
     scheme, sep, target = ref.partition(":")
     if not sep:
         raise CredentialError(

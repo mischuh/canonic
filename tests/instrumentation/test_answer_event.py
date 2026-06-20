@@ -11,7 +11,7 @@ import pytest
 
 from canon.compiler.query import SemanticQuery
 from canon.config import CanonConfig
-from canon.connectors.base import ResultSet
+from canon.connectors.base import Capability, ResultSet
 from canon.contracts.models import (
     AppliesTo,
     CanonicalRef,
@@ -112,6 +112,7 @@ def _make_service(
 
 def _fake_connector(bytes_scanned: int | None = 1024) -> Any:
     connector = MagicMock()
+    connector.capabilities.return_value = [Capability.RUN_READ_ONLY_SQL]
     connector.run_read_only_sql = AsyncMock(
         return_value=ResultSet(columns=[], rows=[[6]], bytes_scanned=bytes_scanned)
     )

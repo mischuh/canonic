@@ -33,8 +33,15 @@ from canon.connectors.base import (
     ResultSet,
     UsageEvidence,
     UsageHint,
+    require_capability,
 )
-from canon.exc import CanonError, ConnectionError, ReadOnlyViolation, SchemaMismatch
+from canon.exc import (
+    CanonError,
+    CapabilityNotSupportedError,
+    ConnectionError,
+    ReadOnlyViolation,
+    SchemaMismatch,
+)
 from canon.ingestion.models import EvidenceKind
 from canon.ingestion.source import gather_evidence
 
@@ -530,3 +537,57 @@ async def test_e3_unsupported_version_ingests_nothing(
     )
     with pytest.raises(UnsupportedSourceVersionError):
         await gather_evidence(connector, param)
+
+
+# ---------------------------------------------------------------------------
+# S8 (GH-94) — E3 connectors never declare SQL execution or introspection caps
+# ---------------------------------------------------------------------------
+
+
+def test_e3_connectors_declare_no_execution_caps(any_offline_connector: ConnectorBase) -> None:
+    """E3 (definition/evidence) connectors never advertise SQL execution or introspection (S8-AC1).
+
+    Checks the capability boundary: if a connector declares ``EXTRACT_DEFINITIONS`` or
+    ``EXTRACT_EVIDENCE`` it must not also declare ``RUN_READ_ONLY_SQL`` or
+    ``INTROSPECT_SCHEMA``.  PostgreSQL (E2) does not declare extract caps and is skipped.
+    """
+    caps = set(any_offline_connector.capabilities())
+    is_e3 = bool(caps & {Capability.EXTRACT_DEFINITIONS, Capability.EXTRACT_EVIDENCE})
+    if not is_e3:
+        return  # E2 connector — this invariant does not apply
+
+    assert Capability.RUN_READ_ONLY_SQL not in caps, (
+        f"{type(any_offline_connector).__name__} is an E3 connector but declares "
+        f"{Capability.RUN_READ_ONLY_SQL.value!r} — no-execution invariant violated (S8)"
+    )
+    assert Capability.INTROSPECT_SCHEMA not in caps, (
+        f"{type(any_offline_connector).__name__} is an E3 connector but declares "
+        f"{Capability.INTROSPECT_SCHEMA.value!r} — no-execution invariant violated (S8)"
+    )
+
+
+def test_require_capability_raises_for_missing_cap(any_offline_connector: ConnectorBase) -> None:
+    """require_capability raises CapabilityNotSupportedError for absent caps, not AttributeError."""
+    caps = set(any_offline_connector.capabilities())
+    missing = next(
+        (
+            cap
+            for cap in (Capability.RUN_READ_ONLY_SQL, Capability.INTROSPECT_SCHEMA)
+            if cap not in caps
+        ),
+        None,
+    )
+    if missing is None:
+        pytest.skip(f"{type(any_offline_connector).__name__} declares all execution caps")
+
+    with pytest.raises(CapabilityNotSupportedError):
+        require_capability(any_offline_connector, missing)
+
+
+def test_require_capability_passes_through_declared_cap(
+    any_offline_connector: ConnectorBase,
+) -> None:
+    """require_capability returns the connector unchanged when the cap is declared."""
+    cap = Capability.TEST_CONNECTION
+    result = require_capability(any_offline_connector, cap)
+    assert result is any_offline_connector
