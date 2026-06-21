@@ -19,7 +19,9 @@ if TYPE_CHECKING:
     from canon.contracts.models import Assertion, AssertionExpect
 
 __all__ = [
+    "AccuracyReport",
     "AssertionOutcome",
+    "accuracy_report",
     "assertion_to_query",
     "is_executable",
     "match_result",
@@ -37,6 +39,55 @@ class AssertionOutcome:
     assertion_id: str
     passed: bool
     detail: str = ""
+
+
+@dataclass(frozen=True, slots=True)
+class AccuracyReport:
+    """The aggregate of running a labeled assertion set — E16's accuracy number (§3.4).
+
+    Assertions are the oracle: each executed assertion is one labeled question, and
+    ``accuracy = passed / total`` turns ">90% accuracy" from aspirational to measured.
+    Outcomes preserve input (load) order so the same assertion set yields the same number
+    every run, which is what makes accuracy regressions detectable in CI.
+    """
+
+    outcomes: tuple[AssertionOutcome, ...]
+
+    @property
+    def total(self) -> int:
+        """How many executable assertions were run (the harness denominator)."""
+        return len(self.outcomes)
+
+    @property
+    def passed(self) -> int:
+        """How many assertions matched their expectation within tolerance."""
+        return sum(1 for o in self.outcomes if o.passed)
+
+    @property
+    def failures(self) -> tuple[AssertionOutcome, ...]:
+        """The diverging assertions, in load order (each carries its diff in ``detail``)."""
+        return tuple(o for o in self.outcomes if not o.passed)
+
+    @property
+    def accuracy(self) -> float:
+        """``passed / total`` — vacuously ``1.0`` when no assertions ran (nothing to regress)."""
+        return self.passed / self.total if self.total else 1.0
+
+    def to_dict(self) -> dict[str, Any]:
+        """A JSON-native summary for ``--json`` output and durable harness records."""
+        return {
+            "accuracy": self.accuracy,
+            "passed": self.passed,
+            "total": self.total,
+            "failures": [
+                {"assertion_id": o.assertion_id, "detail": o.detail} for o in self.failures
+            ],
+        }
+
+
+def accuracy_report(outcomes: list[AssertionOutcome]) -> AccuracyReport:
+    """Aggregate per-assertion outcomes into an :class:`AccuracyReport` (SPEC-Fuller-E15 §3.4)."""
+    return AccuracyReport(outcomes=tuple(outcomes))
 
 
 def is_executable(assertion: Assertion) -> bool:

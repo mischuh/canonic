@@ -28,7 +28,7 @@ from canon.semantic.loader import list_semantic_sources
 if TYPE_CHECKING:
     from canon.compiler.result import CompileResult
     from canon.connectors.base import ResultSet, SQLExecutable
-    from canon.contracts.assertions import AssertionOutcome
+    from canon.contracts.assertions import AccuracyReport, AssertionOutcome
     from canon.contracts.models import Assertion
     from canon.knowledge.results import SearchResult
     from canon.semantic.models import SemanticSource
@@ -266,6 +266,21 @@ class CanonService:
                 continue
             outcomes.append(await self.run_assertion(assertion))
         return outcomes
+
+    async def run_accuracy_harness(
+        self, assertions: list[Assertion] | None = None
+    ) -> AccuracyReport:
+        """Run the labeled assertion set and compute its accuracy (SPEC-Fuller-E15 §3.4).
+
+        This is the E16 integration: every executable assertion is the oracle for one labeled
+        question, so the returned :class:`~canon.contracts.assertions.AccuracyReport` carries
+        ``accuracy = passed / total``. Outcomes preserve load order, so the same assertion set
+        yields the same number every run — the property that makes a regression detectable. The
+        report never raises on a mismatch; the CI gate decides what a sub-target number means.
+        """
+        from canon.contracts.assertions import accuracy_report
+
+        return accuracy_report(await self.check_assertions(assertions))
 
     async def _check_query_assertions(self, query: SemanticQuery, *, harness: bool) -> None:
         """Evaluate assertions matching a user query (SPEC-Fuller-E15 §3.2).

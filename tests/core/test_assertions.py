@@ -131,6 +131,42 @@ class TestCheckAssertions:
         assert outcomes[0].passed
 
 
+class TestAccuracyHarness:
+    async def test_ac1_yields_accuracy_number(
+        self, orders_source: SemanticSource, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # One matching, one diverging assertion → 1/2 = 0.5 against the canned result.
+        passing = _assertion(100.0)
+        failing = Assertion(
+            id="revenue-2024",
+            query={"metrics": ["revenue"]},
+            expect=AssertionExpect(rows=1, values={"total_revenue": 999.0}),
+        )
+        svc = _service(
+            orders_source, [passing, failing], _revenue_result(Decimal("100.0")), monkeypatch
+        )
+        report = await svc.run_accuracy_harness()
+        assert report.total == 2
+        assert report.passed == 1
+        assert report.accuracy == 0.5
+        assert [o.assertion_id for o in report.failures] == ["revenue-2024"]
+
+    async def test_deterministic_order_independent_of_pass_fail(
+        self, orders_source: SemanticSource, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # Candidate (non-executable) assertions are skipped, not counted as failures.
+        candidate = Assertion(id="usage-x", query={"native": "sum(amount)"})
+        svc = _service(
+            orders_source,
+            [_assertion(100.0), candidate],
+            _revenue_result(Decimal("100.0")),
+            monkeypatch,
+        )
+        report = await svc.run_accuracy_harness()
+        assert report.total == 1
+        assert report.accuracy == 1.0
+
+
 class TestHarnessGate:
     async def test_ac1_harness_mode_raises_assertion_failed_on_mismatch(
         self, orders_source: SemanticSource, monkeypatch: pytest.MonkeyPatch
