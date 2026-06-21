@@ -23,6 +23,7 @@ __all__ = [
     "Caveat",
     "Hit",
     "MatchedOn",
+    "ReviewFlag",
     "SearchResult",
     "Subgraph",
 ]
@@ -80,6 +81,24 @@ class Caveat(BaseModel):
     triggered_by: list[str] = []  # entity names in the hits that surfaced this caveat
 
 
+class ReviewFlag(BaseModel):
+    """A served page whose bound measure definition drifted, needing prose review (§7).
+
+    Surfaced when a returned page's recorded ``meta.bound_fingerprints`` no longer match the
+    live measure definition: the rendered ``{{ sl:….expr }}`` auto-updates, but the prose
+    around it may be stale (S5 AC2). The flag is a review signal — never a silent edit;
+    resolution flows through E4's diff/review. ``drifted_refs`` names the bound entities whose
+    definition changed, sorted for deterministic output.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    page: str  # the drifted page's id/slug
+    scope: KnowledgeScope
+    drifted_refs: list[str] = []  # bound entity names whose live definition changed
+    message: str  # ready-to-surface review caveat
+
+
 class Subgraph(BaseModel):
     """The connected context bundle returned by graph traversal (SPEC-E6 §6).
 
@@ -106,3 +125,6 @@ class SearchResult(BaseModel):
     traversed: list[KnowledgePage] = []
     # Caveat pages auto-surfaced because a hit references their bound entity (§8); additive.
     caveats: list[Caveat] = []
+    # Returned pages whose bound measure definition drifted, flagged for prose review (§7);
+    # empty unless an entity index was supplied to compare against. Additive.
+    review_flags: list[ReviewFlag] = []

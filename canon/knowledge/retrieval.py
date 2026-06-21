@@ -11,17 +11,19 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from canon.knowledge.drift import DriftDetector
 from canon.knowledge.embeddings import VectorStore
 from canon.knowledge.index import KnowledgeIndex
 from canon.knowledge.loader import user_from_path
 from canon.knowledge.models import KnowledgePage, KnowledgeScope, UsageMode
-from canon.knowledge.results import Annotation, Caveat, Hit, MatchedOn, SearchResult
+from canon.knowledge.results import Annotation, Caveat, Hit, MatchedOn, ReviewFlag, SearchResult
 from canon.knowledge.scope import ScopeResolver
 
 if TYPE_CHECKING:
     from collections.abc import Iterable, Sequence
 
     from canon.knowledge.embeddings import Embedder
+    from canon.knowledge.validation import EntityIndex
 
 __all__ = [
     "KnowledgeSearch",
@@ -51,6 +53,7 @@ class KnowledgeSearch:
         pages: Iterable[KnowledgePage],
         *,
         embedder: Embedder | None = None,
+        entity_index: EntityIndex | None = None,
         rrf_k: int = _DEFAULT_RRF_K,
         weights: dict[MatchedOn, float] | None = None,
     ) -> None:
@@ -58,13 +61,17 @@ class KnowledgeSearch:
 
         The lexical arm is always built. The vector arm is built only when ``embedder``
         is supplied — its absence is the §5.2 fallback switch. ``weights`` tunes each
-        arm's RRF contribution (default 1.0 each).
+        arm's RRF contribution (default 1.0 each). When ``entity_index`` is supplied,
+        returned pages whose ``meta.bound_fingerprints`` no longer match the live measure
+        definition are flagged for prose review (§7); without it no drift is computed.
         """
         self._pages: list[KnowledgePage] = list(pages)
         self._by_doc_key: dict[str, KnowledgePage] = {_doc_key(p): p for p in self._pages}
         self._index = KnowledgeIndex.build(self._pages)
         self._embedder = embedder
         self._vectors = VectorStore.build(self._pages, embedder) if embedder is not None else None
+        self._entity_index = entity_index
+        self._drift = DriftDetector()
         self._rrf_k = rrf_k
         self._weights = weights or {MatchedOn.LEXICAL: 1.0, MatchedOn.VECTOR: 1.0}
         self._resolver = ScopeResolver()
@@ -99,7 +106,8 @@ class KnowledgeSearch:
 
         hits = self._build_hits(ranked_keys, arm_ranks, visible, limit)
         caveats = self._surface_caveats(hits, visible, max_caveats)
-        return SearchResult(hits=hits, caveats=caveats)
+        review_flags = self._review_flags(hits, caveats)
+        return SearchResult(hits=hits, caveats=caveats, review_flags=review_flags)
 
     @staticmethod
     def _passes_filters(
@@ -226,6 +234,47 @@ class KnowledgeSearch:
             if len(caveats) >= max_caveats:
                 break
         return caveats
+
+    def _review_flags(self, hits: list[Hit], caveats: list[Caveat]) -> list[ReviewFlag]:
+        """Flag returned pages whose bound measure definition drifted (§7, S5 AC1).
+
+        For each distinct page surfaced as a hit or caveat, compares its
+        ``meta.bound_fingerprints`` against the live :class:`EntityIndex` via
+        :class:`DriftDetector`. A page with a stale binding is flagged for prose review —
+        the rendered definition auto-updates, only the surrounding prose is suspect (AC2).
+        Without an entity index there is nothing to compare against, so no flags are emitted.
+        Returns one flag per drifted page, ordered as the pages were returned.
+        """
+        if self._entity_index is None:
+            return []
+        flags: list[ReviewFlag] = []
+        seen: set[str] = set()
+        served_keys = [f"{h.scope.value}:{h.page}" for h in hits]
+        served_keys += [f"{c.scope.value}:{c.page}" for c in caveats]
+        for doc_key in served_keys:
+            if doc_key in seen:
+                continue
+            seen.add(doc_key)
+            page = self._by_doc_key.get(doc_key)
+            if page is None:
+                continue
+            drifted = self._drift.flagged_for_review(page, self._entity_index)
+            if not drifted:
+                continue
+            joined = ", ".join(drifted)
+            flags.append(
+                ReviewFlag(
+                    page=page.id,
+                    scope=page.scope,
+                    drifted_refs=drifted,
+                    message=(
+                        f"Prose review needed — referenced measure definition changed: {joined}. "
+                        "The rendered definition auto-updates; only the surrounding prose is "
+                        "flagged stale."
+                    ),
+                )
+            )
+        return flags
 
     def _annotations_for(
         self, global_page: KnowledgePage, visible: list[KnowledgePage]

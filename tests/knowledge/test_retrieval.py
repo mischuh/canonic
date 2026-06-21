@@ -2,16 +2,18 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import TYPE_CHECKING
 
-from canon.knowledge.models import KnowledgeScope, UsageMode
+from canon.knowledge.models import KnowledgePage, KnowledgePageMeta, KnowledgeScope, UsageMode
 from canon.knowledge.results import MatchedOn
 from canon.knowledge.retrieval import KnowledgeSearch
+from canon.semantic.models import Measure, compute_measure_fingerprint
 
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from canon.knowledge.models import KnowledgePage
+    from canon.knowledge.validation import EntityIndex
     from tests.knowledge.conftest import KeywordEmbedder
 
 
@@ -238,3 +240,97 @@ def test_matched_caveat_is_hit_not_duplicated(
 
     assert "sales-caveat" in {h.page for h in result.hits}
     assert result.caveats == []
+
+
+def _bound_page(
+    page_id: str,
+    *,
+    summary: str = "sales revenue definition",
+    bound_fingerprint: str,
+) -> KnowledgePage:
+    """A global page that matches the query 'sales' and binds total_revenue at a fingerprint."""
+    return KnowledgePage(
+        id=page_id,
+        path=Path("knowledge") / "global" / f"{page_id}.md",
+        scope=KnowledgeScope.GLOBAL,
+        summary=summary,
+        sl_refs=[_REVENUE],
+        meta=KnowledgePageMeta(bound_fingerprints={_REVENUE: bound_fingerprint}),
+    )
+
+
+_LIVE_FP = compute_measure_fingerprint(Measure(name="total_revenue", expr="sum(amount)"))
+
+
+def test_drifted_bound_page_flagged_for_review(entity_index: EntityIndex) -> None:
+    """A returned page whose bound fingerprint is stale is flagged for prose review (S5 AC1)."""
+    page = _bound_page("revenue-def", bound_fingerprint="sha256:old")
+    engine = KnowledgeSearch([page], entity_index=entity_index)
+
+    result = engine.search("sales", requesting_user="alice")
+
+    assert [h.page for h in result.hits] == ["revenue-def"]
+    assert [f.page for f in result.review_flags] == ["revenue-def"]
+    flag = result.review_flags[0]
+    assert flag.drifted_refs == [_REVENUE]
+    assert "Prose review needed" in flag.message
+
+
+def test_matching_fingerprint_not_flagged(entity_index: EntityIndex) -> None:
+    """A returned page whose bound fingerprint matches the live one raises no flag (S5 AC2)."""
+    page = _bound_page("revenue-def", bound_fingerprint=_LIVE_FP)
+    engine = KnowledgeSearch([page], entity_index=entity_index)
+
+    result = engine.search("sales", requesting_user="alice")
+
+    assert [h.page for h in result.hits] == ["revenue-def"]
+    assert result.review_flags == []
+
+
+def test_no_entity_index_emits_no_flags() -> None:
+    """Without an entity index there is nothing to compare against, so no flags (§7)."""
+    page = _bound_page("revenue-def", bound_fingerprint="sha256:old")
+    engine = KnowledgeSearch([page])  # entity_index omitted
+
+    result = engine.search("sales", requesting_user="alice")
+
+    assert [h.page for h in result.hits] == ["revenue-def"]
+    assert result.review_flags == []
+
+
+def test_cosmetic_case_change_still_flags(entity_index: EntityIndex) -> None:
+    """`SUM(amount)` and `sum(amount)` hash differently, so P1 conservatively flags (S6 AC3)."""
+    cosmetic_fp = compute_measure_fingerprint(Measure(name="total_revenue", expr="SUM(amount)"))
+    assert cosmetic_fp != _LIVE_FP  # live expr is the lowercase `sum(amount)`
+    page = _bound_page("revenue-def", bound_fingerprint=cosmetic_fp)
+    engine = KnowledgeSearch([page], entity_index=entity_index)
+
+    result = engine.search("sales", requesting_user="alice")
+
+    assert [f.page for f in result.review_flags] == ["revenue-def"]
+
+
+def test_drifted_caveat_page_flagged(entity_index: EntityIndex) -> None:
+    """A drifted page surfaced only as an auto-caveat is flagged for review too (§7, §8)."""
+    hit = KnowledgePage(
+        id="revenue-report",
+        path=Path("knowledge") / "global" / "revenue-report.md",
+        scope=KnowledgeScope.GLOBAL,
+        summary="sales revenue report",
+        sl_refs=[_REVENUE],
+    )
+    caveat = KnowledgePage(
+        id="revenue-caveat",
+        path=Path("knowledge") / "global" / "revenue-caveat.md",
+        scope=KnowledgeScope.GLOBAL,
+        summary="footnote on the measure",
+        usage_mode=UsageMode.CAVEAT,
+        sl_refs=[_REVENUE],
+        meta=KnowledgePageMeta(bound_fingerprints={_REVENUE: "sha256:old"}),
+    )
+    engine = KnowledgeSearch([hit, caveat], entity_index=entity_index)
+
+    result = engine.search("sales", requesting_user="alice")
+
+    assert [c.page for c in result.caveats] == ["revenue-caveat"]
+    assert [f.page for f in result.review_flags] == ["revenue-caveat"]
