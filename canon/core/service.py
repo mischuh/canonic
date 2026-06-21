@@ -28,6 +28,8 @@ from canon.semantic.loader import list_semantic_sources
 if TYPE_CHECKING:
     from canon.compiler.result import CompileResult
     from canon.connectors.base import ResultSet, SQLExecutable
+    from canon.contracts.assertions import AssertionOutcome
+    from canon.contracts.models import Assertion
     from canon.knowledge.results import SearchResult
     from canon.semantic.models import SemanticSource
 
@@ -185,10 +187,16 @@ class CanonService:
         """Compile a semantic query to SQL + metadata with no execution (SPEC §2)."""
         return compile(query, self._resolver, self._sources)
 
-    async def query(self, query: SemanticQuery) -> QueryResult:
+    async def query(self, query: SemanticQuery, *, harness: bool = False) -> QueryResult:
         """Compile and execute a semantic query read-only (SPEC §2).
 
         Derives the connection from the primary metric's owning source.
+
+        When ``harness`` is ``True`` (benchmark/CI mode, SPEC-Fuller-E15 §3.2 stage 9),
+        every assertion matching this query is run after the user's query and a divergence
+        raises :class:`~canon.exc.AssertionFailed` (exit 10). In normal mode the assertions
+        are still evaluated for instrumentation (logged to the answer-event stream so E16 can
+        spot stale assertions) but never block the result.
         """
         started = time.perf_counter()
         compiled: CompileResult | None = None
@@ -198,20 +206,91 @@ class CanonService:
         try:
             compiled = compile(query, self._resolver, self._sources)
             connection_id = self._connection_for_sql(compiled)
-            connector = default_factory.for_id(self._config, connection_id)
-            try:
-                result = await cast(
-                    "SQLExecutable", require_capability(connector, Capability.RUN_READ_ONLY_SQL)
-                ).run_read_only_sql(compiled.sql)
-            finally:
-                await connector.aclose()
-            return QueryResult.from_parts(compiled, result)
+            result = await self._execute(compiled.sql, connection_id)
+            query_result = QueryResult.from_parts(compiled, result)
+            await self._check_query_assertions(query, harness=harness)
+            return query_result
         except CanonError as err:
             error_code = err.code.value if err.code is not None else None
             raise
         finally:
             latency_ms = round((time.perf_counter() - started) * 1000)
             self._emit_answer_event(query, compiled, connection_id, result, latency_ms, error_code)
+
+    async def _execute(self, sql: str, connection_id: str | None) -> ResultSet:
+        """Run read-only SQL on the resolved connection, always closing the connector."""
+        connector = default_factory.for_id(self._config, connection_id)
+        try:
+            return await cast(
+                "SQLExecutable", require_capability(connector, Capability.RUN_READ_ONLY_SQL)
+            ).run_read_only_sql(sql)
+        finally:
+            await connector.aclose()
+
+    # ------------------------------------------------------------------
+    # Assertions (SPEC-Fuller-E15 §3) — the oracle for E16's accuracy harness
+    # ------------------------------------------------------------------
+
+    async def run_assertion(self, assertion: Assertion) -> AssertionOutcome:
+        """Compile, execute read-only, and match one assertion (SPEC-Fuller-E15 §3.2).
+
+        Compiles the assertion's *semantic* query (so it survives compiler changes),
+        executes it read-only (E2), and compares the result to ``expect`` within tolerance.
+        Returns a structured :class:`~canon.contracts.assertions.AssertionOutcome`; it never
+        raises on a mismatch — callers (the CI gate, E16's harness) decide what a failure
+        means. Raises :class:`~canon.exc.ValidationFailed` only when the assertion is not in
+        executable semantic-query form.
+        """
+        from canon.contracts.assertions import assertion_to_query, match_result
+
+        sq = assertion_to_query(assertion)
+        compiled = compile(sq, self._resolver, self._sources)
+        result = await self._execute(compiled.sql, self._connection_for_sql(compiled))
+        return match_result(assertion, result, resolved=compiled.resolved)
+
+    async def check_assertions(
+        self, assertions: list[Assertion] | None = None
+    ) -> list[AssertionOutcome]:
+        """Run every executable assertion and return its outcome (SPEC-Fuller-E15 §3.4).
+
+        Defaults to all loaded assertions (E16's accuracy harness passes the full set);
+        non-executable candidate assertions are skipped. Outcomes are returned in input
+        order so ``accuracy = passed / total`` is deterministic.
+        """
+        from canon.contracts.assertions import is_executable
+
+        candidates = assertions if assertions is not None else self._resolver.all_assertions()
+        outcomes: list[AssertionOutcome] = []
+        for assertion in candidates:
+            if not is_executable(assertion):
+                continue
+            outcomes.append(await self.run_assertion(assertion))
+        return outcomes
+
+    async def _check_query_assertions(self, query: SemanticQuery, *, harness: bool) -> None:
+        """Evaluate assertions matching a user query (SPEC-Fuller-E15 §3.2).
+
+        Under ``harness`` the first failing assertion raises :class:`~canon.exc.AssertionFailed`
+        (the CI gate). In normal mode the assertions are evaluated for instrumentation only —
+        any mismatch or evaluation error is swallowed so a stale assertion never blocks a
+        user's query (AC2). E16's accuracy harness (#110) owns durable assertion-outcome
+        persistence.
+        """
+        matching = self._resolver.assertions_for(query.model_dump(mode="json"))
+        if not matching:
+            return
+        if not harness:
+            import contextlib
+
+            with contextlib.suppress(Exception):
+                # Informational only — a stale assertion must never block the query (AC2).
+                await self.check_assertions(matching)
+            return
+        from canon.exc import AssertionFailed
+
+        for outcome in await self.check_assertions(matching):
+            if not outcome.passed:
+                raise AssertionFailed(outcome.detail, assertion_id=outcome.assertion_id)
 
     def _emit_answer_event(
         self,

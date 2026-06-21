@@ -28,15 +28,26 @@ def query(
         Path,
         typer.Option("-f", "--file", help="Semantic query JSON file.", exists=True, readable=True),
     ],
+    harness: Annotated[
+        bool,
+        typer.Option(
+            "--harness",
+            help="Benchmark/CI mode: run matching assertions and exit 10 on a mismatch.",
+        ),
+    ] = False,
 ) -> None:
     """Resolve, compile, and execute a semantic query read-only (core.query).
 
     The query file is JSON with the :class:`~canon.compiler.SemanticQuery` shape:
     ``{"metrics": [...], "dimensions": [...], "filters": [...], "limit": null}``.
+
+    With ``--harness`` (benchmark/CI mode, SPEC-Fuller-E15 §3.2), every assertion matching
+    the query is executed and any divergence from its expected result exits 10
+    (``ASSERTION_FAILED``); without it, assertions are informational and never block.
     """
     sq = SemanticQuery.model_validate_json(file.read_text())
     service = load_service(ctx)
-    result = asyncio.run(service.query(sq))
+    result = asyncio.run(service.query(sq, harness=harness))
 
     # ``mode="json"`` yields JSON-native primitives (Decimal/datetime → str/number)
     # so this payload is byte-identical to the MCP ``query`` tool's serialized result.

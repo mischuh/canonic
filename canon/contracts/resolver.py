@@ -14,7 +14,12 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from canon.contracts.loader import load_finality, load_guardrails, load_metric_bindings
+from canon.contracts.loader import (
+    load_assertions,
+    load_finality,
+    load_guardrails,
+    load_metric_bindings,
+)
 from canon.contracts.models import (
     CanonicalRef,
     FinalityRule,
@@ -91,9 +96,11 @@ class ContractResolver:
         bindings: Iterable[MetricBinding],
         guardrails: Iterable[Guardrail],
         finality: Iterable[FinalityRule] = (),
+        assertions: Iterable[Assertion] = (),
     ) -> None:
         self._guardrails: list[Guardrail] = list(guardrails)
         self._finality_by_metric: dict[str, FinalityRule] = {r.metric: r for r in finality}
+        self._assertions: list[Assertion] = list(assertions)
 
         # name/alias -> active bindings; multiple entries for a name means ambiguity
         name_index: dict[str, list[MetricBinding]] = {}
@@ -115,6 +122,7 @@ class ContractResolver:
             bindings=load_metric_bindings(project_root),
             guardrails=load_guardrails(project_root),
             finality=load_finality(project_root),
+            assertions=load_assertions(project_root),
         )
 
     def resolve_metric(self, name: str, context: str | None = None) -> MetricResolution:
@@ -191,6 +199,24 @@ class ContractResolver:
         """Return the finality rule for a metric, or ``None`` if no rule is defined."""
         return self._finality_by_metric.get(metric)
 
+    def all_assertions(self) -> list[Assertion]:
+        """Every loaded assertion, in load order (E16's accuracy harness consumes these)."""
+        return list(self._assertions)
+
     def assertions_for(self, query: dict[str, Any]) -> list[Assertion]:
-        """Assertions relevant to a query — always ``[]`` in P0 (SPEC-E5-E15 §2.5 is P1)."""
-        return []
+        """Executable assertions whose semantic query requests the same metric set.
+
+        An assertion is *relevant* to a query when both request exactly the same set of
+        metrics — so the user's ad-hoc query triggers the trusted checks written for those
+        metrics (informationally in normal mode, as a gate under ``--harness``). Candidate
+        assertions still in raw ``{native, references}`` form (not yet executable) are
+        excluded (SPEC-Fuller-E15 §3.2).
+        """
+        from canon.contracts.assertions import assertion_metrics, is_executable
+
+        wanted = set(query.get("metrics", []))
+        if not wanted:
+            return []
+        return [
+            a for a in self._assertions if is_executable(a) and set(assertion_metrics(a)) == wanted
+        ]
