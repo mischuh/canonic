@@ -12,6 +12,7 @@ from canon.contracts.models import (
     GuardrailKind,
     MetricBinding,
     Realization,
+    RestrictTo,
     Severity,
 )
 from canon.contracts.resolver import ContractResolver
@@ -193,5 +194,33 @@ def finality_resolver(
     return ContractResolver(
         bindings=[revenue_binding],
         guardrails=[refund_guardrail],
+        finality=[finality_rule],
+    )
+
+
+@pytest.fixture
+def board_guardrail() -> Guardrail:
+    return Guardrail(
+        id="board-final-only",
+        applies_to=AppliesTo(metric="revenue"),
+        kind=GuardrailKind.RESTRICT_SOURCE,
+        restrict_to=RestrictTo(role="final"),
+        context="board_reporting",
+        severity=Severity.ERROR,
+        rationale="Board reporting requires authoritative data through T-1.",
+    )
+
+
+@pytest.fixture
+def board_resolver(
+    revenue_binding: MetricBinding,
+    refund_guardrail: Guardrail,
+    board_guardrail: Guardrail,
+    finality_rule: FinalityRule,
+) -> ContractResolver:
+    """Resolver with finality rule and restrict_source guardrail for board_reporting context."""
+    return ContractResolver(
+        bindings=[revenue_binding],
+        guardrails=[refund_guardrail, board_guardrail],
         finality=[finality_rule],
     )

@@ -19,6 +19,7 @@ from canon.contracts.models import (
     CanonicalRef,
     FinalityRule,
     Guardrail,
+    GuardrailKind,
     MetricBinding,
     Status,
 )
@@ -163,6 +164,28 @@ class ContractResolver:
             ref = self._metric_to_canonical.get(at.metric)
             return ref is not None and ref.source == source and ref.measure == measure
         return False
+
+    def restrict_source_for(
+        self,
+        source: str,
+        measure: str,
+        context: str | None,
+    ) -> list[Guardrail]:
+        """Return restrict_source guardrails active for this (source, measure) and context.
+
+        Only returns guardrails when ``context`` is not None and matches ``g.context``.
+        Stable-sorted by ``id``.
+        """
+        if context is None:
+            return []
+        matched = [
+            g
+            for g in self._guardrails
+            if g.kind is GuardrailKind.RESTRICT_SOURCE
+            and g.context == context
+            and self._guardrail_applies(g, source, measure)
+        ]
+        return sorted(matched, key=lambda g: g.id)
 
     def finality_for(self, metric: str) -> FinalityRule | None:
         """Return the finality rule for a metric, or ``None`` if no rule is defined."""

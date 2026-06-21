@@ -14,6 +14,7 @@ from canon.contracts.models import (
     GuardrailKind,
     MetricBinding,
     Realization,
+    RestrictTo,
     Severity,
     Status,
 )
@@ -92,6 +93,20 @@ class TestAppliesTo:
             AppliesTo()
 
 
+class TestRestrictTo:
+    def test_valid_final_role(self) -> None:
+        r = RestrictTo(role="final")
+        assert r.role == "final"
+
+    def test_valid_provisional_role(self) -> None:
+        r = RestrictTo(role="provisional")
+        assert r.role == "provisional"
+
+    def test_invalid_role_raises(self) -> None:
+        with pytest.raises(ValidationError, match="'final' or 'provisional'"):
+            RestrictTo(role="authoritative")
+
+
 class TestGuardrail:
     def test_mandatory_filter_requires_filter(self) -> None:
         with pytest.raises(ValidationError, match="requires a non-empty 'filter'"):
@@ -120,6 +135,39 @@ class TestGuardrail:
             rationale="Must group by currency.",
         )
         assert g.filter is None
+
+    def test_restrict_source_valid(self) -> None:
+        g = Guardrail(
+            id="board-final-only",
+            applies_to=AppliesTo(metric="revenue"),
+            kind=GuardrailKind.RESTRICT_SOURCE,
+            restrict_to=RestrictTo(role="final"),
+            context="board_reporting",
+            rationale="Board reporting requires authoritative data through T-1.",
+        )
+        assert g.restrict_to is not None
+        assert g.restrict_to.role == "final"
+        assert g.context == "board_reporting"
+
+    def test_restrict_source_missing_restrict_to_raises(self) -> None:
+        with pytest.raises(ValidationError, match="requires a 'restrict_to'"):
+            Guardrail(
+                id="bad-restrict",
+                applies_to=AppliesTo(metric="revenue"),
+                kind=GuardrailKind.RESTRICT_SOURCE,
+                context="board_reporting",
+                rationale="Missing restrict_to.",
+            )
+
+    def test_restrict_source_missing_context_raises(self) -> None:
+        with pytest.raises(ValidationError, match="requires a non-empty 'context'"):
+            Guardrail(
+                id="bad-restrict",
+                applies_to=AppliesTo(metric="revenue"),
+                kind=GuardrailKind.RESTRICT_SOURCE,
+                restrict_to=RestrictTo(role="final"),
+                rationale="Missing context.",
+            )
 
 
 class TestP1Stubs:

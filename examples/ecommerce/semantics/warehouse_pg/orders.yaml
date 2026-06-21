@@ -28,10 +28,10 @@ dimensions:
 
 joins:
   - to: customers
-    on: "orders.customer_id = customers.customer_id"
+    on: "fct_orders.customer_id = customers.customer_id"
     relationship: many_to_one
   - to: channels
-    on: "orders.channel_id = channels.channel_id"
+    on: "fct_orders.channel_id = channels.channel_id"
     relationship: many_to_one
 
 meta:

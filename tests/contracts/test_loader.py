@@ -88,6 +88,19 @@ class TestLoadMetricBindings:
         assert len(bindings) == 2  # no error; deprecated doesn't conflict
 
 
+VALID_RESTRICT_SOURCE_YAML = """\
+id: board-final-only
+applies_to:
+  metric: revenue
+kind: restrict_source
+restrict_to:
+  role: final
+context: board_reporting
+severity: error
+rationale: "Board reporting requires authoritative data through T-1."
+"""
+
+
 class TestLoadGuardrails:
     def test_happy_path(self, tmp_contracts_dir: Path) -> None:
         guardrails = load_guardrails(tmp_contracts_dir)
@@ -105,6 +118,18 @@ class TestLoadGuardrails:
         guardrails = load_guardrails(tmp_path)
         assert len(guardrails) == 1
         assert guardrails[0].id == "revenue-excludes-refunds"
+
+    def test_restrict_source_guardrail_loads(self, tmp_path: Path) -> None:
+        d = tmp_path / "contracts" / "guardrails"
+        d.mkdir(parents=True)
+        (d / "board-reporting-final-only.yaml").write_text(VALID_RESTRICT_SOURCE_YAML)
+        guardrails = load_guardrails(tmp_path)
+        assert len(guardrails) == 1
+        g = guardrails[0]
+        assert g.id == "board-final-only"
+        assert g.context == "board_reporting"
+        assert g.restrict_to is not None
+        assert g.restrict_to.role == "final"
 
 
 class TestLoadAssertions:
