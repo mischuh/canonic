@@ -41,8 +41,13 @@ def emit_error(err: CanonError, *, json_output: bool) -> None:
     """Print a structured error to stderr in the requested format."""
     code = err.code.value if err.code is not None else "internal_error"
     message = str(err) or err.__class__.__name__
+    payload: dict[str, Any] = {"code": code, "message": message}
+    # ASSERTION_FAILED carries which check diverged (SPEC-Fuller-E15 §3.3).
+    assertion_id = getattr(err, "assertion_id", None)
+    if assertion_id is not None:
+        payload["assertion_id"] = assertion_id
     if json_output:
-        sys.stderr.write(json.dumps({"code": code, "message": message}) + "\n")
+        sys.stderr.write(json.dumps(payload) + "\n")
     else:
         _err_console.print(f"[red]error[/red] [bold]{code}[/bold]: {message}")
 

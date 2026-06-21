@@ -12,6 +12,7 @@ from canon.semantic.models import Provenance
 __all__ = [
     "AppliesTo",
     "Assertion",
+    "AssertionExpect",
     "CanonicalRef",
     "ContractValidationError",
     "DeprecatedAlternative",
@@ -211,6 +212,21 @@ class FinalityRule(BaseModel):
         return self
 
 
+class AssertionExpect(BaseModel):
+    """The expected result of an assertion — a scalar/row-set check (SPEC-Fuller-E15 §3.1).
+
+    ``rows`` (optional) pins the expected row count. ``values`` maps an output column
+    name to its expected value (compared with ``tolerance`` when numeric). ``tolerance``
+    is a *relative* tolerance (e.g. ``0.01`` = 1%); ``None`` means exact match.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    rows: int | None = None
+    values: dict[str, Any] = {}
+    tolerance: float | None = None
+
+
 class Assertion(BaseModel):
     """A trusted query→expected-result check for CI regression (SPEC-E15 §2.5)."""  # [P1]
 
@@ -218,5 +234,5 @@ class Assertion(BaseModel):
 
     id: str
     query: dict[str, Any]
-    expect: dict[str, Any]
+    expect: AssertionExpect = AssertionExpect()
     source_of_truth: str | None = None

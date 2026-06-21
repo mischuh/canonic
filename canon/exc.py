@@ -142,9 +142,17 @@ class ValidationFailed(CanonError):
 
 
 class AssertionFailed(CanonError):
-    """A benchmark/CI assertion diverged from expected (E5/E15)."""
+    """A benchmark/CI assertion diverged from expected (E5/E15).
+
+    Carries the ``assertion_id`` so the structured error can name which trusted
+    query→expected-result check failed (SPEC-Fuller-E15 §3.3).
+    """
 
     code = ErrorCode.ASSERTION_FAILED
+
+    def __init__(self, message: str = "", *, assertion_id: str | None = None) -> None:
+        super().__init__(message)
+        self.assertion_id = assertion_id
 
 
 class ReadOnlyViolation(CanonError):

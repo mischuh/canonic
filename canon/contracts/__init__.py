@@ -2,6 +2,12 @@
 
 from __future__ import annotations
 
+from canon.contracts.assertions import (
+    AssertionOutcome,
+    assertion_to_query,
+    is_executable,
+    match_result,
+)
 from canon.contracts.loader import (
     contracts_dir_scaffold,
     dump_assertion,
@@ -14,6 +20,7 @@ from canon.contracts.loader import (
 from canon.contracts.models import (
     AppliesTo,
     Assertion,
+    AssertionExpect,
     CanonicalRef,
     ContractValidationError,
     DeprecatedAlternative,
@@ -38,6 +45,8 @@ __all__ = [
     "Ambiguous",
     "AppliesTo",
     "Assertion",
+    "AssertionExpect",
+    "AssertionOutcome",
     "Binding",
     "CanonicalRef",
     "ContractResolver",
@@ -52,12 +61,15 @@ __all__ = [
     "Severity",
     "Status",
     "Unresolved",
+    "assertion_to_query",
     "contracts_dir_scaffold",
     "dump_assertion",
     "dump_guardrail",
     "dump_metric_binding",
+    "is_executable",
     "load_assertions",
     "load_guardrails",
     "load_metric_bindings",
+    "match_result",
     "validate_contracts",
 ]

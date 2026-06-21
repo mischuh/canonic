@@ -10,6 +10,8 @@ from typing import TYPE_CHECKING
 
 from canon.contracts.models import (
     AppliesTo,
+    Assertion,
+    AssertionExpect,
     CanonicalRef,
     Guardrail,
     GuardrailKind,
@@ -202,9 +204,45 @@ class TestP0Stubs:
         resolver = ContractResolver(bindings=[_binding("revenue")], guardrails=[])
         assert resolver.finality_for("revenue") is None
 
-    def test_assertions_for_returns_empty(self) -> None:
+    def test_assertions_for_empty_when_none_loaded(self) -> None:
         resolver = ContractResolver(bindings=[_binding("revenue")], guardrails=[])
         assert resolver.assertions_for({"metrics": ["revenue"]}) == []
+
+
+class TestAssertionsFor:
+    @staticmethod
+    def _assertion(aid: str, metrics: list[str]) -> Assertion:
+        return Assertion(id=aid, query={"metrics": metrics}, expect=AssertionExpect())
+
+    def test_matches_same_metric_set(self) -> None:
+        a = self._assertion("rev-q1", ["revenue"])
+        resolver = ContractResolver(bindings=[_binding("revenue")], guardrails=[], assertions=[a])
+        assert [x.id for x in resolver.assertions_for({"metrics": ["revenue"]})] == ["rev-q1"]
+
+    def test_no_match_for_different_metrics(self) -> None:
+        a = self._assertion("rev-q1", ["revenue"])
+        resolver = ContractResolver(bindings=[_binding("revenue")], guardrails=[], assertions=[a])
+        assert resolver.assertions_for({"metrics": ["profit"]}) == []
+
+    def test_empty_query_metrics_matches_nothing(self) -> None:
+        a = self._assertion("rev-q1", ["revenue"])
+        resolver = ContractResolver(bindings=[_binding("revenue")], guardrails=[], assertions=[a])
+        assert resolver.assertions_for({"metrics": []}) == []
+
+    def test_non_executable_candidate_excluded(self) -> None:
+        candidate = Assertion(id="usage-x", query={"native": "sum(amount)"})
+        resolver = ContractResolver(
+            bindings=[_binding("revenue")], guardrails=[], assertions=[candidate]
+        )
+        assert resolver.assertions_for({"metrics": ["revenue"]}) == []
+
+    def test_all_assertions_returns_everything(self) -> None:
+        a = self._assertion("rev-q1", ["revenue"])
+        candidate = Assertion(id="usage-x", query={"native": "sum(amount)"})
+        resolver = ContractResolver(
+            bindings=[_binding("revenue")], guardrails=[], assertions=[a, candidate]
+        )
+        assert [x.id for x in resolver.all_assertions()] == ["rev-q1", "usage-x"]
 
 
 class TestFromProject:

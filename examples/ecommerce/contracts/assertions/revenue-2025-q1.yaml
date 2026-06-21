@@ -1,0 +1,10 @@
+id: revenue-2025-q1
+query:
+  metrics: [revenue]
+  filters: ["order_date >= '2025-01-01'", "order_date < '2025-04-01'"]
+expect:
+  rows: 1
+  values:
+    revenue: 3790.50
+  tolerance: 0.01
+source_of_truth: "Seed data: completed+pending orders in 2025-Q1, refunds excluded"

@@ -105,3 +105,68 @@ class TestValidateContracts:
         _write_binding(tmp_path, "revenue.yaml", deprecated)
         _write_semantic(tmp_path, ORDERS_SEMANTIC_YAML)
         validate_contracts(tmp_path)  # must not raise
+
+
+def _write_assertion(root: Path, name: str, content: str) -> None:
+    d = root / "contracts" / "assertions"
+    d.mkdir(parents=True, exist_ok=True)
+    (d / name).write_text(content)
+
+
+class TestValidateAssertions:
+    """SPEC-Fuller-E15 §5.2: assertion query resolves; expect shape matches output."""
+
+    def test_unresolved_metric_raises(self, tmp_path: Path) -> None:
+        _write_binding(tmp_path, "revenue.yaml", VALID_BINDING_YAML)
+        _write_semantic(tmp_path, ORDERS_SEMANTIC_YAML)
+        _write_assertion(
+            tmp_path,
+            "ghost.yaml",
+            "id: ghost-q1\nquery:\n  metrics: [ghost_metric]\nexpect:\n  rows: 1\n",
+        )
+        with pytest.raises(ContractError, match="ghost_metric"):
+            validate_contracts(tmp_path)
+
+    def test_expected_value_not_an_output_column_raises(self, tmp_path: Path) -> None:
+        _write_binding(tmp_path, "revenue.yaml", VALID_BINDING_YAML)
+        _write_semantic(tmp_path, ORDERS_SEMANTIC_YAML)
+        _write_assertion(
+            tmp_path,
+            "bad.yaml",
+            "id: bad-q1\nquery:\n  metrics: [revenue]\nexpect:\n  values:\n    profit: 1.0\n",
+        )
+        with pytest.raises(ContractError, match="profit"):
+            validate_contracts(tmp_path)
+
+    def test_scalar_query_expecting_many_rows_raises(self, tmp_path: Path) -> None:
+        _write_binding(tmp_path, "revenue.yaml", VALID_BINDING_YAML)
+        _write_semantic(tmp_path, ORDERS_SEMANTIC_YAML)
+        _write_assertion(
+            tmp_path,
+            "rows.yaml",
+            "id: rows-q1\nquery:\n  metrics: [revenue]\nexpect:\n  rows: 5\n",
+        )
+        with pytest.raises(ContractError, match="returns one row"):
+            validate_contracts(tmp_path)
+
+    def test_alias_metric_resolves(self, tmp_path: Path) -> None:
+        _write_binding(tmp_path, "revenue.yaml", VALID_BINDING_YAML)
+        _write_semantic(tmp_path, ORDERS_SEMANTIC_YAML)
+        # "rev" is a declared alias of revenue in VALID_BINDING_YAML.
+        _write_assertion(
+            tmp_path,
+            "alias.yaml",
+            "id: alias-q1\nquery:\n  metrics: [rev]\nexpect:\n  values:\n    rev: 1.0\n",
+        )
+        validate_contracts(tmp_path)  # must not raise
+
+    def test_non_executable_candidate_skipped(self, tmp_path: Path) -> None:
+        _write_binding(tmp_path, "revenue.yaml", VALID_BINDING_YAML)
+        _write_semantic(tmp_path, ORDERS_SEMANTIC_YAML)
+        _write_assertion(
+            tmp_path,
+            "candidate.yaml",
+            'id: usage-x\nquery:\n  native: "sum(amount)"\n  references: [orders.amount]\n'
+            "expect: {}\n",
+        )
+        validate_contracts(tmp_path)  # raw candidate form is not validated yet
