@@ -25,7 +25,7 @@ dimensions:
 
 joins:
   - to: orders
-    on: "order_items.order_id = orders.order_id"
+    on: "fct_order_items.order_id = orders.order_id"
     relationship: many_to_one
   - to: products
     on: "order_items.product_id = products.product_id"

@@ -741,9 +741,7 @@ def _enforce_restrict_source(
 
             from canon.contracts.finality import evaluate_watermark
 
-            watermark_dt = evaluate_watermark(
-                final_r.watermark, final_r.tz, query.as_of
-            )
+            watermark_dt = evaluate_watermark(final_r.watermark, final_r.tz, query.as_of)
             time_names = _time_column_names(rule, sources_by_name)
             if _window_exceeds_watermark(query.filters, time_names, watermark_dt, sources_by_name):
                 raise GuardrailBlock(guardrail.rationale)
