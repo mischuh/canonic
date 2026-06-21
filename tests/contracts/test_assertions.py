@@ -10,6 +10,7 @@ from canon.compiler.query import SemanticQuery
 from canon.connectors.base import ResultColumn, ResultSet
 from canon.contracts.assertions import (
     AssertionOutcome,
+    accuracy_report,
     assertion_metrics,
     assertion_to_query,
     is_executable,
@@ -116,6 +117,57 @@ class TestMatchResult:
             resolved={"revenue": "orders.total_revenue"},
         )
         assert outcome.passed
+
+
+class TestAccuracyReport:
+    """Aggregation of per-assertion outcomes into the harness accuracy number (§3.4)."""
+
+    def test_accuracy_is_passed_over_total(self) -> None:
+        report = accuracy_report(
+            [
+                AssertionOutcome("a", passed=True),
+                AssertionOutcome("b", passed=True),
+                AssertionOutcome("c", passed=False, detail="c: diverged"),
+                AssertionOutcome("d", passed=True),
+            ]
+        )
+        assert report.total == 4
+        assert report.passed == 3
+        assert report.accuracy == 0.75
+
+    def test_all_passing_is_full_accuracy(self) -> None:
+        report = accuracy_report([AssertionOutcome("a", passed=True)])
+        assert report.accuracy == 1.0
+        assert report.failures == ()
+
+    def test_empty_set_is_vacuously_full_accuracy(self) -> None:
+        report = accuracy_report([])
+        assert report.total == 0
+        assert report.accuracy == 1.0
+
+    def test_failures_preserve_input_order(self) -> None:
+        report = accuracy_report(
+            [
+                AssertionOutcome("a", passed=False, detail="a bad"),
+                AssertionOutcome("b", passed=True),
+                AssertionOutcome("c", passed=False, detail="c bad"),
+            ]
+        )
+        assert [o.assertion_id for o in report.failures] == ["a", "c"]
+
+    def test_to_dict_is_json_native(self) -> None:
+        report = accuracy_report(
+            [
+                AssertionOutcome("a", passed=True),
+                AssertionOutcome("b", passed=False, detail="b: diverged"),
+            ]
+        )
+        assert report.to_dict() == {
+            "accuracy": 0.5,
+            "passed": 1,
+            "total": 2,
+            "failures": [{"assertion_id": "b", "detail": "b: diverged"}],
+        }
 
 
 class TestAssertionMetrics:
