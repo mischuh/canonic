@@ -377,7 +377,7 @@ class CanonService:
         because a hit references their bound semantic entity. Returns an empty
         result when no project root or knowledge directory is available.
         """
-        from canon.knowledge import KnowledgeSearch, load_knowledge_page
+        from canon.knowledge import EntityIndex, KnowledgeSearch, load_knowledge_page
         from canon.knowledge.results import SearchResult as SR
 
         if self._project_root is None:
@@ -390,7 +390,10 @@ class CanonService:
         if not pages:
             return SR(hits=[], caveats=[])
 
-        return KnowledgeSearch(pages).search(
+        # Live entity index so a returned page whose bound measure definition drifted is
+        # flagged for prose review (§7).
+        entity_index = EntityIndex.from_sources(self._sources)
+        return KnowledgeSearch(pages, entity_index=entity_index).search(
             query, requesting_user=user or "anonymous", limit=limit
         )
 

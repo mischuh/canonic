@@ -24,6 +24,7 @@ from canon.knowledge.results import (
     Caveat,
     Hit,
     MatchedOn,
+    ReviewFlag,
     SearchResult,
     Subgraph,
 )
@@ -58,6 +59,7 @@ __all__ = [
     "MatchedOn",
     "PageIndex",
     "ReferenceValidator",
+    "ReviewFlag",
     "ScopeResolver",
     "SearchResult",
     "StalenessSignal",
