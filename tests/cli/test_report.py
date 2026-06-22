@@ -15,7 +15,7 @@ if TYPE_CHECKING:
 _BASE_EVENT: dict[str, Any] = {
     "ts": "2026-01-01T00:00:00+00:00",
     "kind": "served_answer",
-    "contract_schema": "1.1",
+    "contract_schema": "1.3",
     "query_hash": "sha256:aaa",
     "compiled_sql_hash": "sha256:bbb",
     "connection": "wh",

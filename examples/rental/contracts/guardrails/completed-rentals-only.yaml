@@ -1,0 +1,8 @@
+id: completed-rentals-only
+applies_to:
+  source: rentals
+  measure: total_base_revenue
+kind: mandatory_filter
+filter: "status = 'completed'"
+severity: error
+rationale: "rentals.total_amount is NULL for active, confirmed, cancelled, and no_show rows. Summing without a status filter silently produces NULL-inflated or understated totals. Always filter status = 'completed' when aggregating rentals.total_base_revenue, or use payments.total_paid which only counts settled transactions."

@@ -22,7 +22,12 @@ from pydantic import BaseModel, ConfigDict
 from canon.ingestion.builder import ContextBuilder, LLMDrafter, NullLLMDrafter, SkippedEvidence
 from canon.ingestion.emitter import AuditTrailWriter, DiffEmitter, EmissionResult, EmittedDiff
 from canon.ingestion.models import ProposalOp, ReconciliationDecision, ReconciliationReport
-from canon.ingestion.reconciliation import DiskAcceptedStore, ReconciliationEngine
+from canon.ingestion.reconciliation import (
+    DiskAcceptedStore,
+    NullReconcileDrafter,
+    ReconcileDrafter,
+    ReconciliationEngine,
+)
 from canon.ingestion.validation import ValidationGate
 from canon.semantic.loader import dump_semantic_source, load_semantic_source
 
@@ -91,6 +96,7 @@ class IngestionPipeline:
         *,
         headless: bool = False,
         drafter: LLMDrafter | None = None,
+        reconcile_drafter: ReconcileDrafter | None = None,
     ) -> None:
         self._project_root = project_root
         self._connectors = connectors
@@ -101,7 +107,10 @@ class IngestionPipeline:
         # Interactive mode uses the injected drafter (or falls back to NullLLMDrafter when
         # None, e.g. "no models configured" operating point).
         self._builder = ContextBuilder(NullLLMDrafter()) if headless else ContextBuilder(drafter)
-        self._engine = ReconciliationEngine(config)
+        _reconcile_drafter: ReconcileDrafter = (
+            NullReconcileDrafter() if headless else (reconcile_drafter or NullReconcileDrafter())
+        )
+        self._engine = ReconciliationEngine(config, _reconcile_drafter)
         self._emitter = DiffEmitter()
 
     async def run(self, evidence: list[EvidenceItem], *, dry_run: bool = False) -> PipelineResult:
@@ -141,9 +150,11 @@ class IngestionPipeline:
     async def _emit(
         self, evidence: list[EvidenceItem]
     ) -> tuple[EmissionResult, list[SkippedEvidence]]:
-        """Stages 1–4: build → reconcile → validate → emit (no side effects)."""
+        """Stages 1–4: build → reconcile → refine → validate → emit (no side effects)."""
         build = await self._builder.build(evidence)
-        report = self._engine.reconcile(build.proposals, DiskAcceptedStore(self._project_root))
+        store = DiskAcceptedStore(self._project_root)
+        report = self._engine.reconcile(build.proposals, store)
+        report = await self._engine.refine(report, store)
         gate = ValidationGate(self._project_root, self._connectors, evidence)
         await gate.validate(build.proposals)  # raises before emit (S8)
         emission = self._emitter.emit(report)

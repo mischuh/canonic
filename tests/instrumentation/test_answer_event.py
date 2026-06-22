@@ -221,7 +221,7 @@ def test_reconcile_decision_event_schema_unchanged() -> None:
 def test_s3_reserved_fields_present_and_null() -> None:
     ev = AnswerEvent(
         ts="2026-06-15T12:00:00+00:00",
-        contract_schema="1.1",
+        contract_schema="1.3",
         query_hash="sha256:abc",
         compiled_sql_hash="sha256:def",
         connection="warehouse_pg",
@@ -240,7 +240,7 @@ def test_s3_populated_reserved_fields_validate() -> None:
     """AC2: populated values validate against the same v1 shape (no migration needed)."""
     ev = AnswerEvent(
         ts="2026-06-15T12:00:00+00:00",
-        contract_schema="1.1",
+        contract_schema="1.3",
         query_hash="sha256:abc",
         compiled_sql_hash="sha256:def",
         connection="warehouse_pg",
@@ -404,7 +404,7 @@ def _reconcile_entry() -> ReconciliationEntry:
 def _answer_event() -> AnswerEvent:
     return AnswerEvent(
         ts="2026-06-19T12:00:00+00:00",
-        contract_schema="1.1",
+        contract_schema="1.3",
         query_hash="sha256:aaa",
         compiled_sql_hash="sha256:bbb",
         connection="warehouse_pg",

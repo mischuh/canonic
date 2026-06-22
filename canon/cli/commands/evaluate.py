@@ -17,10 +17,18 @@ from rich.console import Console
 
 from canon.cli._errors import get_cli_context, handle_errors
 from canon.eval.candidates import load_candidates
-from canon.eval.dataset import default_dataset_path, load_grain_cases
-from canon.eval.harness import DEFAULT_ADHERENCE_FLOOR, run_baseline
+from canon.eval.dataset import (
+    default_dataset_path,
+    default_reconcile_dataset_path,
+    load_grain_cases,
+    load_reconcile_cases,
+)
+from canon.eval.harness import (
+    DEFAULT_ADHERENCE_FLOOR,
+    _default_reconcile_drafter_factory,
+    run_baseline,
+)
 from canon.eval.report import render_markdown
-from canon.exc import EvalDatasetError
 from canon.runtime.resolver import Task
 
 app = typer.Typer(
@@ -56,25 +64,37 @@ def baseline(
         typer.Option("--adherence-floor", help="Min structured-output adherence to recommend."),
     ] = DEFAULT_ADHERENCE_FLOOR,
 ) -> None:
-    """Run candidate models through the labeled ``draft`` set and publish the baseline."""
-    if task != Task.DRAFT.value:
-        raise EvalDatasetError(
-            f"task {task!r} is not evaluable yet — only 'draft' has a live call site "
-            "('reconcile' is pending E4 reconciliation drafting; SPEC-E10 §7)"
-        )
-
+    """Run candidate models through the labeled set and publish the baseline."""
     named = load_candidates(candidates)
-    cases = load_grain_cases(dataset if dataset is not None else default_dataset_path())
-    report = asyncio.run(
-        run_baseline(named, cases, task=Task.DRAFT, adherence_floor=adherence_floor)
-    )
 
-    if get_cli_context(ctx).json_output:
-        typer.echo(json.dumps(report.model_dump(mode="json")))
-        return
-
-    out.parent.mkdir(parents=True, exist_ok=True)
-    out.write_text(render_markdown(report), encoding="utf-8")
+    if task == Task.RECONCILE.value:
+        reconcile_cases = load_reconcile_cases(
+            dataset if dataset is not None else default_reconcile_dataset_path()
+        )
+        report = asyncio.run(
+            run_baseline(
+                named,
+                reconcile_cases,
+                task=Task.RECONCILE,
+                drafter_factory=_default_reconcile_drafter_factory,
+                adherence_floor=adherence_floor,
+            )
+        )
+        if get_cli_context(ctx).json_output:
+            typer.echo(json.dumps(report.model_dump(mode="json")))
+            return
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_text(render_markdown(reconcile_report=report), encoding="utf-8")
+    else:
+        cases = load_grain_cases(dataset if dataset is not None else default_dataset_path())
+        report = asyncio.run(
+            run_baseline(named, cases, task=Task.DRAFT, adherence_floor=adherence_floor)
+        )
+        if get_cli_context(ctx).json_output:
+            typer.echo(json.dumps(report.model_dump(mode="json")))
+            return
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_text(render_markdown(report), encoding="utf-8")
 
     _console.print(f"baseline written to [bold]{out}[/bold]")
     for summary in report.summaries:

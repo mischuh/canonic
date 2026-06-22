@@ -18,7 +18,7 @@ from time import perf_counter
 from typing import TYPE_CHECKING, Any, Protocol
 
 from canon.eval.models import BaselineReport, CaseOutcome, ModelTaskSummary, StructuredOutcome
-from canon.eval.scoring import score_grain, summarize
+from canon.eval.scoring import score_grain, score_resolution, summarize
 from canon.exc import (
     CredentialError,
     GenerationError,
@@ -29,14 +29,16 @@ from canon.runtime.resolver import Task
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
+    from typing import Any
 
     from canon.config import LLMConfig
     from canon.connectors.base import RelationSchema
     from canon.eval.candidates import NamedCandidate
-    from canon.eval.dataset import GrainCase
+    from canon.eval.dataset import GrainCase, ReconcileCase
     from canon.ingestion.builder import GrainDraft
+    from canon.ingestion.reconciliation import ResolutionDraft
 
-__all__ = ["GrainDrafter", "LiteLLMUsageReader", "UsageReader", "run_baseline"]
+__all__ = ["GrainDrafter", "LiteLLMUsageReader", "ReconcileDrafter", "UsageReader", "run_baseline"]
 
 #: Default share of cases a candidate must HONOR (schema-valid output) to be recommendable.
 DEFAULT_ADHERENCE_FLOOR = 0.9
@@ -46,6 +48,14 @@ class GrainDrafter(Protocol):
     """The production grain-drafting seam the harness measures (RuntimeLLMDrafter satisfies it)."""
 
     async def draft_grain(self, schema: RelationSchema) -> GrainDraft: ...
+
+
+class ReconcileDrafter(Protocol):
+    """The production reconcile-resolution seam (RuntimeReconcileDrafter satisfies it)."""
+
+    async def draft_resolution(
+        self, target: str, proposals: list[dict[str, Any]]
+    ) -> ResolutionDraft | None: ...
 
 
 class UsageReader(Protocol):
@@ -68,6 +78,63 @@ def _default_drafter_factory(config: LLMConfig) -> GrainDrafter:
     from canon.runtime.generation import GenerationRuntime
 
     return RuntimeLLMDrafter(GenerationRuntime(config))
+
+
+class _HarnessReconcileAdapter:
+    """Adapts the generation runtime to the harness ReconcileDrafter seam.
+
+    The harness passes raw proposal dicts from ReconcileCase; the engine's
+    RuntimeReconcileDrafter expects list[Proposal]. This adapter builds the prompt
+    directly from dicts so the two seams stay decoupled.
+    """
+
+    def __init__(self, runtime: Any) -> None:
+        self._runtime = runtime
+
+    async def draft_resolution(
+        self, target: str, proposals: list[dict[str, Any]]
+    ) -> ResolutionDraft | None:
+        import json
+
+        from canon.ingestion.reconciliation import ResolutionDraft as _RD
+        from canon.runtime.resolver import Task
+
+        lines = [f"Two sources disagree on the description of {target!r}.", ""]
+        for i, proposal in enumerate(proposals):
+            lines.append(f"Proposal {i}:")
+            lines.append(json.dumps(proposal, indent=2, default=str))
+            lines.append("")
+        lines.append(
+            'Return the index of the better proposal as JSON: {"winner_index": 0} or {"winner_index": 1}.'
+        )
+        prompt = "\n".join(lines)
+
+        from pydantic import BaseModel
+
+        class _Resp(BaseModel):
+            winner_index: int
+
+        system = (
+            "You resolve contradictions between two proposed descriptions of the same database object. "
+            "Given two proposals, select the one that is most accurate and complete. "
+            "Respond only with the requested JSON."
+        )
+        completion = await self._runtime.generate(
+            prompt, task=Task.RECONCILE, system=system, response_model=_Resp
+        )
+        if not completion.parsed:
+            return None
+        winner_index = completion.parsed.get("winner_index")
+        if not isinstance(winner_index, int) or not (0 <= winner_index < len(proposals)):
+            return None
+        return _RD(winner_index=winner_index)
+
+
+def _default_reconcile_drafter_factory(config: LLMConfig) -> ReconcileDrafter:
+    """Build the real generation-backed reconcile drafter for a candidate."""
+    from canon.runtime.generation import GenerationRuntime
+
+    return _HarnessReconcileAdapter(GenerationRuntime(config))
 
 
 class LiteLLMUsageReader:
@@ -149,6 +216,47 @@ def _failure(
     )
 
 
+async def _run_reconcile_case(
+    drafter: ReconcileDrafter, case: ReconcileCase, reader: UsageReader
+) -> CaseOutcome:
+    """Run one labeled reconcile case through the drafter, classifying the outcome."""
+    reader.reset()
+    start = perf_counter()
+    try:
+        draft = await drafter.draft_resolution(case.target, case.proposals)
+    except StructuredOutputUnsupported as exc:
+        return _reconcile_failure(case, StructuredOutcome.UNSUPPORTED, start, exc)
+    except StructuredOutputError as exc:
+        return _reconcile_failure(case, StructuredOutcome.SCHEMA_INVALID, start, exc)
+    except (GenerationError, CredentialError) as exc:
+        return _reconcile_failure(case, StructuredOutcome.ERROR, start, exc)
+
+    latency_ms = (perf_counter() - start) * 1000
+    predicted = draft.winner_index if draft is not None else -1
+    return CaseOutcome(
+        relation=case.target,
+        correct=score_resolution(predicted, case.expected_winner),
+        structured=StructuredOutcome.HONORED,
+        latency_ms=latency_ms,
+        total_tokens=reader.last_total_tokens,
+        predicted_grain=[str(predicted)],
+        expected_grain=[str(case.expected_winner)],
+    )
+
+
+def _reconcile_failure(
+    case: ReconcileCase, outcome: StructuredOutcome, start: float, exc: Exception
+) -> CaseOutcome:
+    return CaseOutcome(
+        relation=case.target,
+        correct=False,
+        structured=outcome,
+        latency_ms=(perf_counter() - start) * 1000,
+        expected_grain=[str(case.expected_winner)],
+        error=str(exc),
+    )
+
+
 def _recommend(summaries: Sequence[ModelTaskSummary], adherence_floor: float) -> str | None:
     """Recommend the most accurate candidate that also clears the structured-output floor.
 
@@ -164,10 +272,11 @@ def _recommend(summaries: Sequence[ModelTaskSummary], adherence_floor: float) ->
 
 async def run_baseline(
     candidates: Sequence[NamedCandidate],
-    cases: Sequence[GrainCase],
+    cases: Sequence[GrainCase] | Sequence[ReconcileCase],
     *,
     task: Task = Task.DRAFT,
-    drafter_factory: Callable[[LLMConfig], GrainDrafter] = _default_drafter_factory,
+    drafter_factory: Callable[[LLMConfig], GrainDrafter]
+    | Callable[[LLMConfig], ReconcileDrafter] = _default_drafter_factory,
     usage_reader: UsageReader | None = None,
     adherence_floor: float = DEFAULT_ADHERENCE_FLOOR,
     now: datetime | None = None,
@@ -176,11 +285,10 @@ async def run_baseline(
 
     Args:
         candidates: Models to evaluate (a friendly name + resolved ``LLMConfig`` each).
-        cases: The labeled grain set.
-        task: The task this baseline covers (``draft`` in v1; ``reconcile`` is pending an E4
-            call site, so the harness is exercised only for ``draft``).
+        cases: The labeled set — grain cases for ``draft``, reconcile cases for ``reconcile``.
+        task: The task this baseline covers (``draft`` or ``reconcile``).
         drafter_factory: Builds the drafter for a candidate; defaults to the real
-            generation-backed :class:`RuntimeLLMDrafter`. Injected so tests run without a network.
+            generation-backed drafter. Injected so tests run without a network.
         usage_reader: Token probe; defaults to :class:`LiteLLMUsageReader`. Injected for tests.
         adherence_floor: Minimum structured-output adherence to be recommendable.
         now: Override for ``generated_at`` (tests); defaults to current UTC.
@@ -190,7 +298,16 @@ async def run_baseline(
     with reader:
         for candidate in candidates:
             drafter = drafter_factory(candidate.config)
-            outcomes = [await _run_case(drafter, case, reader) for case in cases]
+            if task is Task.RECONCILE:
+                outcomes = [
+                    await _run_reconcile_case(drafter, case, reader)  # type: ignore[arg-type]
+                    for case in cases
+                ]
+            else:
+                outcomes = [
+                    await _run_case(drafter, case, reader)  # type: ignore[arg-type]
+                    for case in cases
+                ]
             summaries.append(summarize(candidate.name, candidate.config.model, task, outcomes))
 
     return BaselineReport(

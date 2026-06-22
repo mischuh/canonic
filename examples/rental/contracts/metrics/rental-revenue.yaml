@@ -1,0 +1,7 @@
+metric: rental_revenue
+canonical:
+  source: payments
+  measure: total_paid
+provenance: human_curated
+aliases: ["revenue", "total revenue", "paid revenue", "settled revenue", "income"]
+status: active

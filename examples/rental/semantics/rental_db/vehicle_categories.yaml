@@ -1,0 +1,17 @@
+name: vehicle_categories
+connection: rental_db
+table: vehicle_categories
+grain: [category_id]
+description: "One row per vehicle class. The daily_rate is the list price — rentals snapshot the rate at booking time into rate_per_day."
+
+columns:
+  - { name: category_id,  type: int,     nullable: false }
+  - { name: name,         type: string,  nullable: false }
+  - { name: daily_rate,   type: decimal, nullable: false }
+  - { name: description,  type: string,  nullable: true  }
+
+dimensions:
+  - { name: category_name, column: name }
+
+meta:
+  provenance: human_curated

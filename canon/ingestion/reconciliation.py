@@ -41,7 +41,10 @@ __all__ = [
     "DiskAcceptedStore",
     "ExistingFact",
     "InMemoryAcceptedStore",
+    "NullReconcileDrafter",
+    "ReconcileDrafter",
     "ReconciliationEngine",
+    "ResolutionDraft",
 ]
 
 # Provenance authority ordering (SPEC-E4 §5.1): board_approved > human_curated > inferred.
@@ -218,6 +221,45 @@ def _signature(proposal: Proposal) -> str:
     return "content:" + json.dumps(proposal.content, sort_keys=True, default=str)
 
 
+class ResolutionDraft(BaseModel):
+    """An LLM-drafted resolution selecting one side of a contradiction (SPEC-E10 §3)."""
+
+    model_config = ConfigDict(frozen=True)
+
+    winner_index: int
+    confidence: float = 0.5
+
+
+class ReconcileDrafter(Protocol):
+    """The conflict-resolution seam (SPEC-E4 §5.4) — injected so the headless path stays LLM-free.
+
+    Implementations select one proposal from a set of contradicting candidates using the stronger
+    model configured for the ``reconcile`` task (SPEC-E10 §3). Returns ``None`` to defer to the
+    human reviewer (no silent winner). The headless default is :class:`NullReconcileDrafter`.
+    """
+
+    async def draft_resolution(
+        self, target: str, proposals: list[Proposal]
+    ) -> ResolutionDraft | None:
+        """Propose the winning proposal index for a contradicting group at ``target``."""
+        ...
+
+
+class NullReconcileDrafter:
+    """Default reconcile stub for the headless path — resolves nothing, asserts nothing.
+
+    Returns ``None`` so every contradiction is kept for human review. A real drafter (E10)
+    is injected to replace it in interactive mode.
+    """
+
+    async def draft_resolution(
+        self,
+        target: str,
+        proposals: list[Proposal],  # noqa: ARG002 — stub
+    ) -> ResolutionDraft | None:
+        return None
+
+
 class ReconciliationEngine:
     """Applies the SPEC-E4 §5 decision table to proposals against accepted files.
 
@@ -225,10 +267,18 @@ class ReconciliationEngine:
     injected accepted store, and the policy, so identical inputs yield an identical report
     (headless determinism, §9 / S9-AC1). Contradictions are surfaced, never raised: a run
     never fails on them by default (§5.4).
+
+    The optional ``drafter`` is used only by :meth:`refine` — the async post-pass that lets
+    the interactive path LLM-resolve intra-run contradictions after the deterministic pass.
     """
 
-    def __init__(self, config: ReconcileConfig | None = None) -> None:
+    def __init__(
+        self,
+        config: ReconcileConfig | None = None,
+        drafter: ReconcileDrafter | None = None,
+    ) -> None:
         self._config: ReconcileConfig = config or ReconcileConfig()
+        self._drafter: ReconcileDrafter = drafter or NullReconcileDrafter()
 
     def reconcile(self, proposals: list[Proposal], accepted: AcceptedStore) -> ReconciliationReport:
         """Reconcile ``proposals`` against ``accepted`` and return the decision report.
@@ -258,6 +308,54 @@ class ReconciliationEngine:
         """
         contradictions = report.summary[ReconciliationDecision.CONTRADICTION.value]
         return self._config.strict_contradictions and contradictions > 0
+
+    async def refine(
+        self, report: ReconciliationReport, accepted: AcceptedStore
+    ) -> ReconciliationReport:
+        """LLM-resolve intra-run contradictions using the injected drafter (SPEC-E10 §3).
+
+        Groups CONTRADICTION entries by target. Targets with ≥2 entries are intra-run
+        contradictions (multiple sources disagreed in the same run) and are eligible for
+        LLM resolution. Targets with exactly 1 entry are policy or provenance contradictions
+        (frozen fact, higher-tier existing) and are always left unchanged.
+
+        When the drafter selects a valid winner, the group is replaced by the deterministic
+        decision for that proposal via ``_reconcile_one``. On ``None`` or an out-of-range
+        index the original CONTRADICTION entries are kept as-is. ``NullReconcileDrafter``
+        is a transparent no-op.
+        """
+        contradiction_groups: dict[str, list[ReconciliationEntry]] = {}
+        for entry in report.entries:
+            if entry.decision is ReconciliationDecision.CONTRADICTION:
+                contradiction_groups.setdefault(entry.target, []).append(entry)
+
+        replacements: dict[str, list[ReconciliationEntry]] = {}
+        for target, group in contradiction_groups.items():
+            if len(group) < 2:
+                continue
+            proposals = [e.proposal for e in group]
+            draft = await self._drafter.draft_resolution(target, proposals)
+            if draft is None or not (0 <= draft.winner_index < len(proposals)):
+                continue
+            winning = proposals[draft.winner_index]
+            replacements[target] = [self._reconcile_one(winning, accepted.get(target))]
+
+        if not replacements:
+            return report
+
+        new_entries: list[ReconciliationEntry] = []
+        emitted: set[str] = set()
+        for entry in report.entries:
+            if entry.decision is not ReconciliationDecision.CONTRADICTION:
+                new_entries.append(entry)
+            elif entry.target in replacements:
+                if entry.target not in emitted:
+                    new_entries.extend(replacements[entry.target])
+                    emitted.add(entry.target)
+            else:
+                new_entries.append(entry)
+
+        return ReconciliationReport(entries=new_entries)
 
     @staticmethod
     def _group_by_target(proposals: list[Proposal]) -> dict[str, list[Proposal]]:

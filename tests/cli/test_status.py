@@ -11,7 +11,7 @@ from canon.cli.app import app
 _BASE_EVENT: dict[str, Any] = {
     "ts": "2026-01-01T00:00:00+00:00",
     "kind": "served_answer",
-    "contract_schema": "1.1",
+    "contract_schema": "1.3",
     "query_hash": "sha256:aaa",
     "compiled_sql_hash": "sha256:bbb",
     "connection": "wh",
@@ -50,7 +50,7 @@ def test_status_inside_project_prints_root_and_version(
     assert str(project_dir) in result.output
     assert "config version: 1" in result.output
     assert "absent" in result.output  # no .canon/ yet
-    assert "1.1" in result.output  # contract_schema
+    assert "1.3" in result.output  # contract_schema
 
 
 def test_status_detects_dotcanon(runner: CliRunner, project_dir: Path) -> None:
@@ -74,7 +74,7 @@ def test_status_json_inside_project(runner: CliRunner, project_dir: Path) -> Non
     assert payload["config_version"] == 1
     assert payload["dotcanon_present"] is False
     assert payload["config_error"] is None
-    assert payload["contract_schema"] == "1.1"
+    assert payload["contract_schema"] == "1.3"
 
 
 def test_status_reports_invalid_config(runner: CliRunner, tmp_path: Path, monkeypatch) -> None:

@@ -1,0 +1,25 @@
+name: employees
+connection: rental_db
+table: employees
+grain: [employee_id]
+description: "One row per employee. Each employee belongs to exactly one location. Used to identify which agent processed a rental."
+
+columns:
+  - { name: employee_id,  type: int,    nullable: false }
+  - { name: first_name,   type: string, nullable: false }
+  - { name: last_name,    type: string, nullable: false }
+  - { name: title,        type: string, nullable: false }
+  - { name: location_id,  type: int,    nullable: false }
+  - { name: hire_date,    type: date,   nullable: false }
+
+dimensions:
+  - { name: title,     column: title }
+  - { name: hire_date, column: hire_date }
+
+joins:
+  - to: locations
+    on: 'employees.location_id = locations.location_id'
+    relationship: many_to_one
+
+meta:
+  provenance: human_curated

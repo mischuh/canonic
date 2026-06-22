@@ -29,7 +29,7 @@ from canon.ingestion.autopr import AutoPRPublisher, PullRequestPublisher, Subpro
 from canon.ingestion.models import ReconciliationDecision
 from canon.ingestion.pipeline import IngestionPipeline
 from canon.ingestion.source import gather_evidence
-from canon.runtime.drafter import make_drafter
+from canon.runtime.drafter import make_drafter, make_reconcile_drafter
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable
@@ -165,8 +165,14 @@ async def _ingest(
         conn.id: default_factory.create(conn) for conn in targets
     }
     drafter = make_drafter(config.llm, config.runtime, headless=headless)
+    reconcile_drafter = make_reconcile_drafter(config.llm, config.runtime, headless=headless)
     pipeline = IngestionPipeline(
-        root, connectors, config.reconcile, headless=headless, drafter=drafter
+        root,
+        connectors,
+        config.reconcile,
+        headless=headless,
+        drafter=drafter,
+        reconcile_drafter=reconcile_drafter,
     )
     try:
         if bootstrap:

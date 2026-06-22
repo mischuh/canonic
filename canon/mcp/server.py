@@ -110,7 +110,12 @@ def build_server(service: CanonService) -> FastMCP:
         description=(
             "Compile a semantic query to dialect-correct SQL + metadata without executing it. "
             "Accepts a dict with keys: metrics (list[str]), dimensions (list[str]), "
-            "filters (list[str]), limit (int|null)."
+            "filters (list[str]), via (list[str]), limit (int|null). "
+            "'via' routes join paths through specific intermediate sources — required when "
+            "multiple join paths exist between the metric source and a dimension source. "
+            "On an 'ambiguous_join_path' error, inspect the returned candidates: each has "
+            "a 'via' list and a human-readable 'route'; re-issue with that 'via' value to "
+            "select the desired path."
         )
     )
     @canon_error_response
@@ -128,7 +133,12 @@ def build_server(service: CanonService) -> FastMCP:
             "Compile and execute a semantic query read-only. "
             "Returns rows + compiler metadata (resolved bindings, guardrails fired, freshness). "
             "Accepts a dict with keys: metrics (list[str]), dimensions (list[str]), "
-            "filters (list[str]), limit (int|null)."
+            "filters (list[str]), via (list[str]), limit (int|null). "
+            "'via' routes join paths through specific intermediate sources — required when "
+            "multiple join paths exist between the metric source and a dimension source. "
+            "On an 'ambiguous_join_path' error, inspect the returned candidates: each has "
+            "a 'via' list and a human-readable 'route'; re-issue with that 'via' value to "
+            "select the desired path."
         )
     )
     @canon_error_response

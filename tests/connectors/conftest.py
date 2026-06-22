@@ -18,6 +18,7 @@ if TYPE_CHECKING:
 
 from canon.config import Connection
 from canon.connectors.postgres import PostgresConnector
+from canon.connectors.sqlite import SQLiteConnector
 
 try:
     from testcontainers.postgres import PostgresContainer
@@ -78,6 +79,17 @@ def metabase_questions_path() -> Path:
 def looker_looks_path() -> Path:
     """Path to the Looker looks fixture used by Looker connector tests."""
     return Path(__file__).parent / "fixtures" / "looker_looks.json"
+
+
+@pytest.fixture
+def sqlite_offline_connector() -> SQLiteConnector:
+    """A SQLite connector pointed at an in-memory database (no I/O on construction)."""
+    connection = Connection(
+        id="warehouse_sqlite",
+        type="sqlite",
+        params={"path": ":memory:"},
+    )
+    return SQLiteConnector(connection)
 
 
 @pytest.fixture

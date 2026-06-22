@@ -243,12 +243,13 @@ class _FixtureLookerLookSource:
 
 
 @pytest.fixture(
-    params=["postgres", "dbt", "notion", "metabase", "looker"],
-    ids=["postgres", "dbt", "notion", "metabase", "looker"],
+    params=["postgres", "dbt", "notion", "metabase", "looker", "sqlite"],
+    ids=["postgres", "dbt", "notion", "metabase", "looker", "sqlite"],
 )
 def any_offline_connector(
     request: pytest.FixtureRequest,
     offline_connector,  # noqa: ANN001
+    sqlite_offline_connector,  # noqa: ANN001
     dbt_manifest_path: Path,
     notion_pages_path: Path,
     metabase_questions_path: Path,
@@ -264,6 +265,8 @@ def any_offline_connector(
     match request.param:
         case "postgres":
             return offline_connector
+        case "sqlite":
+            return sqlite_offline_connector
         case "dbt":
             return DbtConnector(dbt_manifest_path)
         case "notion":

@@ -187,6 +187,114 @@ def test_s4_ac2_ambiguous_join_path(sources: list[SemanticSource]) -> None:
         compile(SemanticQuery(metrics=["m"], dimensions=["c_region"]), res, [o, a, b, c])
     assert ei.value.code is exc.ErrorCode.AMBIGUOUS_JOIN_PATH
     assert len(ei.value.candidates) == 2
+    assert ei.value.owner == "o"
+    assert ei.value.target == "c"
+    from canon.compiler.joins import JoinPathCandidate
+
+    vias = {tuple(c.via) for c in ei.value.candidates}
+    assert vias == {("a", "c"), ("b", "c")}
+    for c in ei.value.candidates:
+        assert isinstance(c, JoinPathCandidate)
+        assert c.route.startswith("o →")
+        assert len(c.joins) == len(c.via)
+
+
+def test_s4_ac2_via_resolves_ambiguity(sources: list[SemanticSource]) -> None:
+    from canon.semantic.models import Column, Dimension, Join, Measure, Relationship, SemanticSource
+
+    o = SemanticSource(
+        name="o",
+        connection="c",
+        table="t.o",
+        grain=["id"],
+        columns=[Column(name="id", type="string"), Column(name="amount", type="decimal")],
+        measures=[Measure(name="m", expr="sum(amount)")],
+        joins=[
+            Join(to="a", on="o.id = a.id", relationship=Relationship.MANY_TO_ONE),
+            Join(to="b", on="o.id = b.id", relationship=Relationship.MANY_TO_ONE),
+        ],
+    )
+    a = SemanticSource(
+        name="a",
+        connection="c",
+        table="t.a",
+        grain=["id"],
+        columns=[Column(name="id", type="string")],
+        joins=[Join(to="c", on="a.id = c.id", relationship=Relationship.MANY_TO_ONE)],
+    )
+    b = SemanticSource(
+        name="b",
+        connection="c",
+        table="t.b",
+        grain=["id"],
+        columns=[Column(name="id", type="string")],
+        joins=[Join(to="c", on="b.id = c.id", relationship=Relationship.MANY_TO_ONE)],
+    )
+    c = SemanticSource(
+        name="c",
+        connection="c",
+        table="t.c",
+        grain=["id"],
+        columns=[Column(name="id", type="string"), Column(name="region", type="string")],
+        dimensions=[Dimension(name="c_region", column="region")],
+    )
+    res = ContractResolver(
+        bindings=[MetricBinding(metric="m", canonical=CanonicalRef(source="o", measure="m"))],
+        guardrails=[],
+    )
+    result = compile(
+        SemanticQuery(metrics=["m"], dimensions=["c_region"], via=["a"]), res, [o, a, b, c]
+    )
+    _parse_ok(result.sql)
+    assert '"t"."a"' in result.sql
+    assert '"t"."b"' not in result.sql
+
+
+def test_s4_ac2_via_no_matching_path_raises_unreachable(sources: list[SemanticSource]) -> None:
+    from canon.semantic.models import Column, Dimension, Join, Measure, Relationship, SemanticSource
+
+    o = SemanticSource(
+        name="o",
+        connection="c",
+        table="t.o",
+        grain=["id"],
+        columns=[Column(name="id", type="string"), Column(name="amount", type="decimal")],
+        measures=[Measure(name="m", expr="sum(amount)")],
+        joins=[
+            Join(to="a", on="o.id = a.id", relationship=Relationship.MANY_TO_ONE),
+            Join(to="b", on="o.id = b.id", relationship=Relationship.MANY_TO_ONE),
+        ],
+    )
+    a = SemanticSource(
+        name="a",
+        connection="c",
+        table="t.a",
+        grain=["id"],
+        columns=[Column(name="id", type="string")],
+        joins=[Join(to="c", on="a.id = c.id", relationship=Relationship.MANY_TO_ONE)],
+    )
+    b = SemanticSource(
+        name="b",
+        connection="c",
+        table="t.b",
+        grain=["id"],
+        columns=[Column(name="id", type="string")],
+        joins=[Join(to="c", on="b.id = c.id", relationship=Relationship.MANY_TO_ONE)],
+    )
+    c = SemanticSource(
+        name="c",
+        connection="c",
+        table="t.c",
+        grain=["id"],
+        columns=[Column(name="id", type="string"), Column(name="region", type="string")],
+        dimensions=[Dimension(name="c_region", column="region")],
+    )
+    res = ContractResolver(
+        bindings=[MetricBinding(metric="m", canonical=CanonicalRef(source="o", measure="m"))],
+        guardrails=[],
+    )
+    with pytest.raises(exc.Unreachable):
+        compile(SemanticQuery(metrics=["m"], dimensions=["c_region"], via=["z"]), res, [o, a, b, c])
 
 
 # --- S5: deterministic output -----------------------------------------------
@@ -212,3 +320,189 @@ def test_freshness_reports_used_sources(
     assert reported == sorted(reported)
     assert "orders" in reported
     assert "customers" in reported
+
+
+# --- dimension resolution: owner-aware priority -----------------------------
+
+
+def test_owner_wins_over_alphabetically_earlier_source(
+    resolver: ContractResolver,
+    orders: SemanticSource,
+    accounts: SemanticSource,
+) -> None:
+    """Owner 'orders' has 'status'; 'accounts' also has 'status' but is alphabetically first.
+    The compiler must bind status to orders.status — no join to accounts."""
+    result = compile(
+        SemanticQuery(metrics=["revenue"], dimensions=["status"]),
+        resolver,
+        [orders, accounts],
+    )
+    _parse_ok(result.sql)
+    assert "accounts" not in result.sql
+    assert "JOIN" not in result.sql.upper()
+    assert "orders" in result.sql
+
+
+def test_unlinked_source_with_same_dim_does_not_block_query(
+    resolver: ContractResolver,
+    orders: SemanticSource,
+    accounts: SemanticSource,
+) -> None:
+    """Regression: previously raised Unreachable because 'accounts' was selected over 'orders'."""
+    result = compile(
+        SemanticQuery(metrics=["revenue"], dimensions=["status"]),
+        resolver,
+        [orders, accounts],
+    )
+    assert result.resolved == {"revenue": "orders.total_revenue"}
+
+
+def test_ambiguous_dim_across_two_reachable_sources_raises(
+    resolver: ContractResolver, orders: SemanticSource
+) -> None:
+    """Two join-reachable sources both declaring 'tier' → Ambiguous, not a silent pick."""
+    from canon.semantic.models import Column, Dimension, Join, Relationship, SemanticSource
+
+    left = SemanticSource(
+        name="left_src",
+        connection="c",
+        table="t.left",
+        grain=["id"],
+        columns=[Column(name="id", type="string"), Column(name="tier", type="string")],
+        dimensions=[Dimension(name="tier", column="tier")],
+    )
+    right = SemanticSource(
+        name="right_src",
+        connection="c",
+        table="t.right",
+        grain=["id"],
+        columns=[Column(name="id", type="string"), Column(name="tier", type="string")],
+        dimensions=[Dimension(name="tier", column="tier")],
+    )
+    orders_with_joins = SemanticSource(
+        name="orders",
+        connection=orders.connection,
+        table=orders.table,
+        grain=orders.grain,
+        columns=orders.columns,
+        measures=orders.measures,
+        dimensions=orders.dimensions,
+        joins=[
+            Join(
+                to="left_src",
+                on="orders.order_id = left_src.id",
+                relationship=Relationship.MANY_TO_ONE,
+            ),
+            Join(
+                to="right_src",
+                on="orders.order_id = right_src.id",
+                relationship=Relationship.MANY_TO_ONE,
+            ),
+        ],
+    )
+    with pytest.raises(exc.Ambiguous) as ei:
+        compile(
+            SemanticQuery(metrics=["revenue"], dimensions=["tier"]),
+            resolver,
+            [orders_with_joins, left, right],
+        )
+    assert ei.value.code is exc.ErrorCode.AMBIGUOUS
+    assert set(ei.value.candidates) == {"left_src.tier", "right_src.tier"}
+
+
+# --- Named joins: role-qualified dimensions ----------------------------------
+
+
+def _make_role_sources() -> tuple[object, object, object]:
+    """Build an owner with two named joins to the same 'loc' source (pickup/dropoff)."""
+    from canon.semantic.models import Column, Dimension, Join, Measure, Relationship, SemanticSource
+
+    loc = SemanticSource(
+        name="loc",
+        connection="c",
+        table="t.loc",
+        grain=["id"],
+        columns=[Column(name="id", type="string"), Column(name="city", type="string")],
+        dimensions=[Dimension(name="city", column="city")],
+    )
+    owner = SemanticSource(
+        name="owner",
+        connection="c",
+        table="t.owner",
+        grain=["id"],
+        columns=[Column(name="id", type="string"), Column(name="amount", type="decimal")],
+        measures=[Measure(name="m", expr="sum(amount)")],
+        joins=[
+            Join(
+                name="pickup",
+                to="loc",
+                on="owner.id = loc.id",
+                relationship=Relationship.MANY_TO_ONE,
+            ),
+            Join(
+                name="dropoff",
+                to="loc",
+                on="owner.id = loc.id",
+                relationship=Relationship.MANY_TO_ONE,
+            ),
+        ],
+    )
+    res = ContractResolver(
+        bindings=[MetricBinding(metric="m", canonical=CanonicalRef(source="owner", measure="m"))],
+        guardrails=[],
+    )
+    return owner, loc, res
+
+
+def test_named_join_qualified_dim_compiles() -> None:
+    owner, loc, res = _make_role_sources()
+    result = compile(SemanticQuery(metrics=["m"], dimensions=["pickup.city"]), res, [owner, loc])
+    _parse_ok(result.sql)
+    assert "pickup" in result.sql
+    assert "dropoff" not in result.sql
+    assert '"t"."loc"' in result.sql or "t.loc" in result.sql
+
+
+def test_named_join_both_roles_compile() -> None:
+    owner, loc, res = _make_role_sources()
+    result = compile(
+        SemanticQuery(metrics=["m"], dimensions=["pickup.city", "dropoff.city"]),
+        res,
+        [owner, loc],
+    )
+    _parse_ok(result.sql)
+    assert "pickup" in result.sql
+    assert "dropoff" in result.sql
+
+
+def test_named_join_unqualified_ambiguous_dim_raises() -> None:
+    owner, loc, res = _make_role_sources()
+    with pytest.raises(exc.Ambiguous) as ei:
+        compile(SemanticQuery(metrics=["m"], dimensions=["city"]), res, [owner, loc])
+    assert ei.value.code is exc.ErrorCode.AMBIGUOUS
+    assert set(ei.value.candidates) == {"pickup.city", "dropoff.city"}
+
+
+def test_named_join_unknown_role_raises_unreachable() -> None:
+    owner, loc, res = _make_role_sources()
+    with pytest.raises(exc.Unreachable):
+        compile(SemanticQuery(metrics=["m"], dimensions=["warehouse.city"]), res, [owner, loc])
+
+
+def test_named_join_duplicate_alias_raises_validation_error() -> None:
+    from pydantic import ValidationError
+
+    from canon.semantic.models import Column, Join, Relationship, SemanticSource
+
+    with pytest.raises(ValidationError, match="duplicate join alias"):
+        SemanticSource(
+            name="bad",
+            connection="c",
+            table="t.bad",
+            grain=["id"],
+            columns=[Column(name="id", type="string")],
+            joins=[
+                Join(to="loc", on="bad.id = loc.id", relationship=Relationship.MANY_TO_ONE),
+                Join(to="loc", on="bad.id = loc.id", relationship=Relationship.MANY_TO_ONE),
+            ],
+        )

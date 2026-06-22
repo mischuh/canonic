@@ -1,0 +1,61 @@
+name: rentals
+connection: rental_db
+table: rentals
+grain: [rental_id]
+description: "One row per rental agreement. The primary operational fact. total_amount is only populated for completed rentals — use the payments fact for settled revenue."
+
+columns:
+  - { name: rental_id,            type: int,       nullable: false }
+  - { name: customer_id,          type: int,       nullable: false }
+  - { name: vehicle_id,           type: int,       nullable: false }
+  - { name: pickup_location_id,   type: int,       nullable: false }
+  - { name: dropoff_location_id,  type: int,       nullable: false }
+  - { name: employee_id,          type: int,       nullable: false }
+  - { name: pickup_date,          type: date,      nullable: false }
+  - { name: dropoff_date,         type: date,      nullable: true  }
+  - { name: planned_days,         type: int,       nullable: false }
+  - { name: actual_days,          type: int,       nullable: true  }
+  - { name: rate_per_day,         type: decimal,   nullable: false }
+  - { name: total_amount,         type: decimal,   nullable: true  }
+  - { name: status,               type: string,    nullable: false }
+
+measures:
+  - name: rental_count
+    expr: 'count(rental_id)'
+    additivity: additive
+  - name: total_base_revenue
+    expr: 'sum(total_amount)'
+    additivity: additive
+  - name: avg_rental_days
+    expr: 'avg(actual_days)'
+    additivity: non_additive
+  - name: completed_rental_count
+    expr: "count(case when status = 'completed' then rental_id end)"
+    additivity: additive
+
+dimensions:
+  - { name: status,       column: status }
+  - { name: pickup_date,  column: pickup_date }
+  - { name: dropoff_date, column: dropoff_date }
+
+joins:
+  - to: customers
+    on: 'rentals.customer_id = customers.customer_id'
+    relationship: many_to_one
+  - to: vehicles
+    on: 'rentals.vehicle_id = vehicles.vehicle_id'
+    relationship: many_to_one
+  - to: employees
+    on: 'rentals.employee_id = employees.employee_id'
+    relationship: many_to_one
+  - name: pickup
+    to: locations
+    on: 'rentals.pickup_location_id = locations.location_id'
+    relationship: many_to_one
+  - name: dropoff
+    to: locations
+    on: 'rentals.dropoff_location_id = locations.location_id'
+    relationship: many_to_one
+
+meta:
+  provenance: human_curated

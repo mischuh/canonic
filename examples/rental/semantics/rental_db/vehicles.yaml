@@ -1,0 +1,28 @@
+name: vehicles
+connection: rental_db
+table: vehicles
+grain: [vehicle_id]
+description: "One row per vehicle in the fleet. category_id determines the vehicle class and base daily rate."
+
+columns:
+  - { name: vehicle_id,    type: int,    nullable: false }
+  - { name: make,          type: string, nullable: false }
+  - { name: model,         type: string, nullable: false }
+  - { name: year,          type: int,    nullable: false }
+  - { name: category_id,   type: int,    nullable: false }
+  - { name: license_plate, type: string, nullable: false }
+  - { name: color,         type: string, nullable: true  }
+
+dimensions:
+  - { name: make,  column: make }
+  - { name: model, column: model }
+  - { name: year,  column: year }
+  - { name: color, column: color }
+
+joins:
+  - to: vehicle_categories
+    on: 'vehicles.category_id = vehicle_categories.category_id'
+    relationship: many_to_one
+
+meta:
+  provenance: human_curated

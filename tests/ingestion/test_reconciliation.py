@@ -16,7 +16,9 @@ from canon.ingestion.models import (
 from canon.ingestion.reconciliation import (
     ExistingFact,
     InMemoryAcceptedStore,
+    NullReconcileDrafter,
     ReconciliationEngine,
+    ResolutionDraft,
 )
 from canon.semantic.models import Provenance
 
@@ -510,3 +512,113 @@ class TestModelingTierPreference:
         assert len(report.entries) == 1
         assert report.entries[0].decision is ReconciliationDecision.ADD
         assert report.entries[0].proposal.acquisition_tier is AcquisitionTier.MODELING
+
+
+# ---------------------------------------------------------------------------
+# refine() — async LLM post-pass for intra-run contradictions (SPEC-E10 §3)
+# ---------------------------------------------------------------------------
+
+
+class _StubReconcileDrafter:
+    """Test stub: always picks the given winner index."""
+
+    def __init__(self, winner: int) -> None:
+        self._winner = winner
+
+    async def draft_resolution(
+        self,
+        target: str,
+        proposals: list[Proposal],  # noqa: ARG002
+    ) -> ResolutionDraft | None:
+        return ResolutionDraft(winner_index=self._winner)
+
+
+class _DecliningDrafter:
+    """Test stub: always returns None (declines to resolve)."""
+
+    async def draft_resolution(
+        self,
+        target: str,
+        proposals: list[Proposal],  # noqa: ARG002
+    ) -> ResolutionDraft | None:
+        return None
+
+
+class _OutOfRangeDrafter:
+    """Test stub: returns an index outside the proposals list."""
+
+    async def draft_resolution(
+        self,
+        target: str,
+        proposals: list[Proposal],  # noqa: ARG002
+    ) -> ResolutionDraft | None:
+        return ResolutionDraft(winner_index=99)
+
+
+class TestRefine:
+    async def test_null_drafter_is_no_op(self) -> None:
+        """NullReconcileDrafter leaves the report unchanged."""
+        p1 = _proposal(fingerprint="sha256:a", content={"grain": ["order_id"]})
+        p2 = _proposal(fingerprint="sha256:b", content={"grain": ["id"]})
+        engine = ReconciliationEngine(drafter=NullReconcileDrafter())
+        report = engine.reconcile([p1, p2], _store())
+        assert len(report.entries) == 2
+        refined = await engine.refine(report, _store())
+        assert len(refined.entries) == 2
+        assert all(e.decision is ReconciliationDecision.CONTRADICTION for e in refined.entries)
+
+    async def test_stub_drafter_resolves_intra_run_contradiction(self) -> None:
+        """A drafter picking winner 0 replaces a 2-entry contradiction with one ADD entry."""
+        p1 = _proposal(fingerprint="sha256:a", content={"grain": ["order_id"]})
+        p2 = _proposal(fingerprint="sha256:b", content={"grain": ["id"]})
+        engine = ReconciliationEngine(drafter=_StubReconcileDrafter(winner=0))
+        report = engine.reconcile([p1, p2], _store())
+        assert len(report.entries) == 2
+        refined = await engine.refine(report, _store())
+        assert len(refined.entries) == 1
+        assert refined.entries[0].decision is ReconciliationDecision.ADD
+
+    async def test_single_entry_contradiction_is_unchanged(self) -> None:
+        """Policy/frozen contradictions (1 entry per target) are never LLM-resolved."""
+        existing = _existing(provenance=Provenance.HUMAN_CURATED, fingerprint="sha256:old")
+        p = _proposal(provenance=Provenance.INFERRED, fingerprint="sha256:new")
+        engine = ReconciliationEngine(drafter=_StubReconcileDrafter(winner=0))
+        report = engine.reconcile([p], _store(existing))
+        assert len(report.entries) == 1
+        assert report.entries[0].decision is ReconciliationDecision.CONTRADICTION
+        refined = await engine.refine(report, _store(existing))
+        assert len(refined.entries) == 1
+        assert refined.entries[0].decision is ReconciliationDecision.CONTRADICTION
+
+    async def test_declining_drafter_preserves_contradictions(self) -> None:
+        """When the drafter returns None, original CONTRADICTION entries are kept."""
+        p1 = _proposal(fingerprint="sha256:a", content={"grain": ["order_id"]})
+        p2 = _proposal(fingerprint="sha256:b", content={"grain": ["id"]})
+        engine = ReconciliationEngine(drafter=_DecliningDrafter())
+        report = engine.reconcile([p1, p2], _store())
+        refined = await engine.refine(report, _store())
+        assert len(refined.entries) == 2
+        assert all(e.decision is ReconciliationDecision.CONTRADICTION for e in refined.entries)
+
+    async def test_out_of_range_winner_preserves_contradictions(self) -> None:
+        """An out-of-range winner index is treated as a declined resolution."""
+        p1 = _proposal(fingerprint="sha256:a", content={"grain": ["order_id"]})
+        p2 = _proposal(fingerprint="sha256:b", content={"grain": ["id"]})
+        engine = ReconciliationEngine(drafter=_OutOfRangeDrafter())
+        report = engine.reconcile([p1, p2], _store())
+        refined = await engine.refine(report, _store())
+        assert len(refined.entries) == 2
+        assert all(e.decision is ReconciliationDecision.CONTRADICTION for e in refined.entries)
+
+    async def test_non_contradiction_entries_unchanged(self) -> None:
+        """refine() passes ADD/EDIT/NO_OP entries through untouched."""
+        p_add = _proposal(fingerprint="sha256:new-target", target="semantics/w/new.yaml")
+        p_noop = _proposal(fingerprint="sha256:same", target="semantics/w/existing.yaml")
+        existing = _existing(target="semantics/w/existing.yaml", fingerprint="sha256:same")
+        engine = ReconciliationEngine(drafter=_StubReconcileDrafter(winner=0))
+        report = engine.reconcile([p_add, p_noop], InMemoryAcceptedStore([existing]))
+        decisions = {e.target: e.decision for e in report.entries}
+        assert decisions["semantics/w/new.yaml"] is ReconciliationDecision.ADD
+        assert decisions["semantics/w/existing.yaml"] is ReconciliationDecision.NO_OP
+        refined = await engine.refine(report, InMemoryAcceptedStore([existing]))
+        assert len(refined.entries) == 2

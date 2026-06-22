@@ -15,7 +15,7 @@ import sqlglot
 from sqlglot import exp
 
 from canon.compiler.dialect import DIALECT_ADAPTERS
-from canon.compiler.joins import JoinEdge, plan_joins
+from canon.compiler.joins import JoinEdge, build_alias_tree, plan_joins
 from canon.compiler.result import CompileResult, FinalityMetadata, FiredGuardrail, SourceFreshness
 from canon.contracts.resolver import Ambiguous as ResolverAmbiguous
 from canon.contracts.resolver import Binding as ResolverBinding
@@ -74,15 +74,20 @@ def compile(  # noqa: A001 — the public verb for this capability is "compile"
     metrics = _resolve_metrics(query, resolver, sources_by_name)
     owner = metrics[0].source  # FROM anchor
 
-    # Stage 2 — resolve dimensions & filters to owning sources.
-    dimensions = _resolve_dimensions(query, sources_by_name)
-    referenced = {src for src, _ in dimensions}
-    where_conditions, filter_sources = _bind_filters(query.filters, sources_by_name)
+    # Stage 2 — resolve dimensions & filters to owning aliases.
+    alias_to_source = build_alias_tree(owner, sources_by_name)
+    dimensions = _resolve_dimensions(query, sources_by_name, owner, alias_to_source)
+    referenced = {alias for alias, _ in dimensions}
+    where_conditions, filter_sources = _bind_filters(
+        query.filters, sources_by_name, owner, alias_to_source
+    )
     referenced |= filter_sources
-    referenced |= {m.source for m in metrics}
+    referenced |= {owner}
 
-    # Stage 3 — plan the join graph from the owner to every referenced source.
-    join_edges = plan_joins(owner, referenced - {owner}, sources_by_name)
+    # Stage 3 — plan the join graph from the owner to every referenced alias.
+    join_edges = plan_joins(
+        owner, referenced - {owner}, sources_by_name, via=list(query.via) or None
+    )
 
     # Stage 4 — fanout analysis: every measure must be P0-compilable; dedup additive
     # measures when a planned join fans out the grain.
@@ -98,7 +103,7 @@ def compile(  # noqa: A001 — the public verb for this capability is "compile"
     finality_rule = resolver.finality_for(metrics[0].name) if len(metrics) == 1 else None
     time_dim_name: str | None = None
     if finality_rule is not None:
-        time_dim_name = _find_time_dim_name(dimensions, sources_by_name)
+        time_dim_name = _find_time_dim_name(dimensions, sources_by_name, alias_to_source)
         if time_dim_name is None:
             finality_rule = None  # no time dimension → all rows implicitly final
 
@@ -148,7 +153,11 @@ def compile(  # noqa: A001 — the public verb for this capability is "compile"
     if finality_meta is not None:
         used_sources = sorted(finality_meta.sources_used)
     else:
-        used_sources = sorted({owner, *referenced, *{e.join.to for e in join_edges}})
+        # Map aliases back to source names (deduplicated) for freshness metadata.
+        used_source_names: set[str] = {owner}
+        for e in join_edges:
+            used_source_names.add(e.join.to)
+        used_sources = sorted(used_source_names)
     return CompileResult(
         sql=sql,
         dialect=adapter.dialect,
@@ -199,10 +208,12 @@ def _resolve_metrics(
 def _resolve_dimensions(
     query: SemanticQuery,
     sources_by_name: dict[str, SemanticSource],
+    owner: str,
+    alias_to_source: dict[str, str],
 ) -> list[tuple[str, Dimension]]:
     resolved: list[tuple[str, Dimension]] = []
     for name in query.dimensions:
-        found = _find_dimension(name, sources_by_name)
+        found = _find_dimension(name, sources_by_name, owner, alias_to_source)
         if found is None:
             raise UnreachableError(f"dimension {name!r} is not declared on any source")
         resolved.append(found)
@@ -212,13 +223,15 @@ def _resolve_dimensions(
 def _bind_filters(
     filters: list[str],
     sources_by_name: dict[str, SemanticSource],
+    owner: str,
+    alias_to_source: dict[str, str] | None = None,
 ) -> tuple[list[exp.Expression], set[str]]:
     """Parse filter strings, qualify referenced names to their owning source alias."""
     conditions: list[exp.Expression] = []
     used: set[str] = set()
     for raw in filters:
         parsed = _parse(raw)
-        bound, sources = _qualify_columns(parsed, sources_by_name)
+        bound, sources = _qualify_columns(parsed, sources_by_name, owner, alias_to_source)
         conditions.append(bound)
         used |= sources
     return conditions, used
@@ -243,7 +256,7 @@ def _enforce_guardrails(
             seen.add(guardrail.id)
             if guardrail.filter:
                 parsed = _parse(guardrail.filter)
-                bound, _ = _qualify_columns(parsed, sources_by_name)
+                bound, _ = _qualify_columns(parsed, sources_by_name, m.source)
                 conditions.append(bound)
             fired.append(FiredGuardrail(id=guardrail.id, kind=str(guardrail.kind)))
     return conditions, fired
@@ -276,9 +289,9 @@ def _from_and_joins(
     select = select.from_(_alias(exp.to_table(owner_table), owner))
     for edge in join_edges:
         target = sources_by_name[edge.join.to]
-        on_ast = _parse(edge.join.on)
+        on_ast = _parse(edge.on_sql)
         select = select.join(
-            _alias(exp.to_table(target.table), edge.join.to),
+            _alias(exp.to_table(target.table), edge.alias),
             on=on_ast,
             join_type="LEFT",
         )
@@ -370,11 +383,89 @@ def _find_measure(source: SemanticSource, name: str) -> Measure | None:
     return next((m for m in source.measures if m.name == name), None)
 
 
+def _reachable_from(
+    owner: str,
+    sources_by_name: dict[str, SemanticSource],
+) -> set[str]:
+    """BFS over declared joins from owner; returns all transitively reachable source names.
+
+    Does not include ``owner`` itself so callers can distinguish
+    "on the owner" from "reachable via join" cleanly.
+    """
+    reachable: set[str] = set()
+    frontier = [owner]
+    visited: set[str] = {owner}
+    while frontier:
+        node = frontier.pop()
+        source = sources_by_name.get(node)
+        if source is None:
+            continue
+        for join in source.joins:
+            if join.to not in visited:
+                visited.add(join.to)
+                reachable.add(join.to)
+                frontier.append(join.to)
+    return reachable
+
+
 def _find_dimension(
     name: str,
     sources_by_name: dict[str, SemanticSource],
+    owner: str | None = None,
+    alias_to_source: dict[str, str] | None = None,
 ) -> tuple[str, Dimension] | None:
-    for src in sorted(sources_by_name):  # deterministic across sources
+    # Handle qualified references like "pickup.city".
+    if "." in name:
+        role, dim_name = name.split(".", 1)
+        if alias_to_source is None or role not in alias_to_source:
+            return None
+        src_name = alias_to_source[role]
+        source = sources_by_name.get(src_name)
+        if source is None:
+            return None
+        dim = next((d for d in source.dimensions if d.name == dim_name), None)
+        if dim is None:
+            return None
+        return (role, dim)
+
+    if owner is not None:
+        # Priority 1: the metric's owning source wins unconditionally.
+        owner_source = sources_by_name.get(owner)
+        if owner_source is not None:
+            for dim in owner_source.dimensions:
+                if dim.name == name:
+                    return owner, dim
+
+        # Priority 2: search join-reachable aliases for the dimension.
+        if alias_to_source is not None:
+            reachable: dict[str, str] = {
+                alias: src for alias, src in alias_to_source.items() if alias != owner
+            }
+        else:
+            reachable = {src: src for src in _reachable_from(owner, sources_by_name)}
+
+        candidates: list[tuple[str, Dimension]] = []
+        for alias in sorted(reachable):
+            reachable_src_name = reachable[alias]
+            reachable_src = sources_by_name.get(reachable_src_name)
+            if reachable_src is None:
+                continue
+            for dim in reachable_src.dimensions:
+                if dim.name == name:
+                    candidates.append((alias, dim))
+        if len(candidates) == 1:
+            return candidates[0]
+        if len(candidates) > 1:
+            qualified = [f"{alias}.{name}" for alias, _ in candidates]
+            raise Ambiguous(
+                f"dimension {name!r} is present on multiple join-reachable sources; "
+                f"qualify explicitly",
+                candidates=qualified,
+            )
+        return None
+
+    # No owner: fall back to alphabetical scan (preserves behaviour for callers without context).
+    for src in sorted(sources_by_name):
         for dim in sources_by_name[src].dimensions:
             if dim.name == name:
                 return src, dim
@@ -384,9 +475,11 @@ def _find_dimension(
 def _bind_name(
     name: str,
     sources_by_name: dict[str, SemanticSource],
+    owner: str | None = None,
+    alias_to_source: dict[str, str] | None = None,
 ) -> tuple[str, str] | None:
-    """Resolve a bare name to ``(source, physical_column)`` — dimension first, then column."""
-    dim = _find_dimension(name, sources_by_name)
+    """Resolve a bare name to ``(alias, physical_column)`` — dimension first, then column."""
+    dim = _find_dimension(name, sources_by_name, owner, alias_to_source)
     if dim is not None:
         return dim[0], dim[1].column
     for src in sorted(sources_by_name):
@@ -398,6 +491,8 @@ def _bind_name(
 def _qualify_columns(
     expr: exp.Expression,
     sources_by_name: dict[str, SemanticSource],
+    owner: str | None = None,
+    alias_to_source: dict[str, str] | None = None,
 ) -> tuple[exp.Expression, set[str]]:
     """Qualify each bare column in a filter to its owning source alias + physical column."""
     used: set[str] = set()
@@ -407,12 +502,12 @@ def _qualify_columns(
             if node.table:
                 used.add(node.table)
                 return node
-            binding = _bind_name(node.name, sources_by_name)
+            binding = _bind_name(node.name, sources_by_name, owner, alias_to_source)
             if binding is None:
                 raise UnreachableError(f"filter references unknown name {node.name!r}")
-            src, col = binding
-            used.add(src)
-            return exp.column(col, table=src)
+            src_or_alias, col = binding
+            used.add(src_or_alias)
+            return exp.column(col, table=src_or_alias)
         return node
 
     return expr.transform(transform), used
@@ -453,9 +548,11 @@ _TIME_TYPES = frozenset({NormalizedType.DATE, NormalizedType.TIMESTAMP})
 def _find_time_dim_name(
     dimensions: list[tuple[str, Dimension]],
     sources_by_name: dict[str, SemanticSource],
+    alias_to_source: dict[str, str] | None = None,
 ) -> str | None:
     """Return the name of the first DATE/TIMESTAMP dimension in the query, or None."""
-    for src_name, dim in dimensions:
+    for alias_or_src, dim in dimensions:
+        src_name = (alias_to_source or {}).get(alias_or_src, alias_or_src)
         source = sources_by_name.get(src_name)
         if source is None:
             continue

@@ -22,6 +22,7 @@ class SemanticQuery(BaseModel):
     metrics: list[str]  # [P0] canonical metric names/aliases
     dimensions: list[str] = []  # [P0] dimension names to group by
     filters: list[str] = []  # [P0] predicate strings over dimension/column names
+    via: list[str] = []  # [P0] intermediate source names to route join paths through
     context: str | None = None  # [P1] tag activating context-scoped guardrails
     limit: int | None = None  # [P0] row cap injected by the dialect adapter
     as_of: datetime | None = None  # [P1] reference point for finality watermark evaluation

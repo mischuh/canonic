@@ -34,7 +34,7 @@ async def test_render_marks_recommended_and_notes_reconcile_pending(grain_cases)
 
     assert "✅" in md  # the recommended candidate
     assert "**Recommended for `draft`:** small-local." in md
-    assert "Pending E4 reconciliation drafting" in md
+    assert "--task reconcile" in md
 
 
 async def test_render_states_when_no_candidate_recommended(grain_cases) -> None:

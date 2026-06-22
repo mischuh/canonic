@@ -1,0 +1,7 @@
+metric: avg_repair_costs
+canonical:
+  source: damages
+  measure: avg_repair_costs
+provenance: human_curated
+aliases: ["average repair costs", "mean repair costs", "avg repair costs"]
+status: active

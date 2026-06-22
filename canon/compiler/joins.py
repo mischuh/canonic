@@ -4,12 +4,20 @@ From the metric's owning source, find the join path to every referenced source u
 only declared ``joins``. No path → ``UNREACHABLE``; more than one valid path →
 ``AMBIGUOUS_JOIN_PATH``. The compiler never invents a cross join and never guesses a
 shortest path (SPEC §10, decided).
+
+Named joins (``join.name``) allow the same source to be joined under multiple SQL
+aliases (e.g. ``pickup`` and ``dropoff`` for a car-rental model). The traversal tracks
+aliases rather than source names so both paths can coexist in a single query.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
+
+import sqlglot
+from pydantic import BaseModel, ConfigDict
+from sqlglot import exp
 
 from canon.exc import AmbiguousJoinPath, Unreachable
 
@@ -18,15 +26,87 @@ if TYPE_CHECKING:
 
     from canon.semantic.models import Join, SemanticSource
 
-__all__ = ["JoinEdge", "plan_joins"]
+__all__ = ["JoinEdge", "JoinPathCandidate", "build_alias_tree", "plan_joins"]
 
 
 @dataclass(frozen=True, slots=True)
 class JoinEdge:
-    """One declared join traversed from ``from_source`` to ``join.to``."""
+    """One declared join traversed from ``from_source`` / ``from_alias`` to ``alias``.
+
+    ``alias`` is the SQL table alias for the join target (``join.name or join.to``).
+    ``on_sql`` is the rewritten ON clause with all table references replaced by aliases.
+    """
 
     from_source: str
+    from_alias: str
     join: Join
+    alias: str
+    on_sql: str
+
+
+class JoinPathCandidate(BaseModel):
+    """A candidate join path for an ambiguous query, ready to act on.
+
+    Returned in ``AmbiguousJoinPath.candidates`` so MCP/CLI clients can present
+    concrete choices. ``via`` is the exact value to pass back in ``SemanticQuery.via``
+    to select this path; ``route`` is a human-readable rendering for display.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    via: list[str]
+    route: str
+    joins: list[dict[str, Any]]
+
+
+def build_alias_tree(
+    owner: str,
+    sources_by_name: dict[str, SemanticSource],
+) -> dict[str, str]:
+    """Return ``{alias: source_name}`` for every alias reachable from *owner*.
+
+    For unnamed joins the alias equals the source name. For named joins (``join.name``
+    set) the alias is the declared name. The owner itself maps to its own name.
+    """
+    alias_to_source: dict[str, str] = {owner: owner}
+    queue: list[tuple[str, str]] = [(owner, owner)]  # (alias, source_name)
+    visited: set[str] = {owner}
+    while queue:
+        _, src_name = queue.pop(0)
+        src = sources_by_name.get(src_name)
+        if src is None:
+            continue
+        for join in src.joins:
+            child_alias = join.name or join.to
+            if child_alias not in visited:
+                visited.add(child_alias)
+                alias_to_source[child_alias] = join.to
+                queue.append((child_alias, join.to))
+    return alias_to_source
+
+
+def _rewrite_on(
+    on_sql: str,
+    from_src: str,
+    from_alias: str,
+    to_src: str,
+    to_alias: str,
+) -> str:
+    """Rewrite ON clause table references to use SQL aliases instead of source names."""
+    if from_alias == from_src and to_alias == to_src:
+        return on_sql  # fast path: no renames needed
+
+    parsed = sqlglot.parse_one(on_sql)
+
+    def transform(node: exp.Expression) -> exp.Expression:
+        if isinstance(node, exp.Column):
+            if node.table == from_src:
+                return exp.column(node.name, table=from_alias)
+            if node.table == to_src:
+                return exp.column(node.name, table=to_alias)
+        return node
+
+    return parsed.transform(transform).sql()
 
 
 def _all_simple_paths(
@@ -34,37 +114,73 @@ def _all_simple_paths(
     target: str,
     sources_by_name: dict[str, SemanticSource],
 ) -> list[list[JoinEdge]]:
-    """Enumerate every simple directed path of declared joins from owner to target."""
+    """Enumerate every simple directed path of declared joins from owner to target alias."""
     paths: list[list[JoinEdge]] = []
 
-    def walk(node: str, visited: frozenset[str], trail: list[JoinEdge]) -> None:
-        if node == target:
+    def walk(
+        node_alias: str,
+        node_src: str,
+        visited: frozenset[str],
+        trail: list[JoinEdge],
+    ) -> None:
+        if node_alias == target:
             paths.append(list(trail))
             return
-        source = sources_by_name.get(node)
+        source = sources_by_name.get(node_src)
         if source is None:
             return
         for join in source.joins:  # declared order → deterministic enumeration
-            if join.to in visited:
+            child_alias = join.name or join.to
+            if child_alias in visited:
                 continue
-            trail.append(JoinEdge(from_source=node, join=join))
-            walk(join.to, visited | {join.to}, trail)
+            on_sql = _rewrite_on(join.on, node_src, node_alias, join.to, child_alias)
+            trail.append(
+                JoinEdge(
+                    from_source=node_src,
+                    from_alias=node_alias,
+                    join=join,
+                    alias=child_alias,
+                    on_sql=on_sql,
+                )
+            )
+            walk(child_alias, join.to, visited | {child_alias}, trail)
             trail.pop()
 
-    walk(owner, frozenset({owner}), [])
+    walk(owner, owner, frozenset({owner}), [])
     return paths
+
+
+def _filter_by_via(paths: list[list[JoinEdge]], via: list[str]) -> list[list[JoinEdge]]:
+    """Keep only paths whose full alias sequence starts with ``via`` as a prefix.
+
+    The alias sequence is ``[e.alias for e in path]``, which includes all joined aliases
+    from the first join to the final target. A path matches if its aliases begin with
+    the exact sequence specified in ``via``.
+    """
+    result = []
+    for path in paths:
+        full_path = [e.alias for e in path]
+        if len(via) <= len(full_path) and full_path[: len(via)] == via:
+            result.append(path)
+    return result
 
 
 def plan_joins(
     owner: str,
     targets: Iterable[str],
     sources_by_name: dict[str, SemanticSource],
+    via: list[str] | None = None,
 ) -> list[JoinEdge]:
-    """Return the ordered join edges connecting ``owner`` to every target source.
+    """Return the ordered join edges connecting ``owner`` to every target alias.
 
-    Targets are processed in sorted order for determinism; an edge whose target is
-    already joined is skipped so no source is joined twice. Raises :class:`Unreachable`
+    Targets are processed in sorted order for determinism; an edge whose target alias is
+    already joined is skipped so no alias is joined twice. Raises :class:`Unreachable`
     when a target has no path and :class:`AmbiguousJoinPath` when it has more than one.
+
+    ``via`` is an optional prefix of alias names that each ambiguous join path
+    must begin with. When ``via`` is provided and narrows the candidate set
+    to exactly one path, that path is used. If it eliminates all paths, :class:`Unreachable`
+    is raised instead.
     """
     edges: list[JoinEdge] = []
     joined: set[str] = {owner}
@@ -74,14 +190,34 @@ def plan_joins(
         paths = _all_simple_paths(owner, target, sources_by_name)
         if not paths:
             raise Unreachable(f"source {target!r} has no declared join path from {owner!r}")
+        if len(paths) > 1 and via is not None:
+            filtered = _filter_by_via(paths, via)
+            if not filtered:
+                raise Unreachable(
+                    f"no join path from {owner!r} to {target!r} passes through {via!r}"
+                )
+            paths = filtered
         if len(paths) > 1:
+            candidates = [
+                JoinPathCandidate(
+                    via=[e.alias for e in path],
+                    route=" → ".join([owner] + [e.alias for e in path]),
+                    joins=[
+                        {"from": e.from_source, "to": e.join.to, "on": e.on_sql, "alias": e.alias}
+                        for e in path
+                    ],
+                )
+                for path in paths
+            ]
             raise AmbiguousJoinPath(
                 f"more than one join path from {owner!r} to {target!r}; "
-                f"an explicit path is required",
-                candidates=[[e.join.to for e in path] for path in paths],
+                f'use "via" to specify which path',
+                owner=owner,
+                target=target,
+                candidates=candidates,
             )
         for edge in paths[0]:
-            if edge.join.to not in joined:
+            if edge.alias not in joined:
                 edges.append(edge)
-                joined.add(edge.join.to)
+                joined.add(edge.alias)
     return edges

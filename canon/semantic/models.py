@@ -160,6 +160,12 @@ class Join(BaseModel):
     to: str
     on: str
     relationship: Relationship
+    name: str | None = None  # SQL alias for the target table; defaults to ``to``
+
+    @property
+    def alias(self) -> str:
+        """SQL alias used when this join's target table appears in a query."""
+        return self.name if self.name else self.to
 
 
 class Filter(BaseModel):
@@ -230,6 +236,7 @@ class SemanticSource(BaseModel):
         self._reject_duplicates("columns", "column", [c.name for c in self.columns])
         self._reject_duplicates("measures", "measure", [m.name for m in self.measures])
         self._reject_duplicates("dimensions", "dimension", [d.name for d in self.dimensions])
+        self._reject_duplicates("joins", "join alias", [j.alias for j in self.joins])
 
         # Grain columns must be declared.
         for i, g in enumerate(self.grain):
