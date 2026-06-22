@@ -20,9 +20,9 @@ from canon.compiler.result import CompileResult, FinalityMetadata, FiredGuardrai
 from canon.contracts.resolver import Ambiguous as ResolverAmbiguous
 from canon.contracts.resolver import Binding as ResolverBinding
 from canon.contracts.resolver import Unresolved as ResolverUnresolved
-from canon.exc import Ambiguous, GuardrailBlock, Unresolved, UnsupportedMeasure
+from canon.exc import Ambiguous, FanoutUnsafe, GuardrailBlock, Unresolved, UnsupportedMeasure
 from canon.exc import Unreachable as UnreachableError
-from canon.semantic.models import NormalizedType, Relationship
+from canon.semantic.models import Additivity, NormalizedType, Relationship
 
 if TYPE_CHECKING:
     from canon.compiler.query import SemanticQuery
@@ -89,15 +89,39 @@ def compile(  # noqa: A001 — the public verb for this capability is "compile"
         owner, referenced - {owner}, sources_by_name, via=list(query.via) or None
     )
 
-    # Stage 4 — fanout analysis: every measure must be P0-compilable; dedup additive
-    # measures when a planned join fans out the grain.
-    for m in metrics:
-        if not m.measure.is_p0_compilable:
-            raise UnsupportedMeasure(
-                f"measure {m.source}.{m.measure.name!r} is not additive; "
-                f"non-additive/semi-additive measures are deferred to P1"
-            )
+    # Stage 4 — fanout analysis: safety floor (SPEC-E15 §5) + dedup for additive fanout.
     fanout = any(edge.join.relationship in _FANOUT for edge in join_edges)
+    grouped = {dim.name for _alias, dim in dimensions}
+
+    for m in metrics:
+        add = m.measure.additivity
+        if add is Additivity.ADDITIVE:
+            if not m.measure.is_p0_compilable:
+                raise UnsupportedMeasure(
+                    f"measure {m.source}.{m.measure.name!r} uses an aggregate function "
+                    f"not supported at P0"
+                )
+            continue
+
+        # Non-additive / semi-additive: safety floor — refuse corrupting aggregations.
+        if fanout:
+            raise FanoutUnsafe(
+                f"measure {m.source}.{m.measure.name!r} is {add.value} and a "
+                f"one_to_many/many_to_many join in this query would multiply its rows "
+                f"and corrupt the aggregate; request it without the fanning dimension "
+                f"or source, or query it at its native grain"
+            )
+        if add is Additivity.SEMI_ADDITIVE:
+            unsafe_dims = [d for d in m.measure.semi_additive_over if d not in grouped]
+            if unsafe_dims:
+                raise UnsupportedMeasure(
+                    f"measure {m.source}.{m.measure.name!r} is semi-additive over "
+                    f"{unsafe_dims} and cannot be collapsed across those dimensions "
+                    f"without the semi_additive strategy; group by {unsafe_dims} for "
+                    f"a correct result"
+                )
+        # Pure NON_ADDITIVE with no fanout, or SEMI_ADDITIVE grouped by its collapse dim(s):
+        # _build_simple recomputes the aggregate from base rows at the requested grain — safe.
 
     # Stage 5 — finality & coalescing [P1]: evaluate watermark, select sources per window.
     finality_rule = resolver.finality_for(metrics[0].name) if len(metrics) == 1 else None
