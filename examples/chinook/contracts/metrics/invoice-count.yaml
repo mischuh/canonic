@@ -1,7 +1,0 @@
-metric: invoice_count
-canonical:
-  source: invoices
-  measure: invoice_count
-provenance: human_curated
-aliases: ["invoices", "number of invoices", "orders", "purchases"]
-status: active

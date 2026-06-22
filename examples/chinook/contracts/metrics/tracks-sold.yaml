@@ -1,7 +1,0 @@
-metric: tracks_sold
-canonical:
-  source: invoice_lines
-  measure: tracks_sold
-provenance: human_curated
-aliases: ["tracks purchased", "downloads", "units sold", "track downloads"]
-status: active

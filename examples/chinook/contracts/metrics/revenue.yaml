@@ -1,7 +1,0 @@
-metric: revenue
-canonical:
-  source: invoices
-  measure: total_revenue
-provenance: human_curated
-aliases: ["total revenue", "sales", "total sales", "net sales"]
-status: active
