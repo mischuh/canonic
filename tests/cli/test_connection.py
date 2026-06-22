@@ -120,7 +120,8 @@ class TestConnectionTest:
 class TestConnectionAdd:
     def test_add_new_connection(self, runner, project_dir):
         result = runner.invoke(
-            app, ["connection", "add", "--id", "db3", "--type", "sqlite", "--param", "path=:memory:"]
+            app,
+            ["connection", "add", "--id", "db3", "--type", "sqlite", "--param", "path=:memory:"],
         )
         assert result.exit_code == 0
         assert "db3" in result.output
@@ -134,10 +135,14 @@ class TestConnectionAdd:
         result = runner.invoke(
             app,
             [
-                "connection", "add",
-                "--id", "newdefault",
-                "--type", "sqlite",
-                "--param", "path=:memory:",
+                "connection",
+                "add",
+                "--id",
+                "newdefault",
+                "--type",
+                "sqlite",
+                "--param",
+                "path=:memory:",
                 "--set-default",
             ],
         )
@@ -149,9 +154,7 @@ class TestConnectionAdd:
         assert defaults[0]["id"] == "newdefault"
 
     def test_add_duplicate_id_exits_nonzero(self, runner, project_dir):
-        result = runner.invoke(
-            app, ["connection", "add", "--id", "db1", "--type", "sqlite"]
-        )
+        result = runner.invoke(app, ["connection", "add", "--id", "db1", "--type", "sqlite"])
         assert result.exit_code == 1
 
     def test_add_bad_param_format_exits_nonzero(self, runner, project_dir):
@@ -170,9 +173,7 @@ class TestConnectionAdd:
 
     def test_add_outside_project(self, runner, tmp_path, monkeypatch):
         monkeypatch.chdir(tmp_path)
-        result = runner.invoke(
-            app, ["connection", "add", "--id", "x", "--type", "sqlite"]
-        )
+        result = runner.invoke(app, ["connection", "add", "--id", "x", "--type", "sqlite"])
         assert result.exit_code == 1
 
 

@@ -38,26 +38,14 @@ def _tokens_cell(summary: ModelTaskSummary) -> str:
     return "—" if summary.median_total_tokens is None else str(summary.median_total_tokens)
 
 
-def render_markdown(report: BaselineReport) -> str:
-    """Render the per-task baseline table, recommended pairing, and re-run instructions."""
-    generated = report.generated_at.isoformat(timespec="seconds")
+def _render_task_section(report: BaselineReport, title: str) -> list[str]:
+    """Render the table and recommendation for one task report."""
     lines: list[str] = [
-        "# Canon local-model baseline",
-        "",
-        f"_Generated {generated} — re-run with `canon eval baseline` (SPEC-E10 §7, GH-66)._",
-        "",
-        "Measures the LLM-in-loop **drafting** that feeds compilable semantics — not literal",
-        "compiler quality, since the E5 compiler is deterministic and LLM-free. Per task and",
-        "model: grain accuracy on a labeled set, structured (JSON-schema) output behavior, and",
-        f"latency. Recommended = most accurate model clearing {_pct(report.adherence_floor)}",
-        "structured-output adherence.",
-        "",
-        f"## Task: `{report.task.value}` (grain inference)",
+        f"## Task: `{report.task.value}` ({title})",
         "",
         "| Model | Accuracy | Structured output | p50 latency | Median tokens | Recommended |",
         "| --- | --- | --- | --- | --- | --- |",
     ]
-
     for summary in report.summaries:
         recommended = "✅" if summary.name == report.recommended else ""
         correct = round(summary.accuracy * summary.n)
@@ -69,7 +57,6 @@ def render_markdown(report: BaselineReport) -> str:
             f"| {_tokens_cell(summary)} "
             f"| {recommended} |"
         )
-
     lines.append("")
     if report.recommended is not None:
         lines.append(f"**Recommended for `{report.task.value}`:** {report.recommended}.")
@@ -78,14 +65,43 @@ def render_markdown(report: BaselineReport) -> str:
             f"**No candidate cleared the {_pct(report.adherence_floor)} structured-output "
             "floor** for this task — none is recommended."
         )
+    return lines
+
+
+def render_markdown(
+    report: BaselineReport,
+    reconcile_report: BaselineReport | None = None,
+) -> str:
+    """Render the per-task baseline tables, recommended pairings, and re-run instructions."""
+    generated = report.generated_at.isoformat(timespec="seconds")
+    lines: list[str] = [
+        "# Canon local-model baseline",
+        "",
+        f"_Generated {generated} — re-run with `canon eval baseline` (SPEC-E10 §7, GH-66)._",
+        "",
+        "Measures the LLM-in-loop **drafting** that feeds compilable semantics — not literal",
+        "compiler quality, since the E5 compiler is deterministic and LLM-free. Per task and",
+        "model: accuracy on a labeled set, structured (JSON-schema) output behavior, and",
+        f"latency. Recommended = most accurate model clearing {_pct(report.adherence_floor)}",
+        "structured-output adherence.",
+        "",
+    ]
+
+    lines += _render_task_section(report, "grain inference")
+
+    lines.append("")
+    if reconcile_report is not None:
+        lines += _render_task_section(reconcile_report, "contradiction resolution")
+    else:
+        lines += [
+            f"## Task: `{Task.RECONCILE.value}`",
+            "",
+            "Pending E4 reconciliation drafting — `reconcile` has no live call site yet, so there is",
+            "no real behavior to score. The harness is generic and will cover it once E4 wires the",
+            "reconcile path (SPEC-E10 §7, GH-66).",
+        ]
 
     lines += [
-        "",
-        f"## Task: `{Task.RECONCILE.value}`",
-        "",
-        "Pending E4 reconciliation drafting — `reconcile` has no live call site yet, so there is",
-        "no real behavior to score. The harness is generic and will cover it once E4 wires the",
-        "reconcile path (SPEC-E10 §7, GH-66).",
         "",
         "## How to re-run",
         "",

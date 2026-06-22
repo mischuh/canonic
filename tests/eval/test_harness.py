@@ -6,6 +6,7 @@ from datetime import UTC, datetime
 
 import pytest
 
+from canon.eval.dataset import ReconcileCase
 from canon.eval.harness import run_baseline
 from canon.eval.models import StructuredOutcome
 from canon.exc import (
@@ -14,6 +15,7 @@ from canon.exc import (
     StructuredOutputError,
     StructuredOutputUnsupported,
 )
+from canon.ingestion.reconciliation import ResolutionDraft
 from canon.runtime.resolver import Task
 from tests.eval.conftest import StubDrafter, StubUsageReader, make_candidate
 
@@ -105,4 +107,85 @@ async def test_no_recommendation_when_none_clear_floor(grain_cases) -> None:
         drafter_factory=_factory({"a": StubDrafter(raises=GenerationError("x"))}),
         usage_reader=StubUsageReader(),
     )
+    assert report.recommended is None
+
+
+class StubReconcileDrafter:
+    """A reconcile drafter that always picks a fixed winner index."""
+
+    def __init__(self, *, winner: int | None = None, raises: Exception | None = None) -> None:
+        self._winner = winner
+        self._raises = raises
+
+    async def draft_resolution(
+        self,
+        target: str,
+        proposals: list,  # noqa: ANN001,ARG002
+    ) -> ResolutionDraft | None:
+        if self._raises is not None:
+            raise self._raises
+        if self._winner is None:
+            return None
+        return ResolutionDraft(winner_index=self._winner)
+
+
+def _reconcile_factory(mapping: dict[str, StubReconcileDrafter]):
+    def build(config):  # noqa: ANN001
+        return mapping[config.model]
+
+    return build
+
+
+@pytest.fixture
+def reconcile_cases() -> list[ReconcileCase]:
+    return [
+        ReconcileCase.model_validate(
+            {
+                "target": "semantics/w/orders.yaml",
+                "proposals": [{"grain": ["order_id"]}, {"grain": ["id"]}],
+                "expected_winner": 0,
+            }
+        ),
+        ReconcileCase.model_validate(
+            {
+                "target": "semantics/w/users.yaml",
+                "proposals": [{"grain": ["user_id"]}, {"grain": ["user_id", "tenant_id"]}],
+                "expected_winner": 1,
+            }
+        ),
+    ]
+
+
+async def test_reconcile_baseline_correct_winner(reconcile_cases) -> None:
+    drafter = StubReconcileDrafter(winner=0)
+    candidate = make_candidate("strong", "llama3:70b")
+    report = await run_baseline(
+        [candidate],
+        reconcile_cases,
+        task=Task.RECONCILE,
+        drafter_factory=_reconcile_factory({"llama3:70b": drafter}),
+        usage_reader=StubUsageReader(tokens=100),
+        now=datetime(2026, 6, 18, tzinfo=UTC),
+    )
+
+    (summary,) = report.summaries
+    # Winner 0 is correct for case 0, wrong for case 1 (expected 1)
+    assert summary.accuracy == 0.5
+    assert summary.schema_adherence == 1.0
+    assert report.task is Task.RECONCILE
+
+
+async def test_reconcile_baseline_generation_error_maps_to_outcome(reconcile_cases) -> None:
+    drafter = StubReconcileDrafter(raises=GenerationError("down"))
+    candidate = make_candidate("m", "m")
+    report = await run_baseline(
+        [candidate],
+        reconcile_cases,
+        task=Task.RECONCILE,
+        drafter_factory=_reconcile_factory({"m": drafter}),
+        usage_reader=StubUsageReader(),
+    )
+    (summary,) = report.summaries
+    assert summary.accuracy == 0.0
+    assert all(o.structured is StructuredOutcome.ERROR for o in summary.outcomes)
     assert report.recommended is None

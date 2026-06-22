@@ -11,7 +11,7 @@ if TYPE_CHECKING:
 
     from canon.runtime.resolver import Task
 
-__all__ = ["median", "score_grain", "summarize"]
+__all__ = ["median", "score_grain", "score_resolution", "summarize"]
 
 
 def score_grain(predicted: Sequence[str], expected: Sequence[str]) -> bool:
@@ -21,6 +21,11 @@ def score_grain(predicted: Sequence[str], expected: Sequence[str]) -> bool:
     same answer; a missing or extra column is wrong.
     """
     return set(predicted) == set(expected)
+
+
+def score_resolution(predicted: int, expected: int) -> bool:
+    """A resolution is correct when the predicted winner index matches the labeled winner."""
+    return predicted == expected
 
 
 def median(values: Sequence[float]) -> float:

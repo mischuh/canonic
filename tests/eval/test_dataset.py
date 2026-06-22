@@ -10,7 +10,12 @@ if TYPE_CHECKING:
     from pathlib import Path
 
 from canon.eval.candidates import load_candidates
-from canon.eval.dataset import default_dataset_path, load_grain_cases
+from canon.eval.dataset import (
+    default_dataset_path,
+    default_reconcile_dataset_path,
+    load_grain_cases,
+    load_reconcile_cases,
+)
 from canon.exc import EvalDatasetError
 
 
@@ -73,6 +78,38 @@ def test_load_candidates_without_list_raises(tmp_path: Path) -> None:
 
     with pytest.raises(EvalDatasetError, match="expected a top-level 'candidates' list"):
         load_candidates(path)
+
+
+def test_shipped_reconcile_dataset_loads() -> None:
+    cases = load_reconcile_cases(default_reconcile_dataset_path())
+
+    assert len(cases) >= 6
+    assert all(len(c.proposals) >= 2 for c in cases)
+    assert all(c.expected_winner in (0, 1) for c in cases)
+
+
+def test_reconcile_invalid_json_line_raises(tmp_path: Path) -> None:
+    bad = tmp_path / "reconcile.jsonl"
+    bad.write_text('{"target": "t", "proposals": [], "expected_winner": 0}\nnot json\n')
+
+    with pytest.raises(EvalDatasetError, match=r"reconcile\.jsonl:2: invalid JSON"):
+        load_reconcile_cases(bad)
+
+
+def test_reconcile_schema_violation_raises(tmp_path: Path) -> None:
+    bad = tmp_path / "reconcile.jsonl"
+    bad.write_text('{"target": "t", "proposals": []}\n')  # missing expected_winner
+
+    with pytest.raises(EvalDatasetError, match="invalid reconcile case"):
+        load_reconcile_cases(bad)
+
+
+def test_reconcile_empty_dataset_raises(tmp_path: Path) -> None:
+    empty = tmp_path / "reconcile.jsonl"
+    empty.write_text("# comment only\n\n")
+
+    with pytest.raises(EvalDatasetError, match="no labeled cases"):
+        load_reconcile_cases(empty)
 
 
 def test_load_candidates_rejects_literal_api_key(tmp_path: Path) -> None:
