@@ -1,0 +1,22 @@
+name: customers
+connection: rental_db
+table: customers
+grain: [customer_id]
+description: "One row per registered customer. membership_tier drives loyalty discounts and is set at account creation."
+
+columns:
+  - { name: customer_id,     type: int,    nullable: false }
+  - { name: first_name,      type: string, nullable: false }
+  - { name: last_name,       type: string, nullable: false }
+  - { name: email,           type: string, nullable: false }
+  - { name: country,         type: string, nullable: false }
+  - { name: membership_tier, type: string, nullable: false }
+  - { name: created_at,      type: date,   nullable: false }
+
+dimensions:
+  - { name: country,         column: country }
+  - { name: membership_tier, column: membership_tier }
+  - { name: created_at,      column: created_at }
+
+meta:
+  provenance: human_curated

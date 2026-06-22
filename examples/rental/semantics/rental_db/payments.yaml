@@ -1,0 +1,37 @@
+name: payments
+connection: rental_db
+table: payments
+grain: [payment_id]
+description: "One row per payment transaction. A single rental can have multiple payments (e.g. deposit + final settlement). Use this fact — not rentals.total_amount — for settled revenue figures."
+
+columns:
+  - { name: payment_id,   type: int,     nullable: false }
+  - { name: rental_id,    type: int,     nullable: false }
+  - { name: payment_date, type: date,    nullable: false }
+  - { name: amount,       type: decimal, nullable: false }
+  - { name: method,       type: string,  nullable: false }
+  - { name: status,       type: string,  nullable: false }
+
+measures:
+  - name: payment_count
+    expr: 'count(payment_id)'
+    additivity: additive
+  - name: total_paid
+    expr: "sum(case when status = 'settled' then amount else 0 end)"
+    additivity: additive
+  - name: avg_payment_amount
+    expr: 'avg(amount)'
+    additivity: non_additive
+
+dimensions:
+  - { name: payment_date, column: payment_date }
+  - { name: method,       column: method }
+  - { name: status,       column: status }
+
+joins:
+  - to: rentals
+    on: 'payments.rental_id = rentals.rental_id'
+    relationship: many_to_one
+
+meta:
+  provenance: human_curated

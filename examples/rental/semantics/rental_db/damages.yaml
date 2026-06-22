@@ -1,0 +1,45 @@
+name: damages
+connection: rental_db
+table: damages
+grain: [damage_id]
+description: "One row per damage claim filed after a rental. A single rental can generate multiple claims. at_fault_customer = 1 means the customer is liable for repair_cost."
+
+columns:
+  - { name: damage_id,         type: int,     nullable: false }
+  - { name: rental_id,         type: int,     nullable: false }
+  - { name: vehicle_id,        type: int,     nullable: false }
+  - { name: reported_date,     type: date,    nullable: false }
+  - { name: severity,          type: string,  nullable: false }
+  - { name: description,       type: string,  nullable: true  }
+  - { name: repair_cost,       type: decimal, nullable: true  }
+  - { name: at_fault_customer, type: int,     nullable: false }
+
+measures:
+  - name: damage_count
+    expr: 'count(damage_id)'
+    additivity: additive
+  - name: total_repair_cost
+    expr: 'sum(repair_cost)'
+    additivity: additive
+  - name: customer_liable_repair_cost
+    expr: 'sum(case when at_fault_customer = 1 then repair_cost else 0 end)'
+    additivity: additive
+  - name: avg_repair_costs
+    expr: 'avg(repair_cost)'
+    additivity: non_additive
+
+dimensions:
+  - { name: severity,          column: severity }
+  - { name: at_fault_customer, column: at_fault_customer }
+  - { name: reported_date,     column: reported_date }
+
+joins:
+  - to: rentals
+    on: 'damages.rental_id = rentals.rental_id'
+    relationship: many_to_one
+  - to: vehicles
+    on: 'damages.vehicle_id = vehicles.vehicle_id'
+    relationship: many_to_one
+
+meta:
+  provenance: human_curated

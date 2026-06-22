@@ -1,0 +1,20 @@
+name: locations
+connection: rental_db
+table: locations
+grain: [location_id]
+description: "One row per rental station. Each station is associated with a city and optionally an airport."
+
+columns:
+  - { name: location_id,  type: int,    nullable: false }
+  - { name: code,         type: string, nullable: false }
+  - { name: city,         type: string, nullable: false }
+  - { name: country,      type: string, nullable: false }
+  - { name: airport_code, type: string, nullable: true  }
+
+dimensions:
+  - { name: city,         column: city }
+  - { name: country,      column: country }
+  - { name: airport_code, column: airport_code }
+
+meta:
+  provenance: human_curated

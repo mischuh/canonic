@@ -113,6 +113,23 @@ Add this to your Claude Code MCP config (`~/.claude.json` or the project `.claud
 }
 ```
 
+```
+"mcpServers": {
+    "canon": {
+      "command": "/Users/mirko/.local/bin/uv",
+      "args": [
+        "run",
+        "--with",
+        "canon@/Users/mirko/dev/canon", 
+        "canon",
+        "mcp",
+        "start"
+      ],
+      "cwd": "/Users/mirko/dev/canon/examples/rental"
+    }
+  },
+```
+
 **HTTP daemon — background process, multiple clients can connect:**
 
 ```sh

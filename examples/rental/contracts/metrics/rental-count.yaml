@@ -1,0 +1,7 @@
+metric: rental_count
+canonical:
+  source: rentals
+  measure: completed_rental_count
+provenance: human_curated
+aliases: ["number of rentals", "rentals completed", "completed rentals", "bookings"]
+status: active

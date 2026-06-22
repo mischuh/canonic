@@ -1,0 +1,31 @@
+version: 1
+
+project:
+  name: rental-demo
+  default_connection: rental_db
+
+connections:
+  - id: rental_db
+    type: sqlite
+    params:
+      path: rental.db   # created by: sqlite3 rental.db < setup.sql
+
+llm:
+  provider: openai_compatible
+  base_url: http://127.0.0.1:11434/v1   # Ollama; swap for any OpenAI-compatible endpoint
+  model: gemma-4-e2b-it-4bit
+  api_key_ref: env:CANON_LLM_API_KEY
+
+embeddings:
+  model: all-MiniLM-L6-v2
+
+reconcile:
+  strict_contradictions: false
+  auto_apply:
+    enabled: false
+
+telemetry:
+  enabled: false
+
+runtime:
+  air_gapped: false
