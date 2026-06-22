@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
-
 import pytest
 import sqlglot
 
@@ -11,9 +9,7 @@ from canon import exc
 from canon.compiler import SemanticQuery, compile
 from canon.contracts.models import CanonicalRef, MetricBinding
 from canon.contracts.resolver import ContractResolver
-
-if TYPE_CHECKING:
-    from canon.semantic.models import SemanticSource
+from canon.semantic.models import Column, Dimension, Measure, SemanticSource
 
 
 def _parse_ok(sql: str) -> None:
@@ -109,12 +105,105 @@ def test_s3_ac1_additive_fanout_dedup(
     assert result.sql.upper().count("SUM(") == 1
 
 
-def test_s3_ac2_non_additive_measure_unsupported(
+# --- E15-S1: safety floor — reject-if-corrupting (SPEC-fuller-E15 §5, §11 S1) ----------
+
+
+@pytest.fixture
+def inventory_source() -> SemanticSource:
+    """Semi-additive inventory snapshot: additive over warehouse, NOT over snapshot_date."""
+    return SemanticSource(
+        name="inventory_snapshots",
+        connection="warehouse_pg",
+        table="analytics.inventory_snapshots",
+        grain=["warehouse_id", "snapshot_date"],
+        columns=[
+            Column(name="warehouse_id", type="string", nullable=False),
+            Column(name="snapshot_date", type="date", nullable=False),
+            Column(name="inventory_level", type="decimal", nullable=False),
+        ],
+        measures=[
+            Measure(
+                name="ending_inventory",
+                expr="sum(inventory_level)",
+                additivity="semi_additive",
+                semi_additive_over=["snapshot_date"],
+            )
+        ],
+        dimensions=[
+            Dimension(name="warehouse_id", column="warehouse_id"),
+            Dimension(name="snapshot_date", column="snapshot_date", granularity="day"),
+        ],
+    )
+
+
+@pytest.fixture
+def inventory_resolver(inventory_source: SemanticSource) -> ContractResolver:
+    binding = MetricBinding(
+        metric="ending_inventory",
+        canonical=CanonicalRef(source="inventory_snapshots", measure="ending_inventory"),
+    )
+    return ContractResolver(bindings=[binding], guardrails=[])
+
+
+def test_e15s1_ac2_non_additive_no_fanout_compiles(
     resolver: ContractResolver, sources: list[SemanticSource]
 ) -> None:
+    """Non-additive at native grain with no fanout → compiles; base-row recompute is safe."""
+    result = compile(SemanticQuery(metrics=["distinct_order_count"]), resolver, sources)
+    _parse_ok(result.sql)
+    assert "COUNT(DISTINCT" in result.sql.upper()
+    assert "DISTINCT ON" not in result.sql.upper()
+
+
+def test_e15s1_ac2_non_additive_many_to_one_join_compiles(
+    resolver: ContractResolver, sources: list[SemanticSource]
+) -> None:
+    """Non-additive grouped via a many_to_one join (no row multiplication) → compiles."""
+    result = compile(
+        SemanticQuery(metrics=["distinct_order_count"], dimensions=["region"]), resolver, sources
+    )
+    _parse_ok(result.sql)
+    assert "COUNT(DISTINCT" in result.sql.upper()
+    assert "DISTINCT ON" not in result.sql.upper()
+
+
+def test_e15s1_ac1_non_additive_fanout_raises_fanout_unsafe(
+    resolver: ContractResolver, sources: list[SemanticSource]
+) -> None:
+    """Non-additive + one_to_many join → FanoutUnsafe with a rationale; never a wrong number."""
+    with pytest.raises(exc.FanoutUnsafe) as ei:
+        compile(
+            SemanticQuery(metrics=["distinct_order_count"], dimensions=["sku"]), resolver, sources
+        )
+    assert ei.value.code is exc.ErrorCode.FANOUT_UNSAFE
+    assert str(ei.value)
+
+
+def test_e15s1_ac2_semi_additive_grouped_by_collapse_dim_compiles(
+    inventory_resolver: ContractResolver, inventory_source: SemanticSource
+) -> None:
+    """Semi-additive grouped by its collapse dimension → additive over remaining dims; compiles."""
+    result = compile(
+        SemanticQuery(metrics=["ending_inventory"], dimensions=["snapshot_date"]),
+        inventory_resolver,
+        [inventory_source],
+    )
+    _parse_ok(result.sql)
+    assert "SUM(" in result.sql.upper()
+
+
+def test_e15s1_ac1_semi_additive_collapsed_raises_unsupported_measure(
+    inventory_resolver: ContractResolver, inventory_source: SemanticSource
+) -> None:
+    """Semi-additive collapsed across its non-additive dimension → UnsupportedMeasure."""
     with pytest.raises(exc.UnsupportedMeasure) as ei:
-        compile(SemanticQuery(metrics=["distinct_order_count"]), resolver, sources)
+        compile(
+            SemanticQuery(metrics=["ending_inventory"], dimensions=["warehouse_id"]),
+            inventory_resolver,
+            [inventory_source],
+        )
     assert ei.value.code is exc.ErrorCode.UNSUPPORTED_MEASURE
+    assert str(ei.value)
 
 
 # --- S4: no implicit or ambiguous joins -------------------------------------
