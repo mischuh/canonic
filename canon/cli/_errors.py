@@ -51,15 +51,25 @@ def emit_error(err: CanonError, *, json_output: bool) -> None:
     else:
         _err_console.print(f"[red]error[/red] [bold]{code}[/bold]: {message}")
         candidates = err.candidates
-        if candidates and all(isinstance(c, (list, tuple)) for c in candidates):
-            owner = getattr(err, "owner", "")
-            prefix = f"{owner} → " if owner else ""
-            for i, path in enumerate(candidates, 1):
-                _err_console.print(f"  path {i}: {prefix}{' → '.join(path)}")
-            _err_console.print(
-                '  hint: add "via": ["<source>"] to your query to select a path',
-                markup=False,
-            )
+        if candidates:
+            for i, c in enumerate(candidates, 1):
+                if hasattr(c, "route"):
+                    _err_console.print(f"  path {i}: {c.route}", markup=False)
+                    _err_console.print(f"    via: {c.via}", markup=False)
+                elif isinstance(c, (list, tuple)):
+                    owner = getattr(err, "owner", "")
+                    prefix = f"{owner} → " if owner else ""
+                    _err_console.print(f"  path {i}: {prefix}{' → '.join(c)}", markup=False)
+            if candidates and hasattr(candidates[0], "via"):
+                _err_console.print(
+                    '  hint: re-issue with "via": <chosen path\'s via list> to select a path',
+                    markup=False,
+                )
+            elif candidates:
+                _err_console.print(
+                    '  hint: add "via": ["<first-hop>"] to your query to select a path',
+                    markup=False,
+                )
 
 
 def handle_errors[F: Callable[..., Any]](func: F) -> F:
