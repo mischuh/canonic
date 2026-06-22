@@ -41,6 +41,7 @@ from canon.contracts.validate import validate_contracts
 from canon.exc import ContractError, SchemaMismatch, SemanticSourceError, ValidationFailed
 from canon.ingestion.models import EvidenceKind, ProposalOp
 from canon.semantic.loader import list_semantic_sources
+from canon.semantic.models import Provenance
 
 if TYPE_CHECKING:
     from collections.abc import Iterable, Mapping
@@ -64,6 +65,36 @@ _PROBE_TIERS: frozenset[AcquisitionTier] = frozenset(
 # The two output surfaces validated by semantic/contract validation; other targets
 # (e.g. knowledge/*.md) have no validator and pass through unchanged.
 _VALIDATION_SURFACES = ("semantics/", "contracts/")
+
+
+_PROVENANCE_TIER: dict[Provenance, int] = {
+    Provenance.INFERRED: 0,
+    Provenance.HUMAN_CURATED: 1,
+    Provenance.BOARD_APPROVED: 2,
+}
+
+
+def _file_provenance(path: Path) -> Provenance:
+    """Read the provenance from a committed YAML file without full model validation.
+
+    Semantic sources store it at ``meta.provenance``; contract files (metric bindings,
+    guardrails) store it at the top level. Falls back to INFERRED when absent.
+    """
+    yaml = YAML()
+    raw: dict[str, object] = yaml.load(path.read_text()) or {}
+    meta = raw.get("meta")
+    if isinstance(meta, dict) and "provenance" in meta:
+        try:
+            return Provenance(meta["provenance"])
+        except ValueError:
+            pass
+    prov = raw.get("provenance")
+    if isinstance(prov, str):
+        try:
+            return Provenance(prov)
+        except ValueError:
+            pass
+    return Provenance.INFERRED
 
 
 def _dump_yaml(content: dict[str, object]) -> str:
@@ -222,7 +253,12 @@ class ValidationGate:
         return None
 
     def _materialize(self, root: Path, proposals: list[Proposal]) -> None:
-        """Build the proposed file tree: accepted semantics/contracts with proposals applied."""
+        """Build the proposed file tree: accepted semantics/contracts with proposals applied.
+
+        Mirrors the reconciliation tier rule (SPEC-E4 §5.1): an inferred proposal never
+        overwrites an existing human-curated or board-approved file in the temp tree, so the
+        validated state matches what the reconciliation engine would actually commit.
+        """
         for surface in ("semantics", "contracts"):
             src = self._project_root / surface
             if src.is_dir():
@@ -236,6 +272,14 @@ class ValidationGate:
                 dest.unlink(missing_ok=True)
                 continue
             dest.parent.mkdir(parents=True, exist_ok=True)
+            if dest.exists():
+                try:
+                    existing_tier = _PROVENANCE_TIER.get(_file_provenance(dest), 0)
+                except Exception:  # noqa: BLE001
+                    existing_tier = 0
+                proposal_tier = _PROVENANCE_TIER.get(proposal.provenance, 0)
+                if existing_tier > proposal_tier:
+                    continue  # existing higher-tier file wins; reconciliation would CONTRADICTION this
             dest.write_text(_dump_yaml(proposal.content))
 
     @staticmethod

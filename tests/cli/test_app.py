@@ -12,10 +12,6 @@ _GROUPS = ["setup", "connection", "sl", "query", "sql", "knowledge", "status", "
 # Capability stubs that must exit 0 with a "not implemented yet" notice.
 # (``setup`` is now a real interactive command — see tests/cli/test_setup.py.)
 _STUBS = [
-    ["connection", "add"],
-    ["connection", "test"],
-    ["connection", "list"],
-    ["connection", "remove"],
     ["sl", "resolve", "revenue"],
     ["sl", "compile", "-f", "q.json"],
     ["knowledge", "search", "orders"],
