@@ -84,7 +84,7 @@ def baseline(
             typer.echo(json.dumps(report.model_dump(mode="json")))
             return
         out.parent.mkdir(parents=True, exist_ok=True)
-        out.write_text(render_markdown(report, reconcile_report=report), encoding="utf-8")
+        out.write_text(render_markdown(reconcile_report=report), encoding="utf-8")
     else:
         cases = load_grain_cases(dataset if dataset is not None else default_dataset_path())
         report = asyncio.run(

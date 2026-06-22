@@ -69,11 +69,14 @@ def _render_task_section(report: BaselineReport, title: str) -> list[str]:
 
 
 def render_markdown(
-    report: BaselineReport,
+    report: BaselineReport | None = None,
     reconcile_report: BaselineReport | None = None,
 ) -> str:
     """Render the per-task baseline tables, recommended pairings, and re-run instructions."""
-    generated = report.generated_at.isoformat(timespec="seconds")
+    anchor = report or reconcile_report
+    assert anchor is not None, "at least one report must be provided"
+    generated = anchor.generated_at.isoformat(timespec="seconds")
+    adherence_floor = anchor.adherence_floor
     lines: list[str] = [
         "# Canon local-model baseline",
         "",
@@ -82,23 +85,22 @@ def render_markdown(
         "Measures the LLM-in-loop **drafting** that feeds compilable semantics — not literal",
         "compiler quality, since the E5 compiler is deterministic and LLM-free. Per task and",
         "model: accuracy on a labeled set, structured (JSON-schema) output behavior, and",
-        f"latency. Recommended = most accurate model clearing {_pct(report.adherence_floor)}",
+        f"latency. Recommended = most accurate model clearing {_pct(adherence_floor)}",
         "structured-output adherence.",
         "",
     ]
 
-    lines += _render_task_section(report, "grain inference")
+    if report is not None:
+        lines += _render_task_section(report, "grain inference")
+        lines.append("")
 
-    lines.append("")
     if reconcile_report is not None:
         lines += _render_task_section(reconcile_report, "contradiction resolution")
-    else:
+    elif report is not None:
         lines += [
             f"## Task: `{Task.RECONCILE.value}`",
             "",
-            "Pending E4 reconciliation drafting — `reconcile` has no live call site yet, so there is",
-            "no real behavior to score. The harness is generic and will cover it once E4 wires the",
-            "reconcile path (SPEC-E10 §7, GH-66).",
+            "Run with `--task reconcile` to score contradiction-resolution behavior on the labeled dataset.",
         ]
 
     lines += [
