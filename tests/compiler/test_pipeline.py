@@ -187,6 +187,106 @@ def test_s4_ac2_ambiguous_join_path(sources: list[SemanticSource]) -> None:
         compile(SemanticQuery(metrics=["m"], dimensions=["c_region"]), res, [o, a, b, c])
     assert ei.value.code is exc.ErrorCode.AMBIGUOUS_JOIN_PATH
     assert len(ei.value.candidates) == 2
+    assert ei.value.owner == "o"
+    assert ei.value.target == "c"
+
+
+def test_s4_ac2_via_resolves_ambiguity(sources: list[SemanticSource]) -> None:
+    from canon.semantic.models import Column, Dimension, Join, Measure, Relationship, SemanticSource
+
+    o = SemanticSource(
+        name="o",
+        connection="c",
+        table="t.o",
+        grain=["id"],
+        columns=[Column(name="id", type="string"), Column(name="amount", type="decimal")],
+        measures=[Measure(name="m", expr="sum(amount)")],
+        joins=[
+            Join(to="a", on="o.id = a.id", relationship=Relationship.MANY_TO_ONE),
+            Join(to="b", on="o.id = b.id", relationship=Relationship.MANY_TO_ONE),
+        ],
+    )
+    a = SemanticSource(
+        name="a",
+        connection="c",
+        table="t.a",
+        grain=["id"],
+        columns=[Column(name="id", type="string")],
+        joins=[Join(to="c", on="a.id = c.id", relationship=Relationship.MANY_TO_ONE)],
+    )
+    b = SemanticSource(
+        name="b",
+        connection="c",
+        table="t.b",
+        grain=["id"],
+        columns=[Column(name="id", type="string")],
+        joins=[Join(to="c", on="b.id = c.id", relationship=Relationship.MANY_TO_ONE)],
+    )
+    c = SemanticSource(
+        name="c",
+        connection="c",
+        table="t.c",
+        grain=["id"],
+        columns=[Column(name="id", type="string"), Column(name="region", type="string")],
+        dimensions=[Dimension(name="c_region", column="region")],
+    )
+    res = ContractResolver(
+        bindings=[MetricBinding(metric="m", canonical=CanonicalRef(source="o", measure="m"))],
+        guardrails=[],
+    )
+    result = compile(
+        SemanticQuery(metrics=["m"], dimensions=["c_region"], via=["a"]), res, [o, a, b, c]
+    )
+    _parse_ok(result.sql)
+    assert '"t"."a"' in result.sql
+    assert '"t"."b"' not in result.sql
+
+
+def test_s4_ac2_via_no_matching_path_raises_unreachable(sources: list[SemanticSource]) -> None:
+    from canon.semantic.models import Column, Dimension, Join, Measure, Relationship, SemanticSource
+
+    o = SemanticSource(
+        name="o",
+        connection="c",
+        table="t.o",
+        grain=["id"],
+        columns=[Column(name="id", type="string"), Column(name="amount", type="decimal")],
+        measures=[Measure(name="m", expr="sum(amount)")],
+        joins=[
+            Join(to="a", on="o.id = a.id", relationship=Relationship.MANY_TO_ONE),
+            Join(to="b", on="o.id = b.id", relationship=Relationship.MANY_TO_ONE),
+        ],
+    )
+    a = SemanticSource(
+        name="a",
+        connection="c",
+        table="t.a",
+        grain=["id"],
+        columns=[Column(name="id", type="string")],
+        joins=[Join(to="c", on="a.id = c.id", relationship=Relationship.MANY_TO_ONE)],
+    )
+    b = SemanticSource(
+        name="b",
+        connection="c",
+        table="t.b",
+        grain=["id"],
+        columns=[Column(name="id", type="string")],
+        joins=[Join(to="c", on="b.id = c.id", relationship=Relationship.MANY_TO_ONE)],
+    )
+    c = SemanticSource(
+        name="c",
+        connection="c",
+        table="t.c",
+        grain=["id"],
+        columns=[Column(name="id", type="string"), Column(name="region", type="string")],
+        dimensions=[Dimension(name="c_region", column="region")],
+    )
+    res = ContractResolver(
+        bindings=[MetricBinding(metric="m", canonical=CanonicalRef(source="o", measure="m"))],
+        guardrails=[],
+    )
+    with pytest.raises(exc.Unreachable):
+        compile(SemanticQuery(metrics=["m"], dimensions=["c_region"], via=["z"]), res, [o, a, b, c])
 
 
 # --- S5: deterministic output -----------------------------------------------

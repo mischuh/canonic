@@ -55,16 +55,36 @@ def _all_simple_paths(
     return paths
 
 
+def _filter_by_via(paths: list[list[JoinEdge]], via: list[str]) -> list[list[JoinEdge]]:
+    """Keep only paths whose node sequence contains every element of ``via`` as a subsequence."""
+    result = []
+    for path in paths:
+        targets = [e.join.to for e in path]
+        i = 0
+        for t in targets:
+            if i < len(via) and t == via[i]:
+                i += 1
+        if i == len(via):
+            result.append(path)
+    return result
+
+
 def plan_joins(
     owner: str,
     targets: Iterable[str],
     sources_by_name: dict[str, SemanticSource],
+    via: list[str] | None = None,
 ) -> list[JoinEdge]:
     """Return the ordered join edges connecting ``owner`` to every target source.
 
     Targets are processed in sorted order for determinism; an edge whose target is
     already joined is skipped so no source is joined twice. Raises :class:`Unreachable`
     when a target has no path and :class:`AmbiguousJoinPath` when it has more than one.
+
+    ``via`` is an optional list of intermediate source names that each ambiguous join path
+    must contain as a subsequence. When ``via`` is provided and narrows the candidate set
+    to exactly one path, that path is used. If it eliminates all paths, :class:`Unreachable`
+    is raised instead.
     """
     edges: list[JoinEdge] = []
     joined: set[str] = {owner}
@@ -74,10 +94,19 @@ def plan_joins(
         paths = _all_simple_paths(owner, target, sources_by_name)
         if not paths:
             raise Unreachable(f"source {target!r} has no declared join path from {owner!r}")
+        if len(paths) > 1 and via:
+            filtered = _filter_by_via(paths, via)
+            if not filtered:
+                raise Unreachable(
+                    f"no join path from {owner!r} to {target!r} passes through {via!r}"
+                )
+            paths = filtered
         if len(paths) > 1:
             raise AmbiguousJoinPath(
                 f"more than one join path from {owner!r} to {target!r}; "
-                f"an explicit path is required",
+                f'use "via" to specify which path',
+                owner=owner,
+                target=target,
                 candidates=[[e.join.to for e in path] for path in paths],
             )
         for edge in paths[0]:

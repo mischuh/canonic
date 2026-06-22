@@ -116,6 +116,18 @@ class AmbiguousJoinPath(CanonError):
 
     code = ErrorCode.AMBIGUOUS_JOIN_PATH
 
+    def __init__(
+        self,
+        message: str = "",
+        *,
+        owner: str = "",
+        target: str = "",
+        candidates: Sequence[Any] | None = None,
+    ) -> None:
+        super().__init__(message, candidates=candidates)
+        self.owner = owner
+        self.target = target
+
 
 class UnsupportedMeasure(CanonError):
     """Non-additive/semi-additive measure requested (E5, P1)."""

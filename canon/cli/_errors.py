@@ -50,6 +50,16 @@ def emit_error(err: CanonError, *, json_output: bool) -> None:
         sys.stderr.write(json.dumps(payload) + "\n")
     else:
         _err_console.print(f"[red]error[/red] [bold]{code}[/bold]: {message}")
+        candidates = err.candidates
+        if candidates and all(isinstance(c, (list, tuple)) for c in candidates):
+            owner = getattr(err, "owner", "")
+            prefix = f"{owner} → " if owner else ""
+            for i, path in enumerate(candidates, 1):
+                _err_console.print(f"  path {i}: {prefix}{' → '.join(path)}")
+            _err_console.print(
+                '  hint: add "via": ["<source>"] to your query to select a path',
+                markup=False,
+            )
 
 
 def handle_errors[F: Callable[..., Any]](func: F) -> F:

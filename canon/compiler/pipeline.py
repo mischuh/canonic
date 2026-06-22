@@ -82,7 +82,9 @@ def compile(  # noqa: A001 — the public verb for this capability is "compile"
     referenced |= {m.source for m in metrics}
 
     # Stage 3 — plan the join graph from the owner to every referenced source.
-    join_edges = plan_joins(owner, referenced - {owner}, sources_by_name)
+    join_edges = plan_joins(
+        owner, referenced - {owner}, sources_by_name, via=list(query.via) or None
+    )
 
     # Stage 4 — fanout analysis: every measure must be P0-compilable; dedup additive
     # measures when a planned join fans out the grain.

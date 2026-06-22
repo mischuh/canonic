@@ -24,6 +24,14 @@
       "title": "Filters",
       "type": "array"
     },
+    "via": {
+      "default": [],
+      "items": {
+        "type": "string"
+      },
+      "title": "Via",
+      "type": "array"
+    },
     "context": {
       "anyOf": [
         {
