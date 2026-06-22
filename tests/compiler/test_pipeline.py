@@ -212,3 +212,91 @@ def test_freshness_reports_used_sources(
     assert reported == sorted(reported)
     assert "orders" in reported
     assert "customers" in reported
+
+
+# --- dimension resolution: owner-aware priority -----------------------------
+
+
+def test_owner_wins_over_alphabetically_earlier_source(
+    resolver: ContractResolver,
+    orders: SemanticSource,
+    accounts: SemanticSource,
+) -> None:
+    """Owner 'orders' has 'status'; 'accounts' also has 'status' but is alphabetically first.
+    The compiler must bind status to orders.status — no join to accounts."""
+    result = compile(
+        SemanticQuery(metrics=["revenue"], dimensions=["status"]),
+        resolver,
+        [orders, accounts],
+    )
+    _parse_ok(result.sql)
+    assert "accounts" not in result.sql
+    assert "JOIN" not in result.sql.upper()
+    assert "orders" in result.sql
+
+
+def test_unlinked_source_with_same_dim_does_not_block_query(
+    resolver: ContractResolver,
+    orders: SemanticSource,
+    accounts: SemanticSource,
+) -> None:
+    """Regression: previously raised Unreachable because 'accounts' was selected over 'orders'."""
+    result = compile(
+        SemanticQuery(metrics=["revenue"], dimensions=["status"]),
+        resolver,
+        [orders, accounts],
+    )
+    assert result.resolved == {"revenue": "orders.total_revenue"}
+
+
+def test_ambiguous_dim_across_two_reachable_sources_raises(
+    resolver: ContractResolver, orders: SemanticSource
+) -> None:
+    """Two join-reachable sources both declaring 'tier' → Ambiguous, not a silent pick."""
+    from canon.semantic.models import Column, Dimension, Join, Relationship, SemanticSource
+
+    left = SemanticSource(
+        name="left_src",
+        connection="c",
+        table="t.left",
+        grain=["id"],
+        columns=[Column(name="id", type="string"), Column(name="tier", type="string")],
+        dimensions=[Dimension(name="tier", column="tier")],
+    )
+    right = SemanticSource(
+        name="right_src",
+        connection="c",
+        table="t.right",
+        grain=["id"],
+        columns=[Column(name="id", type="string"), Column(name="tier", type="string")],
+        dimensions=[Dimension(name="tier", column="tier")],
+    )
+    orders_with_joins = SemanticSource(
+        name="orders",
+        connection=orders.connection,
+        table=orders.table,
+        grain=orders.grain,
+        columns=orders.columns,
+        measures=orders.measures,
+        dimensions=orders.dimensions,
+        joins=[
+            Join(
+                to="left_src",
+                on="orders.order_id = left_src.id",
+                relationship=Relationship.MANY_TO_ONE,
+            ),
+            Join(
+                to="right_src",
+                on="orders.order_id = right_src.id",
+                relationship=Relationship.MANY_TO_ONE,
+            ),
+        ],
+    )
+    with pytest.raises(exc.Ambiguous) as ei:
+        compile(
+            SemanticQuery(metrics=["revenue"], dimensions=["tier"]),
+            resolver,
+            [orders_with_joins, left, right],
+        )
+    assert ei.value.code is exc.ErrorCode.AMBIGUOUS
+    assert set(ei.value.candidates) == {"left_src", "right_src"}

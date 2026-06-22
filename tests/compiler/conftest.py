@@ -125,6 +125,22 @@ def orders_rt() -> SemanticSource:
 
 
 @pytest.fixture
+def accounts() -> SemanticSource:
+    """Unlinked source with a 'status' dimension — alphabetically before 'orders', no join from orders."""
+    return SemanticSource(
+        name="accounts",
+        connection="warehouse_pg",
+        table="analytics.dim_accounts",
+        grain=["account_id"],
+        columns=[
+            Column(name="account_id", type="string", nullable=False),
+            Column(name="status", type="string", nullable=False),
+        ],
+        dimensions=[Dimension(name="status", column="status")],
+    )
+
+
+@pytest.fixture
 def sources(
     orders: SemanticSource,
     customers: SemanticSource,

@@ -75,9 +75,9 @@ def compile(  # noqa: A001 — the public verb for this capability is "compile"
     owner = metrics[0].source  # FROM anchor
 
     # Stage 2 — resolve dimensions & filters to owning sources.
-    dimensions = _resolve_dimensions(query, sources_by_name)
+    dimensions = _resolve_dimensions(query, sources_by_name, owner)
     referenced = {src for src, _ in dimensions}
-    where_conditions, filter_sources = _bind_filters(query.filters, sources_by_name)
+    where_conditions, filter_sources = _bind_filters(query.filters, sources_by_name, owner)
     referenced |= filter_sources
     referenced |= {m.source for m in metrics}
 
@@ -199,10 +199,11 @@ def _resolve_metrics(
 def _resolve_dimensions(
     query: SemanticQuery,
     sources_by_name: dict[str, SemanticSource],
+    owner: str,
 ) -> list[tuple[str, Dimension]]:
     resolved: list[tuple[str, Dimension]] = []
     for name in query.dimensions:
-        found = _find_dimension(name, sources_by_name)
+        found = _find_dimension(name, sources_by_name, owner)
         if found is None:
             raise UnreachableError(f"dimension {name!r} is not declared on any source")
         resolved.append(found)
@@ -212,13 +213,14 @@ def _resolve_dimensions(
 def _bind_filters(
     filters: list[str],
     sources_by_name: dict[str, SemanticSource],
+    owner: str,
 ) -> tuple[list[exp.Expression], set[str]]:
     """Parse filter strings, qualify referenced names to their owning source alias."""
     conditions: list[exp.Expression] = []
     used: set[str] = set()
     for raw in filters:
         parsed = _parse(raw)
-        bound, sources = _qualify_columns(parsed, sources_by_name)
+        bound, sources = _qualify_columns(parsed, sources_by_name, owner)
         conditions.append(bound)
         used |= sources
     return conditions, used
@@ -243,7 +245,7 @@ def _enforce_guardrails(
             seen.add(guardrail.id)
             if guardrail.filter:
                 parsed = _parse(guardrail.filter)
-                bound, _ = _qualify_columns(parsed, sources_by_name)
+                bound, _ = _qualify_columns(parsed, sources_by_name, m.source)
                 conditions.append(bound)
             fired.append(FiredGuardrail(id=guardrail.id, kind=str(guardrail.kind)))
     return conditions, fired
@@ -370,11 +372,63 @@ def _find_measure(source: SemanticSource, name: str) -> Measure | None:
     return next((m for m in source.measures if m.name == name), None)
 
 
+def _reachable_from(
+    owner: str,
+    sources_by_name: dict[str, SemanticSource],
+) -> set[str]:
+    """BFS over declared joins from owner; returns all transitively reachable source names.
+
+    Does not include ``owner`` itself so callers can distinguish
+    "on the owner" from "reachable via join" cleanly.
+    """
+    reachable: set[str] = set()
+    frontier = [owner]
+    visited: set[str] = {owner}
+    while frontier:
+        node = frontier.pop()
+        source = sources_by_name.get(node)
+        if source is None:
+            continue
+        for join in source.joins:
+            if join.to not in visited:
+                visited.add(join.to)
+                reachable.add(join.to)
+                frontier.append(join.to)
+    return reachable
+
+
 def _find_dimension(
     name: str,
     sources_by_name: dict[str, SemanticSource],
+    owner: str | None = None,
 ) -> tuple[str, Dimension] | None:
-    for src in sorted(sources_by_name):  # deterministic across sources
+    if owner is not None:
+        # Priority 1: the metric's owning source wins unconditionally.
+        owner_source = sources_by_name.get(owner)
+        if owner_source is not None:
+            for dim in owner_source.dimensions:
+                if dim.name == name:
+                    return owner, dim
+
+        # Priority 2: search join-reachable sources for the dimension.
+        reachable = _reachable_from(owner, sources_by_name)
+        candidates: list[tuple[str, Dimension]] = []
+        for src in sorted(reachable):
+            for dim in sources_by_name[src].dimensions:
+                if dim.name == name:
+                    candidates.append((src, dim))
+        if len(candidates) == 1:
+            return candidates[0]
+        if len(candidates) > 1:
+            raise Ambiguous(
+                f"dimension {name!r} is present on multiple join-reachable sources; "
+                f"qualify explicitly",
+                candidates=[src for src, _ in candidates],
+            )
+        return None
+
+    # No owner: fall back to alphabetical scan (preserves behaviour for callers without context).
+    for src in sorted(sources_by_name):
         for dim in sources_by_name[src].dimensions:
             if dim.name == name:
                 return src, dim
@@ -384,9 +438,10 @@ def _find_dimension(
 def _bind_name(
     name: str,
     sources_by_name: dict[str, SemanticSource],
+    owner: str | None = None,
 ) -> tuple[str, str] | None:
     """Resolve a bare name to ``(source, physical_column)`` — dimension first, then column."""
-    dim = _find_dimension(name, sources_by_name)
+    dim = _find_dimension(name, sources_by_name, owner)
     if dim is not None:
         return dim[0], dim[1].column
     for src in sorted(sources_by_name):
@@ -398,6 +453,7 @@ def _bind_name(
 def _qualify_columns(
     expr: exp.Expression,
     sources_by_name: dict[str, SemanticSource],
+    owner: str | None = None,
 ) -> tuple[exp.Expression, set[str]]:
     """Qualify each bare column in a filter to its owning source alias + physical column."""
     used: set[str] = set()
@@ -407,7 +463,7 @@ def _qualify_columns(
             if node.table:
                 used.add(node.table)
                 return node
-            binding = _bind_name(node.name, sources_by_name)
+            binding = _bind_name(node.name, sources_by_name, owner)
             if binding is None:
                 raise UnreachableError(f"filter references unknown name {node.name!r}")
             src, col = binding
