@@ -21,7 +21,7 @@ from canon.contracts.resolver import Ambiguous as ResolverAmbiguous
 from canon.contracts.resolver import Binding
 from canon.contracts.resolver import Unresolved as ResolverUnresolved
 from canon.core.models import MetricDetail, MetricSummary, QueryResult, SourceFreshnessOut
-from canon.exc import Ambiguous, CanonError, Unresolved
+from canon.exc import Ambiguous, CanonError, Unresolved, UnsupportedMeasure
 from canon.instrumentation.events import AnswerEventLog, DiskAnswerEventLog, NullAnswerEventLog
 from canon.instrumentation.models import AnswerEvent, _age_days, _sha256_json
 from canon.semantic.loader import list_semantic_sources
@@ -85,10 +85,13 @@ class CanonService:
         summaries: list[MetricSummary] = []
         for binding in self._resolver._name_index.values():
             for b in binding:
-                from canon.contracts.models import Status
+                from canon.contracts.models import BindingKind, Status
 
                 if b.status is not Status.ACTIVE:
                     continue
+                if b.canonical.kind is not BindingKind.SINGLE:
+                    continue  # composite metrics have no single source+measure to summarize
+                assert b.canonical.source is not None and b.canonical.measure is not None  # noqa: S101
                 summaries.append(
                     MetricSummary(
                         metric=b.metric,
@@ -120,6 +123,14 @@ class CanonService:
         name does not resolve to exactly one active binding.
         """
         binding = self._resolve_or_raise(name)
+        from canon.contracts.models import BindingKind
+
+        if binding.kind is not BindingKind.SINGLE:
+            raise UnsupportedMeasure(
+                f"metric {name!r} is a composite ({binding.kind}) — "
+                "use query() to compute it; describe_metric() requires a single source+measure"
+            )
+        assert binding.source is not None and binding.measure is not None  # noqa: S101
         source = self._source_by_name.get(binding.source)
         if source is None:
             raise Unresolved(

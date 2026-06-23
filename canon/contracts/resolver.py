@@ -21,11 +21,13 @@ from canon.contracts.loader import (
     load_metric_bindings,
 )
 from canon.contracts.models import (
+    BindingKind,
     CanonicalRef,
     FinalityRule,
     Guardrail,
     GuardrailKind,
     MetricBinding,
+    OnZeroDenominator,
     Status,
 )
 
@@ -39,6 +41,7 @@ if TYPE_CHECKING:
 __all__ = [
     "Ambiguous",
     "Binding",
+    "ComponentBindings",
     "ContractResolver",
     "MetricResolution",
     "Unresolved",
@@ -47,15 +50,32 @@ __all__ = [
 
 @dataclass(frozen=True, slots=True)
 class Binding:
-    """A metric name resolved to exactly one canonical source+measure.
+    """A metric name resolved to its canonical definition.
 
-    ``source``/``measure`` mirror ``binding.canonical`` for convenience.
+    For ``kind=single``, ``source`` and ``measure`` are non-None.
+    For composite kinds (ratio/weighted_avg), ``source`` and ``measure`` are None;
+    ``components`` carries the resolved numerator/denominator bindings.
     """
 
     metric: str
-    source: str
-    measure: str
+    source: str | None
+    measure: str | None
     binding: MetricBinding
+    kind: BindingKind = BindingKind.SINGLE
+    components: ComponentBindings | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class ComponentBindings:
+    """Resolved component bindings for a composable_post_agg metric (§4.1).
+
+    ``weighted_avg`` maps weighted_sum→numerator, weight→denominator so the
+    compile path is identical to ratio.
+    """
+
+    numerator: Binding
+    denominator: Binding
+    on_zero_denominator: OnZeroDenominator
 
 
 @dataclass(frozen=True, slots=True)
@@ -104,12 +124,14 @@ class ContractResolver:
 
         # name/alias -> active bindings; multiple entries for a name means ambiguity
         name_index: dict[str, list[MetricBinding]] = {}
-        # active metric name -> its canonical (source, measure), for metric-targeted guardrails
+        # active single metric name -> canonical (source, measure) for metric-targeted guardrails
+        # composite bindings have no single (source, measure), so they are excluded
         metric_to_canonical: dict[str, CanonicalRef] = {}
         for binding in bindings:
             if binding.status is not Status.ACTIVE:
                 continue
-            metric_to_canonical[binding.metric] = binding.canonical
+            if binding.canonical.kind is BindingKind.SINGLE:
+                metric_to_canonical[binding.metric] = binding.canonical
             for name in (binding.metric, *binding.aliases):
                 name_index.setdefault(name, []).append(binding)
         self._name_index = name_index
@@ -126,26 +148,73 @@ class ContractResolver:
         )
 
     def resolve_metric(self, name: str, context: str | None = None) -> MetricResolution:
-        """Resolve a metric name/alias to its canonical binding (SPEC-E5-E15 §6).
+        """Resolve a metric name/alias to its canonical binding (SPEC-E5-E15 §6, §4.1).
 
         Zero matches → :class:`Unresolved`; exactly one → :class:`Binding`;
-        more than one → :class:`Ambiguous` with all candidates. Matching is exact;
-        ``context`` is accepted for interface stability but does not affect metric
-        resolution in P0.
+        more than one → :class:`Ambiguous`. For composite kinds (ratio/weighted_avg),
+        components are resolved recursively; a cycle returns :class:`Unresolved`.
+        ``context`` is accepted for interface stability but does not affect resolution in P0.
         """
         matches = self._name_index.get(name, [])
         if not matches:
             return Unresolved(name=name)
-        if len(matches) == 1:
-            binding = matches[0]
+        if len(matches) > 1:
+            candidates = tuple(sorted(matches, key=lambda b: (b.metric, b.aliases)))
+            return Ambiguous(name=name, candidates=candidates)
+        return self._resolve_binding(matches[0], seen=frozenset({name}))
+
+    def _resolve_component(
+        self, name: str, seen: frozenset[str]
+    ) -> Binding | Ambiguous | Unresolved:
+        if name in seen:
+            return Unresolved(name=name)
+        matches = self._name_index.get(name, [])
+        if not matches:
+            return Unresolved(name=name)
+        if len(matches) > 1:
+            candidates = tuple(sorted(matches, key=lambda b: (b.metric, b.aliases)))
+            return Ambiguous(name=name, candidates=candidates)
+        return self._resolve_binding(matches[0], seen | {name})
+
+    def _resolve_binding(
+        self, binding: MetricBinding, seen: frozenset[str]
+    ) -> Binding | Ambiguous | Unresolved:
+        canonical = binding.canonical
+        if canonical.kind is BindingKind.SINGLE:
             return Binding(
                 metric=binding.metric,
-                source=binding.canonical.source,
-                measure=binding.canonical.measure,
+                source=canonical.source,
+                measure=canonical.measure,
                 binding=binding,
             )
-        candidates = tuple(sorted(matches, key=lambda b: (b.metric, b.aliases)))
-        return Ambiguous(name=name, candidates=candidates)
+
+        if canonical.kind is BindingKind.RATIO:
+            num_name, den_name = canonical.numerator, canonical.denominator
+        else:  # WEIGHTED_AVG: weighted_sum → numerator, weight → denominator
+            num_name, den_name = canonical.weighted_sum, canonical.weight
+
+        assert num_name is not None and den_name is not None  # noqa: S101 — enforced by model_validator
+
+        num_result = self._resolve_component(num_name, seen)
+        if not isinstance(num_result, Binding):
+            return num_result
+
+        den_result = self._resolve_component(den_name, seen)
+        if not isinstance(den_result, Binding):
+            return den_result
+
+        return Binding(
+            metric=binding.metric,
+            source=None,
+            measure=None,
+            binding=binding,
+            kind=canonical.kind,
+            components=ComponentBindings(
+                numerator=num_result,
+                denominator=den_result,
+                on_zero_denominator=canonical.on_zero_denominator,
+            ),
+        )
 
     def guardrails_for(
         self,

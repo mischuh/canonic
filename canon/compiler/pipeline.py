@@ -16,9 +16,17 @@ from sqlglot import exp
 
 from canon.compiler.dialect import DIALECT_ADAPTERS
 from canon.compiler.joins import JoinEdge, build_alias_tree, plan_joins
-from canon.compiler.result import CompileResult, FinalityMetadata, FiredGuardrail, SourceFreshness
+from canon.compiler.result import (
+    CompileResult,
+    CompositionMetadata,
+    FinalityMetadata,
+    FiredGuardrail,
+    SourceFreshness,
+)
+from canon.contracts.models import BindingKind, OnZeroDenominator
 from canon.contracts.resolver import Ambiguous as ResolverAmbiguous
 from canon.contracts.resolver import Binding as ResolverBinding
+from canon.contracts.resolver import ComponentBindings
 from canon.contracts.resolver import Unresolved as ResolverUnresolved
 from canon.exc import Ambiguous, FanoutUnsafe, GuardrailBlock, Unresolved, UnsupportedMeasure
 from canon.exc import Unreachable as UnreachableError
@@ -62,6 +70,24 @@ class _ResolvedMetric:
         self.measure = measure
 
 
+class _LeafPlan:
+    """A compiled leaf query for one component of a composable_post_agg metric (§4.1, §6)."""
+
+    __slots__ = ("fired", "select", "used_sources", "warnings")
+
+    def __init__(
+        self,
+        select: exp.Select,
+        fired: list[FiredGuardrail],
+        used_sources: set[str],
+        warnings: list[str],
+    ) -> None:
+        self.select = select
+        self.fired = fired
+        self.used_sources = used_sources
+        self.warnings = warnings
+
+
 def compile(  # noqa: A001 — the public verb for this capability is "compile"
     query: SemanticQuery,
     resolver: ContractResolver,
@@ -70,8 +96,35 @@ def compile(  # noqa: A001 — the public verb for this capability is "compile"
     """Compile a semantic query to read-only SQL and result metadata (SPEC §4)."""
     sources_by_name = {s.name: s for s in sources}
 
-    # Stage 1 — resolve metrics to (source, measure) via the canonicality authority.
-    metrics = _resolve_metrics(query, resolver, sources_by_name)
+    # Stage 1 — resolve metric bindings; detect composite kinds and route accordingly.
+    if not query.metrics:
+        raise Unresolved("query requests at least one metric")
+    raw_bindings: list[tuple[str, ResolverBinding]] = []
+    for name in query.metrics:
+        result = resolver.resolve_metric(name, query.context)
+        if isinstance(result, ResolverUnresolved):
+            raise Unresolved(f"metric {name!r} matches no active binding")
+        if isinstance(result, ResolverAmbiguous):
+            raise Ambiguous(
+                f"metric {name!r} matches more than one active binding",
+                candidates=list(result.candidates),
+            )
+        assert isinstance(result, ResolverBinding)  # noqa: S101 — exhaustive over the union
+        raw_bindings.append((name, result))
+
+    composite_indices = [
+        i for i, (_, b) in enumerate(raw_bindings) if b.kind is not BindingKind.SINGLE
+    ]
+    if composite_indices:
+        if len(query.metrics) > 1:
+            raise UnsupportedMeasure(
+                "composite metrics (ratio/weighted_avg) must be queried alone; "
+                "remove other metrics from the request or split into separate queries"
+            )
+        _, composite = raw_bindings[0]
+        return _compile_composite(query, composite, resolver, sources_by_name)
+
+    metrics = _bindings_to_resolved(raw_bindings, sources_by_name)
     owner = metrics[0].source  # FROM anchor
 
     # Stage 2 — resolve dimensions & filters to owning aliases.
@@ -196,34 +249,250 @@ def compile(  # noqa: A001 — the public verb for this capability is "compile"
 # --- Stage 1 -----------------------------------------------------------------
 
 
-def _resolve_metrics(
+def _bindings_to_resolved(
+    name_bindings: list[tuple[str, ResolverBinding]],
+    sources_by_name: dict[str, SemanticSource],
+) -> list[_ResolvedMetric]:
+    """Convert pre-resolved single-kind bindings to _ResolvedMetric objects."""
+    resolved: list[_ResolvedMetric] = []
+    for name, binding in name_bindings:
+        assert binding.source is not None and binding.measure is not None  # noqa: S101
+        source = sources_by_name.get(binding.source)
+        if source is None:
+            raise Unresolved(f"metric {name!r} binds to unknown source {binding.source!r}")
+        measure = _find_measure(source, binding.measure)
+        if measure is None:
+            raise Unresolved(
+                f"metric {name!r} binds to unknown measure {binding.source}.{binding.measure!r}"
+            )
+        resolved.append(_ResolvedMetric(name=name, source=binding.source, measure=measure))
+    return resolved
+
+
+# --- Composite compile path (composable_post_agg, §4.1) ----------------------
+
+
+def _plan_leaf(
+    component: ResolverBinding,
     query: SemanticQuery,
     resolver: ContractResolver,
     sources_by_name: dict[str, SemanticSource],
-) -> list[_ResolvedMetric]:
-    if not query.metrics:
-        raise Unresolved("query requests at least one metric")
-    resolved: list[_ResolvedMetric] = []
-    for name in query.metrics:
-        result = resolver.resolve_metric(name, query.context)
-        if isinstance(result, ResolverUnresolved):
-            raise Unresolved(f"metric {name!r} matches no active binding")
-        if isinstance(result, ResolverAmbiguous):
-            raise Ambiguous(
-                f"metric {name!r} matches more than one active binding",
-                candidates=list(result.candidates),
+    measure_alias: str,
+) -> _LeafPlan:
+    """Run stages 2–4, 6 for one single-kind component; return a leaf SELECT.
+
+    Each component is planned as an independent sub-query at the requested grain so
+    its own guardrails and safety-floor checks fire automatically (SPEC §4.1, §6, AC3).
+    Finality (stage 5) is deferred to S6.
+    """
+    if component.kind is not BindingKind.SINGLE:
+        raise UnsupportedMeasure(
+            f"nested composite metrics are not yet supported; "
+            f"component {component.metric!r} has kind {component.kind!r}"
+        )
+    assert component.source is not None and component.measure is not None  # noqa: S101
+
+    source_name = component.source
+    alias_to_source = build_alias_tree(source_name, sources_by_name)
+
+    # Stage 2 — dimensions & filters relative to this component's source.
+    dimensions = _resolve_dimensions(query, sources_by_name, source_name, alias_to_source)
+    referenced = {alias for alias, _ in dimensions}
+    where_conditions, filter_sources = _bind_filters(
+        query.filters, sources_by_name, source_name, alias_to_source
+    )
+    referenced |= filter_sources
+    referenced |= {source_name}
+
+    # Stage 3 — join graph from this component's owner.
+    join_edges = plan_joins(
+        source_name, referenced - {source_name}, sources_by_name, via=list(query.via) or None
+    )
+
+    # Stage 4 — safety floor for this component.
+    fanout = any(edge.join.relationship in _FANOUT for edge in join_edges)
+    grouped = {dim.name for _alias, dim in dimensions}
+
+    source_obj = sources_by_name.get(source_name)
+    if source_obj is None:
+        raise Unresolved(f"component {component.metric!r} binds to unknown source {source_name!r}")
+    measure_obj = _find_measure(source_obj, component.measure)
+    if measure_obj is None:
+        raise Unresolved(
+            f"component {component.metric!r} binds to unknown measure "
+            f"{source_name}.{component.measure!r}"
+        )
+
+    add = measure_obj.additivity
+    if add is Additivity.ADDITIVE:
+        if not measure_obj.is_p0_compilable:
+            raise UnsupportedMeasure(
+                f"measure {source_name}.{measure_obj.name!r} uses an aggregate function "
+                f"not supported at P0"
             )
-        assert isinstance(result, ResolverBinding)  # noqa: S101 — exhaustive over the union
-        source = sources_by_name.get(result.source)
-        if source is None:
-            raise Unresolved(f"metric {name!r} binds to unknown source {result.source!r}")
-        measure = _find_measure(source, result.measure)
-        if measure is None:
-            raise Unresolved(
-                f"metric {name!r} binds to unknown measure {result.source}.{result.measure!r}"
+    elif fanout:
+        raise FanoutUnsafe(
+            f"measure {source_name}.{measure_obj.name!r} is {add.value} and a "
+            f"one_to_many/many_to_many join in this query would multiply its rows "
+            f"and corrupt the aggregate; request it without the fanning dimension "
+            f"or source, or query it at its native grain"
+        )
+    elif add is Additivity.SEMI_ADDITIVE:
+        unsafe_dims = [d for d in measure_obj.semi_additive_over if d not in grouped]
+        if unsafe_dims:
+            raise UnsupportedMeasure(
+                f"measure {source_name}.{measure_obj.name!r} is semi-additive over "
+                f"{unsafe_dims} and cannot be collapsed across those dimensions "
+                f"without the semi_additive strategy; group by {unsafe_dims} for "
+                f"a correct result"
             )
-        resolved.append(_ResolvedMetric(name=name, source=result.source, measure=measure))
-    return resolved
+
+    # Stage 6 — guardrails for this leaf.
+    guard_conditions, fired = _enforce_guardrails(
+        [_ResolvedMetric(name=component.metric, source=source_name, measure=measure_obj)],
+        resolver,
+        query.context,
+        sources_by_name,
+    )
+    where_conditions += guard_conditions
+
+    leaf_select = _build_leaf_select(
+        source_name,
+        measure_obj,
+        measure_alias,
+        dimensions,
+        where_conditions,
+        join_edges,
+        sources_by_name,
+    )
+    used = {source_name} | {e.join.to for e in join_edges}
+    return _LeafPlan(select=leaf_select, fired=fired, used_sources=used, warnings=[])
+
+
+def _build_leaf_select(
+    owner: str,
+    measure: Measure,
+    measure_alias: str,
+    dimensions: list[tuple[str, Dimension]],
+    where_conditions: list[exp.Expression],
+    join_edges: list[JoinEdge],
+    sources_by_name: dict[str, SemanticSource],
+) -> exp.Select:
+    """Build a leaf SELECT projecting dimensions + one measure aliased to measure_alias."""
+    select = exp.Select()
+    projections: list[exp.Expression] = []
+    group_exprs: list[exp.Expression] = []
+    for src, dim in dimensions:
+        expr = _dimension_expr(src, dim)
+        projections.append(_alias(expr, dim.name))
+        group_exprs.append(expr)
+    projections.append(_alias(_measure_expr(owner, measure), measure_alias))
+    select = select.select(*projections)
+    select = _from_and_joins(select, owner, join_edges, sources_by_name)
+    if where_conditions:
+        select = select.where(exp.and_(*where_conditions))
+    if group_exprs:
+        select = select.group_by(*group_exprs)
+    return select
+
+
+def _compile_composite(
+    query: SemanticQuery,
+    composite: ResolverBinding,
+    resolver: ContractResolver,
+    sources_by_name: dict[str, SemanticSource],
+) -> CompileResult:
+    """Compile a composable_post_agg metric via CTE-per-leaf + divide (SPEC §4.1, §6 step 6b).
+
+    The unifying rule — aggregate first, combine last: each component is planned as an
+    independent sub-query (stages 2–4, 6) at the requested grain; the compose step
+    divides on the shared grain via ``n / NULLIF(d, 0)`` (or variant per on_zero_denominator).
+    """
+    assert composite.components is not None  # noqa: S101 — routing guarantees composite kind
+    components: ComponentBindings = composite.components
+    on_zero = components.on_zero_denominator
+    adapter = DIALECT_ADAPTERS["postgres"]
+    queried_name = query.metrics[0]
+
+    num_plan = _plan_leaf(components.numerator, query, resolver, sources_by_name, "n")
+    den_plan = _plan_leaf(components.denominator, query, resolver, sources_by_name, "d")
+
+    dim_names = list(query.dimensions)
+
+    # Build the division expression per on_zero_denominator policy.
+    n_col = cast("exp.Expression", exp.column("n"))
+    d_col = cast("exp.Expression", exp.column("d"))
+    if on_zero is OnZeroDenominator.NULL:
+        nullif_d = exp.func("NULLIF", d_col, exp.Literal.number(0))
+        combine = cast("exp.Expression", exp.Div(this=n_col, expression=nullif_d))
+        zero_warnings = [
+            f"zero denominator for metric {composite.metric!r} yields NULL "
+            f"(on_zero_denominator=null)"
+        ]
+    elif on_zero is OnZeroDenominator.ZERO:
+        nullif_d = exp.func("NULLIF", d_col, exp.Literal.number(0))
+        raw_div = cast("exp.Expression", exp.Div(this=n_col, expression=nullif_d))
+        combine = cast("exp.Expression", exp.func("COALESCE", raw_div, exp.Literal.number(0)))
+        zero_warnings = []
+    else:  # ERROR — raw division; the engine raises on zero
+        combine = cast("exp.Expression", exp.Div(this=n_col, expression=d_col))
+        zero_warnings = []
+
+    # Outer SELECT: dimensions (unqualified — USING merges them) + combined metric.
+    outer = exp.Select()
+    projections: list[exp.Expression] = []
+    for dim_name in dim_names:
+        projections.append(_alias(cast("exp.Expression", exp.column(dim_name)), dim_name))
+    projections.append(_alias(combine, composite.metric))
+    outer = outer.select(*projections)
+
+    # Join the two CTEs: FULL JOIN USING (dims) or CROSS JOIN for the scalar case.
+    if dim_names:
+        outer = outer.from_(exp.to_table("num"))
+        # sqlglot stubs use Expr (invariant list) — list[str] is valid at runtime
+        outer = outer.join(exp.to_table("den"), using=dim_names, join_type="FULL")  # type: ignore[arg-type]
+    else:
+        outer = outer.from_(exp.to_table("num"))
+        outer = outer.join(exp.to_table("den"), join_type="CROSS")
+
+    # Wrap with CTEs.
+    ast = outer.with_("num", as_=num_plan.select).with_("den", as_=den_plan.select)
+
+    sql = adapter.emit(ast, limit=query.limit)
+
+    # Stage 8 — assemble result metadata (union guardrails + freshness across leaves).
+    fired_ids: set[str] = set()
+    fired: list[FiredGuardrail] = []
+    for g in num_plan.fired + den_plan.fired:
+        if g.id not in fired_ids:
+            fired_ids.add(g.id)
+            fired.append(g)
+
+    all_sources = num_plan.used_sources | den_plan.used_sources
+    freshness = [_freshness(sources_by_name[s]) for s in sorted(all_sources)]
+
+    num_name = components.numerator.metric
+    den_name = components.denominator.metric
+    resolved_str = (
+        f"weighted_avg({num_name}, {den_name})"
+        if composite.kind is BindingKind.WEIGHTED_AVG
+        else f"ratio({num_name}, {den_name})"
+    )
+
+    return CompileResult(
+        sql=sql,
+        dialect=adapter.dialect,
+        resolved={queried_name: resolved_str},
+        guardrails_fired=fired,
+        freshness=freshness,
+        warnings=zero_warnings,
+        composition=CompositionMetadata(
+            kind=composite.kind,
+            numerator=num_name,
+            denominator=den_name,
+            on_zero_denominator=on_zero,
+        ),
+    )
 
 
 # --- Stage 2 -----------------------------------------------------------------

@@ -1,0 +1,7 @@
+metric: damage_count
+canonical:
+  source: damages
+  measure: damage_count
+provenance: human_curated
+aliases: ["damage count", "number of damages"]
+status: active

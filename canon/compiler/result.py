@@ -8,7 +8,13 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-__all__ = ["CompileResult", "FinalityMetadata", "FiredGuardrail", "SourceFreshness"]
+__all__ = [
+    "CompileResult",
+    "CompositionMetadata",
+    "FinalityMetadata",
+    "FiredGuardrail",
+    "SourceFreshness",
+]
 
 
 @dataclass(frozen=True, slots=True)
@@ -26,6 +32,20 @@ class SourceFreshness:
     source: str
     last_validated_at: str | None
     stale: bool
+
+
+@dataclass(frozen=True, slots=True)
+class CompositionMetadata:
+    """Records how a composable_post_agg metric was produced (SPEC-Fuller-E15 §4.1, §6 stage 8).
+
+    Consumed by E14 (trust scoring) and E16 (event log) to record that division
+    was applied post-aggregation, not row-by-row.
+    """
+
+    kind: str
+    numerator: str
+    denominator: str
+    on_zero_denominator: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -61,3 +81,4 @@ class CompileResult:
     freshness: list[SourceFreshness] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
     finality: FinalityMetadata | None = None
+    composition: CompositionMetadata | None = None
