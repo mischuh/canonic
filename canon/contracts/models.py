@@ -5,7 +5,7 @@ from __future__ import annotations
 from enum import StrEnum
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, model_validator
+from pydantic import BaseModel, ConfigDict, field_validator, model_validator
 
 from canon.semantic.models import Provenance
 
@@ -13,6 +13,7 @@ __all__ = [
     "AppliesTo",
     "Assertion",
     "AssertionExpect",
+    "BindingKind",
     "CanonicalRef",
     "ContractValidationError",
     "DeprecatedAlternative",
@@ -20,6 +21,7 @@ __all__ = [
     "Guardrail",
     "GuardrailKind",
     "MetricBinding",
+    "OnZeroDenominator",
     "Realization",
     "RestrictTo",
     "Severity",
@@ -62,13 +64,70 @@ class GuardrailKind(StrEnum):
     RESTRICT_SOURCE = "restrict_source"  # [P1]
 
 
+class BindingKind(StrEnum):
+    """Compilation strategy for a metric binding (SPEC-Fuller-E15 §3)."""
+
+    SINGLE = "single"
+    RATIO = "ratio"
+    WEIGHTED_AVG = "weighted_avg"
+
+
+class OnZeroDenominator(StrEnum):
+    """Behaviour when the denominator of a composable_post_agg metric is zero (§4.1)."""
+
+    NULL = "null"
+    ZERO = "zero"
+    ERROR = "error"
+
+
 class CanonicalRef(BaseModel):
-    """The single canonical source+measure for a metric binding."""
+    """The canonical binding for a metric — either a single source+measure or a composite (§3).
+
+    For ``kind=single`` (default), ``source`` and ``measure`` are required.
+    For ``kind=ratio``, ``numerator`` and ``denominator`` (metric names) are required.
+    For ``kind=weighted_avg``, ``weighted_sum`` and ``weight`` (metric names) are required.
+    """
 
     model_config = ConfigDict(frozen=True)
 
-    source: str
-    measure: str
+    kind: BindingKind = BindingKind.SINGLE
+    source: str | None = None
+    measure: str | None = None
+    numerator: str | None = None
+    denominator: str | None = None
+    weighted_sum: str | None = None
+    weight: str | None = None
+    on_zero_denominator: OnZeroDenominator = OnZeroDenominator.NULL
+
+    @field_validator("on_zero_denominator", mode="before")
+    @classmethod
+    def _coerce_on_zero(cls, v: object) -> object:
+        if v is None:
+            return OnZeroDenominator.NULL
+        return v
+
+    @model_validator(mode="after")
+    def _validate_shape(self) -> CanonicalRef:
+        if self.kind is BindingKind.SINGLE:
+            if self.source is None:
+                raise ContractValidationError(("source",), "single binding requires 'source'")
+            if self.measure is None:
+                raise ContractValidationError(("measure",), "single binding requires 'measure'")
+        elif self.kind is BindingKind.RATIO:
+            if self.numerator is None:
+                raise ContractValidationError(("numerator",), "ratio binding requires 'numerator'")
+            if self.denominator is None:
+                raise ContractValidationError(
+                    ("denominator",), "ratio binding requires 'denominator'"
+                )
+        elif self.kind is BindingKind.WEIGHTED_AVG:
+            if self.weighted_sum is None:
+                raise ContractValidationError(
+                    ("weighted_sum",), "weighted_avg binding requires 'weighted_sum'"
+                )
+            if self.weight is None:
+                raise ContractValidationError(("weight",), "weighted_avg binding requires 'weight'")
+        return self
 
 
 class DeprecatedAlternative(BaseModel):

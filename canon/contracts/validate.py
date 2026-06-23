@@ -12,7 +12,7 @@ from canon.contracts.loader import (
     load_guardrails,
     load_metric_bindings,
 )
-from canon.contracts.models import GuardrailKind, Status
+from canon.contracts.models import BindingKind, GuardrailKind, MetricBinding, Status
 from canon.exc import ContractError
 from canon.semantic.loader import list_semantic_sources
 
@@ -20,6 +20,68 @@ if TYPE_CHECKING:
     from pathlib import Path
 
 __all__ = ["validate_contracts"]
+
+
+def _validate_composite_binding(
+    binding: MetricBinding,
+    all_bindings: list[MetricBinding],
+    source_measures: dict[str, set[str]],
+) -> None:
+    """Validate a ratio/weighted_avg binding (SPEC-Fuller-E15 §8, S7).
+
+    Checks: components resolve to active metrics; no cycle in the composition graph.
+    Additivity of single-kind components is verified at compile time by the safety floor.
+    """
+    active_by_name: dict[str, MetricBinding] = {
+        b.metric: b for b in all_bindings if b.status is Status.ACTIVE
+    }
+    ref = binding.canonical
+
+    if ref.kind is BindingKind.RATIO:
+        component_names = [ref.numerator, ref.denominator]
+        labels = ["numerator", "denominator"]
+    else:  # WEIGHTED_AVG
+        component_names = [ref.weighted_sum, ref.weight]
+        labels = ["weighted_sum", "weight"]
+
+    for name, label in zip(component_names, labels, strict=True):
+        assert name is not None  # noqa: S101 — enforced by CanonicalRef model_validator
+        if name not in active_by_name:
+            raise ContractError(
+                f"metric {binding.metric!r}: {label} {name!r} does not resolve "
+                f"to an active metric binding"
+            )
+
+    _check_composite_cycle(binding.metric, active_by_name, path=[binding.metric])
+
+
+def _check_composite_cycle(
+    metric: str,
+    active_by_name: dict[str, MetricBinding],
+    path: list[str],
+) -> None:
+    """Raise ContractError if the composition graph has a cycle (SPEC §8, S7 AC2)."""
+    binding = active_by_name.get(metric)
+    if binding is None:
+        return
+    ref = binding.canonical
+    if ref.kind is BindingKind.SINGLE:
+        return
+
+    if ref.kind is BindingKind.RATIO:
+        children = [ref.numerator, ref.denominator]
+    else:
+        children = [ref.weighted_sum, ref.weight]
+
+    for child in children:
+        if child is None:
+            continue
+        if child in path:
+            cycle_str = " → ".join(path + [child])
+            raise ContractError(
+                f"composite metric {path[0]!r} has a cyclic dependency: {cycle_str}"
+            )
+        _check_composite_cycle(child, active_by_name, path + [child])
 
 
 def validate_contracts(project_root: Path) -> None:
@@ -48,16 +110,20 @@ def validate_contracts(project_root: Path) -> None:
         if binding.status is not Status.ACTIVE:
             continue
         ref = binding.canonical
-        if ref.source not in source_measures:
-            raise ContractError(
-                f"metric {binding.metric!r}: canonical.source {ref.source!r} "
-                f"does not match any semantic source"
-            )
-        if ref.measure not in source_measures[ref.source]:
-            raise ContractError(
-                f"metric {binding.metric!r}: canonical.measure {ref.measure!r} "
-                f"is not declared on source {ref.source!r}"
-            )
+        if ref.kind is BindingKind.SINGLE:
+            assert ref.source is not None and ref.measure is not None  # noqa: S101
+            if ref.source not in source_measures:
+                raise ContractError(
+                    f"metric {binding.metric!r}: canonical.source {ref.source!r} "
+                    f"does not match any semantic source"
+                )
+            if ref.measure not in source_measures[ref.source]:
+                raise ContractError(
+                    f"metric {binding.metric!r}: canonical.measure {ref.measure!r} "
+                    f"is not declared on source {ref.source!r}"
+                )
+        else:
+            _validate_composite_binding(binding, bindings, source_measures)
 
     guardrails = load_guardrails(project_root)
     for guardrail in guardrails:
