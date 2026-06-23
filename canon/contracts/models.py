@@ -74,6 +74,7 @@ class BindingKind(StrEnum):
     SEMI_ADDITIVE = "semi_additive"
     DISTINCT_COUNT = "distinct_count"
     PERCENTILE = "percentile"
+    OPAQUE = "opaque"
 
 
 class CollapseAgg(StrEnum):
@@ -104,6 +105,9 @@ class CanonicalRef(BaseModel):
     ``collapse_agg`` are required.
     For ``kind=distinct_count``, ``source`` and ``distinct_on`` (column name) are required.
     For ``kind=percentile``, ``source``, ``column``, and ``quantile`` ∈ (0, 1) are required.
+    For ``kind=opaque``, ``source``, ``measure``, and ``native_grain`` (list of column/dimension
+    names) are required. Served only at the declared native grain; any other grain →
+    ``UNSUPPORTED_MEASURE`` (SPEC-Fuller-E15 §4.4).
 
     ``population_filter`` is an optional SQL predicate (§4.5) valid for every ``kind``. It defines
     the population the metric is *about* and is AND-ed into the WHERE of every leaf query before
@@ -125,6 +129,7 @@ class CanonicalRef(BaseModel):
     distinct_on: str | None = None
     column: str | None = None
     quantile: float | None = None
+    native_grain: list[str] = []
     population_filter: str | None = None
 
     @field_validator("on_zero_denominator", mode="before")
@@ -190,6 +195,15 @@ class CanonicalRef(BaseModel):
             if self.quantile is None or not (0 < self.quantile < 1):
                 raise ContractValidationError(
                     ("quantile",), "percentile binding requires quantile ∈ (0, 1)"
+                )
+        elif self.kind is BindingKind.OPAQUE:
+            if self.source is None:
+                raise ContractValidationError(("source",), "opaque binding requires 'source'")
+            if self.measure is None:
+                raise ContractValidationError(("measure",), "opaque binding requires 'measure'")
+            if not self.native_grain:
+                raise ContractValidationError(
+                    ("native_grain",), "opaque binding requires non-empty 'native_grain'"
                 )
         return self
 

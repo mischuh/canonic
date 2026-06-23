@@ -21,6 +21,7 @@ from canon.compiler.result import (
     CompositionMetadata,
     FinalityMetadata,
     FiredGuardrail,
+    OpaqueMetadata,
     PartialAdditiveMetadata,
     RecomputeAtGrainMetadata,
     SourceFreshness,
@@ -127,6 +128,7 @@ def compile(  # noqa: A001 — the public verb for this capability is "compile"
         for i, (_, b) in enumerate(raw_bindings)
         if b.kind in {BindingKind.DISTINCT_COUNT, BindingKind.PERCENTILE}
     ]
+    opaque_indices = [i for i, (_, b) in enumerate(raw_bindings) if b.kind is BindingKind.OPAQUE]
     if composite_indices:
         if len(query.metrics) > 1:
             raise UnsupportedMeasure(
@@ -151,6 +153,14 @@ def compile(  # noqa: A001 — the public verb for this capability is "compile"
             )
         _, rg_binding = raw_bindings[0]
         return _compile_recompute_at_grain(query, rg_binding, resolver, sources_by_name)
+    if opaque_indices:
+        if len(query.metrics) > 1:
+            raise UnsupportedMeasure(
+                "opaque metrics must be queried alone; "
+                "remove other metrics from the request or split into separate queries"
+            )
+        _, opaque_binding = raw_bindings[0]
+        return _compile_opaque(query, opaque_binding, resolver, sources_by_name)
 
     metrics = _bindings_to_resolved(raw_bindings, sources_by_name)
     owner = metrics[0].source  # FROM anchor
@@ -902,6 +912,105 @@ def _compile_recompute_at_grain(
             column=rg.column,
             quantile=rg.quantile,
         ),
+    )
+
+
+def _compile_opaque(
+    query: SemanticQuery,
+    binding: ResolverBinding,
+    resolver: ContractResolver,
+    sources_by_name: dict[str, SemanticSource],
+) -> CompileResult:
+    """Compile an opaque metric only when the requested grain exactly matches native_grain (§4.4).
+
+    Opaque metrics are pre-computed scores with no decomposition. They are served as-is at the
+    declared native grain; any other grain → UNSUPPORTED_MEASURE with a rationale. Never averaged
+    or summed implicitly.
+    """
+    assert binding.opaque is not None  # noqa: S101 — routing guarantees this kind
+    opaque = binding.opaque
+    adapter = DIALECT_ADAPTERS["postgres"]
+    queried_name = query.metrics[0]
+
+    assert binding.source is not None and binding.measure is not None  # noqa: S101 — enforced by model_validator
+    source_name = binding.source
+
+    # Grain guard: set equality between requested dimensions and native_grain (§4.4).
+    requested_grain = set(query.dimensions)
+    native_grain_set = set(opaque.native_grain)
+    if requested_grain != native_grain_set:
+        raise UnsupportedMeasure(
+            f"opaque metric {queried_name!r} is served only at native grain "
+            f"{sorted(opaque.native_grain)}; cannot re-aggregate a pre-computed score "
+            f"(requested: {sorted(requested_grain)})"
+        )
+
+    alias_to_source = build_alias_tree(source_name, sources_by_name)
+
+    # Stage 2 — dimensions & filters.
+    dimensions = _resolve_dimensions(query, sources_by_name, source_name, alias_to_source)
+    referenced = {alias for alias, _ in dimensions}
+    where_conditions, filter_sources = _bind_filters(
+        query.filters, sources_by_name, source_name, alias_to_source
+    )
+    referenced |= filter_sources
+    referenced |= {source_name}
+
+    # Stage 3 — join graph.
+    join_edges = plan_joins(
+        source_name, referenced - {source_name}, sources_by_name, via=list(query.via) or None
+    )
+
+    # Stage 4 — fanout safety floor: a fanning join would multiply the pre-computed score's rows.
+    fanout = any(edge.join.relationship in _FANOUT for edge in join_edges)
+    if fanout:
+        raise FanoutUnsafe(
+            f"opaque metric {queried_name!r} cannot be used with a "
+            f"one_to_many/many_to_many join; it is a pre-computed score with no decomposition"
+        )
+
+    source_obj = sources_by_name.get(source_name)
+    if source_obj is None:
+        raise Unresolved(f"metric {queried_name!r} binds to unknown source {source_name!r}")
+    measure_obj = _find_measure(source_obj, binding.measure)
+    if measure_obj is None:
+        raise Unresolved(
+            f"metric {queried_name!r} binds to unknown measure {source_name}.{binding.measure!r}"
+        )
+
+    # population_filter — defines the population this metric is compiled over (§4.5); before guardrails.
+    where_conditions += _population_filter_conditions(
+        binding.binding.canonical.population_filter, sources_by_name, source_name, alias_to_source
+    )
+
+    # Stage 6 — guardrails.
+    resolved_metric = _ResolvedMetric(name=queried_name, source=source_name, measure=measure_obj)
+    guard_conditions, fired = _enforce_guardrails(
+        [resolved_metric], resolver, query.context, sources_by_name
+    )
+    where_conditions += guard_conditions
+
+    # Stage 7 — emit SQL (pass-through: grain matches native_grain, so _build_simple is correct).
+    ast = _build_simple(
+        source_name,
+        [resolved_metric],
+        dimensions,
+        where_conditions,
+        join_edges,
+        sources_by_name,
+    )
+    sql = adapter.emit(ast, limit=query.limit)
+
+    # Stage 8 — result metadata.
+    used_sources = sorted({source_name} | {e.join.to for e in join_edges})
+    return CompileResult(
+        sql=sql,
+        dialect=adapter.dialect,
+        resolved={queried_name: f"{source_name}.{measure_obj.name}"},
+        guardrails_fired=fired,
+        freshness=[_freshness(sources_by_name[s]) for s in used_sources],
+        warnings=[],
+        opaque=OpaqueMetadata(native_grain=list(opaque.native_grain)),
     )
 
 

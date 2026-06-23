@@ -52,6 +52,12 @@ def _validate_composite_binding(
                 f"metric {binding.metric!r}: {label} {name!r} does not resolve "
                 f"to an active metric binding"
             )
+        if active_by_name[name].canonical.kind is BindingKind.OPAQUE:
+            raise ContractError(
+                f"metric {binding.metric!r}: {label} {name!r} has kind 'opaque'; "
+                f"opaque components cannot be used in composite metrics because they "
+                f"carry no shared-grain guarantee"
+            )
 
     _check_composite_cycle(binding.metric, active_by_name, path=[binding.metric])
 
@@ -161,6 +167,39 @@ def _validate_recompute_at_grain_binding(
             )
 
 
+def _validate_opaque_binding(
+    binding: MetricBinding,
+    source_measures: dict[str, set[str]],
+    source_columns: dict[str, set[str]],
+    source_dims: dict[str, set[str]],
+) -> None:
+    """Validate an opaque binding (SPEC-Fuller-E15 §8).
+
+    Checks: source exists; measure exists on the source; every native_grain entry is a
+    declared column or dimension on the source.
+    """
+    ref = binding.canonical
+    assert ref.source is not None and ref.measure is not None  # noqa: S101 — enforced by model_validator
+
+    if ref.source not in source_measures:
+        raise ContractError(
+            f"metric {binding.metric!r}: canonical.source {ref.source!r} "
+            f"does not match any semantic source"
+        )
+    if ref.measure not in source_measures[ref.source]:
+        raise ContractError(
+            f"metric {binding.metric!r}: canonical.measure {ref.measure!r} "
+            f"is not declared on source {ref.source!r}"
+        )
+    all_names = source_columns.get(ref.source, set()) | source_dims.get(ref.source, set())
+    for i, col in enumerate(ref.native_grain):
+        if col not in all_names:
+            raise ContractError(
+                f"metric {binding.metric!r}: native_grain[{i}] {col!r} "
+                f"is not declared as a column or dimension on source {ref.source!r}"
+            )
+
+
 def validate_contracts(project_root: Path) -> None:
     """Validate all contracts against the live semantic sources.
 
@@ -212,6 +251,8 @@ def validate_contracts(project_root: Path) -> None:
             _validate_recompute_at_grain_binding(
                 binding, source_measures, source_dims, source_columns
             )
+        elif ref.kind is BindingKind.OPAQUE:
+            _validate_opaque_binding(binding, source_measures, source_columns, source_dims)
         else:
             _validate_composite_binding(binding, bindings, source_measures)
 
