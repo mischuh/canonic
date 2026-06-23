@@ -23,6 +23,7 @@ from canon.contracts.loader import (
 from canon.contracts.models import (
     BindingKind,
     CanonicalRef,
+    CollapseAgg,
     FinalityRule,
     Guardrail,
     GuardrailKind,
@@ -44,8 +45,17 @@ __all__ = [
     "ComponentBindings",
     "ContractResolver",
     "MetricResolution",
+    "SemiAdditiveBinding",
     "Unresolved",
 ]
+
+
+@dataclass(frozen=True, slots=True)
+class SemiAdditiveBinding:
+    """Resolved semi_additive parameters for a partial_additive metric (§4.2)."""
+
+    collapse_dimension: str
+    collapse_agg: CollapseAgg
 
 
 @dataclass(frozen=True, slots=True)
@@ -55,6 +65,8 @@ class Binding:
     For ``kind=single``, ``source`` and ``measure`` are non-None.
     For composite kinds (ratio/weighted_avg), ``source`` and ``measure`` are None;
     ``components`` carries the resolved numerator/denominator bindings.
+    For ``kind=semi_additive``, ``source`` and ``measure`` are non-None (single-leaf);
+    ``semi_additive`` carries the collapse parameters.
     """
 
     metric: str
@@ -63,6 +75,7 @@ class Binding:
     binding: MetricBinding
     kind: BindingKind = BindingKind.SINGLE
     components: ComponentBindings | None = None
+    semi_additive: SemiAdditiveBinding | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -124,13 +137,13 @@ class ContractResolver:
 
         # name/alias -> active bindings; multiple entries for a name means ambiguity
         name_index: dict[str, list[MetricBinding]] = {}
-        # active single metric name -> canonical (source, measure) for metric-targeted guardrails
-        # composite bindings have no single (source, measure), so they are excluded
+        # active single/semi_additive metric name -> canonical for metric-targeted guardrails
+        # composite bindings (ratio/weighted_avg) have no single (source, measure), so excluded
         metric_to_canonical: dict[str, CanonicalRef] = {}
         for binding in bindings:
             if binding.status is not Status.ACTIVE:
                 continue
-            if binding.canonical.kind is BindingKind.SINGLE:
+            if binding.canonical.kind in {BindingKind.SINGLE, BindingKind.SEMI_ADDITIVE}:
                 metric_to_canonical[binding.metric] = binding.canonical
             for name in (binding.metric, *binding.aliases):
                 name_index.setdefault(name, []).append(binding)
@@ -186,6 +199,25 @@ class ContractResolver:
                 source=canonical.source,
                 measure=canonical.measure,
                 binding=binding,
+            )
+
+        if canonical.kind is BindingKind.SEMI_ADDITIVE:
+            assert (  # noqa: S101 — enforced by model_validator
+                canonical.source is not None
+                and canonical.measure is not None
+                and canonical.collapse_dimension is not None
+                and canonical.collapse_agg is not None
+            )
+            return Binding(
+                metric=binding.metric,
+                source=canonical.source,
+                measure=canonical.measure,
+                binding=binding,
+                kind=BindingKind.SEMI_ADDITIVE,
+                semi_additive=SemiAdditiveBinding(
+                    collapse_dimension=canonical.collapse_dimension,
+                    collapse_agg=canonical.collapse_agg,
+                ),
             )
 
         if canonical.kind is BindingKind.RATIO:

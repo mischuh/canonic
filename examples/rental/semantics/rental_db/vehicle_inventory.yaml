@@ -1,0 +1,24 @@
+name: vehicle_inventory
+connection: rental_db
+table: vehicle_inventory_snapshots
+grain: [vehicle_id, snapshot_date]
+description: "Daily snapshot of vehicle inventory level per location. Additive over vehicles/locations but NOT over time (snapshot, not a flow)."
+
+columns:
+  - { name: vehicle_id,     type: string,  nullable: false }
+  - { name: location_id,    type: string,  nullable: false }
+  - { name: snapshot_date,  type: date,    nullable: false }
+  - { name: inventory_level, type: int,    nullable: false }
+
+measures:
+  - name: inventory_level
+    expr: 'sum(inventory_level)'
+    additivity: additive
+
+dimensions:
+  - { name: vehicle_id,    column: vehicle_id }
+  - { name: location_id,   column: location_id }
+  - { name: snapshot_date, column: snapshot_date, granularity: day }
+
+meta:
+  provenance: human_curated

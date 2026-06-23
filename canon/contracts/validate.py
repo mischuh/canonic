@@ -15,6 +15,7 @@ from canon.contracts.loader import (
 from canon.contracts.models import BindingKind, GuardrailKind, MetricBinding, Status
 from canon.exc import ContractError
 from canon.semantic.loader import list_semantic_sources
+from canon.semantic.models import Additivity
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -84,6 +85,43 @@ def _check_composite_cycle(
         _check_composite_cycle(child, active_by_name, path + [child])
 
 
+def _validate_semi_additive_binding(
+    binding: MetricBinding,
+    source_measures: dict[str, set[str]],
+    source_dims: dict[str, set[str]],
+    source_measure_additivity: dict[str, dict[str, Additivity]],
+) -> None:
+    """Validate a semi_additive binding (SPEC-Fuller-E15 §8).
+
+    Checks: source exists; base measure exists and is additive; collapse_dimension exists.
+    """
+    ref = binding.canonical
+    assert ref.source is not None and ref.measure is not None  # noqa: S101 — enforced by model_validator
+    assert ref.collapse_dimension is not None  # noqa: S101
+
+    if ref.source not in source_measures:
+        raise ContractError(
+            f"metric {binding.metric!r}: canonical.source {ref.source!r} "
+            f"does not match any semantic source"
+        )
+    if ref.measure not in source_measures[ref.source]:
+        raise ContractError(
+            f"metric {binding.metric!r}: canonical.measure {ref.measure!r} "
+            f"is not declared on source {ref.source!r}"
+        )
+    additivity = source_measure_additivity.get(ref.source, {}).get(ref.measure)
+    if additivity is not Additivity.ADDITIVE:
+        raise ContractError(
+            f"metric {binding.metric!r}: base measure {ref.source}.{ref.measure!r} "
+            f"must be additive for a semi_additive binding (got {additivity!r})"
+        )
+    if ref.collapse_dimension not in source_dims.get(ref.source, set()):
+        raise ContractError(
+            f"metric {binding.metric!r}: collapse_dimension {ref.collapse_dimension!r} "
+            f"is not declared as a dimension on source {ref.source!r}"
+        )
+
+
 def validate_contracts(project_root: Path) -> None:
     """Validate all contracts against the live semantic sources.
 
@@ -98,6 +136,10 @@ def validate_contracts(project_root: Path) -> None:
     """
     sources = list_semantic_sources(project_root)
     source_measures: dict[str, set[str]] = {s.name: {m.name for m in s.measures} for s in sources}
+    source_dims: dict[str, set[str]] = {s.name: {d.name for d in s.dimensions} for s in sources}
+    source_measure_additivity: dict[str, dict[str, Additivity]] = {
+        s.name: {m.name: m.additivity for m in s.measures} for s in sources
+    }
     source_names = set(source_measures)
 
     bindings = load_metric_bindings(project_root)
@@ -122,6 +164,10 @@ def validate_contracts(project_root: Path) -> None:
                     f"metric {binding.metric!r}: canonical.measure {ref.measure!r} "
                     f"is not declared on source {ref.source!r}"
                 )
+        elif ref.kind is BindingKind.SEMI_ADDITIVE:
+            _validate_semi_additive_binding(
+                binding, source_measures, source_dims, source_measure_additivity
+            )
         else:
             _validate_composite_binding(binding, bindings, source_measures)
 

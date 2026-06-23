@@ -1,0 +1,10 @@
+metric: ending_inventory
+canonical:
+  kind: semi_additive
+  source: vehicle_inventory
+  measure: inventory_level
+  collapse_dimension: snapshot_date
+  collapse_agg: last
+provenance: human_curated
+aliases: ["fleet size", "vehicles on hand"]
+status: active
