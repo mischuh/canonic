@@ -72,6 +72,8 @@ class BindingKind(StrEnum):
     RATIO = "ratio"
     WEIGHTED_AVG = "weighted_avg"
     SEMI_ADDITIVE = "semi_additive"
+    DISTINCT_COUNT = "distinct_count"
+    PERCENTILE = "percentile"
 
 
 class CollapseAgg(StrEnum):
@@ -100,6 +102,8 @@ class CanonicalRef(BaseModel):
     For ``kind=weighted_avg``, ``weighted_sum`` and ``weight`` (metric names) are required.
     For ``kind=semi_additive``, ``source``, ``measure``, ``collapse_dimension``, and
     ``collapse_agg`` are required.
+    For ``kind=distinct_count``, ``source`` and ``distinct_on`` (column name) are required.
+    For ``kind=percentile``, ``source``, ``column``, and ``quantile`` ∈ (0, 1) are required.
 
     ``population_filter`` is an optional SQL predicate (§4.5) valid for every ``kind``. It defines
     the population the metric is *about* and is AND-ed into the WHERE of every leaf query before
@@ -118,6 +122,9 @@ class CanonicalRef(BaseModel):
     on_zero_denominator: OnZeroDenominator = OnZeroDenominator.NULL
     collapse_dimension: str | None = None
     collapse_agg: CollapseAgg | None = None
+    distinct_on: str | None = None
+    column: str | None = None
+    quantile: float | None = None
     population_filter: str | None = None
 
     @field_validator("on_zero_denominator", mode="before")
@@ -165,6 +172,24 @@ class CanonicalRef(BaseModel):
             if self.collapse_agg is None:
                 raise ContractValidationError(
                     ("collapse_agg",), "semi_additive binding requires 'collapse_agg'"
+                )
+        elif self.kind is BindingKind.DISTINCT_COUNT:
+            if self.source is None:
+                raise ContractValidationError(
+                    ("source",), "distinct_count binding requires 'source'"
+                )
+            if self.distinct_on is None:
+                raise ContractValidationError(
+                    ("distinct_on",), "distinct_count binding requires 'distinct_on'"
+                )
+        elif self.kind is BindingKind.PERCENTILE:
+            if self.source is None:
+                raise ContractValidationError(("source",), "percentile binding requires 'source'")
+            if self.column is None:
+                raise ContractValidationError(("column",), "percentile binding requires 'column'")
+            if self.quantile is None or not (0 < self.quantile < 1):
+                raise ContractValidationError(
+                    ("quantile",), "percentile binding requires quantile ∈ (0, 1)"
                 )
         return self
 

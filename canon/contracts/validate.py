@@ -122,6 +122,45 @@ def _validate_semi_additive_binding(
         )
 
 
+def _validate_recompute_at_grain_binding(
+    binding: MetricBinding,
+    source_measures: dict[str, set[str]],
+    source_dims: dict[str, set[str]],
+    source_columns: dict[str, set[str]],
+) -> None:
+    """Validate a distinct_count or percentile binding (SPEC-Fuller-E15 §8).
+
+    Checks: source exists; referenced column (distinct_on / column) exists as a column or
+    dimension on the source; quantile ∈ (0, 1) for percentile (defence-in-depth).
+    """
+    ref = binding.canonical
+    assert ref.source is not None  # noqa: S101 — enforced by model_validator
+
+    if ref.source not in source_measures:
+        raise ContractError(
+            f"metric {binding.metric!r}: canonical.source {ref.source!r} "
+            f"does not match any semantic source"
+        )
+
+    col_field = "distinct_on" if ref.kind is BindingKind.DISTINCT_COUNT else "column"
+    col_name = ref.distinct_on if ref.kind is BindingKind.DISTINCT_COUNT else ref.column
+    assert col_name is not None  # noqa: S101 — enforced by model_validator
+
+    all_names = source_columns.get(ref.source, set()) | source_dims.get(ref.source, set())
+    if col_name not in all_names:
+        raise ContractError(
+            f"metric {binding.metric!r}: {col_field} {col_name!r} "
+            f"is not declared as a column or dimension on source {ref.source!r}"
+        )
+
+    if ref.kind is BindingKind.PERCENTILE:
+        assert ref.quantile is not None  # noqa: S101 — enforced by model_validator
+        if not (0 < ref.quantile < 1):
+            raise ContractError(
+                f"metric {binding.metric!r}: quantile must be in (0, 1), got {ref.quantile}"
+            )
+
+
 def validate_contracts(project_root: Path) -> None:
     """Validate all contracts against the live semantic sources.
 
@@ -137,6 +176,7 @@ def validate_contracts(project_root: Path) -> None:
     sources = list_semantic_sources(project_root)
     source_measures: dict[str, set[str]] = {s.name: {m.name for m in s.measures} for s in sources}
     source_dims: dict[str, set[str]] = {s.name: {d.name for d in s.dimensions} for s in sources}
+    source_columns: dict[str, set[str]] = {s.name: {c.name for c in s.columns} for s in sources}
     source_measure_additivity: dict[str, dict[str, Additivity]] = {
         s.name: {m.name: m.additivity for m in s.measures} for s in sources
     }
@@ -167,6 +207,10 @@ def validate_contracts(project_root: Path) -> None:
         elif ref.kind is BindingKind.SEMI_ADDITIVE:
             _validate_semi_additive_binding(
                 binding, source_measures, source_dims, source_measure_additivity
+            )
+        elif ref.kind in {BindingKind.DISTINCT_COUNT, BindingKind.PERCENTILE}:
+            _validate_recompute_at_grain_binding(
+                binding, source_measures, source_dims, source_columns
             )
         else:
             _validate_composite_binding(binding, bindings, source_measures)

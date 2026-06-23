@@ -1,0 +1,9 @@
+metric: active_customers
+canonical:
+  kind: distinct_count
+  source: rentals
+  distinct_on: customer_id
+  population_filter: "status != 'cancelled'"
+provenance: human_curated
+aliases: ["unique customers", "distinct customers"]
+status: active

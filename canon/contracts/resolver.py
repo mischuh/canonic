@@ -45,6 +45,7 @@ __all__ = [
     "ComponentBindings",
     "ContractResolver",
     "MetricResolution",
+    "RecomputeAtGrainBinding",
     "SemiAdditiveBinding",
     "Unresolved",
 ]
@@ -56,6 +57,16 @@ class SemiAdditiveBinding:
 
     collapse_dimension: str
     collapse_agg: CollapseAgg
+
+
+@dataclass(frozen=True, slots=True)
+class RecomputeAtGrainBinding:
+    """Resolved recompute_at_grain parameters for a distinct_count or percentile metric (§4.3)."""
+
+    kind: BindingKind
+    distinct_on: str | None
+    column: str | None
+    quantile: float | None
 
 
 @dataclass(frozen=True, slots=True)
@@ -76,6 +87,7 @@ class Binding:
     kind: BindingKind = BindingKind.SINGLE
     components: ComponentBindings | None = None
     semi_additive: SemiAdditiveBinding | None = None
+    recompute_at_grain: RecomputeAtGrainBinding | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -143,7 +155,12 @@ class ContractResolver:
         for binding in bindings:
             if binding.status is not Status.ACTIVE:
                 continue
-            if binding.canonical.kind in {BindingKind.SINGLE, BindingKind.SEMI_ADDITIVE}:
+            if binding.canonical.kind in {
+                BindingKind.SINGLE,
+                BindingKind.SEMI_ADDITIVE,
+                BindingKind.DISTINCT_COUNT,
+                BindingKind.PERCENTILE,
+            }:
                 metric_to_canonical[binding.metric] = binding.canonical
             for name in (binding.metric, *binding.aliases):
                 name_index.setdefault(name, []).append(binding)
@@ -217,6 +234,22 @@ class ContractResolver:
                 semi_additive=SemiAdditiveBinding(
                     collapse_dimension=canonical.collapse_dimension,
                     collapse_agg=canonical.collapse_agg,
+                ),
+            )
+
+        if canonical.kind in {BindingKind.DISTINCT_COUNT, BindingKind.PERCENTILE}:
+            assert canonical.source is not None  # noqa: S101 — enforced by model_validator
+            return Binding(
+                metric=binding.metric,
+                source=canonical.source,
+                measure=None,
+                binding=binding,
+                kind=canonical.kind,
+                recompute_at_grain=RecomputeAtGrainBinding(
+                    kind=canonical.kind,
+                    distinct_on=canonical.distinct_on,
+                    column=canonical.column,
+                    quantile=canonical.quantile,
                 ),
             )
 

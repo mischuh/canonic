@@ -103,3 +103,6 @@ class PostgresDialectAdapter(DialectAdapter):
 
 
 DIALECT_ADAPTERS: dict[str, DialectAdapter] = {"postgres": PostgresDialectAdapter()}
+
+# Future: add a DialectAdapter.percentile(q, col) method to abstract percentile_cont (Postgres/DuckDB)
+# vs approx_quantile (BigQuery/Trino) when multi-dialect support is added (SPEC §4.3 open question).

@@ -10,7 +10,7 @@ Acceptance criteria covered here:
 
 Cross-ticket ACs (not covered here):
   AC3 — column absent from a leaf's source → VALIDATION_FAILED at write time (covered in #123).
-  AC4 — distinct_count population_filter (covered in #120).
+  AC4 — distinct_count population_filter (covered in #120 / test_recompute_at_grain.py).
 """
 
 from __future__ import annotations
