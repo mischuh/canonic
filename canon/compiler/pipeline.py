@@ -201,6 +201,12 @@ def compile(  # noqa: A001 — the public verb for this capability is "compile"
     # Stage 5b — restrict_source: block queries that would pull provisional rows in guarded contexts.
     _enforce_restrict_source(query, metrics, resolver, finality_rule, sources_by_name)
 
+    # population_filter — defines the population the metric is about (§4.5); before guardrails.
+    for _, b in raw_bindings:
+        where_conditions += _population_filter_conditions(
+            b.binding.canonical.population_filter, sources_by_name, owner, alias_to_source
+        )
+
     # Stage 6 — enforce guardrails: AND mandatory filters into WHERE.
     guard_conditions, fired = _enforce_guardrails(metrics, resolver, query.context, sources_by_name)
     where_conditions += guard_conditions
@@ -292,6 +298,7 @@ def _plan_leaf(
     resolver: ContractResolver,
     sources_by_name: dict[str, SemanticSource],
     measure_alias: str,
+    population_filter: str | None = None,
 ) -> _LeafPlan:
     """Run stages 2–4, 6 for one single-kind component; return a leaf SELECT.
 
@@ -361,6 +368,11 @@ def _plan_leaf(
                 f"a correct result"
             )
 
+    # population_filter — defines the population this leaf is compiled over (§4.5); before guardrails.
+    where_conditions += _population_filter_conditions(
+        population_filter, sources_by_name, source_name, alias_to_source
+    )
+
     # Stage 6 — guardrails for this leaf.
     guard_conditions, fired = _enforce_guardrails(
         [_ResolvedMetric(name=component.metric, source=source_name, measure=measure_obj)],
@@ -428,8 +440,9 @@ def _compile_composite(
     adapter = DIALECT_ADAPTERS["postgres"]
     queried_name = query.metrics[0]
 
-    num_plan = _plan_leaf(components.numerator, query, resolver, sources_by_name, "n")
-    den_plan = _plan_leaf(components.denominator, query, resolver, sources_by_name, "d")
+    pop_filter = composite.binding.canonical.population_filter
+    num_plan = _plan_leaf(components.numerator, query, resolver, sources_by_name, "n", pop_filter)
+    den_plan = _plan_leaf(components.denominator, query, resolver, sources_by_name, "d", pop_filter)
 
     dim_names = list(query.dimensions)
 
@@ -575,6 +588,11 @@ def _compile_semi_additive(
             f"measure {source_name}.{measure_obj.name!r} uses an aggregate function "
             f"not supported at P0"
         )
+
+    # population_filter — defines the population this metric is compiled over (§4.5); before guardrails.
+    where_conditions += _population_filter_conditions(
+        binding.binding.canonical.population_filter, sources_by_name, source_name, alias_to_source
+    )
 
     # Stage 6 — guardrails.
     resolved_metric = _ResolvedMetric(name=queried_name, source=source_name, measure=measure_obj)
@@ -797,6 +815,20 @@ def _bind_filters(
 
 
 # --- Stage 6 -----------------------------------------------------------------
+
+
+def _population_filter_conditions(
+    population_filter: str | None,
+    sources_by_name: dict[str, SemanticSource],
+    owner: str,
+    alias_to_source: dict[str, str] | None = None,
+) -> list[exp.Expression]:
+    """Parse population_filter and qualify its columns to ``owner`` (§4.5). Empty if None."""
+    if not population_filter:
+        return []
+    parsed = _parse(population_filter)
+    bound, _ = _qualify_columns(parsed, sources_by_name, owner, alias_to_source)
+    return [bound]
 
 
 def _enforce_guardrails(

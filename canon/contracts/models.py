@@ -100,6 +100,10 @@ class CanonicalRef(BaseModel):
     For ``kind=weighted_avg``, ``weighted_sum`` and ``weight`` (metric names) are required.
     For ``kind=semi_additive``, ``source``, ``measure``, ``collapse_dimension``, and
     ``collapse_agg`` are required.
+
+    ``population_filter`` is an optional SQL predicate (§4.5) valid for every ``kind``. It defines
+    the population the metric is *about* and is AND-ed into the WHERE of every leaf query before
+    aggregation and before per-leaf guardrails.
     """
 
     model_config = ConfigDict(frozen=True)
@@ -114,6 +118,7 @@ class CanonicalRef(BaseModel):
     on_zero_denominator: OnZeroDenominator = OnZeroDenominator.NULL
     collapse_dimension: str | None = None
     collapse_agg: CollapseAgg | None = None
+    population_filter: str | None = None
 
     @field_validator("on_zero_denominator", mode="before")
     @classmethod
