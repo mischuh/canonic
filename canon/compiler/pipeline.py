@@ -22,22 +22,23 @@ from canon.compiler.result import (
     FinalityMetadata,
     FiredGuardrail,
     PartialAdditiveMetadata,
+    RecomputeAtGrainMetadata,
     SourceFreshness,
 )
 from canon.contracts.models import BindingKind, CollapseAgg, OnZeroDenominator
 from canon.contracts.resolver import Ambiguous as ResolverAmbiguous
 from canon.contracts.resolver import Binding as ResolverBinding
-from canon.contracts.resolver import ComponentBindings
+from canon.contracts.resolver import ComponentBindings, RecomputeAtGrainBinding
 from canon.contracts.resolver import Unresolved as ResolverUnresolved
 from canon.exc import Ambiguous, FanoutUnsafe, GuardrailBlock, Unresolved, UnsupportedMeasure
 from canon.exc import Unreachable as UnreachableError
-from canon.semantic.models import Additivity, NormalizedType, Relationship
+from canon.semantic.models import Additivity, Measure, NormalizedType, Relationship
 
 if TYPE_CHECKING:
     from canon.compiler.query import SemanticQuery
     from canon.contracts.models import FinalityRule
     from canon.contracts.resolver import ContractResolver
-    from canon.semantic.models import Dimension, Measure, SemanticSource
+    from canon.semantic.models import Dimension, SemanticSource
 
 __all__ = ["compile"]
 
@@ -121,6 +122,11 @@ def compile(  # noqa: A001 — the public verb for this capability is "compile"
     semi_additive_indices = [
         i for i, (_, b) in enumerate(raw_bindings) if b.kind is BindingKind.SEMI_ADDITIVE
     ]
+    recompute_indices = [
+        i
+        for i, (_, b) in enumerate(raw_bindings)
+        if b.kind in {BindingKind.DISTINCT_COUNT, BindingKind.PERCENTILE}
+    ]
     if composite_indices:
         if len(query.metrics) > 1:
             raise UnsupportedMeasure(
@@ -137,6 +143,14 @@ def compile(  # noqa: A001 — the public verb for this capability is "compile"
             )
         _, sa_binding = raw_bindings[0]
         return _compile_semi_additive(query, sa_binding, resolver, sources_by_name)
+    if recompute_indices:
+        if len(query.metrics) > 1:
+            raise UnsupportedMeasure(
+                "recompute_at_grain metrics (distinct_count/percentile) must be queried alone; "
+                "remove other metrics from the request or split into separate queries"
+            )
+        _, rg_binding = raw_bindings[0]
+        return _compile_recompute_at_grain(query, rg_binding, resolver, sources_by_name)
 
     metrics = _bindings_to_resolved(raw_bindings, sources_by_name)
     owner = metrics[0].source  # FROM anchor
@@ -779,6 +793,169 @@ def _build_semi_additive(
     return cast("exp.Expression", outer.with_(_PER_SNAP, as_=inner))
 
 
+# --- Recompute-at-grain compile path (§4.3) ----------------------------------
+
+
+def _compile_recompute_at_grain(
+    query: SemanticQuery,
+    binding: ResolverBinding,
+    resolver: ContractResolver,
+    sources_by_name: dict[str, SemanticSource],
+) -> CompileResult:
+    """Compile a recompute_at_grain metric (distinct_count / percentile) from base rows (§4.3).
+
+    Never derives from pre-aggregates: always groups the base table by the requested
+    dimensions and computes the aggregate directly. Fanout policy is kind-specific:
+    - distinct_count tolerates row duplication (DISTINCT dedups); LEFT joins preserve population.
+    - percentile rejects any fanning join with FANOUT_UNSAFE (sort-based quantile is corrupted).
+    """
+    assert binding.recompute_at_grain is not None  # noqa: S101 — routing guarantees this kind
+    rg = binding.recompute_at_grain
+    adapter = DIALECT_ADAPTERS["postgres"]
+    queried_name = query.metrics[0]
+
+    assert binding.source is not None  # noqa: S101 — enforced by model_validator
+    source_name = binding.source
+    alias_to_source = build_alias_tree(source_name, sources_by_name)
+
+    # Stage 2 — dimensions & filters.
+    dimensions = _resolve_dimensions(query, sources_by_name, source_name, alias_to_source)
+    referenced = {alias for alias, _ in dimensions}
+    where_conditions, filter_sources = _bind_filters(
+        query.filters, sources_by_name, source_name, alias_to_source
+    )
+    referenced |= filter_sources
+    referenced |= {source_name}
+
+    # Stage 3 — join graph.
+    join_edges = plan_joins(
+        source_name, referenced - {source_name}, sources_by_name, via=list(query.via) or None
+    )
+
+    # Stage 4 — fanout safety floor (kind-specific, §4.3).
+    fanout = any(edge.join.relationship in _FANOUT for edge in join_edges)
+    if fanout and rg.kind is BindingKind.PERCENTILE:
+        raise FanoutUnsafe(
+            f"percentile metric {queried_name!r} cannot be used with a "
+            f"one_to_many/many_to_many join; row duplication corrupts a sort-based quantile — "
+            f"request it without the fanning dimension"
+        )
+    # distinct_count tolerates fanout: DISTINCT deduplicates multiplied rows; LEFT joins
+    # (the only kind the compiler emits) do not change the population over which DISTINCT counts.
+
+    # Resolve the referenced column to (alias, physical_column).
+    col_name = rg.distinct_on if rg.kind is BindingKind.DISTINCT_COUNT else rg.column
+    assert col_name is not None  # noqa: S101 — enforced by model_validator
+    col_binding = _bind_name(col_name, sources_by_name, source_name, alias_to_source)
+    if col_binding is None:
+        raise UnreachableError(
+            f"metric {queried_name!r}: {'distinct_on' if rg.kind is BindingKind.DISTINCT_COUNT else 'column'} "
+            f"{col_name!r} is not declared on source {source_name!r} or any reachable join"
+        )
+    col_alias, col_phys = col_binding
+
+    # population_filter — defines the population this metric is compiled over (§4.5); before guardrails.
+    where_conditions += _population_filter_conditions(
+        binding.binding.canonical.population_filter, sources_by_name, source_name, alias_to_source
+    )
+
+    # Stage 6 — guardrails: source-level guardrails keyed on (source, metric_name).
+    # recompute_at_grain bindings have no declared measure; we use the metric name as the
+    # measure key so source-wide guardrails (applies_to: { source }, measure: None) still fire.
+    dummy_metric = _ResolvedMetric(
+        name=queried_name,
+        source=source_name,
+        # Create a minimal Measure-like stand-in using the physical column.
+        measure=_make_synthetic_measure(col_phys),
+    )
+    guard_conditions, fired = _enforce_guardrails(
+        [dummy_metric], resolver, query.context, sources_by_name
+    )
+    where_conditions += guard_conditions
+
+    # Stage 7 — emit SQL.
+    ast = _build_recompute(
+        owner=source_name,
+        rg=rg,
+        col_alias=col_alias,
+        col_phys=col_phys,
+        metric_name=queried_name,
+        dimensions=dimensions,
+        where_conditions=where_conditions,
+        join_edges=join_edges,
+        sources_by_name=sources_by_name,
+    )
+    sql = adapter.emit(ast, limit=query.limit)
+
+    # Stage 8 — result metadata.
+    used_sources = sorted({source_name} | {e.join.to for e in join_edges})
+    return CompileResult(
+        sql=sql,
+        dialect=adapter.dialect,
+        resolved={queried_name: f"recompute_at_grain({source_name}.{col_name})"},
+        guardrails_fired=fired,
+        freshness=[_freshness(sources_by_name[s]) for s in used_sources],
+        warnings=[],
+        recompute_at_grain=RecomputeAtGrainMetadata(
+            kind=str(rg.kind),
+            distinct_on=rg.distinct_on,
+            column=rg.column,
+            quantile=rg.quantile,
+        ),
+    )
+
+
+def _build_recompute(
+    owner: str,
+    rg: RecomputeAtGrainBinding,
+    col_alias: str,
+    col_phys: str,
+    metric_name: str,
+    dimensions: list[tuple[str, Dimension]],
+    where_conditions: list[exp.Expression],
+    join_edges: list[JoinEdge],
+    sources_by_name: dict[str, SemanticSource],
+) -> exp.Select:
+    """Build the recompute-at-grain SELECT: group base table by dims, aggregate directly.
+
+    distinct_count → COUNT(DISTINCT <col>)
+    percentile     → PERCENTILE_CONT(q) WITHIN GROUP (ORDER BY <col>)
+
+    Never wraps in DISTINCT ON dedup — the grain is always recomputed from base rows.
+    For multi-dialect support of percentile_cont vs approx_quantile, a future
+    DialectAdapter.percentile() method will abstract the difference (SPEC §4.3 open question).
+    """
+    if rg.kind is BindingKind.DISTINCT_COUNT:
+        qualified_col = exp.column(col_phys, table=col_alias)
+        agg_expr: exp.Expression = cast(
+            "exp.Expression",
+            exp.Count(this=exp.Distinct(expressions=[qualified_col])),
+        )
+    else:
+        # PERCENTILE: parse PERCENTILE_CONT(q) WITHIN GROUP (ORDER BY col), then qualify.
+        assert rg.quantile is not None  # noqa: S101 — enforced by model_validator
+        agg_expr = _qualify_to(
+            _parse(f"PERCENTILE_CONT({rg.quantile}) WITHIN GROUP (ORDER BY {col_phys})"),
+            col_alias,
+        )
+
+    select = exp.Select()
+    projections: list[exp.Expression] = []
+    group_exprs: list[exp.Expression] = []
+    for src, dim in dimensions:
+        expr = _dimension_expr(src, dim)
+        projections.append(_alias(expr, dim.name))
+        group_exprs.append(expr)
+    projections.append(_alias(agg_expr, metric_name))
+    select = select.select(*projections)
+    select = _from_and_joins(select, owner, join_edges, sources_by_name)
+    if where_conditions:
+        select = select.where(exp.and_(*where_conditions))
+    if group_exprs:
+        select = select.group_by(*group_exprs)
+    return select
+
+
 # --- Stage 2 -----------------------------------------------------------------
 
 
@@ -972,6 +1149,16 @@ def _build_deduped(
 
 def _find_measure(source: SemanticSource, name: str) -> Measure | None:
     return next((m for m in source.measures if m.name == name), None)
+
+
+def _make_synthetic_measure(col_name: str) -> Measure:
+    """Build a minimal non-additive Measure for guardrail enforcement in recompute_at_grain.
+
+    recompute_at_grain bindings reference a column, not a declared measure. Source-wide
+    guardrails (applies_to: { source }, measure: None) match on source alone, so the
+    synthetic name never reaches any equality check that would cause a false positive.
+    """
+    return Measure(name=col_name, expr=col_name, additivity=Additivity.NON_ADDITIVE)
 
 
 def _reachable_from(

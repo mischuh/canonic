@@ -14,6 +14,7 @@ __all__ = [
     "FinalityMetadata",
     "FiredGuardrail",
     "PartialAdditiveMetadata",
+    "RecomputeAtGrainMetadata",
     "SourceFreshness",
 ]
 
@@ -64,6 +65,20 @@ class PartialAdditiveMetadata:
 
 
 @dataclass(frozen=True, slots=True)
+class RecomputeAtGrainMetadata:
+    """Records how a recompute_at_grain metric was compiled (SPEC-Fuller-E15 §4.3, §6 stage 8).
+
+    Consumed by E14 (trust scoring) and E16 (event log) to record that the aggregation
+    was recomputed from base rows at the requested grain, never derived from pre-aggregates.
+    """
+
+    kind: str
+    distinct_on: str | None
+    column: str | None
+    quantile: float | None
+
+
+@dataclass(frozen=True, slots=True)
 class FinalityMetadata:
     """Finality coalescing metadata produced by compiler stage 5 (SPEC-E5-E15 §4 stage 8).
 
@@ -98,3 +113,4 @@ class CompileResult:
     finality: FinalityMetadata | None = None
     composition: CompositionMetadata | None = None
     partial_additive: PartialAdditiveMetadata | None = None
+    recompute_at_grain: RecomputeAtGrainMetadata | None = None
