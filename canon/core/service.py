@@ -89,8 +89,8 @@ class CanonService:
 
                 if b.status is not Status.ACTIVE:
                     continue
-                if b.canonical.kind is not BindingKind.SINGLE:
-                    continue  # composite metrics have no single source+measure to summarize
+                if b.canonical.kind not in {BindingKind.SINGLE, BindingKind.SEMI_ADDITIVE}:
+                    continue  # ratio/weighted_avg have no single source+measure to summarize
                 assert b.canonical.source is not None and b.canonical.measure is not None  # noqa: S101
                 summaries.append(
                     MetricSummary(
@@ -125,7 +125,7 @@ class CanonService:
         binding = self._resolve_or_raise(name)
         from canon.contracts.models import BindingKind
 
-        if binding.kind is not BindingKind.SINGLE:
+        if binding.kind not in {BindingKind.SINGLE, BindingKind.SEMI_ADDITIVE}:
             raise UnsupportedMeasure(
                 f"metric {name!r} is a composite ({binding.kind}) — "
                 "use query() to compute it; describe_metric() requires a single source+measure"

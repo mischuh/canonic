@@ -13,6 +13,7 @@ __all__ = [
     "CompositionMetadata",
     "FinalityMetadata",
     "FiredGuardrail",
+    "PartialAdditiveMetadata",
     "SourceFreshness",
 ]
 
@@ -49,6 +50,20 @@ class CompositionMetadata:
 
 
 @dataclass(frozen=True, slots=True)
+class PartialAdditiveMetadata:
+    """Records how a semi_additive metric was compiled (SPEC-Fuller-E15 §4.2, §6 stage 8).
+
+    ``collapsed`` is True when the window/nested-aggregate form was emitted (collapse_dimension
+    was not grouped); False when the additive pass-through was used (dimension was grouped).
+    """
+
+    kind: str
+    collapse_dimension: str
+    collapse_agg: str
+    collapsed: bool
+
+
+@dataclass(frozen=True, slots=True)
 class FinalityMetadata:
     """Finality coalescing metadata produced by compiler stage 5 (SPEC-E5-E15 §4 stage 8).
 
@@ -82,3 +97,4 @@ class CompileResult:
     warnings: list[str] = field(default_factory=list)
     finality: FinalityMetadata | None = None
     composition: CompositionMetadata | None = None
+    partial_additive: PartialAdditiveMetadata | None = None

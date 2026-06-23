@@ -15,6 +15,7 @@ __all__ = [
     "AssertionExpect",
     "BindingKind",
     "CanonicalRef",
+    "CollapseAgg",
     "ContractValidationError",
     "DeprecatedAlternative",
     "FinalityRule",
@@ -70,6 +71,17 @@ class BindingKind(StrEnum):
     SINGLE = "single"
     RATIO = "ratio"
     WEIGHTED_AVG = "weighted_avg"
+    SEMI_ADDITIVE = "semi_additive"
+
+
+class CollapseAgg(StrEnum):
+    """How to collapse the non-additive dimension in a semi_additive binding (§4.2)."""
+
+    LAST = "last"
+    FIRST = "first"
+    AVG = "avg"
+    MIN = "min"
+    MAX = "max"
 
 
 class OnZeroDenominator(StrEnum):
@@ -86,6 +98,8 @@ class CanonicalRef(BaseModel):
     For ``kind=single`` (default), ``source`` and ``measure`` are required.
     For ``kind=ratio``, ``numerator`` and ``denominator`` (metric names) are required.
     For ``kind=weighted_avg``, ``weighted_sum`` and ``weight`` (metric names) are required.
+    For ``kind=semi_additive``, ``source``, ``measure``, ``collapse_dimension``, and
+    ``collapse_agg`` are required.
     """
 
     model_config = ConfigDict(frozen=True)
@@ -98,6 +112,8 @@ class CanonicalRef(BaseModel):
     weighted_sum: str | None = None
     weight: str | None = None
     on_zero_denominator: OnZeroDenominator = OnZeroDenominator.NULL
+    collapse_dimension: str | None = None
+    collapse_agg: CollapseAgg | None = None
 
     @field_validator("on_zero_denominator", mode="before")
     @classmethod
@@ -127,6 +143,24 @@ class CanonicalRef(BaseModel):
                 )
             if self.weight is None:
                 raise ContractValidationError(("weight",), "weighted_avg binding requires 'weight'")
+        elif self.kind is BindingKind.SEMI_ADDITIVE:
+            if self.source is None:
+                raise ContractValidationError(
+                    ("source",), "semi_additive binding requires 'source'"
+                )
+            if self.measure is None:
+                raise ContractValidationError(
+                    ("measure",), "semi_additive binding requires 'measure'"
+                )
+            if self.collapse_dimension is None:
+                raise ContractValidationError(
+                    ("collapse_dimension",),
+                    "semi_additive binding requires 'collapse_dimension'",
+                )
+            if self.collapse_agg is None:
+                raise ContractValidationError(
+                    ("collapse_agg",), "semi_additive binding requires 'collapse_agg'"
+                )
         return self
 
 
