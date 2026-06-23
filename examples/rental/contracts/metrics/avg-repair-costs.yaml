@@ -4,6 +4,7 @@ canonical:
   numerator: total_repair_cost
   denominator: damage_count
   on_zero_denominator: null
+  population_filter: "severity IN ('major', 'moderate')"
 provenance: human_curated
 aliases: ["average repair costs", "mean repair costs", "avg repair costs"]
 status: active
