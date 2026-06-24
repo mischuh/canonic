@@ -76,19 +76,21 @@ class _ResolvedMetric:
 class _LeafPlan:
     """A compiled leaf query for one component of a composable_post_agg metric (§4.1, §6)."""
 
-    __slots__ = ("fired", "select", "used_sources", "warnings")
+    __slots__ = ("finality", "fired", "select", "used_sources", "warnings")
 
     def __init__(
         self,
-        select: exp.Select,
+        select: exp.Expression,
         fired: list[FiredGuardrail],
         used_sources: set[str],
         warnings: list[str],
+        finality: FinalityMetadata | None = None,
     ) -> None:
         self.select = select
         self.fired = fired
         self.used_sources = used_sources
         self.warnings = warnings
+        self.finality = finality
 
 
 def compile(  # noqa: A001 — the public verb for this capability is "compile"
@@ -324,11 +326,13 @@ def _plan_leaf(
     measure_alias: str,
     population_filter: str | None = None,
 ) -> _LeafPlan:
-    """Run stages 2–4, 6 for one single-kind component; return a leaf SELECT.
+    """Run stages 2–6 for one single-kind component; return a leaf SELECT.
 
     Each component is planned as an independent sub-query at the requested grain so
     its own guardrails and safety-floor checks fire automatically (SPEC §4.1, §6, AC3).
-    Finality (stage 5) is deferred to S6.
+    When the component metric has a finality rule and the query includes a time dimension,
+    the leaf is emitted as a finality UNION ALL (projecting ``is_final``) — so the compose
+    step can inherit the most conservative signal across leaves (§7, S6 AC1).
     """
     if component.kind is not BindingKind.SINGLE:
         raise UnsupportedMeasure(
@@ -406,17 +410,59 @@ def _plan_leaf(
     )
     where_conditions += guard_conditions
 
-    leaf_select = _build_leaf_select(
-        source_name,
-        measure_obj,
-        measure_alias,
-        dimensions,
-        where_conditions,
-        join_edges,
-        sources_by_name,
+    # Stage 5 — finality per leaf (§7, S6): build a UNION ALL when the component metric
+    # has a finality rule and the query includes a time dimension, so the compose step
+    # can apply the conservative-merge rule across leaves.
+    leaf_finality: FinalityMetadata | None = None
+    finality_rule = resolver.finality_for(component.metric)
+    time_dim_name: str | None = None
+    if finality_rule is not None:
+        time_dim_name = _find_time_dim_name(dimensions, sources_by_name, alias_to_source)
+        if time_dim_name is None:
+            finality_rule = None  # no time dimension → all rows implicitly final
+
+    if finality_rule is not None and time_dim_name is not None:
+        from canon.contracts.finality import evaluate_watermark, watermark_to_iso
+
+        final_r = next(r for r in finality_rule.realizations if r.role == "final")
+        watermark_dt = evaluate_watermark(
+            cast("str", final_r.watermark), cast("str", final_r.tz), query.as_of
+        )
+        leaf_metrics = [
+            _ResolvedMetric(name=component.metric, source=source_name, measure=measure_obj)
+        ]
+        leaf_select: exp.Expression = _build_finality_union(
+            rule=finality_rule,
+            query_metrics=leaf_metrics,
+            dimensions=dimensions,
+            where_conditions=where_conditions,
+            sources_by_name=sources_by_name,
+            watermark_dt=watermark_dt,
+            time_dim_name=time_dim_name,
+            original_owner=source_name,
+            measure_alias=measure_alias,
+        )
+        leaf_finality = FinalityMetadata(
+            watermark=watermark_to_iso(watermark_dt),
+            sources_used=[r.source for r in finality_rule.realizations],
+            result_flag=finality_rule.result_flag or "per_row",
+        )
+        used = {r.source for r in finality_rule.realizations}
+    else:
+        leaf_select = _build_leaf_select(
+            source_name,
+            measure_obj,
+            measure_alias,
+            dimensions,
+            where_conditions,
+            join_edges,
+            sources_by_name,
+        )
+        used = {source_name} | {e.join.to for e in join_edges}
+
+    return _LeafPlan(
+        select=leaf_select, fired=fired, used_sources=used, warnings=[], finality=leaf_finality
     )
-    used = {source_name} | {e.join.to for e in join_edges}
-    return _LeafPlan(select=leaf_select, fired=fired, used_sources=used, warnings=[])
 
 
 def _build_leaf_select(
@@ -489,12 +535,53 @@ def _compile_composite(
         combine = cast("exp.Expression", exp.Div(this=n_col, expression=d_col))
         zero_warnings = []
 
+    # Conservative finality merge across leaves (§7, S6 AC1).
+    # A composite row is final iff both leaf rows are final; a leaf without a finality rule
+    # contributes TRUE (all its rows are implicitly final).
+    num_cte: exp.Expression = num_plan.select
+    den_cte: exp.Expression = den_plan.select
+    composite_finality: FinalityMetadata | None = None
+
+    either_has_finality = num_plan.finality is not None or den_plan.finality is not None
+    if either_has_finality:
+        # Ensure both CTE selects project is_final (add TRUE for any leaf without a rule).
+        if num_plan.finality is None:
+            num_cte = cast("exp.Select", num_cte).select(
+                _alias(cast("exp.Expression", exp.true()), "is_final")
+            )
+        if den_plan.finality is None:
+            den_cte = cast("exp.Select", den_cte).select(
+                _alias(cast("exp.Expression", exp.true()), "is_final")
+            )
+
+        # Build conservative FinalityMetadata: earliest watermark + union of sources.
+        leaf_finalities = [f for f in [num_plan.finality, den_plan.finality] if f is not None]
+        earliest_watermark = min(f.watermark for f in leaf_finalities)
+        finality_sources = sorted({s for f in leaf_finalities for s in f.sources_used})
+        composite_finality = FinalityMetadata(
+            watermark=earliest_watermark,
+            sources_used=finality_sources,
+            result_flag="per_row",
+        )
+
     # Outer SELECT: dimensions (unqualified — USING merges them) + combined metric.
     outer = exp.Select()
     projections: list[exp.Expression] = []
     for dim_name in dim_names:
         projections.append(_alias(cast("exp.Expression", exp.column(dim_name)), dim_name))
     projections.append(_alias(combine, composite.metric))
+    if either_has_finality:
+        # is_final = COALESCE(num.is_final, TRUE) AND COALESCE(den.is_final, TRUE)
+        num_is_final = cast("exp.Expression", exp.column("is_final", table="num"))
+        den_is_final = cast("exp.Expression", exp.column("is_final", table="den"))
+        combined_is_final = cast(
+            "exp.Expression",
+            exp.And(
+                this=_func("COALESCE", num_is_final, cast("exp.Expression", exp.true())),
+                expression=_func("COALESCE", den_is_final, cast("exp.Expression", exp.true())),
+            ),
+        )
+        projections.append(_alias(combined_is_final, "is_final"))
     outer = outer.select(*projections)
 
     # Join the two CTEs: FULL JOIN USING (dims) or CROSS JOIN for the scalar case.
@@ -507,7 +594,7 @@ def _compile_composite(
         outer = outer.join(exp.to_table("den"), join_type="CROSS")
 
     # Wrap with CTEs.
-    ast = outer.with_("num", as_=num_plan.select).with_("den", as_=den_plan.select)
+    ast = outer.with_("num", as_=num_cte).with_("den", as_=den_cte)
 
     sql = adapter.emit(ast, limit=query.limit)
 
@@ -537,6 +624,7 @@ def _compile_composite(
         guardrails_fired=fired,
         freshness=freshness,
         warnings=zero_warnings,
+        finality=composite_finality,
         composition=CompositionMetadata(
             kind=composite.kind,
             numerator=num_name,
@@ -921,11 +1009,10 @@ def _compile_opaque(
     resolver: ContractResolver,
     sources_by_name: dict[str, SemanticSource],
 ) -> CompileResult:
-    """Compile an opaque metric only when the requested grain exactly matches native_grain (§4.4).
+    """Compile an opaque metric — serve at native grain only, no re-aggregation (§4.4).
 
-    Opaque metrics are pre-computed scores with no decomposition. They are served as-is at the
-    declared native grain; any other grain → UNSUPPORTED_MEASURE with a rationale. Never averaged
-    or summed implicitly.
+    At native grain (requested dimensions == native_grain set) → direct lookup with no GROUP BY.
+    Any other grain → UNSUPPORTED_MEASURE with a rationale.
     """
     assert binding.opaque is not None  # noqa: S101 — routing guarantees this kind
     opaque = binding.opaque
@@ -934,70 +1021,61 @@ def _compile_opaque(
 
     assert binding.source is not None and binding.measure is not None  # noqa: S101 — enforced by model_validator
     source_name = binding.source
-
-    # Grain guard: set equality between requested dimensions and native_grain (§4.4).
-    requested_grain = set(query.dimensions)
-    native_grain_set = set(opaque.native_grain)
-    if requested_grain != native_grain_set:
-        raise UnsupportedMeasure(
-            f"opaque metric {queried_name!r} is served only at native grain "
-            f"{sorted(opaque.native_grain)}; cannot re-aggregate a pre-computed score "
-            f"(requested: {sorted(requested_grain)})"
-        )
-
     alias_to_source = build_alias_tree(source_name, sources_by_name)
 
     # Stage 2 — dimensions & filters.
     dimensions = _resolve_dimensions(query, sources_by_name, source_name, alias_to_source)
-    referenced = {alias for alias, _ in dimensions}
     where_conditions, filter_sources = _bind_filters(
         query.filters, sources_by_name, source_name, alias_to_source
     )
-    referenced |= filter_sources
-    referenced |= {source_name}
+    referenced = {alias for alias, _ in dimensions} | filter_sources | {source_name}
 
     # Stage 3 — join graph.
     join_edges = plan_joins(
         source_name, referenced - {source_name}, sources_by_name, via=list(query.via) or None
     )
 
-    # Stage 4 — fanout safety floor: a fanning join would multiply the pre-computed score's rows.
-    fanout = any(edge.join.relationship in _FANOUT for edge in join_edges)
-    if fanout:
-        raise FanoutUnsafe(
-            f"opaque metric {queried_name!r} cannot be used with a "
-            f"one_to_many/many_to_many join; it is a pre-computed score with no decomposition"
+    # Grain guard (AC1): requested dimensions must exactly match native_grain (§4.4).
+    requested_dims = {dim.name for _, dim in dimensions}
+    native_dims = set(opaque.native_grain)
+    if requested_dims != native_dims:
+        native_repr = " × ".join(sorted(opaque.native_grain))
+        raise UnsupportedMeasure(
+            f"metric {queried_name!r} is opaque and can only be served at its native grain "
+            f"({native_repr}); cannot re-aggregate a pre-computed value — "
+            f"requested grain was {sorted(requested_dims)!r}"
         )
 
-    source_obj = sources_by_name.get(source_name)
-    if source_obj is None:
+    # Resolve the measure object for guardrails and SQL emission.
+    source = sources_by_name.get(source_name)
+    if source is None:
         raise Unresolved(f"metric {queried_name!r} binds to unknown source {source_name!r}")
-    measure_obj = _find_measure(source_obj, binding.measure)
-    if measure_obj is None:
+    measure = _find_measure(source, binding.measure)
+    if measure is None:
         raise Unresolved(
             f"metric {queried_name!r} binds to unknown measure {source_name}.{binding.measure!r}"
         )
+    resolved_metric = _ResolvedMetric(name=queried_name, source=source_name, measure=measure)
 
-    # population_filter — defines the population this metric is compiled over (§4.5); before guardrails.
+    # population_filter — defines the population this metric is about (§4.5); before guardrails.
     where_conditions += _population_filter_conditions(
         binding.binding.canonical.population_filter, sources_by_name, source_name, alias_to_source
     )
 
     # Stage 6 — guardrails.
-    resolved_metric = _ResolvedMetric(name=queried_name, source=source_name, measure=measure_obj)
     guard_conditions, fired = _enforce_guardrails(
         [resolved_metric], resolver, query.context, sources_by_name
     )
     where_conditions += guard_conditions
 
-    # Stage 7 — emit SQL (pass-through: grain matches native_grain, so _build_simple is correct).
-    ast = _build_simple(
-        source_name,
-        [resolved_metric],
-        dimensions,
-        where_conditions,
-        join_edges,
-        sources_by_name,
+    # Stage 7 — emit raw lookup (no aggregate, no GROUP BY).
+    ast = _build_opaque(
+        owner=source_name,
+        metric=resolved_metric,
+        dimensions=dimensions,
+        where_conditions=where_conditions,
+        join_edges=join_edges,
+        sources_by_name=sources_by_name,
     )
     sql = adapter.emit(ast, limit=query.limit)
 
@@ -1006,12 +1084,37 @@ def _compile_opaque(
     return CompileResult(
         sql=sql,
         dialect=adapter.dialect,
-        resolved={queried_name: f"{source_name}.{measure_obj.name}"},
+        resolved={queried_name: f"opaque({source_name}.{binding.measure})"},
         guardrails_fired=fired,
         freshness=[_freshness(sources_by_name[s]) for s in used_sources],
         warnings=[],
-        opaque=OpaqueMetadata(native_grain=list(opaque.native_grain)),
+        opaque=OpaqueMetadata(
+            source=source_name,
+            measure=binding.measure,
+            native_grain=list(opaque.native_grain),
+        ),
     )
+
+
+def _build_opaque(
+    owner: str,
+    metric: _ResolvedMetric,
+    dimensions: list[tuple[str, Dimension]],
+    where_conditions: list[exp.Expression],
+    join_edges: list[JoinEdge],
+    sources_by_name: dict[str, SemanticSource],
+) -> exp.Select:
+    """Build a raw direct-lookup SELECT for an opaque metric — no aggregate, no GROUP BY (§4.4)."""
+    select = exp.Select()
+    projections: list[exp.Expression] = []
+    for src, dim in dimensions:
+        projections.append(_alias(_dimension_expr(src, dim), dim.name))
+    projections.append(_alias(_measure_expr(metric.source, metric.measure), metric.measure.name))
+    select = select.select(*projections)
+    select = _from_and_joins(select, owner, join_edges, sources_by_name)
+    if where_conditions:
+        select = select.where(exp.and_(*where_conditions))
+    return select
 
 
 def _build_recompute(
@@ -1365,11 +1468,25 @@ def _bind_name(
     owner: str | None = None,
     alias_to_source: dict[str, str] | None = None,
 ) -> tuple[str, str] | None:
-    """Resolve a bare name to ``(alias, physical_column)`` — dimension first, then column."""
+    """Resolve a bare name to ``(alias, physical_column)`` — dimension first, then column.
+
+    Prioritizes the owner source when resolving columns to avoid ambiguity;
+    a distinct_on column should resolve to the metric's owning source if present.
+    """
     dim = _find_dimension(name, sources_by_name, owner, alias_to_source)
     if dim is not None:
         return dim[0], dim[1].column
+
+    # Priority 1: check the owner source first (if provided).
+    if owner is not None:
+        owner_source = sources_by_name.get(owner)
+        if owner_source is not None and any(c.name == name for c in owner_source.columns):
+            return owner, name
+
+    # Priority 2: check other sources (sorted for determinism).
     for src in sorted(sources_by_name):
+        if src == owner:
+            continue  # already checked above
         if any(c.name == name for c in sources_by_name[src].columns):
             return src, name
     return None
@@ -1473,6 +1590,7 @@ def _build_finality_union(
     watermark_dt: datetime,
     time_dim_name: str,
     original_owner: str,
+    measure_alias: str | None = None,
 ) -> exp.Expression:
     """Build a UNION ALL over finality realizations (SPEC-E5-E15 stage 5).
 
@@ -1480,6 +1598,9 @@ def _build_finality_union(
     dimension column, and projects an ``is_final`` boolean marker.  All WHERE conditions
     from the original owner (user filters + guardrails) are re-qualified to each branch
     source — this is valid because both sources share the same column/dimension schema.
+
+    ``measure_alias`` overrides the column alias for each metric's measure projection; used
+    when building a leaf sub-query for a composite metric (e.g. alias ``"n"``/``"d"``).
     """
     from canon.contracts.finality import watermark_to_iso
 
@@ -1559,7 +1680,8 @@ def _build_finality_union(
             projections.append(_alias(expr, dim.name))
             group_exprs.append(expr)
         for m in branch_metrics:
-            projections.append(_alias(_measure_expr(m.source, m.measure), m.measure.name))
+            col_alias = measure_alias if measure_alias is not None else m.measure.name
+            projections.append(_alias(_measure_expr(m.source, m.measure), col_alias))
         projections.append(_alias(is_final_val, "is_final"))
         select = select.select(*projections)
         select = select.from_(_alias(exp.to_table(source.table), src_name))

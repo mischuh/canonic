@@ -81,12 +81,13 @@ class RecomputeAtGrainMetadata:
 
 @dataclass(frozen=True, slots=True)
 class OpaqueMetadata:
-    """Records that an opaque metric was served at its declared native grain (§4.4, §6 stage 8).
+    """Records that an opaque metric was served at its declared native grain (§4.4).
 
-    Consumed by E14 (trust scoring) and E16 (event log) to document that the value was
-    a pre-computed score served as-is — no re-aggregation was performed.
+    Emitted so E14 / E16 can record that no re-aggregation was attempted.
     """
 
+    source: str
+    measure: str
     native_grain: list[str]
 
 

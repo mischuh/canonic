@@ -54,9 +54,9 @@ def _validate_composite_binding(
             )
         if active_by_name[name].canonical.kind is BindingKind.OPAQUE:
             raise ContractError(
-                f"metric {binding.metric!r}: {label} {name!r} has kind 'opaque'; "
-                f"opaque components cannot be used in composite metrics because they "
-                f"carry no shared-grain guarantee"
+                f"metric {binding.metric!r}: {label} {name!r} has kind opaque; "
+                f"opaque metrics are grain-locked and cannot be used as components "
+                f"in a composite metric (§4.1, S7 AC1)"
             )
 
     _check_composite_cycle(binding.metric, active_by_name, path=[binding.metric])
@@ -170,16 +170,16 @@ def _validate_recompute_at_grain_binding(
 def _validate_opaque_binding(
     binding: MetricBinding,
     source_measures: dict[str, set[str]],
-    source_columns: dict[str, set[str]],
     source_dims: dict[str, set[str]],
 ) -> None:
     """Validate an opaque binding (SPEC-Fuller-E15 §8).
 
-    Checks: source exists; measure exists on the source; every native_grain entry is a
-    declared column or dimension on the source.
+    Checks: source exists; measure exists on source; every native_grain column is a declared
+    dimension on the source.
     """
     ref = binding.canonical
     assert ref.source is not None and ref.measure is not None  # noqa: S101 — enforced by model_validator
+    assert ref.native_grain is not None and len(ref.native_grain) > 0  # noqa: S101
 
     if ref.source not in source_measures:
         raise ContractError(
@@ -191,12 +191,12 @@ def _validate_opaque_binding(
             f"metric {binding.metric!r}: canonical.measure {ref.measure!r} "
             f"is not declared on source {ref.source!r}"
         )
-    all_names = source_columns.get(ref.source, set()) | source_dims.get(ref.source, set())
-    for i, col in enumerate(ref.native_grain):
-        if col not in all_names:
+    declared_dims = source_dims.get(ref.source, set())
+    for grain_col in ref.native_grain:
+        if grain_col not in declared_dims:
             raise ContractError(
-                f"metric {binding.metric!r}: native_grain[{i}] {col!r} "
-                f"is not declared as a column or dimension on source {ref.source!r}"
+                f"metric {binding.metric!r}: native_grain column {grain_col!r} "
+                f"is not declared as a dimension on source {ref.source!r}"
             )
 
 
@@ -252,7 +252,7 @@ def validate_contracts(project_root: Path) -> None:
                 binding, source_measures, source_dims, source_columns
             )
         elif ref.kind is BindingKind.OPAQUE:
-            _validate_opaque_binding(binding, source_measures, source_columns, source_dims)
+            _validate_opaque_binding(binding, source_measures, source_dims)
         else:
             _validate_composite_binding(binding, bindings, source_measures)
 

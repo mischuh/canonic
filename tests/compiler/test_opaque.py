@@ -1,94 +1,50 @@
-"""Compiler tests for the opaque strategy — grain-locked pre-computed values (GH-121, S5).
+"""Compiler tests for opaque strategy — grain-locked pre-computed values (GH-121, S5).
 
 Acceptance criteria:
-  AC1 (S5): at native grain → served directly (SQL selects the measure, groups by native grain);
-            at any other grain → UNSUPPORTED_MEASURE with a rationale naming the native grain.
-  population_filter (§4.5): predicate AND-ed into WHERE at native grain.
-  Fanout: one_to_many join → FANOUT_UNSAFE.
-  Queried alongside another metric → UNSUPPORTED_MEASURE.
+  AC1 (S5): customer_health_score at customer_id × month → direct lookup, no re-aggregation.
+            SQL contains the measure column, NO GROUP BY, NO aggregate function.
+  AC1 (S5): at any other grain → UNSUPPORTED_MEASURE with rationale naming the native grain.
+  S7 AC1: a ratio/weighted_avg referencing an opaque component fails validation.
+  population_filter: predicate AND-ed into the WHERE of the native-grain lookup (§4.5).
+  Model validation: opaque binding requires source, measure, and non-empty native_grain.
 """
 
 from __future__ import annotations
 
 import pytest
+import sqlglot
 
 from canon import exc
 from canon.compiler import SemanticQuery, compile
 from canon.contracts.models import BindingKind, CanonicalRef, MetricBinding
 from canon.contracts.resolver import ContractResolver
-from canon.semantic.models import Column, Dimension, Join, Measure, Relationship, SemanticSource
+from canon.semantic.models import Column, Dimension, Measure, SemanticSource
 
 # ---------------------------------------------------------------------------
-# Fixtures — in-memory customer_metrics project for opaque tests
+# Fixtures — customer_metrics pre-computed scores table
 # ---------------------------------------------------------------------------
 
 
 @pytest.fixture
-def customer_metrics_src() -> SemanticSource:
-    """Pre-computed per-customer-month scores: one measure, two native-grain dimensions."""
+def customer_metrics_source() -> SemanticSource:
+    """Pre-computed health scores at customer_id × month grain."""
     return SemanticSource(
         name="customer_metrics",
         connection="warehouse_pg",
-        table="analytics.customer_health_scores",
+        table="analytics.customer_metrics_scores",
         grain=["customer_id", "month"],
         columns=[
             Column(name="customer_id", type="string", nullable=False),
             Column(name="month", type="date", nullable=False),
-            Column(name="region", type="string", nullable=False),
             Column(name="health_score", type="decimal", nullable=False),
         ],
         measures=[
-            Measure(name="health_score", expr="health_score", additivity="non_additive"),
+            Measure(name="health_score", expr="health_score", additivity="additive"),
         ],
         dimensions=[
             Dimension(name="customer_id", column="customer_id"),
             Dimension(name="month", column="month"),
-            Dimension(name="region", column="region"),
         ],
-        joins=[
-            Join(
-                to="customer_segments",
-                on="customer_metrics.customer_id = customer_segments.customer_id",
-                relationship=Relationship.MANY_TO_ONE,
-            ),
-            Join(
-                to="customer_orders",
-                on="customer_metrics.customer_id = customer_orders.customer_id",
-                relationship=Relationship.ONE_TO_MANY,
-            ),
-        ],
-    )
-
-
-@pytest.fixture
-def customer_segments() -> SemanticSource:
-    """Dimension table joined many_to_one from customer_metrics — no fanout."""
-    return SemanticSource(
-        name="customer_segments",
-        connection="warehouse_pg",
-        table="analytics.dim_customer_segments",
-        grain=["customer_id"],
-        columns=[
-            Column(name="customer_id", type="string", nullable=False),
-            Column(name="segment", type="string", nullable=False),
-        ],
-        dimensions=[Dimension(name="segment", column="segment")],
-    )
-
-
-@pytest.fixture
-def customer_orders() -> SemanticSource:
-    """Child table joined one_to_many from customer_metrics — fans out."""
-    return SemanticSource(
-        name="customer_orders",
-        connection="warehouse_pg",
-        table="analytics.fct_orders",
-        grain=["order_id"],
-        columns=[
-            Column(name="order_id", type="string", nullable=False),
-            Column(name="customer_id", type="string", nullable=False),
-        ],
-        dimensions=[],
     )
 
 
@@ -106,173 +62,373 @@ def health_score_binding() -> MetricBinding:
 
 
 @pytest.fixture
-def health_score_filtered_binding() -> MetricBinding:
-    return MetricBinding(
-        metric="customer_health_score_prod",
+def opaque_resolver(health_score_binding: MetricBinding) -> ContractResolver:
+    return ContractResolver(bindings=[health_score_binding], guardrails=[])
+
+
+def _parse_ok(sql: str) -> None:
+    sqlglot.parse_one(sql, dialect="postgres")
+
+
+# ---------------------------------------------------------------------------
+# AC1 — served at native grain; direct lookup with no re-aggregation
+# ---------------------------------------------------------------------------
+
+
+def test_ac1_at_native_grain(
+    opaque_resolver: ContractResolver,
+    customer_metrics_source: SemanticSource,
+) -> None:
+    """At native grain → direct SELECT of the measure; no GROUP BY, no SUM/COUNT/AVG."""
+    result = compile(
+        SemanticQuery(
+            metrics=["customer_health_score"],
+            dimensions=["customer_id", "month"],
+        ),
+        opaque_resolver,
+        [customer_metrics_source],
+    )
+    _parse_ok(result.sql)
+    sql_upper = result.sql.upper()
+    assert "HEALTH_SCORE" in sql_upper
+    assert "GROUP BY" not in sql_upper
+    assert "SUM(" not in sql_upper
+    assert "COUNT(" not in sql_upper
+    assert "AVG(" not in sql_upper
+    assert result.opaque is not None
+    assert result.opaque.source == "customer_metrics"
+    assert result.opaque.measure == "health_score"
+    assert set(result.opaque.native_grain) == {"customer_id", "month"}
+    assert result.resolved == {"customer_health_score": "opaque(customer_metrics.health_score)"}
+
+
+def test_ac1_native_grain_order_independent(
+    opaque_resolver: ContractResolver,
+    customer_metrics_source: SemanticSource,
+) -> None:
+    """Grain match is set equality — dimension order in the query does not matter."""
+    result = compile(
+        SemanticQuery(
+            metrics=["customer_health_score"],
+            dimensions=["month", "customer_id"],
+        ),
+        opaque_resolver,
+        [customer_metrics_source],
+    )
+    _parse_ok(result.sql)
+    assert result.opaque is not None
+
+
+# ---------------------------------------------------------------------------
+# AC1 — rejected at any other grain with UNSUPPORTED_MEASURE + rationale
+# ---------------------------------------------------------------------------
+
+
+def test_ac1_rejects_coarser_grain(
+    opaque_resolver: ContractResolver,
+    customer_metrics_source: SemanticSource,
+) -> None:
+    """At coarser grain (missing month) → UNSUPPORTED_MEASURE with native grain in rationale."""
+    with pytest.raises(exc.UnsupportedMeasure) as exc_info:
+        compile(
+            SemanticQuery(
+                metrics=["customer_health_score"],
+                dimensions=["customer_id"],
+            ),
+            opaque_resolver,
+            [customer_metrics_source],
+        )
+    msg = str(exc_info.value).lower()
+    assert "native grain" in msg
+    assert "customer_id" in msg
+    assert "month" in msg
+
+
+def test_ac1_rejects_different_grain(
+    opaque_resolver: ContractResolver,
+    customer_metrics_source: SemanticSource,
+) -> None:
+    """At a completely different grain → UNSUPPORTED_MEASURE."""
+    with pytest.raises(exc.UnsupportedMeasure):
+        compile(
+            SemanticQuery(
+                metrics=["customer_health_score"],
+                dimensions=["month"],
+            ),
+            opaque_resolver,
+            [customer_metrics_source],
+        )
+
+
+def test_ac1_rejects_superset_grain(
+    opaque_resolver: ContractResolver,
+    customer_metrics_source: SemanticSource,
+) -> None:
+    """Even a strict superset of native_grain (extra dim) → UNSUPPORTED_MEASURE.
+
+    Opaque requires exact match — no extra dimensions allowed (confirmed design decision).
+    """
+    source_with_region = SemanticSource(
+        name="customer_metrics",
+        connection="warehouse_pg",
+        table="analytics.customer_metrics_scores",
+        grain=["customer_id", "month"],
+        columns=[
+            Column(name="customer_id", type="string", nullable=False),
+            Column(name="month", type="date", nullable=False),
+            Column(name="region", type="string", nullable=False),
+            Column(name="health_score", type="decimal", nullable=False),
+        ],
+        measures=[
+            Measure(name="health_score", expr="health_score", additivity="additive"),
+        ],
+        dimensions=[
+            Dimension(name="customer_id", column="customer_id"),
+            Dimension(name="month", column="month"),
+            Dimension(name="region", column="region"),
+        ],
+    )
+    with pytest.raises(exc.UnsupportedMeasure):
+        compile(
+            SemanticQuery(
+                metrics=["customer_health_score"],
+                dimensions=["customer_id", "month", "region"],
+            ),
+            opaque_resolver,
+            [source_with_region],
+        )
+
+
+def test_ac1_rejects_scalar_query(
+    opaque_resolver: ContractResolver,
+    customer_metrics_source: SemanticSource,
+) -> None:
+    """Scalar query (no dimensions) → UNSUPPORTED_MEASURE."""
+    with pytest.raises(exc.UnsupportedMeasure):
+        compile(
+            SemanticQuery(metrics=["customer_health_score"]),
+            opaque_resolver,
+            [customer_metrics_source],
+        )
+
+
+# ---------------------------------------------------------------------------
+# Multi-metric rejection
+# ---------------------------------------------------------------------------
+
+
+def test_opaque_must_be_queried_alone(
+    opaque_resolver: ContractResolver,
+    customer_metrics_source: SemanticSource,
+) -> None:
+    """Querying an opaque metric alongside another metric → UnsupportedMeasure."""
+    extra_binding = MetricBinding(
+        metric="revenue",
+        canonical=CanonicalRef(
+            kind=BindingKind.SINGLE,
+            source="customer_metrics",
+            measure="health_score",
+        ),
+    )
+    resolver = ContractResolver(
+        bindings=[
+            MetricBinding(
+                metric="customer_health_score",
+                canonical=CanonicalRef(
+                    kind=BindingKind.OPAQUE,
+                    source="customer_metrics",
+                    measure="health_score",
+                    native_grain=["customer_id", "month"],
+                ),
+            ),
+            extra_binding,
+        ],
+        guardrails=[],
+    )
+    with pytest.raises(exc.UnsupportedMeasure):
+        compile(
+            SemanticQuery(
+                metrics=["customer_health_score", "revenue"],
+                dimensions=["customer_id", "month"],
+            ),
+            resolver,
+            [customer_metrics_source],
+        )
+
+
+# ---------------------------------------------------------------------------
+# population_filter (§4.5) — applied to the native-grain lookup WHERE
+# ---------------------------------------------------------------------------
+
+
+def test_population_filter_in_native_grain_lookup(
+    customer_metrics_source: SemanticSource,
+) -> None:
+    """population_filter appears in WHERE of the direct lookup before the measure."""
+    binding = MetricBinding(
+        metric="customer_health_score",
         canonical=CanonicalRef(
             kind=BindingKind.OPAQUE,
             source="customer_metrics",
             measure="health_score",
             native_grain=["customer_id", "month"],
-            population_filter="region != 'test'",
+            population_filter="customer_id NOT IN (SELECT customer_id FROM test_accounts)",
         ),
     )
-
-
-@pytest.fixture
-def additive_binding() -> MetricBinding:
-    return MetricBinding(
-        metric="some_count",
-        canonical=CanonicalRef(source="customer_metrics", measure="health_score"),
+    resolver = ContractResolver(bindings=[binding], guardrails=[])
+    result = compile(
+        SemanticQuery(
+            metrics=["customer_health_score"],
+            dimensions=["customer_id", "month"],
+        ),
+        resolver,
+        [customer_metrics_source],
     )
-
-
-@pytest.fixture
-def resolver(
-    health_score_binding: MetricBinding,
-    health_score_filtered_binding: MetricBinding,
-    additive_binding: MetricBinding,
-) -> ContractResolver:
-    return ContractResolver(
-        bindings=[health_score_binding, health_score_filtered_binding, additive_binding],
-        guardrails=[],
-    )
-
-
-@pytest.fixture
-def sources(
-    customer_metrics_src: SemanticSource,
-    customer_segments: SemanticSource,
-    customer_orders: SemanticSource,
-) -> list[SemanticSource]:
-    return [customer_metrics_src, customer_segments, customer_orders]
-
-
-# ---------------------------------------------------------------------------
-# AC1 — served at native grain
-# ---------------------------------------------------------------------------
-
-
-def test_opaque_served_at_native_grain(
-    resolver: ContractResolver, sources: list[SemanticSource]
-) -> None:
-    """At native grain the metric is served; SQL groups by native_grain dims and selects measure."""
-    query = SemanticQuery(
-        metrics=["customer_health_score"],
-        dimensions=["customer_id", "month"],
-    )
-    result = compile(query, resolver, sources)
-
-    assert result.opaque is not None
-    assert set(result.opaque.native_grain) == {"customer_id", "month"}
-    assert result.resolved == {"customer_health_score": "customer_metrics.health_score"}
-
+    _parse_ok(result.sql)
     sql_upper = result.sql.upper()
-    assert "HEALTH_SCORE" in sql_upper
-    assert "GROUP BY" in sql_upper
-    assert "CUSTOMER_METRICS" in sql_upper
+    assert "TEST_ACCOUNTS" in sql_upper
+    assert "GROUP BY" not in sql_upper  # still a raw lookup, not aggregated
 
 
 # ---------------------------------------------------------------------------
-# AC1 — rejected at wrong grain
+# S7 AC1 — opaque component rejected inside ratio/weighted_avg (validation)
 # ---------------------------------------------------------------------------
 
 
-def test_opaque_rejected_at_coarser_grain(
-    resolver: ContractResolver, sources: list[SemanticSource]
-) -> None:
-    """Grouping by month only (dropping customer_id) → UNSUPPORTED_MEASURE."""
-    query = SemanticQuery(
-        metrics=["customer_health_score"],
-        dimensions=["month"],
+def test_s7_ac1_opaque_component_in_ratio_rejected() -> None:
+    """A ratio metric referencing an opaque component → ContractError at validation."""
+    from canon.contracts.validate import _validate_composite_binding
+
+    opaque_binding = MetricBinding(
+        metric="health_score",
+        canonical=CanonicalRef(
+            kind=BindingKind.OPAQUE,
+            source="customer_metrics",
+            measure="health_score",
+            native_grain=["customer_id", "month"],
+        ),
     )
-    with pytest.raises(exc.UnsupportedMeasure, match="native grain"):
-        compile(query, resolver, sources)
-
-
-def test_opaque_rejected_at_finer_grain(
-    resolver: ContractResolver, sources: list[SemanticSource]
-) -> None:
-    """Grouping by customer_id, month, plus an extra dim → UNSUPPORTED_MEASURE."""
-    query = SemanticQuery(
-        metrics=["customer_health_score"],
-        dimensions=["customer_id", "month", "region"],
+    simple_binding = MetricBinding(
+        metric="customer_count",
+        canonical=CanonicalRef(
+            kind=BindingKind.SINGLE,
+            source="customer_metrics",
+            measure="health_score",
+        ),
     )
-    with pytest.raises(exc.UnsupportedMeasure, match="native grain"):
-        compile(query, resolver, sources)
-
-
-def test_opaque_rejected_no_dimensions(
-    resolver: ContractResolver, sources: list[SemanticSource]
-) -> None:
-    """No grouping at all → UNSUPPORTED_MEASURE (requested grain is empty, not native grain)."""
-    query = SemanticQuery(
-        metrics=["customer_health_score"],
-        dimensions=[],
+    ratio_binding = MetricBinding(
+        metric="bad_ratio",
+        canonical=CanonicalRef(
+            kind=BindingKind.RATIO,
+            numerator="customer_count",
+            denominator="health_score",
+        ),
     )
-    with pytest.raises(exc.UnsupportedMeasure, match="native grain"):
-        compile(query, resolver, sources)
+    with pytest.raises(exc.ContractError) as exc_info:
+        _validate_composite_binding(
+            ratio_binding,
+            [opaque_binding, simple_binding, ratio_binding],
+            source_measures={"customer_metrics": {"health_score"}},
+        )
+    msg = str(exc_info.value).lower()
+    assert "opaque" in msg
 
 
-def test_opaque_rejected_wrong_dims(
-    resolver: ContractResolver, sources: list[SemanticSource]
-) -> None:
-    """Grouping by a completely different dim → UNSUPPORTED_MEASURE."""
-    query = SemanticQuery(
-        metrics=["customer_health_score"],
-        dimensions=["region"],
+def test_s7_ac1_opaque_component_as_numerator_rejected() -> None:
+    """Opaque as numerator → ContractError."""
+    from canon.contracts.validate import _validate_composite_binding
+
+    opaque_binding = MetricBinding(
+        metric="health_score",
+        canonical=CanonicalRef(
+            kind=BindingKind.OPAQUE,
+            source="customer_metrics",
+            measure="health_score",
+            native_grain=["customer_id", "month"],
+        ),
     )
-    with pytest.raises(exc.UnsupportedMeasure, match="native grain"):
-        compile(query, resolver, sources)
-
-
-def test_opaque_error_message_includes_native_grain(
-    resolver: ContractResolver, sources: list[SemanticSource]
-) -> None:
-    """UNSUPPORTED_MEASURE rationale names the native grain explicitly."""
-    query = SemanticQuery(
-        metrics=["customer_health_score"],
-        dimensions=["month"],
+    simple_binding = MetricBinding(
+        metric="customer_count",
+        canonical=CanonicalRef(
+            kind=BindingKind.SINGLE,
+            source="customer_metrics",
+            measure="health_score",
+        ),
     )
-    with pytest.raises(exc.UnsupportedMeasure) as exc_info:
-        compile(query, resolver, sources)
-    msg = str(exc_info.value)
-    assert "customer_id" in msg
-    assert "month" in msg
-    assert "pre-computed" in msg
+    ratio_binding = MetricBinding(
+        metric="bad_ratio",
+        canonical=CanonicalRef(
+            kind=BindingKind.RATIO,
+            numerator="health_score",
+            denominator="customer_count",
+        ),
+    )
+    with pytest.raises(exc.ContractError) as exc_info:
+        _validate_composite_binding(
+            ratio_binding,
+            [opaque_binding, simple_binding, ratio_binding],
+            source_measures={"customer_metrics": {"health_score"}},
+        )
+    assert "opaque" in str(exc_info.value).lower()
 
 
 # ---------------------------------------------------------------------------
-# population_filter (§4.5)
+# Model validation — CanonicalRef shape errors
 # ---------------------------------------------------------------------------
 
 
-def test_opaque_population_filter_applied(
-    resolver: ContractResolver, sources: list[SemanticSource]
-) -> None:
-    """population_filter is AND-ed into WHERE before aggregation (§4.5)."""
-    query = SemanticQuery(
-        metrics=["customer_health_score_prod"],
-        dimensions=["customer_id", "month"],
+def test_opaque_requires_source() -> None:
+    from pydantic import ValidationError
+
+    with pytest.raises(ValidationError):
+        CanonicalRef(
+            kind=BindingKind.OPAQUE,
+            measure="health_score",
+            native_grain=["customer_id", "month"],
+        )
+
+
+def test_opaque_requires_measure() -> None:
+    from pydantic import ValidationError
+
+    with pytest.raises(ValidationError):
+        CanonicalRef(
+            kind=BindingKind.OPAQUE,
+            source="customer_metrics",
+            native_grain=["customer_id", "month"],
+        )
+
+
+def test_opaque_requires_native_grain() -> None:
+    from pydantic import ValidationError
+
+    with pytest.raises(ValidationError):
+        CanonicalRef(
+            kind=BindingKind.OPAQUE,
+            source="customer_metrics",
+            measure="health_score",
+        )
+
+
+def test_opaque_requires_nonempty_native_grain() -> None:
+    from pydantic import ValidationError
+
+    with pytest.raises(ValidationError):
+        CanonicalRef(
+            kind=BindingKind.OPAQUE,
+            source="customer_metrics",
+            measure="health_score",
+            native_grain=[],
+        )
+
+
+def test_opaque_valid_construction() -> None:
+    """Valid opaque binding constructs without error."""
+    ref = CanonicalRef(
+        kind=BindingKind.OPAQUE,
+        source="customer_metrics",
+        measure="health_score",
+        native_grain=["customer_id", "month"],
     )
-    result = compile(query, resolver, sources)
-
-    assert "test" in result.sql.lower()
-    assert result.opaque is not None
-
-
-# ---------------------------------------------------------------------------
-# Queried alongside another metric
-# ---------------------------------------------------------------------------
-
-
-def test_opaque_cannot_be_combined_with_other_metrics(
-    resolver: ContractResolver, sources: list[SemanticSource]
-) -> None:
-    """Opaque metrics must be queried alone → UNSUPPORTED_MEASURE."""
-    query = SemanticQuery(
-        metrics=["customer_health_score", "some_count"],
-        dimensions=["customer_id", "month"],
-    )
-    with pytest.raises(exc.UnsupportedMeasure, match="alone"):
-        compile(query, resolver, sources)
+    assert ref.kind is BindingKind.OPAQUE
+    assert ref.native_grain == ["customer_id", "month"]

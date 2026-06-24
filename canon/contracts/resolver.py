@@ -72,7 +72,7 @@ class RecomputeAtGrainBinding:
 
 @dataclass(frozen=True, slots=True)
 class OpaqueBinding:
-    """Resolved opaque parameters for a grain-locked pre-computed metric (§4.4)."""
+    """Resolved opaque parameters for a grain-locked metric (§4.4)."""
 
     native_grain: list[str]
 
@@ -267,7 +267,7 @@ class ContractResolver:
             assert (  # noqa: S101 — enforced by model_validator
                 canonical.source is not None
                 and canonical.measure is not None
-                and canonical.native_grain
+                and canonical.native_grain is not None
             )
             return Binding(
                 metric=binding.metric,

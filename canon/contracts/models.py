@@ -105,9 +105,9 @@ class CanonicalRef(BaseModel):
     ``collapse_agg`` are required.
     For ``kind=distinct_count``, ``source`` and ``distinct_on`` (column name) are required.
     For ``kind=percentile``, ``source``, ``column``, and ``quantile`` ∈ (0, 1) are required.
-    For ``kind=opaque``, ``source``, ``measure``, and ``native_grain`` (list of column/dimension
-    names) are required. Served only at the declared native grain; any other grain →
-    ``UNSUPPORTED_MEASURE`` (SPEC-Fuller-E15 §4.4).
+    For ``kind=opaque``, ``source``, ``measure``, and ``native_grain`` (non-empty list of
+    dimension column names) are required. Served only at its declared native grain; any
+    other grain returns UNSUPPORTED_MEASURE (§4.4).
 
     ``population_filter`` is an optional SQL predicate (§4.5) valid for every ``kind``. It defines
     the population the metric is *about* and is AND-ed into the WHERE of every leaf query before
@@ -129,7 +129,7 @@ class CanonicalRef(BaseModel):
     distinct_on: str | None = None
     column: str | None = None
     quantile: float | None = None
-    native_grain: list[str] = []
+    native_grain: list[str] | None = None
     population_filter: str | None = None
 
     @field_validator("on_zero_denominator", mode="before")
