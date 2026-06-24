@@ -203,4 +203,20 @@ def build_server(service: CanonService) -> FastMCP:
             ],
         }
 
+    # ------------------------------------------------------------------
+    # Tool: read_knowledge_page  (E6, P1)
+    # ------------------------------------------------------------------
+
+    @mcp.tool(
+        description=(
+            "Retrieve the full content of a knowledge page by its id (page slug). "
+            "Use after search_knowledge() to read the complete definition, caveat, or policy. "
+            "Returns the rendered body (with live {{ sl:entity.expr }} definitions substituted), "
+            "metadata, drift review flags, staleness warnings, and linked references."
+        )
+    )
+    @canon_error_response
+    async def read_knowledge_page(page: str, user: str | None = None) -> dict[str, Any]:
+        return service.read_knowledge_page(page, user=user)
+
     return mcp

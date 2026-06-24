@@ -425,6 +425,72 @@ class CanonService:
             query, requesting_user=user or "anonymous", limit=limit
         )
 
+    def read_knowledge_page(self, page: str, *, user: str | None = None) -> dict[str, Any]:
+        """Retrieve the full content of a knowledge page by page id with live rendering (E6, P1).
+
+        Returns rendered body (with {{ sl:entity.expr }} directives resolved to live SQL),
+        drift flag, and staleness metadata. Respects access control.
+        Per amendment-knowledge-read-page: body is rendered, meta includes last_validated_at and drift_flag.
+        """
+        from canon.knowledge import load_knowledge_page, user_from_path
+        from canon.knowledge.drift import DriftDetector
+        from canon.knowledge.rendering import DefinitionRenderer
+        from canon.knowledge.validation import EntityIndex
+
+        if self._project_root is None:
+            raise KeyError(f"No project root; cannot load knowledge page {page!r}")
+        knowledge_root = self._project_root / "knowledge"
+        if not knowledge_root.exists():
+            raise KeyError(f"Knowledge directory not found; cannot load page {page!r}")
+
+        pages = [load_knowledge_page(p) for p in sorted(knowledge_root.rglob("*.md"))]
+        requesting_user = user or "anonymous"
+
+        knowledge_page = None
+        for p in pages:
+            if p.id == page:
+                page_owner = user_from_path(p.path)
+                if p.scope.value == "global" or page_owner == requesting_user:
+                    knowledge_page = p
+                    break
+                raise PermissionError(
+                    f"User {requesting_user!r} does not have access to page {page!r}"
+                )
+
+        if knowledge_page is None:
+            raise KeyError(f"Knowledge page {page!r} not found")
+
+        # Live entity index for rendering and drift detection (E6 §7).
+        entity_index = EntityIndex.from_sources(self._sources)
+
+        # Render body with live measure definitions ({{ sl:entity.expr }} → live SQL).
+        renderer = DefinitionRenderer(entity_index)
+        rendered_body = renderer.render(knowledge_page)
+
+        # Detect drift: compare recorded bound_fingerprints with live definitions.
+        detector = DriftDetector()
+        drifted_refs = detector.flagged_for_review(knowledge_page, entity_index)
+        has_drift = len(drifted_refs) > 0
+
+        return {
+            "page_id": knowledge_page.id,
+            "scope": knowledge_page.scope.value,
+            "summary": knowledge_page.summary,
+            "body": rendered_body,
+            "tags": knowledge_page.tags,
+            "sl_refs": knowledge_page.sl_refs,
+            "refs": knowledge_page.refs,
+            "usage_mode": knowledge_page.usage_mode.value,
+            "meta": {
+                "last_validated_at": (
+                    knowledge_page.meta.last_validated_at.isoformat()
+                    if knowledge_page.meta.last_validated_at
+                    else None
+                ),
+                "drift_flag": has_drift,
+            },
+        }
+
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
