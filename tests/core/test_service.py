@@ -50,6 +50,21 @@ class TestDescribeMetric:
             canon_service.describe_metric("mrr")
 
 
+class TestDescribeMetricDistinctCount:
+    def test_returns_detail(self, distinct_count_service: CanonService) -> None:
+        detail = distinct_count_service.describe_metric("unique_customers")
+        assert isinstance(detail, MetricDetail)
+        assert detail.metric == "unique_customers"
+        assert detail.source == "orders"
+        assert detail.measure is None
+        assert "order_date" in detail.dimensions
+        assert "active_customers" in detail.aliases
+
+    def test_alias_lookup(self, distinct_count_service: CanonService) -> None:
+        detail = distinct_count_service.describe_metric("active_customers")
+        assert detail.metric == "unique_customers"
+
+
 class TestResolveMetric:
     def test_happy_path(self, canon_service: CanonService) -> None:
         from canon.contracts.resolver import Binding

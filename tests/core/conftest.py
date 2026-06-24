@@ -160,6 +160,21 @@ def refund_guardrail() -> Guardrail:
 
 
 @pytest.fixture
+def distinct_count_binding() -> MetricBinding:
+    return MetricBinding(
+        metric="unique_customers",
+        canonical=CanonicalRef(
+            kind="distinct_count",
+            source="orders",
+            distinct_on="order_id",
+            population_filter="status != 'cancelled'",
+        ),
+        aliases=["active_customers"],
+        status=Status.ACTIVE,
+    )
+
+
+@pytest.fixture
 def canon_service(
     revenue_binding: MetricBinding,
     refund_guardrail: Guardrail,
@@ -196,4 +211,32 @@ def canon_service(
             },
         }
     )
+    return CanonService(config=config, resolver=resolver, sources=[orders_source])
+
+
+_DC_CONFIG = {
+    "version": 1,
+    "project": {"name": "test", "default_connection": "warehouse_pg"},
+    "connections": [
+        {
+            "id": "warehouse_pg",
+            "type": "postgres",
+            "params": {"host": "localhost", "port": 5432, "dbname": "testdb", "user": "test"},
+            "credentials_ref": "env:PG_PASSWORD",
+        }
+    ],
+    "llm": {"provider": "openai_compatible", "base_url": "http://localhost/v1", "model": "llama3"},
+}
+
+
+@pytest.fixture
+def distinct_count_service(
+    distinct_count_binding: MetricBinding,
+    orders_source: SemanticSource,
+    monkeypatch: pytest.MonkeyPatch,
+) -> CanonService:
+    """A CanonService with a distinct_count metric for describe_metric tests."""
+    monkeypatch.setenv("PG_PASSWORD", "testpassword")
+    resolver = ContractResolver(bindings=[distinct_count_binding], guardrails=[])
+    config = CanonConfig.model_validate(_DC_CONFIG)
     return CanonService(config=config, resolver=resolver, sources=[orders_source])

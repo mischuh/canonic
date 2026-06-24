@@ -125,12 +125,18 @@ class CanonService:
         binding = self._resolve_or_raise(name)
         from canon.contracts.models import BindingKind
 
-        if binding.kind not in {BindingKind.SINGLE, BindingKind.SEMI_ADDITIVE}:
+        _DESCRIBABLE = {
+            BindingKind.SINGLE,
+            BindingKind.SEMI_ADDITIVE,
+            BindingKind.DISTINCT_COUNT,
+            BindingKind.PERCENTILE,
+        }
+        if binding.kind not in _DESCRIBABLE:
             raise UnsupportedMeasure(
-                f"metric {name!r} is a composite ({binding.kind}) — "
-                "use query() to compute it; describe_metric() requires a single source+measure"
+                f"metric {name!r} is a {binding.kind} metric — "
+                "use query() to compute it; describe_metric() requires a source-based metric"
             )
-        assert binding.source is not None and binding.measure is not None  # noqa: S101
+        assert binding.source is not None  # noqa: S101 — all _DESCRIBABLE kinds have source
         source = self._source_by_name.get(binding.source)
         if source is None:
             raise Unresolved(

@@ -82,7 +82,7 @@ class MetricDetail(BaseModel):
 
     metric: str
     source: str
-    measure: str
+    measure: str | None = None
     grain: list[str]
     dimensions: list[str]
     measures: list[str]
