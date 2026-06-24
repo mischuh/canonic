@@ -13,6 +13,7 @@ __all__ = [
     "CompositionMetadata",
     "FinalityMetadata",
     "FiredGuardrail",
+    "OpaqueMetadata",
     "PartialAdditiveMetadata",
     "RecomputeAtGrainMetadata",
     "SourceFreshness",
@@ -79,6 +80,18 @@ class RecomputeAtGrainMetadata:
 
 
 @dataclass(frozen=True, slots=True)
+class OpaqueMetadata:
+    """Records that an opaque metric was served at its declared native grain (§4.4).
+
+    Emitted so E14 / E16 can record that no re-aggregation was attempted.
+    """
+
+    source: str
+    measure: str
+    native_grain: list[str]
+
+
+@dataclass(frozen=True, slots=True)
 class FinalityMetadata:
     """Finality coalescing metadata produced by compiler stage 5 (SPEC-E5-E15 §4 stage 8).
 
@@ -114,3 +127,4 @@ class CompileResult:
     composition: CompositionMetadata | None = None
     partial_additive: PartialAdditiveMetadata | None = None
     recompute_at_grain: RecomputeAtGrainMetadata | None = None
+    opaque: OpaqueMetadata | None = None

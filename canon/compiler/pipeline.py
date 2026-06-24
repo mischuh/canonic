@@ -21,6 +21,7 @@ from canon.compiler.result import (
     CompositionMetadata,
     FinalityMetadata,
     FiredGuardrail,
+    OpaqueMetadata,
     PartialAdditiveMetadata,
     RecomputeAtGrainMetadata,
     SourceFreshness,
@@ -129,6 +130,7 @@ def compile(  # noqa: A001 — the public verb for this capability is "compile"
         for i, (_, b) in enumerate(raw_bindings)
         if b.kind in {BindingKind.DISTINCT_COUNT, BindingKind.PERCENTILE}
     ]
+    opaque_indices = [i for i, (_, b) in enumerate(raw_bindings) if b.kind is BindingKind.OPAQUE]
     if composite_indices:
         if len(query.metrics) > 1:
             raise UnsupportedMeasure(
@@ -153,6 +155,14 @@ def compile(  # noqa: A001 — the public verb for this capability is "compile"
             )
         _, rg_binding = raw_bindings[0]
         return _compile_recompute_at_grain(query, rg_binding, resolver, sources_by_name)
+    if opaque_indices:
+        if len(query.metrics) > 1:
+            raise UnsupportedMeasure(
+                "opaque metrics must be queried alone; "
+                "remove other metrics from the request or split into separate queries"
+            )
+        _, opaque_binding = raw_bindings[0]
+        return _compile_opaque(query, opaque_binding, resolver, sources_by_name)
 
     metrics = _bindings_to_resolved(raw_bindings, sources_by_name)
     owner = metrics[0].source  # FROM anchor
@@ -991,6 +1001,120 @@ def _compile_recompute_at_grain(
             quantile=rg.quantile,
         ),
     )
+
+
+def _compile_opaque(
+    query: SemanticQuery,
+    binding: ResolverBinding,
+    resolver: ContractResolver,
+    sources_by_name: dict[str, SemanticSource],
+) -> CompileResult:
+    """Compile an opaque metric — serve at native grain only, no re-aggregation (§4.4).
+
+    At native grain (requested dimensions == native_grain set) → direct lookup with no GROUP BY.
+    Any other grain → UNSUPPORTED_MEASURE with a rationale.
+    """
+    assert binding.opaque is not None  # noqa: S101 — routing guarantees this kind
+    opaque = binding.opaque
+    adapter = DIALECT_ADAPTERS["postgres"]
+    queried_name = query.metrics[0]
+
+    assert binding.source is not None and binding.measure is not None  # noqa: S101 — enforced by model_validator
+    source_name = binding.source
+    alias_to_source = build_alias_tree(source_name, sources_by_name)
+
+    # Stage 2 — dimensions & filters.
+    dimensions = _resolve_dimensions(query, sources_by_name, source_name, alias_to_source)
+    where_conditions, filter_sources = _bind_filters(
+        query.filters, sources_by_name, source_name, alias_to_source
+    )
+    referenced = {alias for alias, _ in dimensions} | filter_sources | {source_name}
+
+    # Stage 3 — join graph.
+    join_edges = plan_joins(
+        source_name, referenced - {source_name}, sources_by_name, via=list(query.via) or None
+    )
+
+    # Grain guard (AC1): requested dimensions must exactly match native_grain (§4.4).
+    requested_dims = {dim.name for _, dim in dimensions}
+    native_dims = set(opaque.native_grain)
+    if requested_dims != native_dims:
+        native_repr = " × ".join(sorted(opaque.native_grain))
+        raise UnsupportedMeasure(
+            f"metric {queried_name!r} is opaque and can only be served at its native grain "
+            f"({native_repr}); cannot re-aggregate a pre-computed value — "
+            f"requested grain was {sorted(requested_dims)!r}"
+        )
+
+    # Resolve the measure object for guardrails and SQL emission.
+    source = sources_by_name.get(source_name)
+    if source is None:
+        raise Unresolved(f"metric {queried_name!r} binds to unknown source {source_name!r}")
+    measure = _find_measure(source, binding.measure)
+    if measure is None:
+        raise Unresolved(
+            f"metric {queried_name!r} binds to unknown measure {source_name}.{binding.measure!r}"
+        )
+    resolved_metric = _ResolvedMetric(name=queried_name, source=source_name, measure=measure)
+
+    # population_filter — defines the population this metric is about (§4.5); before guardrails.
+    where_conditions += _population_filter_conditions(
+        binding.binding.canonical.population_filter, sources_by_name, source_name, alias_to_source
+    )
+
+    # Stage 6 — guardrails.
+    guard_conditions, fired = _enforce_guardrails(
+        [resolved_metric], resolver, query.context, sources_by_name
+    )
+    where_conditions += guard_conditions
+
+    # Stage 7 — emit raw lookup (no aggregate, no GROUP BY).
+    ast = _build_opaque(
+        owner=source_name,
+        metric=resolved_metric,
+        dimensions=dimensions,
+        where_conditions=where_conditions,
+        join_edges=join_edges,
+        sources_by_name=sources_by_name,
+    )
+    sql = adapter.emit(ast, limit=query.limit)
+
+    # Stage 8 — result metadata.
+    used_sources = sorted({source_name} | {e.join.to for e in join_edges})
+    return CompileResult(
+        sql=sql,
+        dialect=adapter.dialect,
+        resolved={queried_name: f"opaque({source_name}.{binding.measure})"},
+        guardrails_fired=fired,
+        freshness=[_freshness(sources_by_name[s]) for s in used_sources],
+        warnings=[],
+        opaque=OpaqueMetadata(
+            source=source_name,
+            measure=binding.measure,
+            native_grain=list(opaque.native_grain),
+        ),
+    )
+
+
+def _build_opaque(
+    owner: str,
+    metric: _ResolvedMetric,
+    dimensions: list[tuple[str, Dimension]],
+    where_conditions: list[exp.Expression],
+    join_edges: list[JoinEdge],
+    sources_by_name: dict[str, SemanticSource],
+) -> exp.Select:
+    """Build a raw direct-lookup SELECT for an opaque metric — no aggregate, no GROUP BY (§4.4)."""
+    select = exp.Select()
+    projections: list[exp.Expression] = []
+    for src, dim in dimensions:
+        projections.append(_alias(_dimension_expr(src, dim), dim.name))
+    projections.append(_alias(_measure_expr(metric.source, metric.measure), metric.measure.name))
+    select = select.select(*projections)
+    select = _from_and_joins(select, owner, join_edges, sources_by_name)
+    if where_conditions:
+        select = select.where(exp.and_(*where_conditions))
+    return select
 
 
 def _build_recompute(

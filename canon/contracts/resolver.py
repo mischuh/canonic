@@ -45,6 +45,7 @@ __all__ = [
     "ComponentBindings",
     "ContractResolver",
     "MetricResolution",
+    "OpaqueBinding",
     "RecomputeAtGrainBinding",
     "SemiAdditiveBinding",
     "Unresolved",
@@ -70,6 +71,13 @@ class RecomputeAtGrainBinding:
 
 
 @dataclass(frozen=True, slots=True)
+class OpaqueBinding:
+    """Resolved opaque parameters for a grain-locked metric (§4.4)."""
+
+    native_grain: list[str]
+
+
+@dataclass(frozen=True, slots=True)
 class Binding:
     """A metric name resolved to its canonical definition.
 
@@ -88,6 +96,7 @@ class Binding:
     components: ComponentBindings | None = None
     semi_additive: SemiAdditiveBinding | None = None
     recompute_at_grain: RecomputeAtGrainBinding | None = None
+    opaque: OpaqueBinding | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -160,6 +169,7 @@ class ContractResolver:
                 BindingKind.SEMI_ADDITIVE,
                 BindingKind.DISTINCT_COUNT,
                 BindingKind.PERCENTILE,
+                BindingKind.OPAQUE,
             }:
                 metric_to_canonical[binding.metric] = binding.canonical
             for name in (binding.metric, *binding.aliases):
@@ -251,6 +261,21 @@ class ContractResolver:
                     column=canonical.column,
                     quantile=canonical.quantile,
                 ),
+            )
+
+        if canonical.kind is BindingKind.OPAQUE:
+            assert (  # noqa: S101 — enforced by model_validator
+                canonical.source is not None
+                and canonical.measure is not None
+                and canonical.native_grain is not None
+            )
+            return Binding(
+                metric=binding.metric,
+                source=canonical.source,
+                measure=canonical.measure,
+                binding=binding,
+                kind=BindingKind.OPAQUE,
+                opaque=OpaqueBinding(native_grain=list(canonical.native_grain)),
             )
 
         if canonical.kind is BindingKind.RATIO:
