@@ -175,6 +175,34 @@ def distinct_count_binding() -> MetricBinding:
 
 
 @pytest.fixture
+def percentile_binding() -> MetricBinding:
+    return MetricBinding(
+        metric="median_rental_amount",
+        canonical=CanonicalRef(
+            kind="percentile",
+            source="orders",
+            column="amount",
+            quantile=0.5,
+        ),
+        aliases=["median rental"],
+        status=Status.ACTIVE,
+    )
+
+
+@pytest.fixture
+def percentile_service(
+    percentile_binding: MetricBinding,
+    orders_source: SemanticSource,
+    monkeypatch: pytest.MonkeyPatch,
+) -> CanonService:
+    """A CanonService with a percentile metric for tests."""
+    monkeypatch.setenv("PG_PASSWORD", "testpassword")
+    resolver = ContractResolver(bindings=[percentile_binding], guardrails=[])
+    config = CanonConfig.model_validate(_DC_CONFIG)
+    return CanonService(config=config, resolver=resolver, sources=[orders_source])
+
+
+@pytest.fixture
 def canon_service(
     revenue_binding: MetricBinding,
     refund_guardrail: Guardrail,
@@ -238,5 +266,68 @@ def distinct_count_service(
     """A CanonService with a distinct_count metric for describe_metric tests."""
     monkeypatch.setenv("PG_PASSWORD", "testpassword")
     resolver = ContractResolver(bindings=[distinct_count_binding], guardrails=[])
+    config = CanonConfig.model_validate(_DC_CONFIG)
+    return CanonService(config=config, resolver=resolver, sources=[orders_source])
+
+
+@pytest.fixture
+def damage_count_binding() -> MetricBinding:
+    return MetricBinding(
+        metric="damage_count",
+        canonical=CanonicalRef(source="orders", measure="total_revenue"),
+        status=Status.ACTIVE,
+    )
+
+
+@pytest.fixture
+def ratio_binding() -> MetricBinding:
+    return MetricBinding(
+        metric="avg_cost",
+        canonical=CanonicalRef(kind="ratio", numerator="revenue", denominator="damage_count"),
+        aliases=["cost ratio"],
+        status=Status.ACTIVE,
+    )
+
+
+@pytest.fixture
+def ratio_service(
+    ratio_binding: MetricBinding,
+    revenue_binding: MetricBinding,
+    damage_count_binding: MetricBinding,
+    orders_source: SemanticSource,
+    monkeypatch: pytest.MonkeyPatch,
+) -> CanonService:
+    """A CanonService with a ratio metric + its two SINGLE components."""
+    monkeypatch.setenv("PG_PASSWORD", "testpassword")
+    resolver = ContractResolver(
+        bindings=[ratio_binding, revenue_binding, damage_count_binding], guardrails=[]
+    )
+    config = CanonConfig.model_validate(_DC_CONFIG)
+    return CanonService(config=config, resolver=resolver, sources=[orders_source])
+
+
+@pytest.fixture
+def weighted_avg_binding() -> MetricBinding:
+    return MetricBinding(
+        metric="avg_weighted_cost",
+        canonical=CanonicalRef(kind="weighted_avg", weighted_sum="revenue", weight="damage_count"),
+        aliases=["weighted cost"],
+        status=Status.ACTIVE,
+    )
+
+
+@pytest.fixture
+def weighted_avg_service(
+    weighted_avg_binding: MetricBinding,
+    revenue_binding: MetricBinding,
+    damage_count_binding: MetricBinding,
+    orders_source: SemanticSource,
+    monkeypatch: pytest.MonkeyPatch,
+) -> CanonService:
+    """A CanonService with a weighted_avg metric + its two SINGLE components."""
+    monkeypatch.setenv("PG_PASSWORD", "testpassword")
+    resolver = ContractResolver(
+        bindings=[weighted_avg_binding, revenue_binding, damage_count_binding], guardrails=[]
+    )
     config = CanonConfig.model_validate(_DC_CONFIG)
     return CanonService(config=config, resolver=resolver, sources=[orders_source])

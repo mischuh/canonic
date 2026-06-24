@@ -89,16 +89,36 @@ class CanonService:
 
                 if b.status is not Status.ACTIVE:
                     continue
-                if b.canonical.kind not in {BindingKind.SINGLE, BindingKind.SEMI_ADDITIVE}:
-                    continue  # ratio/weighted_avg have no single source+measure to summarize
-                assert b.canonical.source is not None and b.canonical.measure is not None  # noqa: S101
+                canonical = b.canonical
+                kind = canonical.kind
+                if kind in {BindingKind.SINGLE, BindingKind.SEMI_ADDITIVE}:
+                    assert canonical.source is not None and canonical.measure is not None  # noqa: S101
+                    source, measure, components = canonical.source, canonical.measure, None
+                elif kind is BindingKind.DISTINCT_COUNT:
+                    assert canonical.source is not None and canonical.distinct_on is not None  # noqa: S101
+                    source, measure, components = canonical.source, canonical.distinct_on, None
+                elif kind is BindingKind.PERCENTILE:
+                    assert canonical.source is not None and canonical.column is not None  # noqa: S101
+                    source, measure, components = canonical.source, canonical.column, None
+                elif kind is BindingKind.RATIO:
+                    assert canonical.numerator is not None and canonical.denominator is not None  # noqa: S101
+                    source, measure = None, None
+                    components = [canonical.numerator, canonical.denominator]
+                elif kind is BindingKind.WEIGHTED_AVG:
+                    assert canonical.weighted_sum is not None and canonical.weight is not None  # noqa: S101
+                    source, measure = None, None
+                    components = [canonical.weighted_sum, canonical.weight]
+                else:
+                    continue  # OPAQUE and future kinds not surfaced in summary
                 summaries.append(
                     MetricSummary(
                         metric=b.metric,
-                        source=b.canonical.source,
-                        measure=b.canonical.measure,
+                        kind=kind.value,
+                        source=source,
+                        measure=measure,
                         status=b.status.value,
                         aliases=list(b.aliases),
+                        components=components,
                     )
                 )
         # deduplicate by metric name (each metric may appear multiple times in the name index
