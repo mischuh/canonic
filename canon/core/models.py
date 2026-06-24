@@ -64,15 +64,21 @@ class FinalityOut(BaseModel):
 
 
 class MetricSummary(BaseModel):
-    """One active canonical metric, as returned by ``list_metrics`` (SPEC §4.1)."""
+    """One active canonical metric, as returned by ``list_metrics`` (SPEC §4.1).
+
+    For composite kinds (ratio, weighted_avg), ``source`` and ``measure`` are None;
+    ``components`` holds the ordered component metric names [numerator, denominator].
+    """
 
     model_config = ConfigDict(frozen=True)
 
     metric: str
-    source: str
-    measure: str
+    kind: str
+    source: str | None = None
+    measure: str | None = None
     status: str
     aliases: list[str] = []
+    components: list[str] | None = None
 
 
 class MetricDetail(BaseModel):
