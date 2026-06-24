@@ -1344,11 +1344,25 @@ def _bind_name(
     owner: str | None = None,
     alias_to_source: dict[str, str] | None = None,
 ) -> tuple[str, str] | None:
-    """Resolve a bare name to ``(alias, physical_column)`` — dimension first, then column."""
+    """Resolve a bare name to ``(alias, physical_column)`` — dimension first, then column.
+
+    Prioritizes the owner source when resolving columns to avoid ambiguity;
+    a distinct_on column should resolve to the metric's owning source if present.
+    """
     dim = _find_dimension(name, sources_by_name, owner, alias_to_source)
     if dim is not None:
         return dim[0], dim[1].column
+
+    # Priority 1: check the owner source first (if provided).
+    if owner is not None:
+        owner_source = sources_by_name.get(owner)
+        if owner_source is not None and any(c.name == name for c in owner_source.columns):
+            return owner, name
+
+    # Priority 2: check other sources (sorted for determinism).
     for src in sorted(sources_by_name):
+        if src == owner:
+            continue  # already checked above
         if any(c.name == name for c in sources_by_name[src].columns):
             return src, name
     return None
