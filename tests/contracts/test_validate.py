@@ -251,3 +251,132 @@ status: active
         _write_semantic(tmp_path, ORDERS_SEMANTIC_YAML, name="orders.yaml")
         with pytest.raises(ContractError, match="opaque"):
             validate_contracts(tmp_path)
+
+
+# Semantic source for a second table (denominator in cross-source ratio tests).
+PAYMENTS_SEMANTIC_YAML = """\
+name: payments
+connection: warehouse_pg
+table: analytics.fct_payments
+grain: [payment_id]
+columns:
+  - { name: payment_id, type: string, nullable: false }
+  - { name: amount,     type: decimal, nullable: false }
+measures:
+  - name: payment_count
+    expr: count(payment_id)
+    additivity: additive
+"""
+
+
+class TestValidatePopulationFilter:
+    """Validation tests for population_filter column resolution (§4.5, S7 AC3)."""
+
+    def test_single_leaf_filter_valid_column_passes(self, tmp_path: Path) -> None:
+        """A population_filter referencing a declared column on the single leaf source passes."""
+        binding = """\
+metric: revenue
+canonical:
+  source: orders
+  measure: total_revenue
+  population_filter: "status = 'completed'"
+status: active
+"""
+        _write_binding(tmp_path, "revenue.yaml", binding)
+        _write_semantic(tmp_path, ORDERS_SEMANTIC_YAML)
+        validate_contracts(tmp_path)  # must not raise
+
+    def test_single_leaf_filter_phantom_column_raises(self, tmp_path: Path) -> None:
+        """A population_filter referencing a column absent from the source → ContractError."""
+        binding = """\
+metric: revenue
+canonical:
+  source: orders
+  measure: total_revenue
+  population_filter: "phantom_col = 'x'"
+status: active
+"""
+        _write_binding(tmp_path, "revenue.yaml", binding)
+        _write_semantic(tmp_path, ORDERS_SEMANTIC_YAML)
+        with pytest.raises(ContractError, match="phantom_col"):
+            validate_contracts(tmp_path)
+
+    def test_ratio_filter_absent_from_denominator_raises(self, tmp_path: Path) -> None:
+        """AC3: ratio with population_filter column absent from the denominator's source → ContractError."""
+        num_binding = """\
+metric: order_count
+canonical:
+  source: orders
+  measure: total_revenue
+status: active
+"""
+        den_binding = """\
+metric: payment_count
+canonical:
+  source: payments
+  measure: payment_count
+status: active
+"""
+        ratio_binding = """\
+metric: revenue_per_payment
+canonical:
+  kind: ratio
+  numerator: order_count
+  denominator: payment_count
+  population_filter: "status = 'completed'"
+status: active
+"""
+        _write_binding(tmp_path, "num.yaml", num_binding)
+        _write_binding(tmp_path, "den.yaml", den_binding)
+        _write_binding(tmp_path, "ratio.yaml", ratio_binding)
+        _write_semantic(tmp_path, ORDERS_SEMANTIC_YAML, name="orders.yaml")
+        _write_semantic(tmp_path, PAYMENTS_SEMANTIC_YAML, name="payments.yaml")
+        # "status" exists on orders (numerator leaf) but NOT on payments (denominator leaf)
+        with pytest.raises(ContractError, match="status"):
+            validate_contracts(tmp_path)
+
+    def test_ratio_filter_valid_on_all_leaves_passes(self, tmp_path: Path) -> None:
+        """A ratio population_filter whose column exists on all leaf sources passes."""
+        num_binding = """\
+metric: order_count
+canonical:
+  source: orders
+  measure: total_revenue
+status: active
+"""
+        den_binding = """\
+metric: order_count_b
+canonical:
+  source: orders
+  measure: total_revenue
+status: active
+"""
+        ratio_binding = """\
+metric: ratio_same_source
+canonical:
+  kind: ratio
+  numerator: order_count
+  denominator: order_count_b
+  population_filter: "status = 'completed'"
+status: active
+"""
+        _write_binding(tmp_path, "num.yaml", num_binding)
+        _write_binding(tmp_path, "den.yaml", den_binding)
+        _write_binding(tmp_path, "ratio.yaml", ratio_binding)
+        _write_semantic(tmp_path, ORDERS_SEMANTIC_YAML, name="orders.yaml")
+        validate_contracts(tmp_path)  # must not raise
+
+    def test_malformed_population_filter_raises(self, tmp_path: Path) -> None:
+        """A syntactically invalid population_filter → ContractError naming the metric."""
+        binding = """\
+metric: revenue
+canonical:
+  source: orders
+  measure: total_revenue
+  population_filter: "status IN ("
+status: active
+"""
+        _write_binding(tmp_path, "revenue.yaml", binding)
+        _write_semantic(tmp_path, ORDERS_SEMANTIC_YAML)
+        with pytest.raises(ContractError, match="revenue"):
+            validate_contracts(tmp_path)

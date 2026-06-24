@@ -4,6 +4,10 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+import sqlglot
+from sqlglot import exp
+from sqlglot.errors import ParseError
+
 from canon.contracts.assertions import assertion_metrics, is_executable
 from canon.contracts.finality import validate_finality_rule
 from canon.contracts.loader import (
@@ -200,6 +204,77 @@ def _validate_opaque_binding(
             )
 
 
+def _leaf_sources(
+    binding: MetricBinding,
+    active_by_name: dict[str, MetricBinding],
+) -> set[str]:
+    """Return the physical source name(s) that a binding ultimately reads.
+
+    For single-leaf kinds (single, semi_additive, distinct_count, percentile, opaque)
+    this is the binding's own source. For composite kinds (ratio, weighted_avg) the leaf
+    sources are the union of the components' leaf sources, resolved recursively.
+    Returns empty set if a component is missing — the component-resolution checks in
+    _validate_composite_binding already raise for that case.
+    """
+    ref = binding.canonical
+    if ref.kind in {
+        BindingKind.SINGLE,
+        BindingKind.SEMI_ADDITIVE,
+        BindingKind.DISTINCT_COUNT,
+        BindingKind.PERCENTILE,
+        BindingKind.OPAQUE,
+    }:
+        return {ref.source} if ref.source else set()
+
+    if ref.kind is BindingKind.RATIO:
+        num_name, den_name = ref.numerator, ref.denominator
+    else:  # WEIGHTED_AVG
+        num_name, den_name = ref.weighted_sum, ref.weight
+
+    result: set[str] = set()
+    for name in (num_name, den_name):
+        if name and name in active_by_name:
+            result |= _leaf_sources(active_by_name[name], active_by_name)
+    return result
+
+
+def _validate_population_filter(
+    binding: MetricBinding,
+    active_by_name: dict[str, MetricBinding],
+    source_columns: dict[str, set[str]],
+    source_dims: dict[str, set[str]],
+) -> None:
+    """Validate that every column in population_filter exists on every leaf source (§4.5, S7 AC3).
+
+    A filter column absent from even one leaf's source is VALIDATION_FAILED — never a
+    half-applied filter.
+    """
+    pf = binding.canonical.population_filter
+    if pf is None:
+        return
+
+    try:
+        parsed = sqlglot.parse_one(pf, dialect="postgres")
+    except ParseError as exc:
+        raise ContractError(
+            f"metric {binding.metric!r}: population_filter {pf!r} is not valid SQL: {exc}"
+        ) from exc
+
+    referenced = {c.name for c in parsed.find_all(exp.Column)}
+    if not referenced:
+        return
+
+    leaves = _leaf_sources(binding, active_by_name)
+    for leaf in sorted(leaves):
+        declared = source_columns.get(leaf, set()) | source_dims.get(leaf, set())
+        for name in sorted(referenced):
+            if name not in declared:
+                raise ContractError(
+                    f"metric {binding.metric!r}: population_filter references {name!r} "
+                    f"which is not declared as a column or dimension on leaf source {leaf!r}"
+                )
+
+
 def validate_contracts(project_root: Path) -> None:
     """Validate all contracts against the live semantic sources.
 
@@ -225,6 +300,9 @@ def validate_contracts(project_root: Path) -> None:
     active_metrics = {b.metric for b in bindings if b.status is Status.ACTIVE}
     active_names = {
         n for b in bindings if b.status is Status.ACTIVE for n in (b.metric, *b.aliases)
+    }
+    active_by_name: dict[str, MetricBinding] = {
+        b.metric: b for b in bindings if b.status is Status.ACTIVE
     }
 
     for binding in bindings:
@@ -255,6 +333,7 @@ def validate_contracts(project_root: Path) -> None:
             _validate_opaque_binding(binding, source_measures, source_dims)
         else:
             _validate_composite_binding(binding, bindings, source_measures)
+        _validate_population_filter(binding, active_by_name, source_columns, source_dims)
 
     guardrails = load_guardrails(project_root)
     for guardrail in guardrails:
