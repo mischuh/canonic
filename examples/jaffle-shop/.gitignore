@@ -1,0 +1,9 @@
+# Canon runtime state (not committed)
+.canon/index/
+.canon/embeddings/
+.canon/setup-state.json
+
+# Derived context (commit after review)
+# semantics/
+# knowledge/
+# contracts/

@@ -1,0 +1,6 @@
+metric: revenue
+canonical:
+  source: orders
+  measure: revenue
+provenance: inferred
+status: active

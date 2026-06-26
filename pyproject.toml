@@ -12,6 +12,7 @@ dependencies = [
     "sqlglot>=25.0",
     "asyncpg>=0.30",
     "aiosqlite>=0.20",
+    "duckdb>=1.0",
     "alembic>=1.13",
     "litellm>=1.0",
     "fastmcp>=3.0,<4",

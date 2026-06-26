@@ -1,0 +1,383 @@
+{
+  "metadata": {
+    "dbt_schema_version": "https://schemas.getdbt.com/dbt/manifest/v11.json",
+    "dbt_version": "1.7.0",
+    "generated_at": "2026-06-01T00:00:00.000000Z",
+    "invocation_id": "jaffle-shop-demo-0001"
+  },
+  "nodes": {
+    "model.jaffle_shop.customers": {
+      "unique_id": "model.jaffle_shop.customers",
+      "resource_type": "model",
+      "name": "customers",
+      "schema": "main",
+      "alias": "customers",
+      "database": null,
+      "description": "One row per customer with lifetime order stats.",
+      "config": {
+        "materialized": "table"
+      },
+      "columns": {
+        "customer_id": {
+          "name": "customer_id",
+          "data_type": "integer",
+          "constraints": [{"type": "primary_key"}]
+        },
+        "first_name": {
+          "name": "first_name",
+          "data_type": "varchar",
+          "constraints": []
+        },
+        "last_name": {
+          "name": "last_name",
+          "data_type": "varchar",
+          "constraints": []
+        },
+        "email": {
+          "name": "email",
+          "data_type": "varchar",
+          "constraints": []
+        },
+        "created_at": {
+          "name": "created_at",
+          "data_type": "date",
+          "constraints": []
+        },
+        "customer_type": {
+          "name": "customer_type",
+          "data_type": "varchar",
+          "constraints": []
+        }
+      }
+    },
+    "model.jaffle_shop.orders": {
+      "unique_id": "model.jaffle_shop.orders",
+      "resource_type": "model",
+      "name": "orders",
+      "schema": "main",
+      "alias": "orders",
+      "database": null,
+      "description": "One row per order. Contains payment breakdown and item counts.",
+      "config": {
+        "materialized": "table"
+      },
+      "columns": {
+        "order_id": {
+          "name": "order_id",
+          "data_type": "integer",
+          "constraints": [{"type": "primary_key"}]
+        },
+        "customer_id": {
+          "name": "customer_id",
+          "data_type": "integer",
+          "constraints": [
+            {
+              "type": "foreign_key",
+              "to": "main.customers",
+              "to_columns": ["customer_id"]
+            }
+          ]
+        },
+        "store_id": {
+          "name": "store_id",
+          "data_type": "integer",
+          "constraints": [
+            {
+              "type": "foreign_key",
+              "to": "main.stores",
+              "to_columns": ["store_id"]
+            }
+          ]
+        },
+        "ordered_at": {
+          "name": "ordered_at",
+          "data_type": "timestamp",
+          "constraints": []
+        },
+        "subtotal": {
+          "name": "subtotal",
+          "data_type": "numeric",
+          "constraints": []
+        },
+        "tax_paid": {
+          "name": "tax_paid",
+          "data_type": "numeric",
+          "constraints": []
+        },
+        "amount": {
+          "name": "amount",
+          "data_type": "numeric",
+          "constraints": []
+        },
+        "count_food_items": {
+          "name": "count_food_items",
+          "data_type": "integer",
+          "constraints": []
+        },
+        "count_drink_items": {
+          "name": "count_drink_items",
+          "data_type": "integer",
+          "constraints": []
+        },
+        "count_items": {
+          "name": "count_items",
+          "data_type": "integer",
+          "constraints": []
+        }
+      }
+    },
+    "model.jaffle_shop.order_items": {
+      "unique_id": "model.jaffle_shop.order_items",
+      "resource_type": "model",
+      "name": "order_items",
+      "schema": "main",
+      "alias": "order_items",
+      "database": null,
+      "description": "One row per line item. Grain is order_item_id.",
+      "config": {
+        "materialized": "table"
+      },
+      "columns": {
+        "order_item_id": {
+          "name": "order_item_id",
+          "data_type": "integer",
+          "constraints": [{"type": "primary_key"}]
+        },
+        "order_id": {
+          "name": "order_id",
+          "data_type": "integer",
+          "constraints": [
+            {
+              "type": "foreign_key",
+              "to": "main.orders",
+              "to_columns": ["order_id"]
+            }
+          ]
+        },
+        "product_id": {
+          "name": "product_id",
+          "data_type": "integer",
+          "constraints": [
+            {
+              "type": "foreign_key",
+              "to": "main.products",
+              "to_columns": ["product_id"]
+            }
+          ]
+        },
+        "quantity": {
+          "name": "quantity",
+          "data_type": "integer",
+          "constraints": []
+        }
+      }
+    },
+    "model.jaffle_shop.products": {
+      "unique_id": "model.jaffle_shop.products",
+      "resource_type": "model",
+      "name": "products",
+      "schema": "main",
+      "alias": "products",
+      "database": null,
+      "description": "Product catalog — jaffles and beverages.",
+      "config": {
+        "materialized": "table"
+      },
+      "columns": {
+        "product_id": {
+          "name": "product_id",
+          "data_type": "integer",
+          "constraints": [{"type": "primary_key"}]
+        },
+        "name": {
+          "name": "name",
+          "data_type": "varchar",
+          "constraints": []
+        },
+        "type": {
+          "name": "type",
+          "data_type": "varchar",
+          "constraints": []
+        },
+        "price": {
+          "name": "price",
+          "data_type": "numeric",
+          "constraints": []
+        },
+        "description": {
+          "name": "description",
+          "data_type": "varchar",
+          "constraints": []
+        }
+      }
+    },
+    "model.jaffle_shop.stores": {
+      "unique_id": "model.jaffle_shop.stores",
+      "resource_type": "model",
+      "name": "stores",
+      "schema": "main",
+      "alias": "stores",
+      "database": null,
+      "description": "Store locations for Jaffle Shop.",
+      "config": {
+        "materialized": "table"
+      },
+      "columns": {
+        "store_id": {
+          "name": "store_id",
+          "data_type": "integer",
+          "constraints": [{"type": "primary_key"}]
+        },
+        "name": {
+          "name": "name",
+          "data_type": "varchar",
+          "constraints": []
+        },
+        "opened_at": {
+          "name": "opened_at",
+          "data_type": "date",
+          "constraints": []
+        },
+        "tax_paid": {
+          "name": "tax_paid",
+          "data_type": "numeric",
+          "constraints": []
+        }
+      }
+    }
+  },
+  "semantic_models": {
+    "semantic_model.jaffle_shop.orders": {
+      "unique_id": "semantic_model.jaffle_shop.orders",
+      "name": "orders",
+      "description": "Orders semantic model — order grain, joins to customers and stores.",
+      "model": {
+        "ref_name": "main.orders"
+      },
+      "entities": [
+        {
+          "name": "order_id",
+          "type": "primary",
+          "expr": "order_id"
+        },
+        {
+          "name": "customer_id",
+          "type": "foreign",
+          "expr": "customer_id"
+        },
+        {
+          "name": "store_id",
+          "type": "foreign",
+          "expr": "store_id"
+        }
+      ],
+      "measures": [
+        {
+          "name": "revenue",
+          "agg": "sum",
+          "expr": "amount",
+          "non_additive_dimension": null
+        },
+        {
+          "name": "order_count",
+          "agg": "count",
+          "expr": "order_id",
+          "non_additive_dimension": null
+        },
+        {
+          "name": "total_tax_paid",
+          "agg": "sum",
+          "expr": "tax_paid",
+          "non_additive_dimension": null
+        }
+      ],
+      "dimensions": [
+        {
+          "name": "ordered_at",
+          "type": "time",
+          "expr": "ordered_at"
+        },
+        {
+          "name": "customer_type",
+          "type": "categorical",
+          "expr": "customer_type"
+        }
+      ]
+    },
+    "semantic_model.jaffle_shop.order_items": {
+      "unique_id": "semantic_model.jaffle_shop.order_items",
+      "name": "order_items",
+      "description": "Order-line semantic model — line-item grain, joins to orders and products.",
+      "model": {
+        "ref_name": "main.order_items"
+      },
+      "entities": [
+        {
+          "name": "order_item_id",
+          "type": "primary",
+          "expr": "order_item_id"
+        },
+        {
+          "name": "order_id",
+          "type": "foreign",
+          "expr": "order_id"
+        },
+        {
+          "name": "product_id",
+          "type": "foreign",
+          "expr": "product_id"
+        }
+      ],
+      "measures": [
+        {
+          "name": "units_sold",
+          "agg": "sum",
+          "expr": "quantity",
+          "non_additive_dimension": null
+        }
+      ],
+      "dimensions": [
+        {
+          "name": "product_id",
+          "type": "categorical",
+          "expr": "product_id"
+        }
+      ]
+    }
+  },
+  "metrics": {
+    "metric.jaffle_shop.revenue": {
+      "unique_id": "metric.jaffle_shop.revenue",
+      "name": "revenue",
+      "description": "Total revenue (order amount) across all orders.",
+      "type": "simple",
+      "type_params": {
+        "measure": {
+          "name": "revenue"
+        }
+      }
+    },
+    "metric.jaffle_shop.order_count": {
+      "unique_id": "metric.jaffle_shop.order_count",
+      "name": "order_count",
+      "description": "Total number of orders placed.",
+      "type": "simple",
+      "type_params": {
+        "measure": {
+          "name": "order_count"
+        }
+      }
+    },
+    "metric.jaffle_shop.units_sold": {
+      "unique_id": "metric.jaffle_shop.units_sold",
+      "name": "units_sold",
+      "description": "Total units sold across all order lines.",
+      "type": "simple",
+      "type_params": {
+        "measure": {
+          "name": "units_sold"
+        }
+      }
+    }
+  }
+}

@@ -10,6 +10,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from canon.connectors.dbt import DbtConnector
+from canon.connectors.duckdb import DuckDBConnector
 from canon.connectors.looker import LookerConnector
 from canon.connectors.metabase import MetabaseConnector
 from canon.connectors.notion import DEFAULT_API_VERSION as _NOTION_DEFAULT_API_VERSION
@@ -108,6 +109,7 @@ class ConnectorFactory:
 def _build_default_factory() -> ConnectorFactory:
     factory = ConnectorFactory()
     factory.register("dbt", _make_dbt)
+    factory.register("duckdb", DuckDBConnector)
     factory.register("looker", LookerConnector)
     factory.register("metabase", MetabaseConnector)
     factory.register("notion", _make_notion)
