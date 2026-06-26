@@ -53,7 +53,6 @@ from canon.contracts.models import CanonicalRef, MetricBinding, Status
 from canon.contracts.resolver import ContractResolver
 from canon.core.service import CanonService
 from canon.exc import ConnectionError, CredentialError
-from canon.ingestion.models import ProposalOp
 from canon.semantic.loader import list_semantic_sources
 from canon.semantic.models import NormalizedType
 
@@ -61,11 +60,13 @@ if TYPE_CHECKING:
     from canon.compiler.query import SemanticQuery
     from canon.connectors.base import Health, SchemaIntrospectable
     from canon.core.models import QueryResult
+    from canon.ingestion.emitter import EmittedDiff
     from canon.ingestion.pipeline import PipelineResult
     from canon.semantic.models import Dimension, Measure, SemanticSource
 
 _DEFAULT_TYPE = "postgres"
 _DEMO_LIMIT = 10
+_REVIEW_CAP = 5
 _LOW_CARDINALITY_TYPES = frozenset(
     {NormalizedType.DATE, NormalizedType.TIMESTAMP, NormalizedType.BOOL}
 )
@@ -159,7 +160,8 @@ def _run_golden_path(root: Path, config: CanonConfig, scaffolded: list[Path]) ->
             "add a doc source or richer connection to unlock the first answer"
         )
 
-    _render_setup_complete(config, scaffolded, demo_ok=demo_ok)
+    withheld_count = _render_curated_review(pipeline_result)
+    _render_setup_complete(config, scaffolded, demo_ok=demo_ok, withheld_count=withheld_count)
 
 
 def _bootstrap_connection(root: Path, config: CanonConfig) -> PipelineResult | None:
@@ -194,9 +196,57 @@ async def _bootstrap_async(
     finally:
         await connector.aclose()
 
-    add_count = sum(1 for d in result.emission.diffs if d.op is ProposalOp.ADD)
-    _console.print(f"[green]✓[/green] bootstrapped {add_count} semantic source(s)")
+    from canon.ingestion.pipeline import first_run_auto_acceptable
+
+    accepted = sum(1 for d in result.emission.diffs if first_run_auto_acceptable(d))
+    withheld = sum(1 for d in result.emission.diffs if not first_run_auto_acceptable(d))
+    msg = f"[green]✓[/green] bootstrapped {accepted} semantic source(s)"
+    if withheld:
+        msg += f", [yellow]{withheld} held for review[/yellow] (no primary key — grain needs confirmation)"
+    _console.print(msg)
     return result
+
+
+def _withheld_diffs_priority_key(diff: EmittedDiff) -> tuple[int, str]:
+    """Sort key for the curated review: grain-drafts first, then the rest, alpha within tier."""
+    is_grain_draft = (
+        diff.op.value == "add" and isinstance(diff.after, str) and "grain_draft: true" in diff.after
+    )
+    return (0 if is_grain_draft else 1, diff.target)
+
+
+def _render_curated_review(pipeline_result: PipelineResult | None) -> int:
+    """Render the capped, prioritized curated review of withheld diffs (SPEC-onboarding §5).
+
+    Returns the total withheld count (shown in the completion panel handoff).
+    Shows at most ``_REVIEW_CAP`` items; the remainder is pointed at ``canon ingest``.
+    """
+    if pipeline_result is None:
+        return 0
+
+    from canon.ingestion.pipeline import first_run_auto_acceptable
+
+    withheld = [d for d in pipeline_result.emission.diffs if not first_run_auto_acceptable(d)]
+    if not withheld:
+        return 0
+
+    withheld.sort(key=_withheld_diffs_priority_key)
+    shown = withheld[:_REVIEW_CAP]
+    deferred = len(withheld) - len(shown)
+
+    _console.print("\n[dim]curated review — sources held for human confirmation[/dim]")
+    for diff in shown:
+        _console.print(
+            f"  [yellow]·[/yellow] [bold]{diff.target}[/bold]"
+            f"  confidence={diff.confidence:.1f}"
+            "  — no primary key; grain is a guess — confirm before trusting measures"
+        )
+    if deferred:
+        _console.print(
+            f"  [dim]… and {deferred} more — run [bold]canon ingest[/bold] to review them[/dim]"
+        )
+
+    return len(withheld)
 
 
 def _try_first_answer(root: Path, config: CanonConfig, sources: list[SemanticSource]) -> bool:
@@ -314,11 +364,18 @@ def _render_source_listing(sources: list[SemanticSource]) -> None:
         )
 
 
-def _render_setup_complete(config: CanonConfig, scaffolded: list[Path], *, demo_ok: bool) -> None:
+def _render_setup_complete(
+    config: CanonConfig, scaffolded: list[Path], *, demo_ok: bool, withheld_count: int = 0
+) -> None:
     """Print the completion panel with three concrete next actions (step 7)."""
     files = ", ".join(p.name for p in scaffolded) if scaffolded else "no new paths"
+    ingest_label = (
+        f"[bold]canon ingest[/bold]                 — review {withheld_count} proposal(s) waiting"
+        if withheld_count
+        else "[bold]canon ingest[/bold]                 — review and apply the proposed semantic context"
+    )
     next_steps = (
-        "[bold]canon ingest[/bold]                 — review and apply the proposed semantic context\n"
+        f"{ingest_label}\n"
         "[bold]canon query -f <query.json>[/bold]  — run your own query\n"
         "[bold]canon mcp start[/bold]              — connect an agent via MCP"
     )

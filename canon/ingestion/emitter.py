@@ -27,6 +27,7 @@ from ruamel.yaml import YAML
 
 from canon.connectors.base import AcquisitionTier  # noqa: TC001 — Pydantic resolves at runtime
 from canon.ingestion.models import (
+    DraftedBy,
     ProposalOp,
     ReconciliationDecision,
     ReconciliationEntry,
@@ -117,6 +118,7 @@ class EmittedDiff(BaseModel):
     provenance: Provenance
     confidence: float
     auto_apply: bool = False
+    drafted_by: DraftedBy = DraftedBy.DETERMINISTIC
 
 
 class ContradictionNote(BaseModel):
@@ -276,6 +278,7 @@ class DiffEmitter:
             provenance=entry.proposal.provenance,
             confidence=entry.proposal.confidence,
             auto_apply=entry.auto_apply,
+            drafted_by=entry.proposal.drafted_by,
         )
 
     @staticmethod
