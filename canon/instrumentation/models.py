@@ -66,12 +66,15 @@ class ReconcileDecisionEvent(BaseModel):
 
     Field set owned by E4 §6; E16 owns the substrate (the shared file and writer).
     ``ts`` unifies the timestamp key across both event kinds for §7 metric joins.
+    ``run_id`` cross-references the ``.canon/pending-diffs/<run-id>/`` directory written
+    by the same ingest run (GH-149, AC4).
     """
 
     model_config = ConfigDict(frozen=True)
 
     ts: str
     kind: Literal["reconcile_decision"] = "reconcile_decision"
+    run_id: str
     decision: str
     target: str
     op: str

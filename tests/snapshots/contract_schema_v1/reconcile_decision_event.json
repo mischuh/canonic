@@ -1,5 +1,5 @@
 {
-  "description": "One reconcile-decision record appended to ``.canon/events.jsonl`` (SPEC-E16 \u00a711 S4).\n\nField set owned by E4 \u00a76; E16 owns the substrate (the shared file and writer).\n``ts`` unifies the timestamp key across both event kinds for \u00a77 metric joins.",
+  "description": "One reconcile-decision record appended to ``.canon/events.jsonl`` (SPEC-E16 §11 S4).\n\nField set owned by E4 §6; E16 owns the substrate (the shared file and writer).\n``ts`` unifies the timestamp key across both event kinds for §7 metric joins.\n``run_id`` cross-references the ``.canon/pending-diffs/<run-id>/`` directory written\nby the same ingest run (GH-149, AC4).",
   "properties": {
     "anchored_to": {
       "default": [],
@@ -50,6 +50,10 @@
       "title": "Provenance",
       "type": "string"
     },
+    "run_id": {
+      "title": "Run Id",
+      "type": "string"
+    },
     "target": {
       "title": "Target",
       "type": "string"
@@ -61,6 +65,7 @@
   },
   "required": [
     "ts",
+    "run_id",
     "decision",
     "target",
     "op",
