@@ -43,12 +43,12 @@ def _patch_connector(monkeypatch, *connectors: _FakeConnector) -> None:
     monkeypatch.setattr("canon.cli.commands.setup.default_factory", _StubFactory())
 
 
-# Prompt answers for a happy-path fresh run (one empty Database/Model overridden).
+# Prompt answers for a happy-path fresh run using the Postgres path.
 _FRESH_INPUT = "\n".join(
     [
         "",  # project name → default (cwd name)
+        "2",  # connection type → postgres
         "",  # connection id → warehouse_pg
-        "",  # type → postgres
         "",  # host → localhost
         "",  # port → 5432
         "",  # user → postgres
@@ -107,8 +107,8 @@ def test_connection_test_gates_recording(runner: CliRunner, tmp_path: Path, monk
         [
             "",  # project name
             # attempt 1
+            "2",  # type → postgres
             "",  # id
-            "",  # type
             "",  # host
             "",  # port
             "",  # user
@@ -117,8 +117,8 @@ def test_connection_test_gates_recording(runner: CliRunner, tmp_path: Path, monk
             "",  # env var
             "",  # Try again? → default yes
             # attempt 2
+            "2",  # type → postgres
             "",  # id
-            "",  # type
             "",  # host
             "",  # port
             "",  # user
@@ -178,7 +178,7 @@ def test_existing_project_menu_exit_does_not_overwrite(
     runner: CliRunner, project_dir: Path
 ) -> None:
     before = (project_dir / "canon.yaml").read_bytes()
-    result = runner.invoke(app, ["setup"], input="3\n")  # exit immediately
+    result = runner.invoke(app, ["setup"], input="4\n")  # exit immediately
     assert result.exit_code == 0, result.output
     assert "project menu" in result.output
     assert (project_dir / "canon.yaml").read_bytes() == before
@@ -191,15 +191,15 @@ def test_existing_project_menu_adds_connection(
     menu_input = "\n".join(
         [
             "2",  # add connection
+            "2",  # connection type → postgres
             "newconn",  # id
-            "",  # type
             "",  # host
             "",  # port
             "",  # user
             "db",  # database
             "",  # schema
             "",  # env var
-            "3",  # exit
+            "4",  # exit
         ]
     )
     result = runner.invoke(app, ["setup"], input=menu_input + "\n")
@@ -207,6 +207,58 @@ def test_existing_project_menu_adds_connection(
     config = load_config(project_dir / "canon.yaml")
     assert [c.id for c in config.connections] == ["newconn"]
     assert config.project.name == "test-project"  # untouched
+
+
+def test_sqlite_connection_path(runner: CliRunner, tmp_path: Path, monkeypatch) -> None:
+    """SQLite path records a connection with no credentials_ref."""
+    monkeypatch.chdir(tmp_path)
+    db_file = tmp_path / "data.db"
+    _patch_connector(monkeypatch, _FakeConnector(Health(status="ok")))
+    sqlite_input = "\n".join(
+        [
+            "",  # project name
+            "1",  # connection type → sqlite
+            "local_sqlite",  # id
+            str(db_file),  # path to .db file
+            "",  # llm provider
+            "",  # base url
+            "m",  # model
+            "",  # api key env
+            "",  # preview schema?
+        ]
+    )
+    result = runner.invoke(app, ["setup"], input=sqlite_input + "\n")
+    assert result.exit_code == 0, result.output
+    config = load_config(tmp_path / "canon.yaml")
+    conn = config.connections[0]
+    assert conn.id == "local_sqlite"
+    assert conn.type == "sqlite"
+    assert conn.params["path"] == str(db_file)
+    assert conn.credentials_ref is None
+
+
+def test_existing_project_menu_generates_contracts(runner: CliRunner, project_dir: Path) -> None:
+    """Option 3 in the existing-project menu writes inferred contracts from sources."""
+    # Write a minimal semantic source YAML with a numeric column and no measures.
+    semantics_dir = project_dir / "semantics" / "wh"
+    semantics_dir.mkdir(parents=True)
+    (semantics_dir / "orders.yaml").write_text(
+        "name: orders\n"
+        "connection: wh\n"
+        "table: orders\n"
+        "grain: [id]\n"
+        "columns:\n"
+        "  - {name: id, type: int, nullable: false}\n"
+        "  - {name: amount, type: float, nullable: true}\n"
+        "measures: []\n"
+        "dimensions: []\n"
+    )
+
+    result = runner.invoke(app, ["setup"], input="3\n4\n")
+    assert result.exit_code == 0, result.output
+    assert "wrote" in result.output
+    assert (project_dir / "contracts" / "metrics" / "row-count.yaml").exists()
+    assert (project_dir / "contracts" / "metrics" / "total-amount.yaml").exists()
 
 
 def test_json_mode_rejected(runner: CliRunner, tmp_path: Path, monkeypatch) -> None:

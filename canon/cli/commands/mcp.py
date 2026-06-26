@@ -15,23 +15,58 @@ from canon.config import ConfigError, find_project_root, load_config
 app = typer.Typer(name="mcp", help="Control the local MCP daemon.")
 _console = Console(soft_wrap=True)
 
+_LAST_PROJECT_FILE = Path.home() / ".canon" / "last-project"
 
-def _require_root(ctx: typer.Context) -> Path:
+
+def _save_last_project(root: Path) -> None:
+    _LAST_PROJECT_FILE.parent.mkdir(exist_ok=True)
+    _LAST_PROJECT_FILE.write_text(str(root))
+
+
+def _load_last_project() -> Path | None:
+    if not _LAST_PROJECT_FILE.exists():
+        return None
+    p = Path(_LAST_PROJECT_FILE.read_text().strip())
+    return p if (p / "canon.yaml").exists() else None
+
+
+def _resolve_root(ctx: typer.Context, explicit: Path | None) -> Path:
+    json_output = get_cli_context(ctx).json_output
+
+    if explicit is not None:
+        resolved = explicit.resolve()
+        if not (resolved / "canon.yaml").exists():
+            msg = f"no canon.yaml found in {resolved}"
+            if json_output:
+                typer.echo(json.dumps({"error": msg}))
+            else:
+                _console.print(f"[red]error:[/red] {msg}")
+            raise typer.Exit(1)
+        return resolved
+
     root = find_project_root()
-    if root is None:
-        json_output = get_cli_context(ctx).json_output
-        msg = "no canon project found — run from inside a project directory"
-        if json_output:
-            typer.echo(json.dumps({"error": msg}))
-        else:
-            _console.print(f"[red]error:[/red] {msg}")
-        raise typer.Exit(1)
-    return root
+    if root is not None:
+        return root
+
+    root = _load_last_project()
+    if root is not None:
+        return root
+
+    msg = "no canon project found — use --project <path> or run from inside a project directory"
+    if json_output:
+        typer.echo(json.dumps({"error": msg}))
+    else:
+        _console.print(f"[red]error:[/red] {msg}")
+    raise typer.Exit(1)
 
 
 @app.command("start")
 def start(
     ctx: typer.Context,
+    project: Annotated[
+        Path | None,
+        typer.Option("--project", "-p", help="Path to canon project root (overrides cwd walk)."),
+    ] = None,
     http: Annotated[bool, typer.Option("--http", help="Start as background HTTP daemon.")] = False,
     port: Annotated[
         int, typer.Option("--port", help="Port for HTTP daemon (default 7474).")
@@ -46,7 +81,7 @@ def start(
     MCP client manages the process lifetime). With ``--http``: forks a
     background uvicorn daemon bound to the given host/port.
     """
-    root = _require_root(ctx)
+    root = _resolve_root(ctx, project)
     json_output = get_cli_context(ctx).json_output
 
     try:
@@ -71,6 +106,20 @@ def start(
         else:
             _console.print(f"[red]error:[/red] {msg}")
         raise typer.Exit(1) from exc
+
+    _save_last_project(root)
+
+    if not service.list_metrics():
+        from canon.contracts.bootstrap import write_inferred_contracts
+        from canon.semantic.loader import list_semantic_sources
+
+        sources = list_semantic_sources(root)
+        if sources:
+            count = write_inferred_contracts(root, sources)
+            if count:
+                if not json_output:
+                    _console.print(f"[dim]auto-generated {count} inferred metric contract(s)[/dim]")
+                service = CanonService.from_project(root)
 
     try:
         if http:
@@ -99,7 +148,7 @@ def start(
 @app.command("stop")
 def stop(ctx: typer.Context) -> None:
     """Stop the background MCP daemon."""
-    root = _require_root(ctx)
+    root = _resolve_root(ctx, None)
     json_output = get_cli_context(ctx).json_output
 
     from canon.mcp.daemon import stop as daemon_stop
@@ -116,7 +165,7 @@ def stop(ctx: typer.Context) -> None:
 @app.command("status")
 def status(ctx: typer.Context) -> None:
     """Report whether the MCP daemon is running."""
-    root = _require_root(ctx)
+    root = _resolve_root(ctx, None)
     json_output = get_cli_context(ctx).json_output
 
     from canon.mcp.daemon import status as daemon_status
