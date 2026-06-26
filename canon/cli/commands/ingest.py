@@ -175,6 +175,21 @@ async def _ingest(
     connectors: dict[str, ConnectorBase] = {
         conn.id: default_factory.create(conn) for conn in targets
     }
+
+    # Bootstrap only introspects the default connection, but definition connectors (e.g.
+    # a dbt manifest) need no live connection and provide business-named measures from
+    # semantic models.  Build them alongside so pipeline.bootstrap can include their
+    # evidence and avoid validation failures when metric contracts already exist.
+    if bootstrap:
+        from canon.connectors.base import Capability
+
+        target_ids = {conn.id for conn in targets}
+        for conn in config.connections:
+            if conn.id not in target_ids:
+                extra = default_factory.create(conn)
+                if Capability.EXTRACT_DEFINITIONS in extra.capabilities():
+                    connectors[conn.id] = extra
+
     drafter = make_drafter(config.llm, config.runtime, headless=headless)
     reconcile_drafter = make_reconcile_drafter(config.llm, config.runtime, headless=headless)
     pipeline = IngestionPipeline(

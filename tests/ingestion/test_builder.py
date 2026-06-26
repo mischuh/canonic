@@ -8,6 +8,7 @@ from typing import Any
 from canon.connectors.base import (
     AcquisitionTier,
     ColumnInfo,
+    DefinitionEntityType,
     ForeignKey,
     ForeignKeyRef,
     RelationSchema,
@@ -21,7 +22,7 @@ from canon.ingestion.builder import (
     NullLLMDrafter,
     SkippedEvidence,
 )
-from canon.ingestion.models import DraftedBy, EvidenceItem, ProposalOp
+from canon.ingestion.models import DraftedBy, EvidenceItem, EvidenceKind, ProposalOp
 from canon.semantic.models import Provenance, Relationship
 
 # ---------------------------------------------------------------------------
@@ -171,6 +172,56 @@ class TestNoPrimaryKey:
         assert p.content["grain"] == ["order_id"]
         assert p.confidence == 0.6
         assert p.drafted_by is DraftedBy.LLM
+
+    async def test_entity_grain_used_when_no_pk(self) -> None:
+        """Modeling-tier ENTITY evidence provides grain for a schema with no declared PK."""
+        schema = _relation_schema(primary_key=[])
+        entity_item = EvidenceItem(
+            source="dbt_prod",
+            kind=EvidenceKind.DEFINITION,
+            acquisition_tier=AcquisitionTier.MODELING,
+            payload={
+                "entity": "fct_orders",
+                "entity_type": DefinitionEntityType.ENTITY,
+                "grain": ["order_id"],
+                "references": ["analytics.fct_orders"],
+                "native_ref": "semantic_model.analytics.fct_orders",
+                "source": "dbt_prod",
+                "acquisition_tier": AcquisitionTier.MODELING,
+            },
+            source_fingerprint="sha256:entity-stub",
+            observed_at=_NOW,
+        )
+        p = (await ContextBuilder().build([_evidence(schema), entity_item])).proposals[0]
+
+        assert p.drafted_by is DraftedBy.DETERMINISTIC
+        assert p.confidence == 1.0
+        assert p.content["grain"] == ["order_id"]
+        assert "grain_draft" not in p.content["meta"]
+
+    async def test_pk_takes_precedence_over_entity_grain(self) -> None:
+        """Declared PK wins over ENTITY evidence grain."""
+        schema = _relation_schema(primary_key=["order_id"])
+        entity_item = EvidenceItem(
+            source="dbt_prod",
+            kind=EvidenceKind.DEFINITION,
+            acquisition_tier=AcquisitionTier.MODELING,
+            payload={
+                "entity": "fct_orders",
+                "entity_type": DefinitionEntityType.ENTITY,
+                "grain": ["surrogate_key"],
+                "references": ["analytics.fct_orders"],
+                "native_ref": "semantic_model.analytics.fct_orders",
+                "source": "dbt_prod",
+                "acquisition_tier": AcquisitionTier.MODELING,
+            },
+            source_fingerprint="sha256:entity-stub",
+            observed_at=_NOW,
+        )
+        p = (await ContextBuilder().build([_evidence(schema), entity_item])).proposals[0]
+
+        assert p.content["grain"] == ["order_id"]
+        assert p.drafted_by is DraftedBy.DETERMINISTIC
 
 
 # ---------------------------------------------------------------------------

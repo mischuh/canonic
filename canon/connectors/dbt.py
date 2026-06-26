@@ -357,6 +357,7 @@ class DbtConnector(ConnectorBase):
                 entity=sm_name,
                 entity_type=DefinitionEntityType.ENTITY,
                 grain=grain,
+                references=[node_relation] if node_relation else [],
                 description=description,
                 native_ref=unique_id,
                 acquisition_tier=AcquisitionTier.MODELING,
@@ -399,7 +400,11 @@ class DbtConnector(ConnectorBase):
             if non_additive_dim:
                 additivity = Additivity.SEMI_ADDITIVE
 
-            expr = measure.get("expr") or m_name
+            # Store the full aggregation expression so the builder can use it verbatim
+            # in the semantic source (e.g. "count(order_id)" not just "order_id").
+            raw_expr = measure.get("expr") or m_name
+            agg_lower = agg.strip().lower() if agg else None
+            expr = f"{agg_lower}({raw_expr})" if agg_lower else raw_expr
             refs = [node_relation] if node_relation else []
             fp = _definition_fingerprint({"entity": m_name, "entity_type": "measure", "expr": expr})
             definitions.append(
@@ -454,7 +459,13 @@ class DbtConnector(ConnectorBase):
         elif isinstance(type_params.get("measure"), str):
             measure_ref = type_params["measure"]
 
-        if metric_type in ("simple", "additive", "sum", "count", "average", "min", "max"):
+        # MetricFlow "simple" metrics are backed by a semantic-model measure that is
+        # already emitted by _extract_semantic_model; emitting MEASURE here would
+        # duplicate it with wrong references (the measure name, not the source table).
+        # Legacy dbt metric types (sum/count/…) predate semantic models and carry the
+        # aggregation definition directly in the metric, so emit MEASURE for those.
+        _LEGACY_METRIC_TYPES: frozenset[str] = frozenset({"sum", "count", "average", "min", "max"})
+        if metric_type in _LEGACY_METRIC_TYPES:
             additivity = _additivity_for(metric_type, "metric", name)
             expr = measure_ref or name
             refs = list(filter(None, [measure_ref]))
@@ -473,7 +484,10 @@ class DbtConnector(ConnectorBase):
                     source_fingerprint=fp,
                 )
             )
-        else:
-            logger.warning(
-                "unsupported dbt metric type %r for metric %r; skipping", metric_type, name
+        elif metric_type in ("simple", "ratio", "derived", "conversion", "cumulative"):
+            # Known MetricFlow composite/reference types — not yet implemented; skip silently.
+            logger.debug(
+                "skipping unimplemented MetricFlow metric type %r for %r", metric_type, name
             )
+        else:
+            logger.warning("unknown dbt metric type %r for metric %r; skipping", metric_type, name)

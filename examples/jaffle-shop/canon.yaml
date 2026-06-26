@@ -27,7 +27,9 @@ llm:
 reconcile:
   strict_contradictions: false
   auto_apply:
-    enabled: false   # propose-only; review diffs before committing
+    enabled: true   # propose-only; review diffs before committing
+    min_confidence: 0.95
+    max_provenance: inferred
 
 telemetry:
   enabled: false   # local event log only — nothing leaves the machine

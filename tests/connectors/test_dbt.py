@@ -202,7 +202,7 @@ class TestExtractDefinitions:
         revenue = next((m for m in measures if m.entity == "total_revenue"), None)
         assert revenue is not None
         assert revenue.additivity == Additivity.ADDITIVE
-        assert revenue.expr == "amount"
+        assert revenue.expr == "sum(amount)"
         assert len(revenue.references) > 0
 
     async def test_ac1_count_distinct_is_additive(self, dbt_manifest_path: Path) -> None:
@@ -257,12 +257,28 @@ class TestExtractDefinitions:
                 f"dbt-specific keys leaked into {defn.entity}: {dumped & dbt_keys}"
             )
 
-    async def test_ac1_simple_metric_emitted(self, dbt_manifest_path: Path) -> None:
+    async def test_ac1_simple_metric_not_duplicated(self, dbt_manifest_path: Path) -> None:
+        # A MetricFlow "simple" metric is a reference to a semantic-model measure, not a
+        # new measure definition. The semantic model already emits MEASURE evidence for
+        # "total_revenue"; the "revenue" metric should NOT produce a second MEASURE entry.
         connector = DbtConnector(dbt_manifest_path)
         result = await connector.extract_definitions()
         measures = [d for d in result.definitions if d.entity_type == DefinitionEntityType.MEASURE]
-        metric_names = {m.entity for m in measures}
-        assert "revenue" in metric_names
+        measure_names = {m.entity for m in measures}
+        assert "total_revenue" in measure_names  # semantic model measure is present
+        assert "revenue" not in measure_names  # metric reference does not add a duplicate
+
+    async def test_ac1_entity_evidence_has_references_to_backing_relation(
+        self, dbt_manifest_path: Path
+    ) -> None:
+        # ENTITY evidence must carry references=[node_relation] so the builder can
+        # correlate the grain to the right DuckDB RelationSchema during bootstrap.
+        connector = DbtConnector(dbt_manifest_path)
+        result = await connector.extract_definitions()
+        entities = [d for d in result.definitions if d.entity_type == DefinitionEntityType.ENTITY]
+        orders_entity = next((e for e in entities if e.entity == "orders"), None)
+        assert orders_entity is not None
+        assert "analytics.fct_orders" in orders_entity.references
 
     async def test_ac2_unmappable_type_recorded_with_warning(
         self, dbt_manifest_path: Path, caplog: pytest.LogCaptureFixture
@@ -286,13 +302,15 @@ class TestExtractDefinitions:
         assert active is not None
         assert active.additivity is None
 
-    async def test_ac2_unsupported_metric_type_skips_with_warning(
+    async def test_ac2_composite_metric_type_skipped_without_warning(
         self, dbt_manifest_path: Path, caplog: pytest.LogCaptureFixture
     ) -> None:
+        # MetricFlow composite types (ratio, derived, …) are recognised but not yet
+        # implemented; they are skipped at DEBUG level — no WARNING noise for the user.
         connector = DbtConnector(dbt_manifest_path)
         with caplog.at_level(logging.WARNING):
             result = await connector.extract_definitions()
-        assert "ratio" in caplog.text
+        assert "ratio" not in caplog.text
         metric_names = {
             d.entity for d in result.definitions if d.entity_type == DefinitionEntityType.MEASURE
         }
