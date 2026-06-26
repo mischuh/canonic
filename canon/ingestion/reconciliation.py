@@ -173,9 +173,7 @@ class DiskAcceptedStore:
                 target=target,
                 content=source.model_dump(mode="json"),
                 provenance=source.meta.provenance,
-                # SPEC-E4 §11 open touchpoint: `frozen` is not yet a field on SourceMeta.
-                # Once E5 adds it, read it here; until then no accepted fact is frozen.
-                frozen=False,
+                frozen=source.meta.frozen,
                 source_fingerprint=source.meta.source_fingerprint,
             )
 

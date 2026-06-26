@@ -193,6 +193,7 @@ class SourceMeta(BaseModel):
     provenance: Provenance = Provenance.INFERRED
     source_fingerprint: str | None = None  # sha256 of the introspected/declared schema
     last_validated_at: datetime | None = None
+    frozen: bool = False
 
 
 def _columns_in_expr(expr: str) -> set[str]:

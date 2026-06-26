@@ -15,9 +15,13 @@ from canon.ingestion.models import (
 )
 from canon.ingestion.pending import (
     PendingDiffStore,
+    PendingRun,
     PendingStatus,
     ProposalStatus,
+    apply_entry,
     generate_run_id,
+    latest_run_id,
+    update_status,
 )
 from canon.semantic.models import Provenance
 
@@ -69,6 +73,15 @@ def _report(*entries: ReconciliationEntry) -> ReconciliationReport:
     return ReconciliationReport(entries=list(entries))
 
 
+_VALID_SOURCE_CONTENT = {
+    "name": "orders",
+    "connection": "warehouse_pg",
+    "table": "public.orders",
+    "grain": ["order_id"],
+    "columns": [{"name": "order_id", "type": "int", "nullable": False}],
+}
+
+
 def _emission_with_diffs(n: int = 2) -> Any:
     """Return an EmissionResult with ``n`` ADD diffs."""
     entries = [
@@ -76,6 +89,23 @@ def _emission_with_diffs(n: int = 2) -> Any:
         for i in range(1, n + 1)
     ]
     return DiffEmitter().emit(_report(*entries))
+
+
+def _emission_with_valid_source() -> Any:
+    """Return an EmissionResult with one ADD diff containing a full valid SemanticSource body."""
+    entry = ReconciliationEntry(
+        decision=ReconciliationDecision.ADD,
+        target=_TARGET_YAML,
+        proposal=Proposal(
+            target=_TARGET_YAML,
+            op=ProposalOp.ADD,
+            content=_VALID_SOURCE_CONTENT,
+            provenance=Provenance.INFERRED,
+            confidence=1.0,
+            anchored_to=["sha256:abc"],
+        ),
+    )
+    return DiffEmitter().emit(_report(entry))
 
 
 # ---------------------------------------------------------------------------
@@ -345,3 +375,153 @@ class TestPipelineRunIdCrossReference:
             assert ev["run_id"] == run_id, (
                 f"event run_id {ev['run_id']!r} != pending dir {run_id!r}"
             )
+
+
+# ---------------------------------------------------------------------------
+# GH-150: latest_run_id
+# ---------------------------------------------------------------------------
+
+
+class TestLatestRunId:
+    def test_returns_none_when_no_runs(self, tmp_path: Path) -> None:
+        assert latest_run_id(tmp_path) is None
+
+    def test_returns_most_recent_by_lexicographic_order(self, tmp_path: Path) -> None:
+        emission = _emission_with_diffs(1)
+        store = PendingDiffStore(tmp_path)
+        store.write("20260101T000000Z", emission)
+        store.write("20260626T000000Z", emission)
+        store.write("20260310T000000Z", emission)
+
+        result = latest_run_id(tmp_path)
+        assert result == "20260626T000000Z"
+
+    def test_returns_single_run_when_only_one(self, tmp_path: Path) -> None:
+        emission = _emission_with_diffs(1)
+        PendingDiffStore(tmp_path).write("20260626T143201Z", emission)
+        assert latest_run_id(tmp_path) == "20260626T143201Z"
+
+
+# ---------------------------------------------------------------------------
+# GH-150: PendingRun
+# ---------------------------------------------------------------------------
+
+
+class TestPendingRun:
+    def test_load_aligns_proposals_with_diffs(self, tmp_path: Path) -> None:
+        emission = _emission_with_diffs(3)
+        run_id = "20260626T143201Z"
+        run_dir = PendingDiffStore(tmp_path).write(run_id, emission)
+
+        run = PendingRun.load(run_dir)
+
+        assert len(run.proposals) == 3
+        for proposal, diff in zip(run.proposals, emission.diffs, strict=True):
+            assert proposal.target == diff.target
+            assert run.diff_for(proposal).target == diff.target
+
+    def test_patch_text_matches_diff_file(self, tmp_path: Path) -> None:
+        emission = _emission_with_diffs(1)
+        run_dir = PendingDiffStore(tmp_path).write("run1", emission)
+
+        run = PendingRun.load(run_dir)
+        proposal = run.proposals[0]
+
+        assert run.patch_text(proposal) == emission.diffs[0].patch
+
+
+# ---------------------------------------------------------------------------
+# GH-150: update_status
+# ---------------------------------------------------------------------------
+
+
+class TestUpdateStatus:
+    def test_persists_new_status_to_disk(self, tmp_path: Path) -> None:
+        from ruamel.yaml import YAML
+
+        emission = _emission_with_diffs(2)
+        run_dir = PendingDiffStore(tmp_path).write("run1", emission)
+
+        run = PendingRun.load(run_dir)
+        updated = [
+            run.proposals[0].model_copy(update={"status": ProposalStatus.ACCEPTED}),
+            run.proposals[1],
+        ]
+        update_status(run_dir, updated)
+
+        yaml = YAML()
+        with (run_dir / "status.yaml").open() as f:
+            data = yaml.load(f)
+        reloaded = PendingStatus.model_validate(data)
+
+        assert reloaded.proposals[0].status is ProposalStatus.ACCEPTED
+        assert reloaded.proposals[1].status is ProposalStatus.PENDING
+
+
+# ---------------------------------------------------------------------------
+# GH-150: apply_entry (AC1 / AC5)
+# ---------------------------------------------------------------------------
+
+
+class TestApplyEntry:
+    def test_ac1_add_writes_target_file(self, tmp_path: Path) -> None:
+        """AC1: accepting an ADD proposal writes the target file to the working directory."""
+        from canon.config import scaffold_project
+
+        scaffold_project(tmp_path)
+        emission = _emission_with_diffs(1)
+        run_dir = PendingDiffStore(tmp_path).write("run1", emission)
+        run = PendingRun.load(run_dir)
+
+        apply_entry(tmp_path, run, run.proposals[0])
+
+        target = tmp_path / run.proposals[0].target
+        assert target.exists()
+
+    def test_ac5_freeze_writes_frozen_annotation(self, tmp_path: Path) -> None:
+        """AC5: freeze writes meta.frozen=true; a subsequent ingest flags CONTRADICTION."""
+        from canon.config import scaffold_project
+        from canon.semantic.loader import load_semantic_source
+
+        scaffold_project(tmp_path)
+        emission = _emission_with_valid_source()
+        run_dir = PendingDiffStore(tmp_path).write("run1", emission)
+        run = PendingRun.load(run_dir)
+
+        apply_entry(tmp_path, run, run.proposals[0], freeze=True)
+
+        target = tmp_path / run.proposals[0].target
+        assert target.exists()
+        source = load_semantic_source(target)
+        assert source.meta.frozen is True
+
+    def test_ac5_frozen_fact_flags_contradiction_on_reingest(self, tmp_path: Path) -> None:
+        """AC5: after freeze, a conflicting proposal yields CONTRADICTION not EDIT."""
+        from canon.config import ReconcileConfig, scaffold_project
+        from canon.ingestion.models import ReconciliationDecision
+        from canon.ingestion.reconciliation import DiskAcceptedStore, ReconciliationEngine
+
+        scaffold_project(tmp_path)
+        emission = _emission_with_valid_source()
+        run_dir = PendingDiffStore(tmp_path).write("run1", emission)
+        run = PendingRun.load(run_dir)
+
+        apply_entry(tmp_path, run, run.proposals[0], freeze=True)
+
+        target_str = run.proposals[0].target
+        accepted_store = DiskAcceptedStore(tmp_path)
+        fact = accepted_store.get(target_str)
+        assert fact is not None
+        assert fact.frozen is True
+
+        conflicting_proposal = _proposal(
+            target=target_str,
+            op=ProposalOp.EDIT,
+            content={**_VALID_SOURCE_CONTENT, "name": "different_orders"},
+        )
+        from canon.ingestion.reconciliation import NullReconcileDrafter
+
+        engine = ReconciliationEngine(ReconcileConfig(), NullReconcileDrafter())
+        report = engine.reconcile([conflicting_proposal], accepted_store)
+
+        assert any(e.decision is ReconciliationDecision.CONTRADICTION for e in report.entries)
