@@ -12,6 +12,7 @@ import typer
 
 from canon.cli._errors import get_cli_context
 from canon.cli.commands import (
+    apply,
     assertions,
     completion,
     connection,
@@ -21,6 +22,7 @@ from canon.cli.commands import (
     mcp,
     query,
     report,
+    review,
     setup,
     sl,
     sql,
@@ -80,6 +82,8 @@ app.add_typer(evaluate.app, name="eval")
 # Top-level single commands.
 app.command("setup")(setup.setup)
 app.command("ingest")(ingest.ingest)
+app.command("review")(review.review)
+app.command("apply")(apply.apply)
 app.command("query")(query.query)
 app.command("assert")(assertions.assert_)
 app.command("sql")(sql.sql)
