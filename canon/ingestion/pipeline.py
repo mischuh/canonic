@@ -52,6 +52,16 @@ __all__ = [
     "write_emitted_diffs",
 ]
 
+
+def _has_accepted_context(project_root: Path) -> bool:
+    """Return True when the project already has at least one accepted fact on disk (OB-S3 AC2).
+
+    Checks both semantic sources and metric bindings — the full accepted-context surface —
+    so the "one-time" bootstrap guarantee is by construction, not by call-site discipline.
+    """
+    return any(True for _ in DiskAcceptedStore(project_root).targets())
+
+
 #: Confidence threshold for first-run auto-accept (SPEC-onboarding §4).
 #: Only the fully-trusted deterministic core (confidence == 1.0) is written on first bootstrap.
 AUTO_ACCEPT_MIN_CONFIDENCE = 1.0
@@ -96,12 +106,16 @@ class PipelineResult(BaseModel):
     emitted diffs, and the contradiction notes, and serializes via ``to_json`` /
     ``render_markdown``) so the CLI has a single object to render. ``skipped`` records evidence
     the builder could not handle (SPEC-E4 §3) — never an error.
+
+    ``first_run`` is True only when ``bootstrap()`` fired on an empty project and wrote the
+    deterministic core directly.  Callers use it to vary their messaging (OB-S3 AC2).
     """
 
     model_config = ConfigDict(frozen=True)
 
     emission: EmissionResult
     skipped: list[SkippedEvidence] = []
+    first_run: bool = False
 
     @property
     def report(self) -> ReconciliationReport:
@@ -164,9 +178,15 @@ class IngestionPipeline:
         sources and **written** directly — the fresh-project path that supersedes the E1 thin
         scaffold. Validation still gates the write (S8); knowledge drafting and cross-source
         reconciliation are part of the full ingest, not the bootstrap.
+
+        Auto-accept fires only when the project is empty of accepted context at call time
+        (OB-S3 AC2): a re-bootstrap on a non-empty project falls back to propose-only, identical
+        to ``run()``.  The emptiness check happens before ``_emit``/``_persist`` so the snapshot
+        reflects the state the caller observed.
         """
         from canon.ingestion.source import evidence_from_introspection
 
+        first_run = not _has_accepted_context(self._project_root)
         connector = self._connectors[connection]
         evidence = await evidence_from_introspection(
             cast("SchemaIntrospectable", connector), connection
@@ -174,8 +194,9 @@ class IngestionPipeline:
 
         emission, skipped = await self._emit(evidence)
         self._persist(evidence, emission)
-        self._write_diffs(d for d in emission.diffs if first_run_auto_acceptable(d))
-        return PipelineResult(emission=emission, skipped=skipped)
+        if first_run:
+            self._write_diffs(d for d in emission.diffs if first_run_auto_acceptable(d))
+        return PipelineResult(emission=emission, skipped=skipped, first_run=first_run)
 
     async def _emit(
         self, evidence: list[EvidenceItem]
