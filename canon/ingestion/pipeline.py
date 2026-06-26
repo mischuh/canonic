@@ -21,7 +21,12 @@ from pydantic import BaseModel, ConfigDict
 
 from canon.ingestion.builder import ContextBuilder, LLMDrafter, NullLLMDrafter, SkippedEvidence
 from canon.ingestion.emitter import AuditTrailWriter, DiffEmitter, EmissionResult, EmittedDiff
-from canon.ingestion.models import ProposalOp, ReconciliationDecision, ReconciliationReport
+from canon.ingestion.models import (
+    DraftedBy,
+    ProposalOp,
+    ReconciliationDecision,
+    ReconciliationReport,
+)
 from canon.ingestion.reconciliation import (
     DiskAcceptedStore,
     NullReconcileDrafter,
@@ -39,7 +44,32 @@ if TYPE_CHECKING:
     from canon.connectors.base import ConnectorBase, SchemaIntrospectable
     from canon.ingestion.models import EvidenceItem
 
-__all__ = ["IngestionPipeline", "PipelineResult", "write_emitted_diffs"]
+__all__ = [
+    "AUTO_ACCEPT_MIN_CONFIDENCE",
+    "IngestionPipeline",
+    "PipelineResult",
+    "first_run_auto_acceptable",
+    "write_emitted_diffs",
+]
+
+#: Confidence threshold for first-run auto-accept (SPEC-onboarding §4).
+#: Only the fully-trusted deterministic core (confidence == 1.0) is written on first bootstrap.
+AUTO_ACCEPT_MIN_CONFIDENCE = 1.0
+
+
+def first_run_auto_acceptable(diff: EmittedDiff) -> bool:
+    """Return True when a diff is safe to auto-accept on the first bootstrap (SPEC-onboarding §4).
+
+    The deterministic core — typed columns, PK-derived grain, FK-derived joins, additive
+    measures — is reproducible, purely additive (empty project), and fully visible in the
+    initial git diff.  Everything ``drafted_by: llm`` or below the structural-confidence
+    threshold is withheld for the curated review instead.
+    """
+    return (
+        diff.op is ProposalOp.ADD
+        and diff.drafted_by is DraftedBy.DETERMINISTIC
+        and diff.confidence >= AUTO_ACCEPT_MIN_CONFIDENCE
+    )
 
 
 def write_emitted_diffs(project_root: Path, diffs: Iterable[EmittedDiff]) -> None:
@@ -144,7 +174,7 @@ class IngestionPipeline:
 
         emission, skipped = await self._emit(evidence)
         self._persist(evidence, emission)
-        self._write_diffs(d for d in emission.diffs if d.op is ProposalOp.ADD)
+        self._write_diffs(d for d in emission.diffs if first_run_auto_acceptable(d))
         return PipelineResult(emission=emission, skipped=skipped)
 
     async def _emit(

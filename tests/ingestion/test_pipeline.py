@@ -31,8 +31,8 @@ from canon.connectors.base import (
     compute_fingerprint,
 )
 from canon.exc import ValidationFailed
-from canon.ingestion.models import ProposalOp, ReconciliationDecision
-from canon.ingestion.pipeline import IngestionPipeline
+from canon.ingestion.models import DraftedBy, ProposalOp, ReconciliationDecision
+from canon.ingestion.pipeline import IngestionPipeline, first_run_auto_acceptable
 from canon.ingestion.source import evidence_from_introspection
 from canon.runtime.drafter import make_drafter
 from canon.semantic.loader import load_semantic_source
@@ -123,9 +123,44 @@ async def test_bootstrap_writes_a_semantic_file_per_table(tmp_path: Path) -> Non
     assert (tmp_path / "semantics" / _CONN / "dim_customers.yaml").exists()
     assert (tmp_path / "semantics" / _CONN / "fct_orders.yaml").exists()
     assert {d.op for d in result.emission.diffs} == {ProposalOp.ADD}
+    # Every written diff is deterministic — the core (PK tables) (OB-S2 AC2).
+    assert all(d.drafted_by is DraftedBy.DETERMINISTIC for d in result.emission.diffs)
     # The written files round-trip as valid semantic sources.
     orders = load_semantic_source(tmp_path / "semantics" / _CONN / "fct_orders.yaml")
     assert orders.grain == ["order_id"]
+
+
+async def test_bootstrap_withholds_llm_drafted_proposals(tmp_path: Path) -> None:
+    """OB-S2 AC2: a no-PK table is withheld (drafted_by: llm) — its file is not written."""
+    pipeline = _pipeline(tmp_path, [_customers(), _no_pk_schema()])
+
+    result = await pipeline.bootstrap(_CONN)
+
+    # PK table is written; no-PK table is withheld.
+    assert (tmp_path / "semantics" / _CONN / "dim_customers.yaml").exists()
+    assert not (tmp_path / "semantics" / _CONN / "events.yaml").exists()
+
+    withheld = [d for d in result.emission.diffs if not first_run_auto_acceptable(d)]
+    assert len(withheld) == 1
+    assert withheld[0].drafted_by is DraftedBy.LLM
+
+
+async def test_bootstrap_is_one_time_subsequent_ingest_is_propose_only(tmp_path: Path) -> None:
+    """OB-S3 AC2: after bootstrap, a subsequent run() uses propose-only (no auto-write)."""
+    pipeline = _pipeline(tmp_path, [_customers(), _no_pk_schema()])
+    await pipeline.bootstrap(_CONN)
+
+    evidence = await evidence_from_introspection(
+        FakeConnector([_customers(), _no_pk_schema()]), _CONN
+    )
+    result = await pipeline.run(evidence)
+
+    # The no-PK table was withheld at bootstrap time so it is still an ADD proposal on re-run.
+    add_diffs = [d for d in result.emission.diffs if d.op is ProposalOp.ADD]
+    assert len(add_diffs) == 1
+    assert "events" in add_diffs[0].target
+    # propose-only: the file is still absent (not auto-written).
+    assert not (tmp_path / "semantics" / _CONN / "events.yaml").exists()
 
 
 # ---------------------------------------------------------------------------
