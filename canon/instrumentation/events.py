@@ -1,8 +1,10 @@
-"""Append-only event-log sink for canon events (SPEC-E16 §2, §11 S4)."""
+"""Append-only event-log sink for canon events (SPEC-E16 §2, §11 S4/S6)."""
 
 from __future__ import annotations
 
+import contextlib
 import json
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Protocol, Union
 
 from canon.config import LOCAL_STATE_DIR
@@ -10,13 +12,25 @@ from canon.config import LOCAL_STATE_DIR
 if TYPE_CHECKING:
     from pathlib import Path
 
-    from canon.instrumentation.models import AnswerEvent, ReconcileDecisionEvent
+    from canon.instrumentation.models import (
+        AnswerEvent,
+        FunnelEvent,
+        FunnelMilestone,
+        ReconcileDecisionEvent,
+    )
 
-__all__ = ["AnswerEventLog", "CanonEvent", "DiskAnswerEventLog", "NullAnswerEventLog"]
+__all__ = [
+    "AnswerEventLog",
+    "CanonEvent",
+    "DiskAnswerEventLog",
+    "NullAnswerEventLog",
+    "emit_milestone",
+    "emit_milestone_once",
+]
 
 _EVENTS_FILE = "events.jsonl"
 
-CanonEvent = Union["AnswerEvent", "ReconcileDecisionEvent"]
+CanonEvent = Union["AnswerEvent", "ReconcileDecisionEvent", "FunnelEvent"]
 
 
 class AnswerEventLog(Protocol):
@@ -48,3 +62,21 @@ class NullAnswerEventLog:
 
     def append(self, event: CanonEvent) -> None:
         pass
+
+
+def emit_milestone(log: AnswerEventLog, milestone: FunnelMilestone) -> None:
+    """Append a FunnelEvent for ``milestone``; errors are swallowed so logging never aborts callers."""
+    from canon.instrumentation.models import FunnelEvent
+
+    with contextlib.suppress(Exception):
+        log.append(FunnelEvent(ts=datetime.now(UTC).isoformat(), milestone=milestone))
+
+
+def emit_milestone_once(root: Path, milestone: FunnelMilestone) -> None:
+    """Append ``milestone`` only if it has not been recorded yet (idempotent guard)."""
+    from canon.instrumentation.report import read_events
+
+    existing = read_events(root, kind="funnel_milestone")
+    if any(e.milestone == milestone for e in existing):
+        return
+    emit_milestone(DiskAnswerEventLog(root), milestone)

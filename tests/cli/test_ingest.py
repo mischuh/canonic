@@ -239,3 +239,47 @@ def test_dry_run_never_publishes(project: Path, publisher: _RecordingPublisher) 
 
     assert result.exit_code == 0, result.output
     assert publisher.calls == []
+
+
+# ---------------------------------------------------------------------------
+# OB-S6: first_curated_review_completed emitted on first post-setup ingest
+# ---------------------------------------------------------------------------
+
+
+def test_ob_s6_first_curated_review_completed_emitted_after_ingest(project: Path) -> None:
+    """first_curated_review_completed is emitted on the first successful (non-dry-run) ingest."""
+    from canon.instrumentation.models import FunnelMilestone
+    from canon.instrumentation.report import read_events
+
+    result = CliRunner().invoke(app, ["ingest", "--bootstrap"])
+
+    assert result.exit_code == 0, result.output
+    events = read_events(project, kind="funnel_milestone")
+    milestones = [e.milestone for e in events]
+    assert FunnelMilestone.FIRST_CURATED_REVIEW_COMPLETED in milestones
+
+
+def test_ob_s6_first_curated_review_completed_emitted_only_once(project: Path) -> None:
+    """A second ingest run does NOT re-emit first_curated_review_completed (once-only guard)."""
+    from canon.instrumentation.models import FunnelMilestone
+    from canon.instrumentation.report import read_events
+
+    CliRunner().invoke(app, ["ingest", "--bootstrap"])
+    CliRunner().invoke(app, ["ingest", "--bootstrap"])
+
+    events = read_events(project, kind="funnel_milestone")
+    completed = [e for e in events if e.milestone == FunnelMilestone.FIRST_CURATED_REVIEW_COMPLETED]
+    assert len(completed) == 1
+
+
+def test_ob_s6_dry_run_does_not_emit_first_curated_review_completed(project: Path) -> None:
+    """--dry-run must NOT emit first_curated_review_completed (nothing reviewed)."""
+    from canon.instrumentation.models import FunnelMilestone
+    from canon.instrumentation.report import read_events
+
+    result = CliRunner().invoke(app, ["ingest", "--dry-run"])
+
+    assert result.exit_code == 0, result.output
+    events = read_events(project, kind="funnel_milestone")
+    milestones = [e.milestone for e in events]
+    assert FunnelMilestone.FIRST_CURATED_REVIEW_COMPLETED not in milestones

@@ -29,6 +29,8 @@ from canon.ingestion.autopr import AutoPRPublisher, PullRequestPublisher, Subpro
 from canon.ingestion.models import ReconciliationDecision
 from canon.ingestion.pipeline import IngestionPipeline
 from canon.ingestion.source import gather_evidence
+from canon.instrumentation.events import emit_milestone_once
+from canon.instrumentation.models import FunnelMilestone
 from canon.runtime.drafter import make_drafter, make_reconcile_drafter
 
 if TYPE_CHECKING:
@@ -99,6 +101,9 @@ def ingest(
             "[yellow]note:[/yellow] accepted context already exists — "
             "auto-accept skipped; run behaved as normal propose-only ingest (OB-S3)"
         )
+
+    if not dry_run:
+        emit_milestone_once(root, FunnelMilestone.FIRST_CURATED_REVIEW_COMPLETED)
 
     # Auto-PR before the strict gate so the PR still carries the contradiction notes, then CI
     # fails the run on the gate (SPEC-E4 §6/§5.4).
