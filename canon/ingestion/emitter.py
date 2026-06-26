@@ -342,7 +342,7 @@ class SnapshotStore(Protocol):
 class EventLog(Protocol):
     """Appends the per-decision audit log of a run (SPEC-E4 §6, local/git-ignored)."""
 
-    def append(self, entries: Iterable[ReconciliationEntry]) -> None:
+    def append(self, entries: Iterable[ReconciliationEntry], run_id: str) -> None:
         """Record one event per reconciliation decision with its inputs (S7-AC2)."""
         ...
 
@@ -383,15 +383,16 @@ class DiskEventLog:
     def __init__(self, project_root: Path) -> None:
         self._sink = DiskAnswerEventLog(project_root)
 
-    def append(self, entries: Iterable[ReconciliationEntry]) -> None:
+    def append(self, entries: Iterable[ReconciliationEntry], run_id: str) -> None:
         ts = datetime.now(UTC).isoformat()
         for entry in entries:
-            self._sink.append(self._event(entry, ts))
+            self._sink.append(self._event(entry, ts, run_id))
 
     @staticmethod
-    def _event(entry: ReconciliationEntry, ts: str) -> ReconcileDecisionEvent:
+    def _event(entry: ReconciliationEntry, ts: str, run_id: str) -> ReconcileDecisionEvent:
         return ReconcileDecisionEvent(
             ts=ts,
+            run_id=run_id,
             decision=entry.decision.value,
             target=entry.target,
             op=entry.proposal.op.value,
@@ -422,7 +423,9 @@ class AuditTrailWriter:
         """Wire the on-disk snapshot store and event log under ``project_root``."""
         return cls(DiskSnapshotStore(project_root), DiskEventLog(project_root))
 
-    def write(self, evidence: Iterable[EvidenceItem], report: ReconciliationReport) -> None:
+    def write(
+        self, evidence: Iterable[EvidenceItem], report: ReconciliationReport, run_id: str
+    ) -> None:
         """Write the scan snapshot and append the per-decision event log (S7-AC1/AC2)."""
         self._snapshots.write(evidence)
-        self._events.append(report.entries)
+        self._events.append(report.entries, run_id)

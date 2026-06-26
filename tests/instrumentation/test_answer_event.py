@@ -415,7 +415,7 @@ def _answer_event() -> AnswerEvent:
 def test_s4_both_kinds_in_one_file(tmp_path: Path) -> None:
     """AC1 — served_answer and reconcile_decision both land in .canon/events.jsonl."""
     DiskAnswerEventLog(tmp_path).append(_answer_event())
-    DiskEventLog(tmp_path).append([_reconcile_entry()])
+    DiskEventLog(tmp_path).append([_reconcile_entry()], run_id="test-run-id")
 
     log_path = tmp_path / ".canon" / "events.jsonl"
     assert log_path.exists()
@@ -428,7 +428,7 @@ def test_s4_both_kinds_in_one_file(tmp_path: Path) -> None:
 def test_s4_read_events_returns_both_kinds(tmp_path: Path) -> None:
     """AC1 — read_events() returns both kinds from the same file."""
     DiskAnswerEventLog(tmp_path).append(_answer_event())
-    DiskEventLog(tmp_path).append([_reconcile_entry()])
+    DiskEventLog(tmp_path).append([_reconcile_entry()], run_id="test-run-id")
 
     all_events = read_events(tmp_path)
     assert len(all_events) == 2
@@ -438,7 +438,7 @@ def test_s4_read_events_returns_both_kinds(tmp_path: Path) -> None:
 def test_s4_read_events_kind_filter(tmp_path: Path) -> None:
     """AC1 — read_events(kind=...) filters to one event type."""
     DiskAnswerEventLog(tmp_path).append(_answer_event())
-    DiskEventLog(tmp_path).append([_reconcile_entry()])
+    DiskEventLog(tmp_path).append([_reconcile_entry()], run_id="test-run-id")
 
     served = read_events(tmp_path, kind="served_answer")
     assert len(served) == 1

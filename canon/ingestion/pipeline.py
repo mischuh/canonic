@@ -27,6 +27,7 @@ from canon.ingestion.models import (
     ReconciliationDecision,
     ReconciliationReport,
 )
+from canon.ingestion.pending import PendingDiffStore, generate_run_id
 from canon.ingestion.reconciliation import (
     DiskAcceptedStore,
     NullReconcileDrafter,
@@ -50,6 +51,7 @@ __all__ = [
     "PipelineResult",
     "first_run_auto_acceptable",
     "write_emitted_diffs",
+    "generate_run_id",
 ]
 
 
@@ -202,7 +204,9 @@ class IngestionPipeline:
             if conn_id == connection:
                 continue
             if Capability.EXTRACT_DEFINITIONS in conn.capabilities():
-                evidence += await evidence_from_definitions(cast("DefinitionExtractable", conn), conn_id)
+                evidence += await evidence_from_definitions(
+                    cast("DefinitionExtractable", conn), conn_id
+                )
 
         emission, skipped = await self._emit(evidence)
         self._persist(evidence, emission)
@@ -225,7 +229,9 @@ class IngestionPipeline:
 
     def _persist(self, evidence: list[EvidenceItem], emission: EmissionResult) -> None:
         """Side effects of a non-dry run: audit trail, no-op refresh, bounded auto-apply (§6/§7)."""
-        AuditTrailWriter.for_project(self._project_root).write(evidence, emission.report)
+        run_id = generate_run_id()
+        AuditTrailWriter.for_project(self._project_root).write(evidence, emission.report, run_id)
+        PendingDiffStore(self._project_root).write(run_id, emission)
         self._refresh_no_ops(emission.report)
         self._write_diffs(d for d in emission.diffs if d.auto_apply)
 

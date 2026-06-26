@@ -307,13 +307,14 @@ class TestEventLog:
             _entry(ReconciliationDecision.ADD, proposal=_proposal(fingerprint="sha256:abc")),
             _entry(ReconciliationDecision.NO_OP),
         )
-        DiskEventLog(tmp_path).append(report.entries)
+        DiskEventLog(tmp_path).append(report.entries, run_id="20260626T143201Z")
         log = (tmp_path / ".canon" / "events.jsonl").read_text()
         events = [json.loads(line) for line in log.splitlines()]
         assert len(events) == 2
         add_event = events[0]
         assert add_event["kind"] == "reconcile_decision"
         assert add_event["ts"]
+        assert add_event["run_id"] == "20260626T143201Z"
         assert add_event["decision"] == "add"
         assert add_event["provenance"] == "inferred"
         assert add_event["confidence"] == 1.0
@@ -321,8 +322,8 @@ class TestEventLog:
 
     def test_append_accumulates_across_runs(self, tmp_path: Path) -> None:
         log = DiskEventLog(tmp_path)
-        log.append(_report(_entry(ReconciliationDecision.ADD)).entries)
-        log.append(_report(_entry(ReconciliationDecision.EDIT)).entries)
+        log.append(_report(_entry(ReconciliationDecision.ADD)).entries, run_id="run-1")
+        log.append(_report(_entry(ReconciliationDecision.EDIT)).entries, run_id="run-2")
         text = (tmp_path / ".canon" / "events.jsonl").read_text()
         assert len(text.splitlines()) == 2
 
@@ -409,7 +410,7 @@ class TestPipelineIntegration:
         proposals = (await ContextBuilder().build([evidence])).proposals
         report = ReconciliationEngine().reconcile(proposals, InMemoryAcceptedStore())
         result = DiffEmitter().emit(report)
-        AuditTrailWriter.for_project(tmp_path).write([evidence], report)
+        AuditTrailWriter.for_project(tmp_path).write([evidence], report, run_id="20260626T000000Z")
 
         # One add diff, anchored to the evidence fingerprint.
         assert [d.op for d in result.diffs] == [ProposalOp.ADD]
