@@ -16,6 +16,7 @@ from typing import Any, Protocol
 from pydantic import BaseModel, ConfigDict
 
 from canon.connectors.base import (
+    ColumnInfo,
     ForeignKey,
     RelationSchema,
     UsageEvidence,
@@ -207,7 +208,9 @@ class ContextBuilder:
             "columns": [
                 {"name": c.name, "type": c.type, "nullable": c.nullable} for c in schema.columns
             ],
-            "joins": [self._fk_to_join(name, fk) for fk in schema.foreign_keys],
+            "measures": ContextBuilder._infer_measures(schema.columns),
+            "dimensions": ContextBuilder._infer_dimensions(schema.columns),
+            "joins": self._build_joins(name, schema.foreign_keys),
             "meta": meta,
         }
 
@@ -223,7 +226,25 @@ class ContextBuilder:
         )
 
     @staticmethod
-    def _fk_to_join(this_name: str, fk: ForeignKey) -> dict[str, Any]:
+    def _build_joins(this_name: str, foreign_keys: list[ForeignKey]) -> list[dict[str, Any]]:
+        """Build join fragments, adding a disambiguating ``name`` when two FKs share a target.
+
+        When a table has multiple FKs pointing at the same target (e.g. pickup_location_id
+        and return_location_id both → locations), the default alias would collide. In that
+        case a unique alias is derived from the FK column by stripping common id/fk/key suffixes.
+        """
+        from collections import Counter
+
+        target_counts = Counter(fk.references.relation.split(".")[-1] for fk in foreign_keys)
+        return [
+            ContextBuilder._fk_to_join(
+                this_name, fk, needs_alias=target_counts[fk.references.relation.split(".")[-1]] > 1
+            )
+            for fk in foreign_keys
+        ]
+
+    @staticmethod
+    def _fk_to_join(this_name: str, fk: ForeignKey, *, needs_alias: bool = False) -> dict[str, Any]:
         """Project a discovered foreign key into a semantic join fragment.
 
         A foreign key points many local rows at one referenced row, so the relationship
@@ -235,7 +256,60 @@ class ContextBuilder:
             f"{this_name}.{col} = {to}.{ref}"
             for col, ref in zip(fk.columns, fk.references.columns, strict=False)
         )
-        return {"to": to, "on": on, "relationship": Relationship.MANY_TO_ONE.value}
+        result: dict[str, Any] = {
+            "to": to,
+            "on": on,
+            "relationship": Relationship.MANY_TO_ONE.value,
+        }
+        if needs_alias:
+            # Derive alias from the first FK column; strip trailing _id/_fk/_key suffixes.
+            col_name = fk.columns[0] if fk.columns else to
+            alias = re.sub(r"_(id|fk|key)$", "", col_name, flags=re.IGNORECASE)
+            result["name"] = alias
+        return result
+
+    @staticmethod
+    def _infer_measures(columns: list[ColumnInfo]) -> list[dict[str, Any]]:
+        """Derive additive measures deterministically from column types.
+
+        Always emits ``row_count`` (count(*)) plus a ``total_<col>`` sum for every
+        numeric column that is not a surrogate key (plain ``id`` or ``*_id``/``*_fk``/
+        ``*_key`` suffixes).  All results carry ``additivity: additive`` so they are
+        immediately p0-compilable and MCP-servable after bootstrap.
+        """
+        _SUMMABLE = {"int", "float", "decimal"}
+        _ID_RE = re.compile(r"(^id$|_(id|fk|key)$)", re.IGNORECASE)
+        measures: list[dict[str, Any]] = [
+            {"name": "row_count", "expr": "count(*)", "additivity": "additive"}
+        ]
+        for col in columns:
+            if col.type in _SUMMABLE and not _ID_RE.search(col.name):
+                measures.append(
+                    {
+                        "name": f"total_{col.name}",
+                        "expr": f"sum({col.name})",
+                        "additivity": "additive",
+                    }
+                )
+        return measures
+
+    @staticmethod
+    def _infer_dimensions(columns: list[ColumnInfo]) -> list[dict[str, Any]]:
+        """Derive categorical dimensions deterministically from column types.
+
+        Date/timestamp columns become time dimensions; bool and string columns become
+        categorical dimensions.  String columns that look like surrogate keys
+        (``*_id``/``*_fk``/``*_key`` suffixes) are excluded because they are join
+        keys, not useful group-by attributes.
+        """
+        _ID_RE = re.compile(r"_(id|fk|key)$", re.IGNORECASE)
+        dimensions: list[dict[str, Any]] = []
+        for col in columns:
+            if col.type in {"date", "timestamp", "bool"} or (
+                col.type == "string" and not _ID_RE.search(col.name)
+            ):
+                dimensions.append({"name": col.name, "column": col.name})
+        return dimensions
 
     def _build_usage_evidence(self, item: EvidenceItem) -> list[Proposal]:
         """Map one ``UsageEvidence`` to a proposal against the contracts surface (SPEC-E3 §3.3).

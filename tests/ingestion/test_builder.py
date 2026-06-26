@@ -228,6 +228,87 @@ class TestSkipping:
 
 
 # ---------------------------------------------------------------------------
+# _infer_measures / _infer_dimensions
+# ---------------------------------------------------------------------------
+
+
+class TestInferMeasures:
+    def test_always_emits_row_count(self) -> None:
+        measures = ContextBuilder._infer_measures([])
+        assert len(measures) == 1
+        assert measures[0]["name"] == "row_count"
+        assert measures[0]["expr"] == "count(*)"
+        assert measures[0]["additivity"] == "additive"
+
+    def test_sums_numeric_non_id_columns(self) -> None:
+        cols = [
+            ColumnInfo(name="amount", type="decimal", nullable=True),
+            ColumnInfo(name="price", type="float", nullable=True),
+            ColumnInfo(name="qty", type="int", nullable=False),
+        ]
+        names = {m["name"] for m in ContextBuilder._infer_measures(cols)}
+        assert "total_amount" in names
+        assert "total_price" in names
+        assert "total_qty" in names
+
+    def test_skips_plain_id(self) -> None:
+        cols = [ColumnInfo(name="id", type="int", nullable=False)]
+        names = {m["name"] for m in ContextBuilder._infer_measures(cols)}
+        assert "total_id" not in names
+        assert "row_count" in names
+
+    def test_skips_id_suffix_columns(self) -> None:
+        cols = [
+            ColumnInfo(name="customer_id", type="int", nullable=False),
+            ColumnInfo(name="order_fk", type="int", nullable=False),
+            ColumnInfo(name="account_key", type="int", nullable=False),
+        ]
+        names = {m["name"] for m in ContextBuilder._infer_measures(cols)}
+        assert names == {"row_count"}
+
+    def test_all_are_additive(self) -> None:
+        cols = [ColumnInfo(name="revenue", type="float", nullable=True)]
+        for m in ContextBuilder._infer_measures(cols):
+            assert m["additivity"] == "additive"
+
+
+class TestInferDimensions:
+    def test_date_and_timestamp_become_dimensions(self) -> None:
+        cols = [
+            ColumnInfo(name="created_at", type="date", nullable=True),
+            ColumnInfo(name="updated_at", type="timestamp", nullable=True),
+        ]
+        names = {d["name"] for d in ContextBuilder._infer_dimensions(cols)}
+        assert names == {"created_at", "updated_at"}
+
+    def test_bool_becomes_dimension(self) -> None:
+        cols = [ColumnInfo(name="is_active", type="bool", nullable=False)]
+        dims = ContextBuilder._infer_dimensions(cols)
+        assert len(dims) == 1
+        assert dims[0]["column"] == "is_active"
+
+    def test_string_non_id_becomes_dimension(self) -> None:
+        cols = [ColumnInfo(name="status", type="string", nullable=True)]
+        dims = ContextBuilder._infer_dimensions(cols)
+        assert len(dims) == 1
+        assert dims[0]["name"] == "status"
+
+    def test_skips_id_suffix_string_columns(self) -> None:
+        cols = [
+            ColumnInfo(name="customer_id", type="string", nullable=False),
+            ColumnInfo(name="ref_fk", type="string", nullable=False),
+        ]
+        assert ContextBuilder._infer_dimensions(cols) == []
+
+    def test_numeric_columns_produce_no_dimensions(self) -> None:
+        cols = [
+            ColumnInfo(name="amount", type="float", nullable=True),
+            ColumnInfo(name="count", type="int", nullable=False),
+        ]
+        assert ContextBuilder._infer_dimensions(cols) == []
+
+
+# ---------------------------------------------------------------------------
 # NullLLMDrafter stub
 # ---------------------------------------------------------------------------
 
