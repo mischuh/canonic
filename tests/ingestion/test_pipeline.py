@@ -109,6 +109,11 @@ def _pipeline(root: Path, schemas: list[RelationSchema]) -> IngestionPipeline:
     return IngestionPipeline(root, {_CONN: FakeConnector(schemas)}, ReconcileConfig())
 
 
+def _pipeline_no_scaffold(root: Path, schemas: list[RelationSchema]) -> IngestionPipeline:
+    """Like ``_pipeline`` but skips scaffold_project — for re-runs on an already-set-up root."""
+    return IngestionPipeline(root, {_CONN: FakeConnector(schemas)}, ReconcileConfig())
+
+
 # ---------------------------------------------------------------------------
 # §8 — fast initial bootstrap
 # ---------------------------------------------------------------------------
@@ -161,6 +166,55 @@ async def test_bootstrap_is_one_time_subsequent_ingest_is_propose_only(tmp_path:
     assert "events" in add_diffs[0].target
     # propose-only: the file is still absent (not auto-written).
     assert not (tmp_path / "semantics" / _CONN / "events.yaml").exists()
+
+
+async def test_re_bootstrap_on_non_empty_project_is_propose_only(tmp_path: Path) -> None:
+    """OB-S3 AC2: re-running bootstrap() when accepted context exists never auto-writes.
+
+    Covers the ``canon ingest --bootstrap`` re-run hole: a brand-new PK table appearing
+    upstream must not be silently written into the project.
+    """
+    pipeline = _pipeline(tmp_path, [_customers()])
+    first = await pipeline.bootstrap(_CONN)
+
+    assert first.first_run is True
+    assert (tmp_path / "semantics" / _CONN / "dim_customers.yaml").exists()
+
+    # Simulate a new upstream PK table appearing after initial bootstrap.
+    pipeline2 = _pipeline_no_scaffold(tmp_path, [_customers(), _orders()])
+    second = await pipeline2.bootstrap(_CONN)
+
+    assert second.first_run is False
+    # The new table must NOT have been auto-written — it lands as an ADD proposal only.
+    assert not (tmp_path / "semantics" / _CONN / "fct_orders.yaml").exists()
+    add_diffs = [d for d in second.emission.diffs if d.op is ProposalOp.ADD]
+    assert any("fct_orders" in d.target for d in add_diffs)
+
+
+async def test_auto_accepted_files_are_visible_in_git_working_tree(tmp_path: Path) -> None:
+    """OB-S3 AC1: every auto-accepted file is an untracked working-tree change — revertable."""
+    import subprocess
+
+    subprocess.run(["git", "init", str(tmp_path)], check=True, capture_output=True)
+    pipeline = _pipeline(tmp_path, [_customers(), _orders()])
+    await pipeline.bootstrap(_CONN)
+
+    result = subprocess.run(
+        ["git", "status", "--porcelain", "-u"],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    # All written semantics files show up as untracked (??).
+    untracked = {line[3:] for line in result.stdout.splitlines() if line.startswith("??")}
+    assert any("dim_customers" in p for p in untracked)
+    assert any("fct_orders" in p for p in untracked)
+
+    # Revert via git clean — no trace left in committed state.
+    subprocess.run(["git", "clean", "-fd"], cwd=tmp_path, check=True, capture_output=True)
+    assert not (tmp_path / "semantics" / _CONN / "dim_customers.yaml").exists()
+    assert not (tmp_path / "semantics" / _CONN / "fct_orders.yaml").exists()
 
 
 # ---------------------------------------------------------------------------

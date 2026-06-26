@@ -94,6 +94,12 @@ def ingest(
     else:
         typer.echo(result.emission.render_markdown())
 
+    if bootstrap and not result.first_run and not get_cli_context(ctx).json_output:
+        _console.print(
+            "[yellow]note:[/yellow] accepted context already exists — "
+            "auto-accept skipped; run behaved as normal propose-only ingest (OB-S3)"
+        )
+
     # Auto-PR before the strict gate so the PR still carries the contradiction notes, then CI
     # fails the run on the gate (SPEC-E4 §6/§5.4).
     if _should_open_pr(open_pr, headless=is_headless) and not dry_run and not bootstrap:
