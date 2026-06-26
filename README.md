@@ -103,15 +103,23 @@ canon --version
 
 ## Quickstart — your first answer in minutes
 
-The fastest path uses **SQLite**: a local file, no server, no credentials, no network.
+The fastest path uses **local connectors** — no server, no network. Pick either SQLite or DuckDB:
 
+**SQLite** — a local `.db` file:
 ```bash
 canon setup
+# Point at a .db file when prompted
+```
+
+**DuckDB** — a local `.duckdb` file or data files (CSV/Parquet/JSON):
+```bash
+canon setup
+# Point at a .duckdb file, or let it read a CSV/Parquet directly
 ```
 
 The wizard walks you through:
 1. **Name** your project.
-2. **Connect** a source — point at a `.db` SQLite file (zero credentials) or a Postgres connection.
+2. **Connect** a source — SQLite/DuckDB file, or Postgres if you have a server.
 3. **Configure an LLM** — optional, and skippable. The core works without one.
 4. **Bootstrap** — canon introspects the schema and drafts your semantics.
 5. **First answer** — the wizard runs a real query against your data and shows the result, plus how fresh it is and which definition it used.

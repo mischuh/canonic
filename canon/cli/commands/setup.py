@@ -57,6 +57,8 @@ from canon.contracts.resolver import ContractResolver
 from canon.core.service import CanonService
 from canon.exc import CanonError, ConnectionError, CredentialError
 from canon.ingestion.models import DraftedBy
+from canon.instrumentation.events import DiskAnswerEventLog, emit_milestone
+from canon.instrumentation.models import FunnelMilestone
 from canon.semantic.loader import list_semantic_sources
 from canon.semantic.models import NormalizedType
 
@@ -161,6 +163,8 @@ def _run_wizard(root: Path) -> None:
     state = load_state(root) or SetupState()
     if state.completed_steps:
         _console.print("[dim]resuming interrupted setup…[/dim]")
+    else:
+        emit_milestone(DiskAnswerEventLog(root), FunnelMilestone.SETUP_STARTED)
 
     if not state.done(STEP_NAME):
         state.project_name = typer.prompt("Project name", default=root.name)
@@ -171,6 +175,7 @@ def _run_wizard(root: Path) -> None:
         state.connection = _prompt_connection(root)
         state.mark(STEP_CONNECTION)
         save_state(root, state)
+        emit_milestone(DiskAnswerEventLog(root), FunnelMilestone.CONNECTION_ADDED)
 
     if not state.done(STEP_LLM):
         state.llm = _prompt_llm()
@@ -204,6 +209,8 @@ def _run_golden_path(root: Path, config: CanonConfig, scaffolded: list[Path]) ->
     """Steps 5–7: bootstrap → first answer → handoff + completion panel."""
     _console.print("\n[dim]step 5 — bootstrapping connection…[/dim]")
     pipeline_result = _bootstrap_connection(root, config)
+    if pipeline_result is not None:
+        emit_milestone(DiskAnswerEventLog(root), FunnelMilestone.BOOTSTRAP_COMPLETED)
 
     sources: list[SemanticSource] = []
     try:  # noqa: SIM105 — need to assign to sources, contextlib.suppress cannot do that
@@ -331,7 +338,7 @@ def _try_first_answer(root: Path, config: CanonConfig, sources: list[SemanticSou
 
     _console.print("\n[dim]step 6 — running first answer…[/dim]")
     try:
-        result, sq = asyncio.run(_run_demo_query(config, sources, source, measure, dim))
+        result, sq = asyncio.run(_run_demo_query(root, config, sources, source, measure, dim))
     except CanonError as exc:  # structured registry-coded failure — surface it (OB-S5 AC2)
         _surface_demo_error(exc)
         _render_describe_fallback(config, sources)
@@ -342,6 +349,7 @@ def _try_first_answer(root: Path, config: CanonConfig, sources: list[SemanticSou
         return False
 
     _render_first_answer(result, sq, source.name)
+    emit_milestone(DiskAnswerEventLog(root), FunnelMilestone.FIRST_ANSWER_SERVED)
     return True
 
 
@@ -371,13 +379,18 @@ def _best_dimension(source: SemanticSource) -> Dimension | None:
 
 
 async def _run_demo_query(
+    root: Path,
     config: CanonConfig,
     sources: list[SemanticSource],
     source: SemanticSource,
     measure: Measure,
     dim: Dimension | None,
 ) -> tuple[QueryResult, SemanticQuery]:
-    """Synthetic in-memory binding → compile + execute through the normal path (OB-S1 AC1)."""
+    """Synthetic in-memory binding → compile + execute through the normal path (OB-S1 AC1).
+
+    ``root`` is passed so the demo answer writes a ``served_answer`` event, seeding the
+    first accuracy/usage data (SPEC-onboarding §9/§10).
+    """
     from canon.compiler.query import SemanticQuery
 
     binding = MetricBinding(
@@ -389,6 +402,8 @@ async def _run_demo_query(
         config=config,
         resolver=ContractResolver(bindings=[binding], guardrails=[]),
         sources=sources,
+        project_root=root,
+        event_log=DiskAnswerEventLog(root),
     )
     sq = SemanticQuery(
         metrics=[measure.name],

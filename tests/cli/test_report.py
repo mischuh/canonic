@@ -5,6 +5,8 @@ from __future__ import annotations
 import json
 from typing import TYPE_CHECKING, Any
 
+import pytest
+
 from canon.cli.app import app
 
 if TYPE_CHECKING:
@@ -157,3 +159,65 @@ def test_report_telemetry_off_by_default(runner: CliRunner, project_dir: Path) -
     result = runner.invoke(app, ["--json", "report"])
     payload = json.loads(result.output)
     assert payload["telemetry_enabled"] is False
+
+
+# ---------------------------------------------------------------------------
+# OB-S6: funnel section in canon report
+# ---------------------------------------------------------------------------
+
+
+def _funnel_event(milestone: str, ts: str = "2026-01-01T00:00:00+00:00") -> dict[str, Any]:
+    return {"kind": "funnel_milestone", "milestone": milestone, "ts": ts}
+
+
+def test_report_funnel_section_shown_when_milestones_present(
+    runner: CliRunner, project_dir: Path
+) -> None:
+    _write_events(
+        project_dir / ".canon",
+        [
+            _funnel_event("setup_started", "2026-01-01T00:00:00+00:00"),
+            _funnel_event("connection_added", "2026-01-01T00:00:10+00:00"),
+            _funnel_event("first_answer_served", "2026-01-01T00:00:42+00:00"),
+        ],
+    )
+    result = runner.invoke(app, ["report"])
+    assert result.exit_code == 0
+    assert "onboarding funnel" in result.output
+    assert "setup_started" in result.output
+    assert "connection_added" in result.output
+    assert "time-to-first-answer" in result.output
+
+
+def test_report_funnel_section_hidden_when_no_milestones(
+    runner: CliRunner, project_dir: Path
+) -> None:
+    _write_events(project_dir / ".canon", [_event(latency_ms=10)])
+    result = runner.invoke(app, ["report"])
+    assert result.exit_code == 0
+    assert "onboarding funnel" not in result.output
+
+
+def test_report_json_includes_funnel(runner: CliRunner, project_dir: Path) -> None:
+    _write_events(
+        project_dir / ".canon",
+        [
+            _funnel_event("setup_started", "2026-01-01T00:00:00+00:00"),
+            _funnel_event("first_answer_served", "2026-01-01T00:01:30+00:00"),
+        ],
+    )
+    result = runner.invoke(app, ["--json", "report"])
+    assert result.exit_code == 0
+    payload = json.loads(result.output)
+    assert "funnel" in payload
+    assert "setup_started" in payload["funnel"]["milestones"]
+    assert payload["funnel"]["time_to_first_answer_seconds"] == pytest.approx(90.0, abs=1.0)
+
+
+def test_report_funnel_time_to_first_answer_none_when_missing_milestone(
+    runner: CliRunner, project_dir: Path
+) -> None:
+    _write_events(project_dir / ".canon", [_funnel_event("setup_started")])
+    result = runner.invoke(app, ["--json", "report"])
+    payload = json.loads(result.output)
+    assert payload["funnel"]["time_to_first_answer_seconds"] is None

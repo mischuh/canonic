@@ -1,9 +1,10 @@
-"""Read path for the local event log — aggregates served-answer records (SPEC-E16 §4, §11 S4)."""
+"""Read path for the local event log — aggregates served-answer records (SPEC-E16 §4, §11 S4/S6)."""
 
 from __future__ import annotations
 
 import json
 import math
+from datetime import UTC, datetime
 from json import JSONDecodeError
 from typing import TYPE_CHECKING, Literal, overload
 
@@ -11,12 +12,33 @@ from pydantic import BaseModel, ConfigDict, ValidationError
 
 from canon.config import LOCAL_STATE_DIR
 from canon.instrumentation.events import _EVENTS_FILE, CanonEvent
-from canon.instrumentation.models import AnswerEvent, ReconcileDecisionEvent
+from canon.instrumentation.models import (
+    AnswerEvent,
+    FunnelEvent,
+    FunnelMilestone,
+    ReconcileDecisionEvent,
+)
 
 if TYPE_CHECKING:
     from pathlib import Path
 
-__all__ = ["EventReport", "LatencySummary", "BytesSummary", "read_events", "build_report"]
+__all__ = [
+    "BytesSummary",
+    "EventReport",
+    "FunnelReport",
+    "LatencySummary",
+    "build_funnel",
+    "build_report",
+    "read_events",
+]
+
+_ORDERED_MILESTONES = [
+    FunnelMilestone.SETUP_STARTED,
+    FunnelMilestone.CONNECTION_ADDED,
+    FunnelMilestone.BOOTSTRAP_COMPLETED,
+    FunnelMilestone.FIRST_ANSWER_SERVED,
+    FunnelMilestone.FIRST_CURATED_REVIEW_COMPLETED,
+]
 
 
 class LatencySummary(BaseModel):
@@ -52,6 +74,21 @@ class EventReport(BaseModel):
     recent: list[AnswerEvent]
 
 
+class FunnelReport(BaseModel):
+    """Onboarding funnel state derived from the local event log (OB-S6, SPEC-onboarding §9)."""
+
+    model_config = ConfigDict(frozen=True)
+
+    milestones: dict[str, str]
+    """milestone value → first recorded timestamp (ISO string)."""
+    time_to_first_answer_seconds: float | None
+    """Seconds from setup_started to first_answer_served; None when either is absent."""
+    reached: list[str]
+    """Ordered list of milestone values that have been recorded."""
+    dropped_after: str | None
+    """Last milestone reached before the funnel stalls; None when all five are complete."""
+
+
 def _percentile(sorted_values: list[int], p: float) -> int:
     """Nearest-rank percentile on a pre-sorted list (must be non-empty)."""
     n = len(sorted_values)
@@ -71,6 +108,8 @@ def _parse_line(line: str) -> CanonEvent | None:
             return AnswerEvent.model_validate(data)
         if kind == "reconcile_decision":
             return ReconcileDecisionEvent.model_validate(data)
+        if kind == "funnel_milestone":
+            return FunnelEvent.model_validate(data)
     except ValidationError:
         pass
     return None
@@ -99,16 +138,30 @@ def read_events(
     project_root: Path,
     last: int | None = ...,
     *,
+    kind: Literal["funnel_milestone"],
+) -> list[FunnelEvent]: ...
+
+
+@overload
+def read_events(
+    project_root: Path,
+    last: int | None = ...,
+    *,
     kind: None = ...,
-) -> list[AnswerEvent | ReconcileDecisionEvent]: ...
+) -> list[AnswerEvent | ReconcileDecisionEvent | FunnelEvent]: ...
 
 
 def read_events(
     project_root: Path,
     last: int | None = None,
     *,
-    kind: Literal["served_answer", "reconcile_decision"] | None = None,
-) -> list[AnswerEvent] | list[ReconcileDecisionEvent] | list[AnswerEvent | ReconcileDecisionEvent]:
+    kind: Literal["served_answer", "reconcile_decision", "funnel_milestone"] | None = None,
+) -> (
+    list[AnswerEvent]
+    | list[ReconcileDecisionEvent]
+    | list[FunnelEvent]
+    | list[AnswerEvent | ReconcileDecisionEvent | FunnelEvent]
+):
     """Read and parse events from the local event log.
 
     Returns an empty list if the log file is missing. Malformed or unknown lines
@@ -134,6 +187,42 @@ def read_events(
             continue
         events.append(event)
     return events
+
+
+def build_funnel(events: list[FunnelEvent]) -> FunnelReport:
+    """Derive the onboarding funnel state from a list of FunnelEvents (OB-S6 AC2)."""
+    first_ts: dict[str, str] = {}
+    for event in events:
+        key = str(event.milestone)
+        if key not in first_ts:
+            first_ts[key] = event.ts
+
+    reached = [str(m) for m in _ORDERED_MILESTONES if str(m) in first_ts]
+
+    ttfa: float | None = None
+    started = first_ts.get(str(FunnelMilestone.SETUP_STARTED))
+    answered = first_ts.get(str(FunnelMilestone.FIRST_ANSWER_SERVED))
+    if started and answered:
+        try:
+            t0 = datetime.fromisoformat(started)
+            t1 = datetime.fromisoformat(answered)
+            if t0.tzinfo is None:
+                t0 = t0.replace(tzinfo=UTC)
+            if t1.tzinfo is None:
+                t1 = t1.replace(tzinfo=UTC)
+            ttfa = (t1 - t0).total_seconds()
+        except ValueError:
+            pass
+
+    all_reached = len(reached) == len(_ORDERED_MILESTONES)
+    dropped_after = reached[-1] if reached and not all_reached else None
+
+    return FunnelReport(
+        milestones=first_ts,
+        time_to_first_answer_seconds=ttfa,
+        reached=reached,
+        dropped_after=dropped_after,
+    )
 
 
 def build_report(events: list[AnswerEvent], recent: int = 10) -> EventReport:

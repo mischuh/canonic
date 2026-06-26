@@ -12,9 +12,34 @@ from rich.table import Table
 
 from canon.cli._errors import get_cli_context, handle_errors
 from canon.config import ConfigError, find_project_root, load_config
-from canon.instrumentation.report import build_report, read_events
+from canon.instrumentation.models import FunnelMilestone
+from canon.instrumentation.report import FunnelReport, build_funnel, build_report, read_events
 
 _console = Console(soft_wrap=True)
+
+_MILESTONE_LABELS: dict[str, str] = {
+    FunnelMilestone.SETUP_STARTED: "setup_started",
+    FunnelMilestone.CONNECTION_ADDED: "connection_added",
+    FunnelMilestone.BOOTSTRAP_COMPLETED: "bootstrap_completed",
+    FunnelMilestone.FIRST_ANSWER_SERVED: "first_answer_served",
+    FunnelMilestone.FIRST_CURATED_REVIEW_COMPLETED: "first_curated_review_completed",
+}
+
+
+def _render_funnel(funnel: FunnelReport) -> None:
+    if not funnel.reached:
+        return
+    _console.print("[bold]onboarding funnel[/bold]")
+    for value in _MILESTONE_LABELS.values():
+        ts = funnel.milestones.get(value)
+        marker = "[green]✓[/green]" if ts else "[dim]·[/dim]"
+        ts_str = f"  {ts}" if ts else ""
+        _console.print(f"  {marker} {value}{ts_str}")
+    if funnel.time_to_first_answer_seconds is not None:
+        _console.print(
+            f"  time-to-first-answer: [bold]{funnel.time_to_first_answer_seconds:.1f}s[/bold]"
+        )
+    _console.print()
 
 
 @handle_errors
@@ -46,10 +71,13 @@ def report(
 
     events = read_events(root, last=last, kind="served_answer")
     rep = build_report(events, recent=recent)
+    funnel_events = read_events(root, kind="funnel_milestone")
+    funnel = build_funnel(funnel_events)
 
     if json_output:
         payload = rep.model_dump(mode="json")
         payload["telemetry_enabled"] = telemetry_enabled
+        payload["funnel"] = funnel.model_dump(mode="json")
         typer.echo(json.dumps(payload))
         return
 
@@ -57,6 +85,8 @@ def report(
         f"[bold]canon report[/bold]  (telemetry: {'on' if telemetry_enabled else 'off'})"
     )
     _console.print()
+
+    _render_funnel(funnel)
 
     if rep.count == 0:
         _console.print("[yellow]no served answers recorded yet[/yellow]")

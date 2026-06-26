@@ -708,3 +708,117 @@ def test_render_setup_complete_with_llm_no_enrichment_note(capsys, tmp_path):
     _render_setup_complete(_config_with_llm(), [], demo_ok=True)
     out = capsys.readouterr().out
     assert "naming/prose enrichment" not in out
+
+
+# ---------------------------------------------------------------------------
+# OB-S6: Funnel milestones emitted during the golden path
+# ---------------------------------------------------------------------------
+
+
+def test_ob_s6_bootstrap_completed_emitted_when_pipeline_result_present(tmp_path, monkeypatch):
+    """bootstrap_completed fires when _bootstrap_connection returns a real result."""
+    import canon.cli.commands.setup as setup_mod
+    from canon.ingestion.emitter import EmissionResult
+    from canon.ingestion.models import ReconciliationReport
+    from canon.ingestion.pipeline import PipelineResult
+    from canon.instrumentation.models import FunnelMilestone
+    from canon.instrumentation.report import read_events
+
+    pipeline_result = PipelineResult(
+        emission=EmissionResult(diffs=[], report=ReconciliationReport(entries=[])),
+        first_run=True,
+    )
+    monkeypatch.setattr(setup_mod, "_bootstrap_connection", lambda *_: pipeline_result)
+    monkeypatch.setattr(setup_mod, "list_semantic_sources", lambda _: [])
+
+    _run_golden_path(tmp_path, _config_with_llm(), [])
+
+    events = read_events(tmp_path, kind="funnel_milestone")
+    milestones = [e.milestone for e in events]
+    assert FunnelMilestone.BOOTSTRAP_COMPLETED in milestones
+
+
+def test_ob_s6_bootstrap_completed_not_emitted_when_bootstrap_fails(tmp_path, monkeypatch):
+    """bootstrap_completed is NOT emitted when bootstrap returns None (e.g. credential error)."""
+    import canon.cli.commands.setup as setup_mod
+    from canon.instrumentation.models import FunnelMilestone
+    from canon.instrumentation.report import read_events
+
+    monkeypatch.setattr(setup_mod, "_bootstrap_connection", lambda *_: None)
+    monkeypatch.setattr(setup_mod, "list_semantic_sources", lambda _: [])
+
+    _run_golden_path(tmp_path, _config_with_llm(), [])
+
+    events = read_events(tmp_path, kind="funnel_milestone")
+    milestones = [e.milestone for e in events]
+    assert FunnelMilestone.BOOTSTRAP_COMPLETED not in milestones
+
+
+def test_ob_s6_first_answer_served_emitted_on_success(tmp_path, monkeypatch):
+    """first_answer_served fires when the demo query completes successfully."""
+    import canon.cli.commands.setup as setup_mod
+    from canon.connectors.base import ResultSet
+    from canon.core.models import QueryMetadata, QueryResult
+    from canon.ingestion.emitter import EmissionResult
+    from canon.ingestion.models import ReconciliationReport
+    from canon.ingestion.pipeline import PipelineResult
+    from canon.instrumentation.models import FunnelMilestone
+    from canon.instrumentation.report import read_events
+
+    pipeline_result = PipelineResult(
+        emission=EmissionResult(diffs=[], report=ReconciliationReport(entries=[])),
+        first_run=True,
+    )
+    source = _source(
+        measures=[_additive()],
+        dimensions=[_dim("order_date", "created_at")],
+    )
+    from canon.core.models import Compiled
+
+    fake_rs = ResultSet(columns=[], rows=[], truncated=False)
+    fake_result = QueryResult(
+        result=fake_rs,
+        compiled=Compiled(sql="SELECT 1", dialect="ansi"),
+        metadata=QueryMetadata(
+            resolved={},
+            guardrails_fired=[],
+            freshness=[],
+        ),
+    )
+    from canon.compiler.query import SemanticQuery
+
+    fake_sq = SemanticQuery(metrics=["revenue"])
+
+    monkeypatch.setattr(setup_mod, "_bootstrap_connection", lambda *_: pipeline_result)
+    monkeypatch.setattr(setup_mod, "list_semantic_sources", lambda _: [source])
+    monkeypatch.setattr(
+        setup_mod,
+        "_run_demo_query",
+        AsyncMock(return_value=(fake_result, fake_sq)),
+    )
+
+    _run_golden_path(tmp_path, _config_with_llm(), [])
+
+    events = read_events(tmp_path, kind="funnel_milestone")
+    milestones = [e.milestone for e in events]
+    assert FunnelMilestone.FIRST_ANSWER_SERVED in milestones
+
+
+def test_ob_s6_first_answer_served_not_emitted_on_demo_error(tmp_path, monkeypatch):
+    """first_answer_served is NOT emitted when the demo query fails."""
+    import canon.cli.commands.setup as setup_mod
+    from canon.instrumentation.models import FunnelMilestone
+    from canon.instrumentation.report import read_events
+
+    source = _source(measures=[_additive()], dimensions=[_dim("d", "created_at")])
+    monkeypatch.setattr(setup_mod, "_bootstrap_connection", lambda *_: None)
+    monkeypatch.setattr(setup_mod, "list_semantic_sources", lambda _: [source])
+    monkeypatch.setattr(
+        setup_mod, "_run_demo_query", AsyncMock(side_effect=RuntimeError("db down"))
+    )
+
+    _run_golden_path(tmp_path, _config_with_llm(), [])
+
+    events = read_events(tmp_path, kind="funnel_milestone")
+    milestones = [e.milestone for e in events]
+    assert FunnelMilestone.FIRST_ANSWER_SERVED not in milestones

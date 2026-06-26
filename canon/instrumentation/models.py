@@ -1,15 +1,16 @@
-"""AnswerEvent and ReconcileDecisionEvent models for SPEC-E16 §3 / §11 S4."""
+"""AnswerEvent, ReconcileDecisionEvent, and FunnelEvent models for SPEC-E16 §3 / §11 S4/S6."""
 
 from __future__ import annotations
 
 import hashlib
 import json
 from datetime import UTC, datetime
+from enum import StrEnum
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict
 
-__all__ = ["AnswerEvent", "ReconcileDecisionEvent"]
+__all__ = ["AnswerEvent", "FunnelEvent", "FunnelMilestone", "ReconcileDecisionEvent"]
 
 
 def _sha256_json(payload: Any) -> str:
@@ -81,3 +82,26 @@ class ReconcileDecisionEvent(BaseModel):
     auto_apply: bool = False
     low_confidence: bool = False
     existing_frozen: bool = False
+
+
+class FunnelMilestone(StrEnum):
+    """Onboarding funnel milestones emitted to the E16 event log (SPEC-onboarding §9, OB-S6)."""
+
+    SETUP_STARTED = "setup_started"
+    CONNECTION_ADDED = "connection_added"
+    BOOTSTRAP_COMPLETED = "bootstrap_completed"
+    FIRST_ANSWER_SERVED = "first_answer_served"
+    FIRST_CURATED_REVIEW_COMPLETED = "first_curated_review_completed"
+
+
+class FunnelEvent(BaseModel):
+    """Content-free onboarding funnel milestone appended to ``.canon/events.jsonl`` (OB-S6).
+
+    No warehouse content — only the milestone name and timestamp.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    ts: str
+    kind: Literal["funnel_milestone"] = "funnel_milestone"
+    milestone: FunnelMilestone
