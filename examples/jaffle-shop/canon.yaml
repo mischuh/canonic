@@ -21,7 +21,7 @@ connections:
 llm:
   provider: openai_compatible
   base_url: http://127.0.0.1:11434/v1   # Ollama; swap for OpenAI/Anthropic as needed
-  model: gemma3:4b
+  model: gemma-4-e4b-it-4bit
   api_key_ref: env:CANON_LLM_API_KEY
 
 reconcile:
