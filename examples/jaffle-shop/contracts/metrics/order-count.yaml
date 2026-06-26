@@ -1,0 +1,6 @@
+metric: order_count
+canonical:
+  source: orders
+  measure: order_count
+provenance: inferred
+status: active

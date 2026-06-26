@@ -627,15 +627,20 @@ def _prompt_connection(root: Path) -> Connection:
     _console.print(
         "  [bold][1][/bold] SQLite   — local .db file, no credentials, works offline [dim](recommended for a first try)[/dim]"
     )
-    _console.print("  [bold][2][/bold] Postgres — server-based, requires host/port/credentials")
+    _console.print(
+        "  [bold][2][/bold] DuckDB   — local .duckdb file, analytical workloads, no credentials"
+    )
+    _console.print("  [bold][3][/bold] Postgres — server-based, requires host/port/credentials")
     while True:
-        choice = typer.prompt("Type [1=sqlite / 2=postgres]", default="1")
+        choice = typer.prompt("Type [1=sqlite / 2=duckdb / 3=postgres]", default="1")
         if choice == "1":
             conn = _prompt_sqlite_params()
         elif choice == "2":
+            conn = _prompt_duckdb_params()
+        elif choice == "3":
             conn = _prompt_postgres_params()
         else:
-            _console.print("[red]enter 1 or 2[/red]")
+            _console.print("[red]enter 1, 2 or 3[/red]")
             continue
 
         health = _test_connection(conn)
@@ -654,6 +659,13 @@ def _prompt_sqlite_params() -> Connection:
     conn_id = typer.prompt("Connection id", default="local_sqlite")
     path = typer.prompt("Path to .db file")
     return Connection(id=conn_id, type="sqlite", params={"path": path})
+
+
+def _prompt_duckdb_params() -> Connection:
+    """Collect params for a DuckDB connection (file path only, no credentials)."""
+    conn_id = typer.prompt("Connection id", default="local_duckdb")
+    path = typer.prompt("Path to .duckdb file")
+    return Connection(id=conn_id, type="duckdb", params={"path": path})
 
 
 def _prompt_postgres_params() -> Connection:

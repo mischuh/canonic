@@ -16,7 +16,9 @@ from typing import Any, Protocol
 from pydantic import BaseModel, ConfigDict
 
 from canon.connectors.base import (
+    AcquisitionTier,
     ColumnInfo,
+    DefinitionEntityType,
     ForeignKey,
     RelationSchema,
     UsageEvidence,
@@ -149,7 +151,36 @@ class ContextBuilder:
 
         Iterates in input order for determinism. Unknown kinds — and known kinds without
         a handler yet — are recorded in ``skipped`` and never raise (SPEC-E4 §3, S1-AC4).
+
+        Modeling-tier MEASURE DefinitionEvidence is pre-collected in a first pass so that
+        when a matching RELATION_SCHEMA is processed the builder can use the business-named
+        measures (e.g. ``revenue``, ``order_count``) instead of generic inferred ones
+        (``total_amount``, ``row_count``).  The short relation name (last dotted segment)
+        is used as the lookup key so both ``main.orders`` and ``orders`` hit the same entry.
         """
+        named_measures: dict[str, list[dict[str, Any]]] = {}
+        named_grains: dict[str, list[str]] = {}
+        for item in evidence:
+            if item.kind != EvidenceKind.DEFINITION:
+                continue
+            if item.acquisition_tier != AcquisitionTier.MODELING:
+                continue
+            payload = item.payload
+            entity_type = payload.get("entity_type")
+            if entity_type == DefinitionEntityType.MEASURE:
+                entry: dict[str, Any] = {
+                    "name": payload["entity"],
+                    "expr": payload.get("expr") or payload["entity"],
+                    "additivity": payload.get("additivity") or "unknown",
+                }
+                for ref in payload.get("references", []):
+                    named_measures.setdefault(ref.split(".")[-1], []).append(entry)
+            elif entity_type == DefinitionEntityType.ENTITY:
+                grain = payload.get("grain") or []
+                if grain:
+                    for ref in payload.get("references", []):
+                        named_grains.setdefault(ref.split(".")[-1], grain)
+
         proposals: list[Proposal] = []
         skipped: list[SkippedEvidence] = []
 
@@ -162,9 +193,17 @@ class ContextBuilder:
                 )
                 continue
             if item.kind == EvidenceKind.RELATION_SCHEMA:
-                proposals.append(await self._build_relation_schema(item))
+                schema = RelationSchema.model_validate(item.payload)
+                rel_key = schema.relation.split(".")[-1]
+                proposals.append(
+                    await self._build_relation_schema(
+                        item, named_measures.get(rel_key), named_grains.get(rel_key)
+                    )
+                )
             elif item.kind == EvidenceKind.USAGE_EVIDENCE:
                 proposals.extend(self._build_usage_evidence(item))
+            elif item.kind == EvidenceKind.DEFINITION:
+                pass  # consumed by the pre-collection pass above
             else:
                 skipped.append(
                     SkippedEvidence(
@@ -176,13 +215,25 @@ class ContextBuilder:
 
         return BuildResult(proposals=proposals, skipped=skipped)
 
-    async def _build_relation_schema(self, item: EvidenceItem) -> Proposal:
+    async def _build_relation_schema(
+        self,
+        item: EvidenceItem,
+        named_measures: list[dict[str, Any]] | None = None,
+        named_grain: list[str] | None = None,
+    ) -> Proposal:
         """Map one ``RelationSchema`` to a ``semantics/<conn>/<name>.yaml`` draft proposal.
 
         With a declared primary key the grain is asserted deterministically with full
-        confidence. Without one, the grain is an LLM-drafted candidate: labelled
-        ``drafted_by: llm``, carrying reduced confidence, with the grain marked as a draft
-        in ``meta`` rather than silently asserted (SPEC-E4 §4, S1-AC2).
+        confidence. Without one but with modeling-tier ENTITY evidence (e.g. a dbt semantic
+        model primary entity), the entity-sourced grain is used deterministically.
+        Otherwise the grain is an LLM-drafted candidate: labelled ``drafted_by: llm``,
+        carrying reduced confidence, with the grain marked as a draft in ``meta`` rather
+        than silently asserted (SPEC-E4 §4, S1-AC2).
+
+        When ``named_measures`` is supplied (pre-collected from modeling-tier MEASURE
+        DefinitionEvidence), those measures replace the generic column-inferred ones so
+        the emitted semantic source carries business-meaningful names from a dbt semantic
+        model rather than ``total_amount`` / ``row_count`` fallbacks.
         """
         schema = RelationSchema.model_validate(item.payload)
         name = schema.relation.split(".")[-1]
@@ -193,12 +244,21 @@ class ContextBuilder:
             grain = list(schema.primary_key)
             drafted_by = DraftedBy.DETERMINISTIC
             confidence = DETERMINISTIC_CONFIDENCE
+        elif named_grain:
+            grain = list(named_grain)
+            drafted_by = DraftedBy.DETERMINISTIC
+            confidence = DETERMINISTIC_CONFIDENCE
         else:
             draft = await self._llm_drafter.draft_grain(schema)
             grain = list(draft.grain)
             meta["grain_draft"] = True
             drafted_by = DraftedBy.LLM
             confidence = draft.confidence
+
+        if named_measures is not None:
+            measures: list[dict[str, Any]] = named_measures
+        else:
+            measures = ContextBuilder._infer_measures(schema.columns)
 
         content: dict[str, Any] = {
             "name": name,
@@ -208,7 +268,7 @@ class ContextBuilder:
             "columns": [
                 {"name": c.name, "type": c.type, "nullable": c.nullable} for c in schema.columns
             ],
-            "measures": ContextBuilder._infer_measures(schema.columns),
+            "measures": measures,
             "dimensions": ContextBuilder._infer_dimensions(schema.columns),
             "joins": self._build_joins(name, schema.foreign_keys),
             "meta": meta,

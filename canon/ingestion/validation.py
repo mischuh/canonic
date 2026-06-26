@@ -302,7 +302,7 @@ class ValidationGate:
     @staticmethod
     def _raise(report: ValidationReport) -> None:
         """Raise the aggregated violations: SchemaMismatch if probe-only, else ValidationFailed."""
-        summary = "; ".join(f"{v.target}: {v.detail}" for v in report.violations)
+        summary = "; ".join(v.detail for v in report.violations)
         schema_only = all(v.kind is ViolationKind.SCHEMA_MISMATCH for v in report.violations)
         if schema_only:
             raise SchemaMismatch(

@@ -47,7 +47,7 @@ def _patch_connector(monkeypatch, *connectors: _FakeConnector) -> None:
 _FRESH_INPUT = "\n".join(
     [
         "",  # project name → default (cwd name)
-        "2",  # connection type → postgres
+        "3",  # connection type → postgres (1=sqlite, 2=duckdb, 3=postgres)
         "",  # connection id → warehouse_pg
         "",  # host → localhost
         "",  # port → 5432
@@ -107,7 +107,7 @@ def test_connection_test_gates_recording(runner: CliRunner, tmp_path: Path, monk
         [
             "",  # project name
             # attempt 1
-            "2",  # type → postgres
+            "3",  # type → postgres (1=sqlite, 2=duckdb, 3=postgres)
             "",  # id
             "",  # host
             "",  # port
@@ -117,7 +117,7 @@ def test_connection_test_gates_recording(runner: CliRunner, tmp_path: Path, monk
             "",  # env var
             "",  # Try again? → default yes
             # attempt 2
-            "2",  # type → postgres
+            "3",  # type → postgres (1=sqlite, 2=duckdb, 3=postgres)
             "",  # id
             "",  # host
             "",  # port
@@ -191,7 +191,7 @@ def test_existing_project_menu_adds_connection(
     menu_input = "\n".join(
         [
             "2",  # add connection
-            "2",  # connection type → postgres
+            "3",  # connection type → postgres (1=sqlite, 2=duckdb, 3=postgres)
             "newconn",  # id
             "",  # host
             "",  # port

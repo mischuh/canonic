@@ -183,14 +183,26 @@ class IngestionPipeline:
         (OB-S3 AC2): a re-bootstrap on a non-empty project falls back to propose-only, identical
         to ``run()``.  The emptiness check happens before ``_emit``/``_persist`` so the snapshot
         reflects the state the caller observed.
+
+        Companion definition connectors in ``self._connectors`` (e.g. a dbt manifest) carry
+        no live dependency and are included in the evidence so that business-named measures
+        from a semantic model replace generic inferred ones.  This avoids validation failures
+        when metric contracts referencing those measures already exist in the project.
         """
-        from canon.ingestion.source import evidence_from_introspection
+        from canon.connectors.base import Capability, DefinitionExtractable
+        from canon.ingestion.source import evidence_from_definitions, evidence_from_introspection
 
         first_run = not _has_accepted_context(self._project_root)
         connector = self._connectors[connection]
         evidence = await evidence_from_introspection(
             cast("SchemaIntrospectable", connector), connection
         )
+
+        for conn_id, conn in self._connectors.items():
+            if conn_id == connection:
+                continue
+            if Capability.EXTRACT_DEFINITIONS in conn.capabilities():
+                evidence += await evidence_from_definitions(cast("DefinitionExtractable", conn), conn_id)
 
         emission, skipped = await self._emit(evidence)
         self._persist(evidence, emission)
