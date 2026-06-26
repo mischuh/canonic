@@ -28,7 +28,7 @@ from canon.ingestion.pending import (
 
 _PENDING_DIFFS_DIR = "pending-diffs"
 
-_ACTIONS = "[a]ccept / [r]eject / [s]kip / [f]reeze / [q]uit"
+_ACTIONS = "[[a]]ccept / [[r]]eject / [[s]]kip / [[f]]reeze / [[q]]uit"
 
 
 def _resolve_run_dir(project_root: Path, run_id: str | None) -> Path | None:
