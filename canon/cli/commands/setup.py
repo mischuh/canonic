@@ -55,7 +55,7 @@ from canon.contracts.bootstrap import write_inferred_contracts as _write_bootstr
 from canon.contracts.models import CanonicalRef, MetricBinding, Status
 from canon.contracts.resolver import ContractResolver
 from canon.core.service import CanonService
-from canon.exc import ConnectionError, CredentialError
+from canon.exc import CanonError, ConnectionError, CredentialError
 from canon.ingestion.models import DraftedBy
 from canon.semantic.loader import list_semantic_sources
 from canon.semantic.models import NormalizedType
@@ -326,15 +326,19 @@ def _try_first_answer(root: Path, config: CanonConfig, sources: list[SemanticSou
     source, measure, dim = _pick_demo_target(sources)
     if source is None or measure is None:
         _console.print("\n[dim]step 6 — schema overview[/dim]")
-        _render_source_listing(sources)
+        _render_describe_fallback(config, sources)
         return False
 
     _console.print("\n[dim]step 6 — running first answer…[/dim]")
     try:
         result, sq = asyncio.run(_run_demo_query(config, sources, source, measure, dim))
-    except Exception as exc:  # noqa: BLE001 — demo errors must not abort setup
-        _console.print(f"[yellow]demo query skipped:[/yellow] {exc}")
-        _render_source_listing(sources)
+    except CanonError as exc:  # structured registry-coded failure — surface it (OB-S5 AC2)
+        _surface_demo_error(exc)
+        _render_describe_fallback(config, sources)
+        return False
+    except Exception as exc:  # noqa: BLE001 — unexpected demo errors must not abort setup
+        _console.print(f"[yellow]demo query failed:[/yellow] {exc}")
+        _render_describe_fallback(config, sources)
         return False
 
     _render_first_answer(result, sq, source.name)
@@ -436,6 +440,67 @@ def _render_source_listing(sources: list[SemanticSource]) -> None:
         )
 
 
+def _surface_demo_error(exc: CanonError) -> None:
+    """Surface a registry-coded demo-query failure (OB-S5 AC2 — never swallow it)."""
+    code = exc.code.value if exc.code is not None else "internal_error"
+    _console.print(f"[red]demo query failed[/red] [bold]{code}[/bold]: {exc}")
+
+
+def _describe_service(config: CanonConfig, sources: list[SemanticSource]) -> CanonService | None:
+    """Build an in-memory service over all p0-compilable measures for the describe fallback."""
+    bindings = [
+        MetricBinding(
+            metric=m.name,
+            canonical=CanonicalRef(source=s.name, measure=m.name),
+            status=Status.ACTIVE,
+        )
+        for s in sources
+        for m in s.measures
+        if m.is_p0_compilable
+    ]
+    if not bindings:
+        return None
+    return CanonService(
+        config=config,
+        resolver=ContractResolver(bindings=bindings, guardrails=[]),
+        sources=sources,
+    )
+
+
+def _render_describe_fallback(config: CanonConfig, sources: list[SemanticSource]) -> None:
+    """Describe-level ending when a full demo answer is not possible (SPEC §6/§7, OB-S5 AC2).
+
+    Shows the shape of a question the user can ask: the available metrics and a description
+    of the top metric's grain and dimensions.  Falls back to the plain source listing when
+    nothing is describable (no p0-compilable measures).
+    """
+    service = _describe_service(config, sources)
+    if service is None:
+        _render_source_listing(sources)
+        return
+    metrics = service.list_metrics()
+    if not metrics:
+        _render_source_listing(sources)
+        return
+    _console.print(f"\n[green]✓[/green] canon found {len(metrics)} metric(s) you can query:")
+    for m in metrics[:_REVIEW_CAP]:
+        _console.print(f"  [bold]{m.metric}[/bold]  [dim]({m.kind})[/dim]")
+    if len(metrics) > _REVIEW_CAP:
+        _console.print(f"  [dim]… and {len(metrics) - _REVIEW_CAP} more[/dim]")
+    try:
+        detail = service.describe_metric(metrics[0].metric)
+    except CanonError:
+        return
+    lines: list[str] = [f"[bold]{detail.metric}[/bold]"]
+    if detail.grain:
+        lines.append(f"  grain: {', '.join(detail.grain)}")
+    if detail.dimensions:
+        lines.append(f"  dimensions: {', '.join(detail.dimensions[:5])}")
+    if detail.measures:
+        lines.append(f"  measures: {', '.join(detail.measures[:5])}")
+    _console.print(Panel("\n".join(lines), title="what you can ask", border_style="dim"))
+
+
 def _render_setup_complete(
     config: CanonConfig, scaffolded: list[Path], *, demo_ok: bool, withheld_count: int = 0
 ) -> None:
@@ -455,6 +520,8 @@ def _render_setup_complete(
         next_steps += (
             "\n\n[dim]tip:[/dim] add doc sources or a richer connection to unlock richer answers"
         )
+    if not (config.llm and config.llm.model):
+        next_steps += "\n\n[dim]note:[/dim] naming/prose enrichment is available once you add an LLM to canon.yaml"
     _console.print(
         Panel.fit(
             f"[green]✓[/green] Project [bold]{config.project.name}[/bold] is ready.\n"

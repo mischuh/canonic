@@ -10,9 +10,11 @@ from canon.cli.commands.setup import (
     _classify_withheld,
     _pick_demo_target,
     _render_curated_review,
+    _render_describe_fallback,
     _render_setup_complete,
     _render_source_listing,
     _run_golden_path,
+    _surface_demo_error,
     _write_bootstrap_contracts,
 )
 from canon.ingestion.emitter import DiffFormat, EmissionResult, EmittedDiff
@@ -309,8 +311,8 @@ def test_run_golden_path_demo_query_error_falls_back(tmp_path, monkeypatch, caps
 
     _run_golden_path(tmp_path, config, [])
     out = capsys.readouterr().out
-    assert "demo query skipped" in out
-    assert "orders" in out  # fallback listing shown
+    assert "demo query failed" in out
+    assert "revenue" in out  # describe fallback shows metric names
     assert "demo" in out  # completion panel shown
 
 
@@ -579,3 +581,130 @@ def test_render_curated_review_long_tail_why_line(capsys):
     _render_curated_review(result)
     out = capsys.readouterr().out
     assert "low-confidence" in out
+
+
+# ---------------------------------------------------------------------------
+# OB-S5 — Honest failure modes
+# ---------------------------------------------------------------------------
+
+
+def _config_no_llm():
+    from canon.config import CanonConfig
+
+    return CanonConfig.model_validate(
+        {
+            "version": 1,
+            "project": {"name": "demo"},
+            "connections": [],
+            "llm": {"provider": "openai_compatible", "base_url": "http://x/v1", "model": ""},
+        }
+    )
+
+
+def _config_with_llm():
+    from canon.config import CanonConfig
+
+    return CanonConfig.model_validate(
+        {
+            "version": 1,
+            "project": {"name": "demo"},
+            "connections": [],
+            "llm": {"provider": "openai_compatible", "base_url": "http://x/v1", "model": "m"},
+        }
+    )
+
+
+def test_ob_s5_ac1_empty_schema_says_so_no_fabricated_demo(tmp_path, monkeypatch, capsys):
+    """AC1: empty/queryless schema → says so plainly, does not fabricate a demo."""
+    import canon.cli.commands.setup as setup_mod
+    from canon.ingestion.emitter import EmissionResult
+    from canon.ingestion.models import ReconciliationReport
+    from canon.ingestion.pipeline import PipelineResult
+
+    empty_result = PipelineResult(
+        emission=EmissionResult(diffs=[], report=ReconciliationReport(entries=[])),
+        first_run=True,
+    )
+    monkeypatch.setattr(setup_mod, "_bootstrap_connection", lambda *_: empty_result)
+    monkeypatch.setattr(setup_mod, "list_semantic_sources", lambda _: [])
+
+    _run_golden_path(tmp_path, _config_with_llm(), [])
+    out = capsys.readouterr().out
+
+    assert "no queryable tables found" in out
+    assert "step 6 — running first answer" not in out  # demo path never entered
+
+
+def test_ob_s5_ac2_canon_error_surfaces_registry_code(capsys):
+    """AC2: a CanonError from the demo query exposes its registry code — never swallowed."""
+    from canon.exc import ConnectionError as CanonConnectionError
+
+    exc = CanonConnectionError("permission denied")
+    _surface_demo_error(exc)
+    out = capsys.readouterr().out
+
+    assert "connection_error" in out
+    assert "permission denied" in out
+
+
+def test_ob_s5_ac2_demo_canon_error_falls_back_to_describe(tmp_path, monkeypatch, capsys):
+    """AC2: CanonError during demo → code surfaced, describe-level fallback rendered, setup completes."""
+    import canon.cli.commands.setup as setup_mod
+    from canon.exc import ConnectionError as CanonConnectionError
+
+    source = _source(measures=[_additive()], dimensions=[_dim("d", "created_at")])
+    monkeypatch.setattr(setup_mod, "_bootstrap_connection", lambda *_: None)
+    monkeypatch.setattr(setup_mod, "list_semantic_sources", lambda _: [source])
+    monkeypatch.setattr(
+        setup_mod,
+        "_run_demo_query",
+        AsyncMock(side_effect=CanonConnectionError("permission denied")),
+    )
+
+    _run_golden_path(tmp_path, _config_with_llm(), [])
+    out = capsys.readouterr().out
+
+    assert "connection_error" in out  # registry code surfaced
+    assert "permission denied" in out  # message surfaced
+    assert "metric" in out.lower()  # describe-level fallback rendered
+    assert "setup complete" in out or "what's next" in out  # wizard completes
+
+
+def test_ob_s5_ac2_describe_fallback_shows_metric_shape(tmp_path, capsys):
+    """AC2 describe-level ending: metric list and grain/dimensions shown as shape of a question."""
+    source = _source(
+        name="sales",
+        measures=[_additive("revenue"), _additive("row_count", "id")],
+        dimensions=[_dim("order_date", "created_at"), _dim("status", "status")],
+    )
+    config = _config_with_llm()
+    _render_describe_fallback(config, [source])
+    out = capsys.readouterr().out
+
+    assert "revenue" in out
+    assert "row_count" in out
+    assert "what you can ask" in out
+
+
+def test_ob_s5_ac2_describe_fallback_no_compilable_measures_falls_back_to_listing(capsys):
+    """When no measures are p0-compilable, describe fallback still shows source listing."""
+    source = _source(name="ledger", measures=[_non_additive()])
+    config = _config_with_llm()
+    _render_describe_fallback(config, [source])
+    out = capsys.readouterr().out
+
+    assert "ledger" in out  # source listing rendered
+
+
+def test_render_setup_complete_no_llm_model_shows_enrichment_note(capsys, tmp_path):
+    """§7 no-LLM honesty: note that naming/prose enrichment needs a model."""
+    _render_setup_complete(_config_no_llm(), [], demo_ok=True)
+    out = capsys.readouterr().out
+    assert "naming/prose enrichment" in out
+
+
+def test_render_setup_complete_with_llm_no_enrichment_note(capsys, tmp_path):
+    """With a model configured the enrichment note is suppressed."""
+    _render_setup_complete(_config_with_llm(), [], demo_ok=True)
+    out = capsys.readouterr().out
+    assert "naming/prose enrichment" not in out
