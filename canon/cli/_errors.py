@@ -65,7 +65,7 @@ def emit_error(err: CanonError, *, json_output: bool) -> None:
                     '  hint: re-issue with "via": <chosen path\'s via list> to select a path',
                     markup=False,
                 )
-            elif candidates:
+            elif candidates and isinstance(candidates[0], (list, tuple)):
                 _err_console.print(
                     '  hint: add "via": ["<first-hop>"] to your query to select a path',
                     markup=False,
