@@ -15,10 +15,13 @@ After the config is written, the golden path (OB-S1) runs steps 5–7:
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 import json
 import os
+from collections import Counter
+from enum import IntEnum
 from pathlib import Path
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING, Any, cast
 
 import typer
 from rich.panel import Panel
@@ -53,6 +56,7 @@ from canon.contracts.models import CanonicalRef, MetricBinding, Status
 from canon.contracts.resolver import ContractResolver
 from canon.core.service import CanonService
 from canon.exc import ConnectionError, CredentialError
+from canon.ingestion.models import DraftedBy
 from canon.semantic.loader import list_semantic_sources
 from canon.semantic.models import NormalizedType
 
@@ -70,6 +74,70 @@ _REVIEW_CAP = 5
 _LOW_CARDINALITY_TYPES = frozenset(
     {NormalizedType.DATE, NormalizedType.TIMESTAMP, NormalizedType.BOOL}
 )
+
+
+class ReviewTier(IntEnum):
+    """Priority tier for the curated first review (SPEC-onboarding §5, OB-S4).
+
+    Lower value = higher priority = shown first: grains corrupt every measure on their
+    source (highest blast radius), then LLM-named measures, then the low-confidence long tail.
+    """
+
+    GRAIN = 0
+    MEASURE = 1
+    LONG_TAIL = 2
+
+
+@dataclasses.dataclass(frozen=True)
+class _ReviewItem:
+    target: str
+    source_name: str
+    tier: ReviewTier
+    confidence: float
+    anchors: list[str]
+    why: str
+
+
+_WHY_LINES: dict[ReviewTier, str] = {
+    ReviewTier.GRAIN: "no primary key — grain is a guess; a wrong grain corrupts every measure here",
+    ReviewTier.MEASURE: "LLM-named measure — confirm name/expr before trusting",
+    ReviewTier.LONG_TAIL: "low-confidence inference — confirm before trusting",
+}
+
+
+def _classify_withheld(
+    withheld: list[EmittedDiff],
+    contents: dict[str, dict[str, Any]],
+    ref_counts: dict[str, int],
+) -> list[_ReviewItem]:
+    """Classify and sort withheld diffs into teachable review items (SPEC-onboarding §5, OB-S4).
+
+    Priority: grain drafts → LLM-named measures → long tail.
+    Within each tier, higher incoming-join count (blast radius) sorts first.
+    """
+    items: list[_ReviewItem] = []
+    for diff in withheld:
+        source_name = Path(diff.target).stem
+        content = contents.get(diff.target, {})
+        is_grain_draft = content.get("meta", {}).get("grain_draft") is True
+        if is_grain_draft:
+            tier = ReviewTier.GRAIN
+        elif diff.drafted_by is DraftedBy.LLM:
+            tier = ReviewTier.MEASURE
+        else:
+            tier = ReviewTier.LONG_TAIL
+        items.append(
+            _ReviewItem(
+                target=diff.target,
+                source_name=source_name,
+                tier=tier,
+                confidence=diff.confidence,
+                anchors=list(diff.anchored_to),
+                why=_WHY_LINES[tier],
+            )
+        )
+    items.sort(key=lambda item: (item.tier, -ref_counts.get(item.source_name, 0), item.target))
+    return items
 
 
 @handle_errors
@@ -207,19 +275,12 @@ async def _bootstrap_async(
     return result
 
 
-def _withheld_diffs_priority_key(diff: EmittedDiff) -> tuple[int, str]:
-    """Sort key for the curated review: grain-drafts first, then the rest, alpha within tier."""
-    is_grain_draft = (
-        diff.op.value == "add" and isinstance(diff.after, str) and "grain_draft: true" in diff.after
-    )
-    return (0 if is_grain_draft else 1, diff.target)
-
-
 def _render_curated_review(pipeline_result: PipelineResult | None) -> int:
-    """Render the capped, prioritized curated review of withheld diffs (SPEC-onboarding §5).
+    """Render the capped, prioritized curated review of withheld diffs (SPEC-onboarding §5, OB-S4).
 
     Returns the total withheld count (shown in the completion panel handoff).
-    Shows at most ``_REVIEW_CAP`` items; the remainder is pointed at ``canon ingest``.
+    Shows at most ``_REVIEW_CAP`` items as teachable units (proposal + evidence anchor +
+    confidence + why-line); the remainder is pointed at ``canon ingest`` with a count.
     """
     if pipeline_result is None:
         return 0
@@ -230,23 +291,34 @@ def _render_curated_review(pipeline_result: PipelineResult | None) -> int:
     if not withheld:
         return 0
 
-    withheld.sort(key=_withheld_diffs_priority_key)
-    shown = withheld[:_REVIEW_CAP]
-    deferred = len(withheld) - len(shown)
+    contents: dict[str, dict[str, Any]] = {
+        entry.target: entry.proposal.content for entry in pipeline_result.emission.report.entries
+    }
+    ref_counts: dict[str, int] = Counter()
+    for entry in pipeline_result.emission.report.entries:
+        for join in entry.proposal.content.get("joins", []):
+            if to := join.get("to"):
+                ref_counts[to] += 1
+
+    items = _classify_withheld(withheld, contents, ref_counts)
+    shown = items[:_REVIEW_CAP]
+    deferred = len(items) - len(shown)
 
     _console.print("\n[dim]curated review — sources held for human confirmation[/dim]")
-    for diff in shown:
+    for item in shown:
+        anchor = item.anchors[0] if item.anchors else "—"
         _console.print(
-            f"  [yellow]·[/yellow] [bold]{diff.target}[/bold]"
-            f"  confidence={diff.confidence:.1f}"
-            "  — no primary key; grain is a guess — confirm before trusting measures"
+            f"  [yellow]·[/yellow] [bold]{item.source_name}[/bold]"
+            f"  confidence={item.confidence:.1f}"
+            f"  evidence={anchor}"
         )
+        _console.print(f"    [dim]{item.why}[/dim]")
     if deferred:
         _console.print(
             f"  [dim]… and {deferred} more — run [bold]canon ingest[/bold] to review them[/dim]"
         )
 
-    return len(withheld)
+    return len(items)
 
 
 def _try_first_answer(root: Path, config: CanonConfig, sources: list[SemanticSource]) -> bool:

@@ -5,14 +5,34 @@ from __future__ import annotations
 from unittest.mock import AsyncMock
 
 from canon.cli.commands.setup import (
+    ReviewTier,
     _best_dimension,
+    _classify_withheld,
     _pick_demo_target,
+    _render_curated_review,
     _render_setup_complete,
     _render_source_listing,
     _run_golden_path,
     _write_bootstrap_contracts,
 )
-from canon.semantic.models import Column, Dimension, Measure, NormalizedType, SemanticSource
+from canon.ingestion.emitter import DiffFormat, EmissionResult, EmittedDiff
+from canon.ingestion.models import (
+    DraftedBy,
+    Proposal,
+    ProposalOp,
+    ReconciliationDecision,
+    ReconciliationEntry,
+    ReconciliationReport,
+)
+from canon.ingestion.pipeline import PipelineResult
+from canon.semantic.models import (
+    Column,
+    Dimension,
+    Measure,
+    NormalizedType,
+    Provenance,
+    SemanticSource,
+)
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -376,3 +396,186 @@ def test_write_bootstrap_contracts_fallback_skips_id_columns(tmp_path):
     assert "total-revenue" in names
     assert "total-id" not in names
     assert "total-customer-id" not in names
+
+
+# ---------------------------------------------------------------------------
+# Helpers for curated review tests (OB-S4)
+# ---------------------------------------------------------------------------
+
+
+def _withheld_diff(
+    target: str = "semantics/conn/orders.yaml",
+    drafted_by: DraftedBy = DraftedBy.LLM,
+    confidence: float = 0.3,
+    anchored_to: list[str] | None = None,
+) -> EmittedDiff:
+    return EmittedDiff(
+        target=target,
+        op=ProposalOp.ADD,
+        format=DiffFormat.YAML,
+        before=None,
+        after="",
+        patch="",
+        provenance=Provenance.INFERRED,
+        confidence=confidence,
+        drafted_by=drafted_by,
+        anchored_to=anchored_to or [],
+    )
+
+
+def _entry_with_content(target: str, content: dict) -> ReconciliationEntry:
+    proposal = Proposal(
+        target=target,
+        op=ProposalOp.ADD,
+        content=content,
+        provenance=Provenance.INFERRED,
+        confidence=0.3,
+    )
+    return ReconciliationEntry(
+        decision=ReconciliationDecision.ADD,
+        target=target,
+        proposal=proposal,
+    )
+
+
+def _pipeline_result(
+    diffs: list[EmittedDiff],
+    entries: list[ReconciliationEntry] | None = None,
+) -> PipelineResult:
+    report = ReconciliationReport(entries=entries or [])
+    emission = EmissionResult(diffs=diffs, report=report)
+    return PipelineResult(emission=emission, first_run=True)
+
+
+# ---------------------------------------------------------------------------
+# _classify_withheld — ordering (AC1)
+# ---------------------------------------------------------------------------
+
+
+def test_classify_withheld_grain_before_measure_before_long_tail():
+    grain = _withheld_diff("semantics/c/a.yaml", drafted_by=DraftedBy.LLM)
+    measure = _withheld_diff("semantics/c/b.yaml", drafted_by=DraftedBy.LLM)
+    long_tail = _withheld_diff(
+        "semantics/c/c.yaml", drafted_by=DraftedBy.DETERMINISTIC, confidence=0.5
+    )
+    contents = {
+        "semantics/c/a.yaml": {"meta": {"grain_draft": True}, "joins": []},
+        "semantics/c/b.yaml": {"meta": {}, "joins": []},
+        "semantics/c/c.yaml": {"meta": {}, "joins": []},
+    }
+    items = _classify_withheld([measure, long_tail, grain], contents, {})
+    assert [i.tier for i in items] == [ReviewTier.GRAIN, ReviewTier.MEASURE, ReviewTier.LONG_TAIL]
+
+
+def test_classify_withheld_measure_blast_radius_sorts_by_ref_count():
+    a = _withheld_diff("semantics/c/a_low.yaml", drafted_by=DraftedBy.LLM)
+    b = _withheld_diff("semantics/c/b_high.yaml", drafted_by=DraftedBy.LLM)
+    contents = {
+        "semantics/c/a_low.yaml": {"meta": {}, "joins": []},
+        "semantics/c/b_high.yaml": {"meta": {}, "joins": []},
+    }
+    ref_counts = {"a_low": 1, "b_high": 3}
+    items = _classify_withheld([a, b], contents, ref_counts)
+    assert items[0].source_name == "b_high"
+    assert items[1].source_name == "a_low"
+
+
+def test_classify_withheld_alpha_tiebreak_within_same_tier():
+    b = _withheld_diff("semantics/c/b.yaml", drafted_by=DraftedBy.LLM)
+    a = _withheld_diff("semantics/c/a.yaml", drafted_by=DraftedBy.LLM)
+    contents = {
+        "semantics/c/a.yaml": {"meta": {}, "joins": []},
+        "semantics/c/b.yaml": {"meta": {}, "joins": []},
+    }
+    items = _classify_withheld([b, a], contents, {})
+    assert items[0].source_name == "a"
+    assert items[1].source_name == "b"
+
+
+# ---------------------------------------------------------------------------
+# _render_curated_review — cap + count (AC2) and teachable unit (spec §5)
+# ---------------------------------------------------------------------------
+
+
+def test_render_curated_review_none_returns_zero():
+    assert _render_curated_review(None) == 0
+
+
+def test_render_curated_review_no_withheld_returns_zero(capsys):
+    auto_diff = EmittedDiff(
+        target="semantics/c/good.yaml",
+        op=ProposalOp.ADD,
+        format=DiffFormat.YAML,
+        before=None,
+        after="",
+        patch="",
+        provenance=Provenance.INFERRED,
+        confidence=1.0,
+        drafted_by=DraftedBy.DETERMINISTIC,
+    )
+    result = _pipeline_result([auto_diff])
+    count = _render_curated_review(result)
+    assert count == 0
+    assert capsys.readouterr().out == ""
+
+
+def test_render_curated_review_caps_and_shows_deferred_count(capsys):
+    from canon.cli.commands.setup import _REVIEW_CAP
+
+    diffs = [
+        _withheld_diff(f"semantics/c/t{i}.yaml", drafted_by=DraftedBy.LLM)
+        for i in range(_REVIEW_CAP + 3)
+    ]
+    entries = [
+        _entry_with_content(f"semantics/c/t{i}.yaml", {"meta": {"grain_draft": True}, "joins": []})
+        for i in range(_REVIEW_CAP + 3)
+    ]
+    result = _pipeline_result(diffs, entries)
+    total = _render_curated_review(result)
+    out = capsys.readouterr().out
+
+    assert total == _REVIEW_CAP + 3
+    assert "… and 3 more" in out
+    assert "canon ingest" in out
+
+
+def test_render_curated_review_grain_teachable_unit(capsys):
+    diff = _withheld_diff(
+        "semantics/c/orders.yaml",
+        drafted_by=DraftedBy.LLM,
+        confidence=0.3,
+        anchored_to=["sha256:abc123"],
+    )
+    entry = _entry_with_content(
+        "semantics/c/orders.yaml", {"meta": {"grain_draft": True}, "joins": []}
+    )
+    result = _pipeline_result([diff], [entry])
+    _render_curated_review(result)
+    out = capsys.readouterr().out
+
+    assert "orders" in out
+    assert "0.3" in out
+    assert "sha256:abc123" in out
+    assert "grain" in out.lower()
+
+
+def test_render_curated_review_no_anchor_shows_dash(capsys):
+    diff = _withheld_diff("semantics/c/orders.yaml", drafted_by=DraftedBy.LLM, anchored_to=[])
+    entry = _entry_with_content(
+        "semantics/c/orders.yaml", {"meta": {"grain_draft": True}, "joins": []}
+    )
+    result = _pipeline_result([diff], [entry])
+    _render_curated_review(result)
+    out = capsys.readouterr().out
+    assert "evidence=—" in out
+
+
+def test_render_curated_review_long_tail_why_line(capsys):
+    diff = _withheld_diff(
+        "semantics/c/orders.yaml", drafted_by=DraftedBy.DETERMINISTIC, confidence=0.5
+    )
+    entry = _entry_with_content("semantics/c/orders.yaml", {"meta": {}, "joins": []})
+    result = _pipeline_result([diff], [entry])
+    _render_curated_review(result)
+    out = capsys.readouterr().out
+    assert "low-confidence" in out
