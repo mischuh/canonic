@@ -34,13 +34,35 @@ _INSTRUCTIONS = (
     "2. Match the user's question to a metric ('metric' field) and a dimension ('name' in "
     "'dimensions'). Labels help map natural-language terms (e.g. 'Kundentyp' → "
     "label 'Customer Type' → name 'customer_type').\n"
-    "3. Call query() with the canonical metric name and dimension name.\n\n"
+    "3. Call query() with the canonical metric name and dimension name.\n"
+    "4. If the response contains a 'suggestions' key, relay that text verbatim to the user "
+    "as a natural-language follow-up after presenting the results. "
+    "Skip this step only when 'suggestions' is absent.\n\n"
     "Do NOT ask the user for clarification before calling list_metrics — the tool "
     "response provides everything you need."
 )
 
 
-def build_server(service: CanonService) -> FastMCP:
+def _format_suggestions(related: dict[str, Any]) -> str | None:
+    """Format metadata.related into a verbatim-relay string for small models."""
+    dims = related.get("unused_dimensions", [])
+    metrics = related.get("sibling_metrics", [])
+    if not dims and not metrics:
+        return None
+    parts: list[str] = []
+    if dims:
+        dim_tokens: list[str] = []
+        for d in dims:
+            label = d.get("label")
+            name = d.get("name", "")
+            dim_tokens.append(f"{label} ({name})" if label else name)
+        parts.append("Break down further by: " + ", ".join(dim_tokens))
+    if metrics:
+        parts.append("Related metrics: " + ", ".join(m.get("name", "") for m in metrics))
+    return " | ".join(parts)
+
+
+def build_server(service: CanonService, *, suggestions: bool = False) -> FastMCP:
     """Return a :class:`FastMCP` instance with all P0 tools registered against *service*."""
     mcp: FastMCP = FastMCP("canon", instructions=_INSTRUCTIONS)
 
@@ -139,14 +161,21 @@ def build_server(service: CanonService) -> FastMCP:
             "a 'via' list and a human-readable 'route'; re-issue with that 'via' value to "
             "select the desired path. "
             "On an 'unreachable' error for a dimension, check 'candidates' for the correct "
-            "canonical name and re-issue."
+            "canonical name and re-issue. "
+            "When the response contains a 'suggestions' key, relay that text verbatim to the "
+            "user as a follow-up after presenting the results."
         )
     )
     @canon_error_response
     async def compile_query(query: dict[str, Any]) -> dict[str, Any]:
         sq = SemanticQuery.model_validate(query)
         result = service.compile_query(sq)
-        return CompileOutput.from_compile_result(result).model_dump(mode="json")
+        response = CompileOutput.from_compile_result(result).model_dump(mode="json")
+        if suggestions:
+            s = _format_suggestions(response.get("metadata", {}).get("related", {}))
+            if s:
+                response["suggestions"] = s
+        return response
 
     # ------------------------------------------------------------------
     # Tool: query
@@ -166,14 +195,21 @@ def build_server(service: CanonService) -> FastMCP:
             "a 'via' list and a human-readable 'route'; re-issue with that 'via' value to "
             "select the desired path. "
             "On an 'unreachable' error for a dimension, check 'candidates' for the correct "
-            "canonical name and re-issue."
+            "canonical name and re-issue. "
+            "When the response contains a 'suggestions' key, relay that text verbatim to the "
+            "user as a follow-up after presenting the results."
         )
     )
     @canon_error_response
     async def query(query: dict[str, Any]) -> dict[str, Any]:
         sq = SemanticQuery.model_validate(query)
         result = await service.query(sq)
-        return result.model_dump()
+        response = result.model_dump()
+        if suggestions:
+            s = _format_suggestions(response.get("metadata", {}).get("related", {}))
+            if s:
+                response["suggestions"] = s
+        return response
 
     # ------------------------------------------------------------------
     # Tool: run_sql

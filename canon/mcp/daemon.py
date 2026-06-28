@@ -155,7 +155,7 @@ def stop(project_root: Path) -> bool:
     return True
 
 
-def start_stdio(service: object, project_root: Path) -> None:
+def start_stdio(service: object, project_root: Path, *, suggestions: bool = False) -> None:
     """Run the MCP server in stdio transport mode (foreground, blocks).
 
     The MCP client (e.g. Claude Code) manages the process lifetime; this function
@@ -164,7 +164,7 @@ def start_stdio(service: object, project_root: Path) -> None:
     from canon.mcp.server import build_server
 
     _check_version_on_start(project_root)
-    mcp = build_server(service)  # type: ignore[arg-type]
+    mcp = build_server(service, suggestions=suggestions)  # type: ignore[arg-type]
     mcp.run(transport="stdio")
 
 
@@ -173,6 +173,8 @@ def start_http(
     project_root: Path,
     host: str = _DEFAULT_HOST,
     port: int = _DEFAULT_PORT,
+    *,
+    suggestions: bool = False,
 ) -> None:
     """Fork a uvicorn HTTP daemon in the background and write the state file.
 
@@ -225,7 +227,7 @@ def start_http(
 
     from canon.mcp.server import build_server
 
-    mcp = build_server(service)  # type: ignore[arg-type]
+    mcp = build_server(service, suggestions=suggestions)  # type: ignore[arg-type]
     import asyncio
 
     # stateless_http=True: no session IDs are issued or expected, so restarting the

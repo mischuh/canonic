@@ -229,6 +229,49 @@ def test_s4_reachable_dimension_emits_join(
     assert "CROSS JOIN" not in result.sql.upper()
 
 
+def test_s4_join_on_clause_with_physical_table_name(
+    resolver: ContractResolver, customers: SemanticSource
+) -> None:
+    """ON clause written with the physical table name must compile; regression for fct_orders alias bug."""
+    from canon.semantic.models import Join, Relationship
+
+    orders = SemanticSource(
+        name="orders",
+        connection="warehouse_pg",
+        table="analytics.fct_orders",
+        grain=["order_id"],
+        columns=[
+            Column(name="order_id", type="string", nullable=False),
+            Column(name="customer_id", type="string", nullable=False),
+            Column(name="status", type="string", nullable=False),
+            Column(name="amount", type="decimal", nullable=False),
+            Column(name="created_at", type="timestamp", nullable=False),
+        ],
+        measures=[Measure(name="total_revenue", expr="sum(amount)", additivity="additive")],
+        dimensions=[
+            Dimension(name="order_date", column="created_at", granularity="day"),
+            Dimension(name="status", column="status"),
+        ],
+        joins=[
+            Join(
+                to="customers",
+                on="fct_orders.customer_id = customers.customer_id",
+                relationship=Relationship.MANY_TO_ONE,
+            ),
+        ],
+    )
+    result = compile(
+        SemanticQuery(metrics=["revenue"], dimensions=["region"]),
+        resolver,
+        [orders, customers],
+    )
+    _parse_ok(result.sql)
+    assert "JOIN" in result.sql.upper()
+    assert (
+        '"fct_orders"."customer_id"' not in result.sql
+    )  # ON clause must use alias, not table name
+
+
 def test_s4_ac2_ambiguous_join_path(sources: list[SemanticSource]) -> None:
     from canon.semantic.models import Column, Dimension, Join, Measure, Relationship, SemanticSource
 

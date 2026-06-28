@@ -74,6 +74,10 @@ def start(
     host: Annotated[
         str, typer.Option("--host", help="Host for HTTP daemon (default 127.0.0.1).")
     ] = "127.0.0.1",
+    suggestions: Annotated[
+        bool,
+        typer.Option("--suggestions", help="Enable follow-up suggestions in query responses."),
+    ] = False,
 ) -> None:
     """Start the local MCP daemon.
 
@@ -123,7 +127,7 @@ def start(
 
     try:
         if http:
-            start_http(service, root, host=host, port=port)
+            start_http(service, root, host=host, port=port, suggestions=suggestions)
             if json_output:
                 typer.echo(
                     json.dumps(
@@ -135,7 +139,7 @@ def start(
         else:
             if not json_output:
                 _console.print("Starting MCP server (stdio) — press Ctrl+C to stop.")
-            start_stdio(service, root)
+            start_stdio(service, root, suggestions=suggestions)
     except RuntimeError as exc:
         msg = str(exc)
         if json_output:

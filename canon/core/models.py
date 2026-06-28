@@ -74,6 +74,7 @@ class RelatedDimensionOut(BaseModel):
 
     name: str
     source: str
+    label: str | None = None
 
 
 class RelatedMetricOut(BaseModel):
@@ -208,7 +209,7 @@ class QueryMetadata(BaseModel):
             finality=finality_out,
             related=RelatedOut(
                 unused_dimensions=[
-                    RelatedDimensionOut(name=d.name, source=d.source)
+                    RelatedDimensionOut(name=d.name, source=d.source, label=d.label)
                     for d in compiled.related.unused_dimensions
                 ],
                 sibling_metrics=[

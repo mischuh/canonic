@@ -146,18 +146,24 @@ def _rewrite_on(
     from_alias: str,
     to_src: str,
     to_alias: str,
+    from_table: str | None = None,
+    to_table: str | None = None,
 ) -> str:
-    """Rewrite ON clause table references to use SQL aliases instead of source names."""
-    if from_alias == from_src and to_alias == to_src:
-        return on_sql  # fast path: no renames needed
+    """Rewrite ON clause table references to use SQL aliases instead of source names.
+
+    Accepts references written as either source names (e.g. ``orders``) or the
+    physical table name without schema (e.g. ``fct_orders``).
+    """
+    from_names = {n for n in (from_src, from_table) if n}
+    to_names = {n for n in (to_src, to_table) if n}
 
     parsed = sqlglot.parse_one(on_sql)
 
     def transform(node: exp.Expression) -> exp.Expression:
         if isinstance(node, exp.Column):
-            if node.table == from_src:
+            if node.table in from_names:
                 return exp.column(node.name, table=from_alias)
-            if node.table == to_src:
+            if node.table in to_names:
                 return exp.column(node.name, table=to_alias)
         return node
 
@@ -188,7 +194,12 @@ def _all_simple_paths(
             child_alias = join.name or join.to
             if child_alias in visited:
                 continue
-            on_sql = _rewrite_on(join.on, node_src, node_alias, join.to, child_alias)
+            from_table = source.table.split(".")[-1]
+            child_source = sources_by_name.get(join.to)
+            to_table = child_source.table.split(".")[-1] if child_source else join.to
+            on_sql = _rewrite_on(
+                join.on, node_src, node_alias, join.to, child_alias, from_table, to_table
+            )
             trail.append(
                 JoinEdge(
                     from_source=node_src,

@@ -98,7 +98,7 @@ def orders_source() -> SemanticSource:
         ],
         dimensions=[
             Dimension(name="order_date", column="created_at"),
-            Dimension(name="status", column="status"),
+            Dimension(name="status", column="status", label="Bestellstatus"),
             Dimension(name="region", column="region"),
             Dimension(name="channel", column="channel"),
         ],

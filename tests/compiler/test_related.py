@@ -136,6 +136,19 @@ def test_filter_tokens_excluded_from_unused_dims(
     assert "status" not in unused_names
 
 
+def test_unused_dimensions_propagates_label(
+    resolver: ContractResolver,
+    sources: list[SemanticSource],
+) -> None:
+    """Dimension labels are propagated to unused_dimensions entries."""
+    query = SemanticQuery(metrics=["revenue"], dimensions=["order_date"])
+    result = compile(query, resolver, sources)
+
+    status_dim = next((d for d in result.related.unused_dimensions if d.name == "status"), None)
+    assert status_dim is not None
+    assert status_dim.label == "Bestellstatus"
+
+
 def test_related_capped_at_five(
     sources: list[SemanticSource],
 ) -> None:

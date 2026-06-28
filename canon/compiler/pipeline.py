@@ -1624,6 +1624,13 @@ def _related(
     used_dims: set[str] = set(query.dimensions)
     filter_tokens: set[str] = {tok for f in query.filters for tok in f.split()}
 
+    alias_to_src: dict[str, str] = {}
+    for src_name in queried_sources:
+        alias_to_src.update(build_alias_tree(src_name, sources_by_name))
+    dim_label_lookup: dict[tuple[str, str], str | None] = {
+        (sn, d.name): d.label for sn, src in sources_by_name.items() for d in src.dimensions
+    }
+
     seen_dims: set[str] = set()
     raw_dims: list[RelatedDimension] = []
     for src_name in sorted(queried_sources):
@@ -1633,7 +1640,9 @@ def _related(
                 continue
             if entry_name not in seen_dims:
                 seen_dims.add(entry_name)
-                raw_dims.append(RelatedDimension(name=entry_name, source=alias))
+                actual_src = alias_to_src.get(alias, alias)
+                label = dim_label_lookup.get((actual_src, bare))
+                raw_dims.append(RelatedDimension(name=entry_name, source=alias, label=label))
     unused_dimensions = sorted(raw_dims, key=lambda d: (d.name, d.source))[:_RELATED_CAP]
 
     seen_metrics: set[str] = set()

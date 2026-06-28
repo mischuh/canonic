@@ -29,6 +29,7 @@ class RelatedDimension:
 
     name: str
     source: str
+    label: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
