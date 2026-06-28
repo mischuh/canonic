@@ -25,10 +25,24 @@ if TYPE_CHECKING:
 
 __all__ = ["build_server"]
 
+_INSTRUCTIONS = (
+    "You are working with Canon, a semantic query layer over structured data.\n\n"
+    "WORKFLOW — always follow these steps in order:\n"
+    "1. Call list_metrics(). "
+    "The response includes every metric AND its queryable dimensions with canonical names "
+    "and human-readable labels. Use the 'name' field of each dimension in query() calls.\n"
+    "2. Match the user's question to a metric ('metric' field) and a dimension ('name' in "
+    "'dimensions'). Labels help map natural-language terms (e.g. 'Kundentyp' → "
+    "label 'Customer Type' → name 'customer_type').\n"
+    "3. Call query() with the canonical metric name and dimension name.\n\n"
+    "Do NOT ask the user for clarification before calling list_metrics — the tool "
+    "response provides everything you need."
+)
+
 
 def build_server(service: CanonService) -> FastMCP:
     """Return a :class:`FastMCP` instance with all P0 tools registered against *service*."""
-    mcp: FastMCP = FastMCP("canon")
+    mcp: FastMCP = FastMCP("canon", instructions=_INSTRUCTIONS)
 
     # ------------------------------------------------------------------
     # Tool: list_metrics
@@ -67,7 +81,13 @@ def build_server(service: CanonService) -> FastMCP:
     # Tool: list_metrics
     # ------------------------------------------------------------------
 
-    @mcp.tool(description="List all active canonical metrics this project defines.")
+    @mcp.tool(
+        description=(
+            "List all active canonical metrics this project defines. "
+            "Each metric includes its queryable dimensions with canonical names and labels — "
+            "use these canonical 'name' values directly in query() calls."
+        )
+    )
     @canon_error_response
     async def list_metrics() -> list[dict[str, Any]]:
         summaries = service.list_metrics()
@@ -111,11 +131,15 @@ def build_server(service: CanonService) -> FastMCP:
             "Compile a semantic query to dialect-correct SQL + metadata without executing it. "
             "Accepts a dict with keys: metrics (list[str]), dimensions (list[str]), "
             "filters (list[str]), via (list[str]), limit (int|null). "
+            "Dimension names must be canonical 'name' values as returned by describe_metric — "
+            "not natural-language terms. "
             "'via' routes join paths through specific intermediate sources — required when "
             "multiple join paths exist between the metric source and a dimension source. "
             "On an 'ambiguous_join_path' error, inspect the returned candidates: each has "
             "a 'via' list and a human-readable 'route'; re-issue with that 'via' value to "
-            "select the desired path."
+            "select the desired path. "
+            "On an 'unreachable' error for a dimension, check 'candidates' for the correct "
+            "canonical name and re-issue."
         )
     )
     @canon_error_response
@@ -134,11 +158,15 @@ def build_server(service: CanonService) -> FastMCP:
             "Returns rows + compiler metadata (resolved bindings, guardrails fired, freshness). "
             "Accepts a dict with keys: metrics (list[str]), dimensions (list[str]), "
             "filters (list[str]), via (list[str]), limit (int|null). "
+            "Dimension names must be canonical 'name' values as returned by describe_metric — "
+            "not natural-language terms. "
             "'via' routes join paths through specific intermediate sources — required when "
             "multiple join paths exist between the metric source and a dimension source. "
             "On an 'ambiguous_join_path' error, inspect the returned candidates: each has "
             "a 'via' list and a human-readable 'route'; re-issue with that 'via' value to "
-            "select the desired path."
+            "select the desired path. "
+            "On an 'unreachable' error for a dimension, check 'candidates' for the correct "
+            "canonical name and re-issue."
         )
     )
     @canon_error_response

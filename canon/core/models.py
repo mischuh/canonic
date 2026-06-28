@@ -23,6 +23,7 @@ if TYPE_CHECKING:
 __all__ = [
     "Compiled",
     "CompileOutput",
+    "DimensionInfo",
     "FinalityOut",
     "FiredGuardrailOut",
     "MetricDetail",
@@ -63,6 +64,22 @@ class FinalityOut(BaseModel):
     provisional_rows: int | None = None
 
 
+class DimensionInfo(BaseModel):
+    """One queryable dimension as returned by ``describe_metric`` (SPEC §4.1).
+
+    ``name`` is the canonical string to pass to ``query()`` or ``compile_query()``.
+    ``source`` is the semantic source alias that owns the dimension in the join graph.
+    ``label`` and ``description`` are optional author-supplied metadata for LLM reasoning.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    name: str
+    source: str
+    label: str | None = None
+    description: str | None = None
+
+
 class MetricSummary(BaseModel):
     """One active canonical metric, as returned by ``list_metrics`` (SPEC §4.1).
 
@@ -79,6 +96,7 @@ class MetricSummary(BaseModel):
     status: str
     aliases: list[str] = []
     components: list[str] | None = None
+    dimensions: list[DimensionInfo] = []
 
 
 class MetricDetail(BaseModel):
@@ -87,10 +105,10 @@ class MetricDetail(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     metric: str
-    source: str
+    source: str | None
     measure: str | None = None
     grain: list[str]
-    dimensions: list[str]
+    dimensions: list[DimensionInfo]
     measures: list[str]
     aliases: list[str] = []
     freshness: SourceFreshnessOut | None = None

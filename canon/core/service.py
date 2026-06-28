@@ -20,7 +20,13 @@ from canon.contracts import ContractResolver
 from canon.contracts.resolver import Ambiguous as ResolverAmbiguous
 from canon.contracts.resolver import Binding
 from canon.contracts.resolver import Unresolved as ResolverUnresolved
-from canon.core.models import MetricDetail, MetricSummary, QueryResult, SourceFreshnessOut
+from canon.core.models import (
+    DimensionInfo,
+    MetricDetail,
+    MetricSummary,
+    QueryResult,
+    SourceFreshnessOut,
+)
 from canon.exc import Ambiguous, CanonError, Unresolved, UnsupportedMeasure
 from canon.instrumentation.events import AnswerEventLog, DiskAnswerEventLog, NullAnswerEventLog
 from canon.instrumentation.models import AnswerEvent, _age_days, _sha256_json
@@ -32,6 +38,7 @@ if TYPE_CHECKING:
     from canon.contracts.assertions import AccuracyReport, AssertionOutcome
     from canon.contracts.models import Assertion
     from canon.knowledge.results import SearchResult
+    from canon.semantic.models import Dimension as _Dimension
     from canon.semantic.models import SemanticSource
 
 __all__ = ["CanonService"]
@@ -129,7 +136,15 @@ class CanonService:
             if s.metric not in seen:
                 seen.add(s.metric)
                 deduped.append(s)
-        return deduped
+        # enrich each summary with its queryable dimensions
+        enriched: list[MetricSummary] = []
+        for s in deduped:
+            try:
+                detail = self.describe_metric(s.metric)
+                enriched.append(s.model_copy(update={"dimensions": detail.dimensions}))
+            except CanonError:
+                enriched.append(s)
+        return enriched
 
     def describe_metric(self, name: str) -> MetricDetail:
         """Return grain, dimensions, measures, and freshness for a metric (SPEC §4.1).
@@ -151,6 +166,34 @@ class CanonService:
             BindingKind.DISTINCT_COUNT,
             BindingKind.PERCENTILE,
         }
+        _COMPOSITE = {BindingKind.RATIO, BindingKind.WEIGHTED_AVG}
+        if binding.kind in _COMPOSITE:
+            assert binding.components is not None  # noqa: S101
+            all_dims: list[DimensionInfo] = []
+            all_measures: list[str] = []
+            seen_dim_names: set[str] = set()
+            for component in (binding.components.numerator, binding.components.denominator):
+                if component.source is None:
+                    continue
+                for d in self._reachable_dimensions(component.source):
+                    if d.name not in seen_dim_names:
+                        seen_dim_names.add(d.name)
+                        all_dims.append(d)
+                comp_src = self._source_by_name.get(component.source)
+                if comp_src is not None:
+                    for m in comp_src.measures:
+                        if m.name not in all_measures:
+                            all_measures.append(m.name)
+            return MetricDetail(
+                metric=binding.metric,
+                source=None,
+                measure=None,
+                grain=[],
+                dimensions=all_dims,
+                measures=all_measures,
+                aliases=list(binding.binding.aliases),
+                freshness=None,
+            )
         if binding.kind not in _DESCRIBABLE:
             raise UnsupportedMeasure(
                 f"metric {name!r} is a {binding.kind} metric — "
@@ -181,18 +224,18 @@ class CanonService:
             freshness=freshness,
         )
 
-    def _reachable_dimensions(self, source_name: str) -> list[str]:
-        """All dimension names queryable from *source_name* via its declared join graph.
+    def _reachable_dimensions(self, source_name: str) -> list[DimensionInfo]:
+        """All dimensions queryable from *source_name* via its declared join graph.
 
         Traverses the join tree breadth-first using aliases. Dimensions reachable under
-        only one alias are returned unqualified; dimensions reachable under multiple aliases
-        (e.g. ``city`` via both ``pickup`` and ``dropoff``) are returned qualified
-        (``pickup.city``, ``dropoff.city``) so the caller always gets usable names.
+        only one alias are returned with an unqualified ``name``; dimensions reachable
+        under multiple aliases (e.g. ``city`` via both ``pickup`` and ``dropoff``) are
+        returned qualified (``pickup.city``, ``dropoff.city``) so the caller always gets
+        a usable name to pass to ``query()``.
         """
         alias_to_source = build_alias_tree(source_name, self._source_by_name)
 
-        # Collect (alias, dim_name) in BFS alias order.
-        all_dims: list[tuple[str, str]] = []
+        all_dims: list[tuple[str, _Dimension]] = []
         seen_aliases: set[str] = set()
         queue: list[str] = [source_name]
         while queue:
@@ -205,24 +248,31 @@ class CanonService:
             if src is None:
                 continue
             for d in src.dimensions:
-                all_dims.append((alias, d.name))
+                all_dims.append((alias, d))
             for join in src.joins:
                 child_alias = join.name or join.to
                 if child_alias not in seen_aliases:
                     queue.append(child_alias)
 
-        # Determine which dim_names appear under multiple aliases.
+        # Determine which dim names appear under multiple aliases (need qualification).
         dim_aliases: dict[str, list[str]] = {}
-        for alias, dim_name in all_dims:
-            dim_aliases.setdefault(dim_name, []).append(alias)
+        for alias, dim in all_dims:
+            dim_aliases.setdefault(dim.name, []).append(alias)
 
         seen_result: set[str] = set()
-        result: list[str] = []
-        for alias, dim_name in all_dims:
-            entry = f"{alias}.{dim_name}" if len(dim_aliases[dim_name]) > 1 else dim_name
-            if entry not in seen_result:
-                seen_result.add(entry)
-                result.append(entry)
+        result: list[DimensionInfo] = []
+        for alias, dim in all_dims:
+            entry_name = f"{alias}.{dim.name}" if len(dim_aliases[dim.name]) > 1 else dim.name
+            if entry_name not in seen_result:
+                seen_result.add(entry_name)
+                result.append(
+                    DimensionInfo(
+                        name=entry_name,
+                        source=alias,
+                        label=dim.label,
+                        description=dim.description,
+                    )
+                )
         return result
 
     # ------------------------------------------------------------------

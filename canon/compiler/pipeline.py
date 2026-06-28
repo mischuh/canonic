@@ -76,7 +76,7 @@ class _ResolvedMetric:
 class _LeafPlan:
     """A compiled leaf query for one component of a composable_post_agg metric (§4.1, §6)."""
 
-    __slots__ = ("finality", "fired", "select", "used_sources", "warnings")
+    __slots__ = ("dim_names", "finality", "fired", "select", "used_sources", "warnings")
 
     def __init__(
         self,
@@ -84,12 +84,14 @@ class _LeafPlan:
         fired: list[FiredGuardrail],
         used_sources: set[str],
         warnings: list[str],
+        dim_names: list[str],
         finality: FinalityMetadata | None = None,
     ) -> None:
         self.select = select
         self.fired = fired
         self.used_sources = used_sources
         self.warnings = warnings
+        self.dim_names = dim_names
         self.finality = finality
 
 
@@ -461,7 +463,12 @@ def _plan_leaf(
         used = {source_name} | {e.join.to for e in join_edges}
 
     return _LeafPlan(
-        select=leaf_select, fired=fired, used_sources=used, warnings=[], finality=leaf_finality
+        select=leaf_select,
+        fired=fired,
+        used_sources=used,
+        warnings=[],
+        dim_names=[dim.name for _, dim in dimensions],
+        finality=leaf_finality,
     )
 
 
@@ -514,7 +521,7 @@ def _compile_composite(
     num_plan = _plan_leaf(components.numerator, query, resolver, sources_by_name, "n", pop_filter)
     den_plan = _plan_leaf(components.denominator, query, resolver, sources_by_name, "d", pop_filter)
 
-    dim_names = list(query.dimensions)
+    dim_names = num_plan.dim_names
 
     # Build the division expression per on_zero_denominator policy.
     n_col = cast("exp.Expression", exp.column("n"))
@@ -1181,7 +1188,12 @@ def _resolve_dimensions(
     for name in query.dimensions:
         found = _find_dimension(name, sources_by_name, owner, alias_to_source)
         if found is None:
-            raise UnreachableError(f"dimension {name!r} is not declared on any source")
+            suggestions = _dimension_suggestions(name, sources_by_name)
+            hint = f"; did you mean: {', '.join(suggestions)}" if suggestions else ""
+            raise UnreachableError(
+                f"dimension {name!r} is not declared on any reachable source{hint}",
+                candidates=suggestions,
+            )
         resolved.append(found)
     return resolved
 
@@ -1398,6 +1410,34 @@ def _reachable_from(
     return reachable
 
 
+def _dim_matches(dim: Dimension, name: str) -> bool:
+    """True when *name* matches a dimension by canonical name or any declared alias."""
+    return dim.name == name or name in dim.aliases
+
+
+def _dimension_suggestions(name: str, sources_by_name: dict[str, SemanticSource]) -> list[str]:
+    """Fuzzy-match *name* against all dimension names, labels, and aliases across sources."""
+    import difflib
+
+    token_to_canonical: dict[str, str] = {}
+    for src in sources_by_name.values():
+        for dim in src.dimensions:
+            token_to_canonical[dim.name.lower()] = dim.name
+            for alias in dim.aliases:
+                token_to_canonical[alias.lower()] = dim.name
+            if dim.label:
+                token_to_canonical[dim.label.lower()] = dim.name
+    matches = difflib.get_close_matches(name.lower(), token_to_canonical, n=5, cutoff=0.5)
+    seen: set[str] = set()
+    result: list[str] = []
+    for m in matches:
+        canonical = token_to_canonical[m]
+        if canonical not in seen:
+            seen.add(canonical)
+            result.append(canonical)
+    return result
+
+
 def _find_dimension(
     name: str,
     sources_by_name: dict[str, SemanticSource],
@@ -1413,7 +1453,7 @@ def _find_dimension(
         source = sources_by_name.get(src_name)
         if source is None:
             return None
-        dim = next((d for d in source.dimensions if d.name == dim_name), None)
+        dim = next((d for d in source.dimensions if _dim_matches(d, dim_name)), None)
         if dim is None:
             return None
         return (role, dim)
@@ -1423,7 +1463,7 @@ def _find_dimension(
         owner_source = sources_by_name.get(owner)
         if owner_source is not None:
             for dim in owner_source.dimensions:
-                if dim.name == name:
+                if _dim_matches(dim, name):
                     return owner, dim
 
         # Priority 2: search join-reachable aliases for the dimension.
@@ -1441,12 +1481,12 @@ def _find_dimension(
             if reachable_src is None:
                 continue
             for dim in reachable_src.dimensions:
-                if dim.name == name:
+                if _dim_matches(dim, name):
                     candidates.append((alias, dim))
         if len(candidates) == 1:
             return candidates[0]
         if len(candidates) > 1:
-            qualified = [f"{alias}.{name}" for alias, _ in candidates]
+            qualified = [f"{alias}.{dim.name}" for alias, dim in candidates]
             raise Ambiguous(
                 f"dimension {name!r} is present on multiple join-reachable sources; "
                 f"qualify explicitly",
@@ -1457,7 +1497,7 @@ def _find_dimension(
     # No owner: fall back to alphabetical scan (preserves behaviour for callers without context).
     for src in sorted(sources_by_name):
         for dim in sources_by_name[src].dimensions:
-            if dim.name == name:
+            if _dim_matches(dim, name):
                 return src, dim
     return None
 
