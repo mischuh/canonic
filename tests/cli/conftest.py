@@ -25,3 +25,10 @@ def project_dir(tmp_path, monkeypatch):
     (tmp_path / "canon.yaml").write_text(_VALID_CONFIG)
     monkeypatch.chdir(tmp_path)
     return tmp_path
+
+
+@pytest.fixture
+def outside_project(monkeypatch, tmp_path):
+    """Run from a temp dir with no canon.yaml and no last-project fallback."""
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr("canon.cli.commands.mcp._load_last_project", lambda: None)

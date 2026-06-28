@@ -49,7 +49,7 @@ def orders() -> SemanticSource:
         ],
         dimensions=[
             Dimension(name="order_date", column="created_at", granularity="day"),
-            Dimension(name="status", column="status"),
+            Dimension(name="status", column="status", label="Bestellstatus"),
         ],
         joins=[
             Join(

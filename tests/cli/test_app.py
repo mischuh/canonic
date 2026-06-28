@@ -63,7 +63,9 @@ def test_stub_commands_json_mode(runner: CliRunner, argv: list[str]) -> None:
 
 
 @pytest.mark.parametrize("argv", _MCP_COMMANDS, ids=lambda a: " ".join(a))
-def test_mcp_commands_require_project(runner: CliRunner, argv: list[str]) -> None:
+def test_mcp_commands_require_project(
+    runner: CliRunner, outside_project: None, argv: list[str]
+) -> None:
     """MCP/sql commands are real and exit non-zero outside a project directory."""
     result = runner.invoke(app, argv)
     assert result.exit_code != 0
