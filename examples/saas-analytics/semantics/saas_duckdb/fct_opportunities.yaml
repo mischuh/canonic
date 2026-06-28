@@ -1,0 +1,46 @@
+name: fct_opportunities
+connection: saas_duckdb
+table: fct_opportunities
+grain: [opp_id]
+description: "Sales pipeline fact. One row per opportunity (deal). is_won marks closed-won deals."
+
+columns:
+  - { name: opp_id,       type: int,     nullable: false }
+  - { name: customer_id,  type: int,     nullable: false }
+  - { name: rep_id,       type: int,     nullable: false }
+  - { name: campaign_id,  type: int,     nullable: false }
+  - { name: created_date, type: date,    nullable: false }
+  - { name: closed_date,  type: date,    nullable: true  }
+  - { name: stage,        type: string,  nullable: false }
+  - { name: amount,       type: decimal, nullable: false }
+  - { name: is_won,       type: bool,    nullable: false }
+
+measures:
+  - name: opp_count
+    expr: "count(opp_id)"
+    additivity: additive
+  - name: won_count
+    expr: "count(case when is_won then opp_id end)"
+    additivity: additive
+  - name: open_pipeline_amount
+    expr: "sum(case when stage in ('prospecting', 'negotiation') then amount else 0 end)"
+    additivity: additive
+
+dimensions:
+  - { name: created_date, column: created_date, label: "Created Date", granularity: day }
+  - { name: closed_date,  column: closed_date,  label: "Closed Date", granularity: day }
+  - { name: stage,        column: stage,        label: "Pipeline Stage" }
+
+joins:
+  - to: dim_customer
+    on: "fct_opportunities.customer_id = dim_customer.customer_id"
+    relationship: many_to_one
+  - to: dim_sales_rep
+    on: "fct_opportunities.rep_id = dim_sales_rep.rep_id"
+    relationship: many_to_one
+  - to: dim_campaign
+    on: "fct_opportunities.campaign_id = dim_campaign.campaign_id"
+    relationship: many_to_one
+
+meta:
+  provenance: human_curated

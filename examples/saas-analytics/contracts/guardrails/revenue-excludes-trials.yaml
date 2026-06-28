@@ -1,0 +1,8 @@
+id: revenue-excludes-trials
+applies_to:
+  source: fct_invoices
+  measure: total_amount
+kind: mandatory_filter
+filter: "is_trial = false"
+severity: error
+rationale: "Trial invoices represent $0-value evaluation periods, not booked revenue. Excluding them is enforced on every revenue query so trials cannot inflate billings."

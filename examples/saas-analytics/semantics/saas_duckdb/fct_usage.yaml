@@ -1,0 +1,31 @@
+name: fct_usage
+connection: saas_duckdb
+table: fct_usage
+grain: [usage_id]
+description: "Account-level product usage rollup. One row per active customer per month."
+
+columns:
+  - { name: usage_id,    type: int,  nullable: false }
+  - { name: customer_id, type: int,  nullable: false }
+  - { name: usage_date,  type: date, nullable: false }
+  - { name: api_calls,   type: int,  nullable: false }
+  - { name: seats_used,  type: int,  nullable: false }
+
+measures:
+  - name: api_call_total
+    expr: "sum(api_calls)"
+    additivity: additive
+  - name: avg_seats_used
+    expr: "avg(seats_used)"
+    additivity: non_additive
+
+dimensions:
+  - { name: usage_date, column: usage_date, label: "Usage Month", granularity: month }
+
+joins:
+  - to: dim_customer
+    on: "fct_usage.customer_id = dim_customer.customer_id"
+    relationship: many_to_one
+
+meta:
+  provenance: human_curated

@@ -1,0 +1,8 @@
+metric: expansion_mrr
+canonical:
+  kind: single
+  source: fct_subscription_events
+  measure: expansion_mrr_amount
+provenance: human_curated
+aliases: ["expansion", "upsell mrr"]
+status: active

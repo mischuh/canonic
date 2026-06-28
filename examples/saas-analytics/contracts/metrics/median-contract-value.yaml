@@ -1,0 +1,10 @@
+metric: median_contract_value
+canonical:
+  kind: percentile
+  source: fct_subscription_events
+  column: contract_value
+  quantile: 0.5
+  population_filter: "event_type IN ('new', 'expansion')"
+provenance: human_curated
+aliases: ["median acv", "median deal value"]
+status: active

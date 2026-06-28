@@ -1,0 +1,9 @@
+id: board-reporting-final-only
+applies_to:
+  metric: gross_revenue
+kind: restrict_source
+restrict_to:
+  role: final
+context: board_reporting
+severity: error
+rationale: "Board reporting must use authoritative, settled figures only. In the board_reporting context the compiler restricts gross_revenue to the final fct_invoices source and excludes the provisional fct_invoices_rt estimates."

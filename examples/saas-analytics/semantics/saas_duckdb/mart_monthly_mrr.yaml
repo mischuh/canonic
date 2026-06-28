@@ -1,0 +1,32 @@
+name: mart_monthly_mrr
+connection: saas_duckdb
+table: mart_monthly_mrr
+grain: [month, segment]
+description: "Pre-aggregated data mart: MRR, active customers and movement by month × segment. Condensed reporting layer derived from fct_mrr_snapshot."
+
+columns:
+  - { name: month,            type: date,    nullable: false }
+  - { name: segment,          type: string,  nullable: false }
+  - { name: total_mrr,        type: decimal, nullable: false }
+  - { name: active_customers, type: int,     nullable: false }
+  - { name: new_mrr,          type: decimal, nullable: false }
+  - { name: churned_mrr,      type: decimal, nullable: false }
+
+measures:
+  - name: mart_total_mrr
+    expr: "sum(total_mrr)"
+    additivity: semi_additive
+    semi_additive_over: [month]
+  - name: mart_new_mrr
+    expr: "sum(new_mrr)"
+    additivity: additive
+  - name: mart_churned_mrr
+    expr: "sum(churned_mrr)"
+    additivity: additive
+
+dimensions:
+  - { name: month,   column: month,   label: "Month", granularity: month }
+  - { name: segment, column: segment, label: "Segment" }
+
+meta:
+  provenance: human_curated

@@ -1,0 +1,20 @@
+name: dim_plan
+connection: saas_duckdb
+table: dim_plan
+grain: [plan_id]
+description: "Subscription plan catalogue. Tier orders free < starter < pro < enterprise."
+
+columns:
+  - { name: plan_id,            type: int,     nullable: false }
+  - { name: plan_name,          type: string,  nullable: false }
+  - { name: tier,               type: int,     nullable: false }
+  - { name: list_price_monthly, type: decimal, nullable: false }
+  - { name: billing_interval,   type: string,  nullable: false }
+
+dimensions:
+  - { name: plan_name,        column: plan_name,        label: "Plan" }
+  - { name: tier,             column: tier,             label: "Plan Tier" }
+  - { name: billing_interval, column: billing_interval, label: "Billing Interval" }
+
+meta:
+  provenance: human_curated

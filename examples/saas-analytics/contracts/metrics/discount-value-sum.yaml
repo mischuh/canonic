@@ -1,0 +1,8 @@
+# Helper metric: weighted numerator for blended_discount (sum of discount_pct * contract_value).
+metric: discount_value_sum
+canonical:
+  kind: single
+  source: fct_subscription_events
+  measure: discount_value_sum
+provenance: human_curated
+status: active

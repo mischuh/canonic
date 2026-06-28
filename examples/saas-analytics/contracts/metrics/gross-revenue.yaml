@@ -1,0 +1,8 @@
+metric: gross_revenue
+canonical:
+  kind: single
+  source: fct_invoices
+  measure: total_amount
+provenance: human_curated
+aliases: ["revenue", "billings", "invoiced revenue"]
+status: active

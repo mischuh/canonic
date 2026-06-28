@@ -1,0 +1,8 @@
+metric: support_tickets
+canonical:
+  kind: single
+  source: fct_support_tickets
+  measure: ticket_count
+provenance: human_curated
+aliases: ["tickets", "ticket count", "support volume"]
+status: active

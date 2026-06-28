@@ -1,0 +1,9 @@
+metric: arpu
+canonical:
+  kind: ratio
+  numerator: mrr_total
+  denominator: active_accounts
+  on_zero_denominator: null
+provenance: human_curated
+aliases: ["average revenue per user", "average revenue per account", "arpa"]
+status: active

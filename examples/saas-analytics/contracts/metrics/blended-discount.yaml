@@ -1,0 +1,8 @@
+metric: blended_discount
+canonical:
+  kind: weighted_avg
+  weighted_sum: discount_value_sum
+  weight: total_contract_value
+provenance: human_curated
+aliases: ["average discount", "contract-weighted discount"]
+status: active

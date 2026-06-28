@@ -1,0 +1,20 @@
+name: dim_sales_rep
+connection: saas_duckdb
+table: dim_sales_rep
+grain: [rep_id]
+description: "Sales representative (Account Executive) dimension."
+
+columns:
+  - { name: rep_id,    type: int,    nullable: false }
+  - { name: rep_name,  type: string, nullable: false }
+  - { name: team,      type: string, nullable: false }
+  - { name: region,    type: string, nullable: false }
+  - { name: hire_date, type: date,   nullable: false }
+
+dimensions:
+  - { name: rep_name,   column: rep_name, label: "Sales Rep" }
+  - { name: rep_team,   column: team,     label: "Sales Team" }
+  - { name: rep_region, column: region,   label: "Rep Region" }
+
+meta:
+  provenance: human_curated

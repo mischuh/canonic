@@ -1,0 +1,10 @@
+metric: median_deal_size
+canonical:
+  kind: percentile
+  source: fct_opportunities
+  column: amount
+  quantile: 0.5
+  population_filter: "is_won = true"
+provenance: human_curated
+aliases: ["median won deal", "median deal amount"]
+status: active

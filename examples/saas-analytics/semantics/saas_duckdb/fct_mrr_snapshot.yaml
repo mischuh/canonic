@@ -1,0 +1,41 @@
+name: fct_mrr_snapshot
+connection: saas_duckdb
+table: fct_mrr_snapshot
+grain: [snapshot_id]
+description: >
+  Monthly MRR position. One row per customer per month carrying the recurring
+  revenue on the books at month end. This is a SNAPSHOT fact: MRR is semi-additive —
+  additive across customers/segments within a month, but NOT summable across months.
+  Use ending_mrr (collapse_agg: last) to roll up over time. See [[semi-additive-mrr-caveat]].
+
+columns:
+  - { name: snapshot_id,    type: int,     nullable: false }
+  - { name: snapshot_month, type: date,    nullable: false }
+  - { name: customer_id,    type: int,     nullable: false }
+  - { name: plan_id,        type: int,     nullable: false }
+  - { name: mrr,            type: decimal, nullable: false }
+  - { name: is_active,      type: bool,    nullable: false }
+
+measures:
+  - name: mrr_sum
+    expr: "sum(mrr)"
+    additivity: additive   # the ending_mrr metric makes this semi-additive via collapse_agg: last
+  - name: active_account_count
+    expr: "count(distinct case when is_active then customer_id end)"
+    additivity: non_additive
+
+dimensions:
+  - { name: customer_id,    column: customer_id,    label: "Customer ID" }
+  - { name: snapshot_month, column: snapshot_month, label: "Snapshot Month", granularity: month }
+  - { name: is_active,      column: is_active,       label: "Active Flag" }
+
+joins:
+  - to: dim_customer
+    on: "fct_mrr_snapshot.customer_id = dim_customer.customer_id"
+    relationship: many_to_one
+  - to: dim_plan
+    on: "fct_mrr_snapshot.plan_id = dim_plan.plan_id"
+    relationship: many_to_one
+
+meta:
+  provenance: human_curated

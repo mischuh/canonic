@@ -1,0 +1,24 @@
+name: dim_date
+connection: saas_duckdb
+table: dim_date
+grain: [date_id]
+description: "Conformed daily date dimension (2024-2025) with calendar roll-ups."
+
+columns:
+  - { name: date_id,      type: int,    nullable: false }
+  - { name: date,         type: date,   nullable: false }
+  - { name: year,         type: int,    nullable: false }
+  - { name: quarter,      type: int,    nullable: false }
+  - { name: month,        type: int,    nullable: false }
+  - { name: month_name,   type: string, nullable: false }
+  - { name: day,          type: int,    nullable: false }
+  - { name: is_month_end, type: bool,   nullable: false }
+
+dimensions:
+  - { name: calendar_date, column: date,       label: "Date", granularity: day }
+  - { name: year,          column: year,       label: "Year" }
+  - { name: quarter,       column: quarter,    label: "Quarter" }
+  - { name: month_name,    column: month_name, label: "Month" }
+
+meta:
+  provenance: human_curated

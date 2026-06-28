@@ -1,0 +1,37 @@
+name: fct_invoices_rt
+connection: saas_duckdb
+table: fct_invoices_rt
+grain: [invoice_id]
+description: >
+  Provisional intraday billing estimates for the latest open period. Same shape as
+  fct_invoices. Used for fresh-but-unsettled figures; the board-reporting context
+  restricts revenue to the final fct_invoices source via a restrict_source guardrail.
+
+columns:
+  - { name: invoice_id,   type: int,     nullable: false }
+  - { name: customer_id,  type: int,     nullable: false }
+  - { name: invoice_date, type: date,    nullable: false }
+  - { name: amount,       type: decimal, nullable: false }
+  - { name: status,       type: string,  nullable: false }
+  - { name: is_trial,     type: bool,    nullable: false }
+
+measures:
+  - name: total_amount
+    expr: "sum(amount)"
+    additivity: additive
+  - name: invoice_count
+    expr: "count(invoice_id)"
+    additivity: additive
+
+dimensions:
+  - { name: invoice_date, column: invoice_date, label: "Invoice Date", granularity: day }
+  - { name: status,       column: status,       label: "Invoice Status" }
+  - { name: is_trial,     column: is_trial,     label: "Trial Flag" }
+
+joins:
+  - to: dim_customer
+    on: "fct_invoices_rt.customer_id = dim_customer.customer_id"
+    relationship: many_to_one
+
+meta:
+  provenance: human_curated

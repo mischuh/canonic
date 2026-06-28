@@ -1,0 +1,19 @@
+name: dim_geo
+connection: saas_duckdb
+table: dim_geo
+grain: [geo_id]
+description: "Geography dimension: country rolled up to region and continent."
+
+columns:
+  - { name: geo_id,    type: int,    nullable: false }
+  - { name: country,   type: string, nullable: false }
+  - { name: region,    type: string, nullable: false }
+  - { name: continent, type: string, nullable: false }
+
+dimensions:
+  - { name: country,   column: country,   label: "Country" }
+  - { name: region,    column: region,    label: "Region" }
+  - { name: continent, column: continent, label: "Continent" }
+
+meta:
+  provenance: human_curated

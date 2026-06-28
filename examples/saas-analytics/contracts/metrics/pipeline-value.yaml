@@ -1,0 +1,8 @@
+metric: pipeline_value
+canonical:
+  kind: single
+  source: fct_opportunities
+  measure: open_pipeline_amount
+provenance: human_curated
+aliases: ["open pipeline", "pipeline", "open deal value"]
+status: active

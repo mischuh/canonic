@@ -1,0 +1,10 @@
+metric: gross_revenue
+realizations:
+  - source: fct_invoices
+    role: final
+    watermark: "business_day - 1 day"
+    tz: "America/New_York"
+  - source: fct_invoices_rt
+    role: provisional
+coalescing: "window <= watermark ? final : provisional"
+result_flag: per_row

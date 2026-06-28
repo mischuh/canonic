@@ -1,0 +1,10 @@
+metric: ending_mrr
+canonical:
+  kind: semi_additive
+  source: fct_mrr_snapshot
+  measure: mrr_sum
+  collapse_dimension: snapshot_month
+  collapse_agg: last
+provenance: human_curated
+aliases: ["mrr", "monthly recurring revenue", "ending recurring revenue"]
+status: active

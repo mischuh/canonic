@@ -1,0 +1,31 @@
+name: mart_rep_quota
+connection: saas_duckdb
+table: mart_rep_quota
+grain: [rep_id, quarter]
+description: "Pre-aggregated data mart: sales-rep quota attainment by quarter."
+
+columns:
+  - { name: rep_id,            type: int,     nullable: false }
+  - { name: quarter,           type: string,  nullable: false }
+  - { name: quota,             type: decimal, nullable: false }
+  - { name: closed_won_amount, type: decimal, nullable: false }
+  - { name: attainment_pct,    type: decimal, nullable: false }
+
+measures:
+  - name: total_closed_won
+    expr: "sum(closed_won_amount)"
+    additivity: additive
+  - name: avg_attainment
+    expr: "avg(attainment_pct)"
+    additivity: non_additive
+
+dimensions:
+  - { name: quarter, column: quarter, label: "Quarter" }
+
+joins:
+  - to: dim_sales_rep
+    on: "mart_rep_quota.rep_id = dim_sales_rep.rep_id"
+    relationship: many_to_one
+
+meta:
+  provenance: human_curated
