@@ -8,6 +8,7 @@ canonicality — the compiler trusts its results and never reimplements them (§
 
 from __future__ import annotations
 
+import dataclasses
 from datetime import datetime
 from typing import TYPE_CHECKING, cast
 
@@ -15,7 +16,7 @@ import sqlglot
 from sqlglot import exp
 
 from canon.compiler.dialect import DIALECT_ADAPTERS
-from canon.compiler.joins import JoinEdge, build_alias_tree, plan_joins
+from canon.compiler.joins import JoinEdge, build_alias_tree, plan_joins, reachable_dimension_names
 from canon.compiler.result import (
     CompileResult,
     CompositionMetadata,
@@ -24,6 +25,9 @@ from canon.compiler.result import (
     OpaqueMetadata,
     PartialAdditiveMetadata,
     RecomputeAtGrainMetadata,
+    RelatedDimension,
+    RelatedMetadata,
+    RelatedMetric,
     SourceFreshness,
 )
 from canon.contracts.models import BindingKind, CollapseAgg, OnZeroDenominator
@@ -119,6 +123,19 @@ def compile(  # noqa: A001 — the public verb for this capability is "compile"
         assert isinstance(result, ResolverBinding)  # noqa: S101 — exhaustive over the union
         raw_bindings.append((name, result))
 
+    # Compute related metadata once here using resolved bindings (all paths get it via
+    # dataclasses.replace or direct constructor argument below).
+    queried_sources: set[str] = set()
+    for _, b in raw_bindings:
+        if b.source is not None:
+            queried_sources.add(b.source)
+        elif b.components is not None:
+            for component in (b.components.numerator, b.components.denominator):
+                if component.source is not None:
+                    queried_sources.add(component.source)
+    queried_metric_names = {name for name, _ in raw_bindings}
+    related = _related(queried_sources, queried_metric_names, query, resolver, sources_by_name)
+
     composite_indices = [
         i
         for i, (_, b) in enumerate(raw_bindings)
@@ -140,7 +157,9 @@ def compile(  # noqa: A001 — the public verb for this capability is "compile"
                 "remove other metrics from the request or split into separate queries"
             )
         _, composite = raw_bindings[0]
-        return _compile_composite(query, composite, resolver, sources_by_name)
+        return dataclasses.replace(
+            _compile_composite(query, composite, resolver, sources_by_name), related=related
+        )
     if semi_additive_indices:
         if len(query.metrics) > 1:
             raise UnsupportedMeasure(
@@ -148,7 +167,9 @@ def compile(  # noqa: A001 — the public verb for this capability is "compile"
                 "remove other metrics from the request or split into separate queries"
             )
         _, sa_binding = raw_bindings[0]
-        return _compile_semi_additive(query, sa_binding, resolver, sources_by_name)
+        return dataclasses.replace(
+            _compile_semi_additive(query, sa_binding, resolver, sources_by_name), related=related
+        )
     if recompute_indices:
         if len(query.metrics) > 1:
             raise UnsupportedMeasure(
@@ -156,7 +177,10 @@ def compile(  # noqa: A001 — the public verb for this capability is "compile"
                 "remove other metrics from the request or split into separate queries"
             )
         _, rg_binding = raw_bindings[0]
-        return _compile_recompute_at_grain(query, rg_binding, resolver, sources_by_name)
+        return dataclasses.replace(
+            _compile_recompute_at_grain(query, rg_binding, resolver, sources_by_name),
+            related=related,
+        )
     if opaque_indices:
         if len(query.metrics) > 1:
             raise UnsupportedMeasure(
@@ -164,7 +188,9 @@ def compile(  # noqa: A001 — the public verb for this capability is "compile"
                 "remove other metrics from the request or split into separate queries"
             )
         _, opaque_binding = raw_bindings[0]
-        return _compile_opaque(query, opaque_binding, resolver, sources_by_name)
+        return dataclasses.replace(
+            _compile_opaque(query, opaque_binding, resolver, sources_by_name), related=related
+        )
 
     metrics = _bindings_to_resolved(raw_bindings, sources_by_name)
     owner = metrics[0].source  # FROM anchor
@@ -291,6 +317,7 @@ def compile(  # noqa: A001 — the public verb for this capability is "compile"
         freshness=[_freshness(sources_by_name[s]) for s in used_sources],
         warnings=[],
         finality=finality_meta,
+        related=related,
     )
 
 
@@ -1580,6 +1607,47 @@ def _freshness(source: SemanticSource) -> SourceFreshness:
         source=source.name,
         last_validated_at=last.isoformat() if last is not None else None,
         stale=False,
+    )
+
+
+_RELATED_CAP = 5
+
+
+def _related(
+    queried_sources: set[str],
+    queried_metric_names: set[str],
+    query: SemanticQuery,
+    resolver: ContractResolver,
+    sources_by_name: dict[str, SemanticSource],
+) -> RelatedMetadata:
+    """Compute related-query suggestions for Stage 8 metadata (SPEC-E7/E8 §2.2)."""
+    used_dims: set[str] = set(query.dimensions)
+    filter_tokens: set[str] = {tok for f in query.filters for tok in f.split()}
+
+    seen_dims: set[str] = set()
+    raw_dims: list[RelatedDimension] = []
+    for src_name in sorted(queried_sources):
+        for entry_name, alias in reachable_dimension_names(src_name, sources_by_name):
+            bare = entry_name.split(".")[-1]
+            if entry_name in used_dims or bare in used_dims or bare in filter_tokens:
+                continue
+            if entry_name not in seen_dims:
+                seen_dims.add(entry_name)
+                raw_dims.append(RelatedDimension(name=entry_name, source=alias))
+    unused_dimensions = sorted(raw_dims, key=lambda d: (d.name, d.source))[:_RELATED_CAP]
+
+    seen_metrics: set[str] = set()
+    raw_metrics: list[RelatedMetric] = []
+    for src_name in sorted(queried_sources):
+        for metric_name in resolver.metrics_for_source(src_name):
+            if metric_name not in queried_metric_names and metric_name not in seen_metrics:
+                seen_metrics.add(metric_name)
+                raw_metrics.append(RelatedMetric(name=metric_name, source=src_name))
+    sibling_metrics = sorted(raw_metrics, key=lambda m: m.name)[:_RELATED_CAP]
+
+    return RelatedMetadata(
+        unused_dimensions=unused_dimensions,
+        sibling_metrics=sibling_metrics,
     )
 
 

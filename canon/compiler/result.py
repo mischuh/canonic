@@ -16,8 +16,35 @@ __all__ = [
     "OpaqueMetadata",
     "PartialAdditiveMetadata",
     "RecomputeAtGrainMetadata",
+    "RelatedDimension",
+    "RelatedMetadata",
+    "RelatedMetric",
     "SourceFreshness",
 ]
+
+
+@dataclass(frozen=True, slots=True)
+class RelatedDimension:
+    """A queryable dimension not used in the current query (SPEC-E7/E8 §2.2 metadata.related)."""
+
+    name: str
+    source: str
+
+
+@dataclass(frozen=True, slots=True)
+class RelatedMetric:
+    """An active sibling metric on the same source (SPEC-E7/E8 §2.2 metadata.related)."""
+
+    name: str
+    source: str
+
+
+@dataclass(frozen=True, slots=True)
+class RelatedMetadata:
+    """Related-query suggestions attached to every compile result (SPEC-E7/E8 §2.2)."""
+
+    unused_dimensions: list[RelatedDimension] = field(default_factory=list)
+    sibling_metrics: list[RelatedMetric] = field(default_factory=list)
 
 
 @dataclass(frozen=True, slots=True)
@@ -124,6 +151,7 @@ class CompileResult:
     freshness: list[SourceFreshness] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
     finality: FinalityMetadata | None = None
+    related: RelatedMetadata = field(default_factory=RelatedMetadata)
     composition: CompositionMetadata | None = None
     partial_additive: PartialAdditiveMetadata | None = None
     recompute_at_grain: RecomputeAtGrainMetadata | None = None

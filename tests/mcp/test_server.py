@@ -143,7 +143,15 @@ async def test_compile_query(canon_service: CanonService) -> None:
     assert "SELECT" in data["compiled"]["sql"].upper()
     assert data["metadata"]["resolved"]["metrics"]["revenue"] == "orders.total_revenue"
     assert any(g["id"] == "revenue-excludes-refunds" for g in data["metadata"]["guardrails_fired"])
-    assert data["metadata"]["contract_schema"] == "1.3"
+    assert data["metadata"]["contract_schema"] == "1.4"
+    # S12: related block is always present
+    assert "related" in data["metadata"]
+    assert isinstance(data["metadata"]["related"]["unused_dimensions"], list)
+    assert isinstance(data["metadata"]["related"]["sibling_metrics"], list)
+    # order_count is a sibling on the same source
+    sibling_names = [m["name"] for m in data["metadata"]["related"]["sibling_metrics"]]
+    assert "order_count" in sibling_names
+    assert "revenue" not in sibling_names
 
 
 @pytest.mark.asyncio

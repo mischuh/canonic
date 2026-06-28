@@ -88,12 +88,19 @@ def orders_source() -> SemanticSource:
             Column(name="order_id", type="string", nullable=False),
             Column(name="amount", type="decimal", nullable=False),
             Column(name="status", type="string", nullable=False),
+            Column(name="region", type="string", nullable=False),
+            Column(name="channel", type="string", nullable=False),
             Column(name="created_at", type="timestamp", nullable=False),
         ],
-        measures=[Measure(name="total_revenue", expr="sum(amount)", additivity="additive")],
+        measures=[
+            Measure(name="total_revenue", expr="sum(amount)", additivity="additive"),
+            Measure(name="order_count", expr="count(order_id)", additivity="additive"),
+        ],
         dimensions=[
             Dimension(name="order_date", column="created_at"),
             Dimension(name="status", column="status"),
+            Dimension(name="region", column="region"),
+            Dimension(name="channel", column="channel"),
         ],
     )
 
@@ -107,6 +114,11 @@ def canon_service(orders_source: SemanticSource, monkeypatch: pytest.MonkeyPatch
         aliases=["rev"],
         status=Status.ACTIVE,
     )
+    order_count_binding = MetricBinding(
+        metric="order_count",
+        canonical=CanonicalRef(source="orders", measure="order_count"),
+        status=Status.ACTIVE,
+    )
     guardrail = Guardrail(
         id="revenue-excludes-refunds",
         applies_to=AppliesTo(source="orders", measure="total_revenue"),
@@ -115,7 +127,7 @@ def canon_service(orders_source: SemanticSource, monkeypatch: pytest.MonkeyPatch
         severity=Severity.ERROR,
         rationale="Refunds are reversals, not revenue.",
     )
-    resolver = ContractResolver(bindings=[binding], guardrails=[guardrail])
+    resolver = ContractResolver(bindings=[binding, order_count_binding], guardrails=[guardrail])
     config = CanonConfig.model_validate(
         {
             "version": 1,

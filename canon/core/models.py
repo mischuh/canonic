@@ -30,6 +30,9 @@ __all__ = [
     "MetricSummary",
     "QueryMetadata",
     "QueryResult",
+    "RelatedDimensionOut",
+    "RelatedMetricOut",
+    "RelatedOut",
     "SourceFreshnessOut",
 ]
 
@@ -62,6 +65,33 @@ class FinalityOut(BaseModel):
     sources_used: list[str]
     final_rows: int | None = None
     provisional_rows: int | None = None
+
+
+class RelatedDimensionOut(BaseModel):
+    """An unused queryable dimension surfaced in ``metadata.related`` (SPEC-E7/E8 §2.2)."""
+
+    model_config = ConfigDict(frozen=True)
+
+    name: str
+    source: str
+
+
+class RelatedMetricOut(BaseModel):
+    """An active sibling metric surfaced in ``metadata.related`` (SPEC-E7/E8 §2.2)."""
+
+    model_config = ConfigDict(frozen=True)
+
+    name: str
+    source: str
+
+
+class RelatedOut(BaseModel):
+    """The ``metadata.related`` block: unused dimensions and sibling metrics (SPEC-E7/E8 §2.2)."""
+
+    model_config = ConfigDict(frozen=True)
+
+    unused_dimensions: list[RelatedDimensionOut] = []
+    sibling_metrics: list[RelatedMetricOut] = []
 
 
 class DimensionInfo(BaseModel):
@@ -134,6 +164,7 @@ class QueryMetadata(BaseModel):
     warnings: list[str] = []
     contract_schema: str = CONTRACT_SCHEMA
     finality: FinalityOut | None = None
+    related: RelatedOut = RelatedOut()
 
     @classmethod
     def from_compile_result(
@@ -175,6 +206,16 @@ class QueryMetadata(BaseModel):
             warnings=list(compiled.warnings),
             contract_schema=CONTRACT_SCHEMA,
             finality=finality_out,
+            related=RelatedOut(
+                unused_dimensions=[
+                    RelatedDimensionOut(name=d.name, source=d.source)
+                    for d in compiled.related.unused_dimensions
+                ],
+                sibling_metrics=[
+                    RelatedMetricOut(name=m.name, source=m.source)
+                    for m in compiled.related.sibling_metrics
+                ],
+            ),
         )
 
 

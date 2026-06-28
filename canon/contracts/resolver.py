@@ -161,6 +161,8 @@ class ContractResolver:
         # active single/semi_additive metric name -> canonical for metric-targeted guardrails
         # composite bindings (ratio/weighted_avg) have no single (source, measure), so excluded
         metric_to_canonical: dict[str, CanonicalRef] = {}
+        # source name -> sorted list of active metric names bound to that source
+        source_to_metrics: dict[str, list[str]] = {}
         for binding in bindings:
             if binding.status is not Status.ACTIVE:
                 continue
@@ -172,10 +174,17 @@ class ContractResolver:
                 BindingKind.OPAQUE,
             }:
                 metric_to_canonical[binding.metric] = binding.canonical
+                if binding.canonical.source:
+                    source_to_metrics.setdefault(binding.canonical.source, []).append(
+                        binding.metric
+                    )
             for name in (binding.metric, *binding.aliases):
                 name_index.setdefault(name, []).append(binding)
         self._name_index = name_index
         self._metric_to_canonical = metric_to_canonical
+        self._source_to_metrics: dict[str, list[str]] = {
+            src: sorted(metrics) for src, metrics in source_to_metrics.items()
+        }
 
     @classmethod
     def from_project(cls, project_root: Path) -> ContractResolver:
@@ -186,6 +195,10 @@ class ContractResolver:
             finality=load_finality(project_root),
             assertions=load_assertions(project_root),
         )
+
+    def metrics_for_source(self, source: str) -> list[str]:
+        """Return active canonical metric names bound to *source*, sorted alphabetically."""
+        return list(self._source_to_metrics.get(source, []))
 
     def resolve_metric(self, name: str, context: str | None = None) -> MetricResolution:
         """Resolve a metric name/alias to its canonical binding (SPEC-E5-E15 §6, §4.1).

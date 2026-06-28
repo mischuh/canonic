@@ -11,7 +11,7 @@ from pathlib import Path  # noqa: TC003 — used in function bodies, not just an
 from typing import TYPE_CHECKING, Any, cast
 
 from canon.compiler import SemanticQuery, compile
-from canon.compiler.joins import build_alias_tree
+from canon.compiler.joins import build_alias_tree, reachable_dimension_names
 from canon.config import CanonConfig, load_config
 from canon.connectors.base import Capability, require_capability
 from canon.connectors.factory import default_factory
@@ -227,52 +227,33 @@ class CanonService:
     def _reachable_dimensions(self, source_name: str) -> list[DimensionInfo]:
         """All dimensions queryable from *source_name* via its declared join graph.
 
-        Traverses the join tree breadth-first using aliases. Dimensions reachable under
+        Traverses the join graph breadth-first using aliases. Dimensions reachable under
         only one alias are returned with an unqualified ``name``; dimensions reachable
         under multiple aliases (e.g. ``city`` via both ``pickup`` and ``dropoff``) are
         returned qualified (``pickup.city``, ``dropoff.city``) so the caller always gets
         a usable name to pass to ``query()``.
         """
         alias_to_source = build_alias_tree(source_name, self._source_by_name)
+        dim_lookup: dict[tuple[str, str], _Dimension] = {
+            (alias_to_source.get(alias, alias), d.name): d
+            for alias in alias_to_source
+            for src in [self._source_by_name.get(alias_to_source.get(alias, alias))]
+            if src is not None
+            for d in src.dimensions
+        }
 
-        all_dims: list[tuple[str, _Dimension]] = []
-        seen_aliases: set[str] = set()
-        queue: list[str] = [source_name]
-        while queue:
-            alias = queue.pop(0)
-            if alias in seen_aliases:
-                continue
-            seen_aliases.add(alias)
-            src_name = alias_to_source.get(alias, alias)
-            src = self._source_by_name.get(src_name)
-            if src is None:
-                continue
-            for d in src.dimensions:
-                all_dims.append((alias, d))
-            for join in src.joins:
-                child_alias = join.name or join.to
-                if child_alias not in seen_aliases:
-                    queue.append(child_alias)
-
-        # Determine which dim names appear under multiple aliases (need qualification).
-        dim_aliases: dict[str, list[str]] = {}
-        for alias, dim in all_dims:
-            dim_aliases.setdefault(dim.name, []).append(alias)
-
-        seen_result: set[str] = set()
         result: list[DimensionInfo] = []
-        for alias, dim in all_dims:
-            entry_name = f"{alias}.{dim.name}" if len(dim_aliases[dim.name]) > 1 else dim.name
-            if entry_name not in seen_result:
-                seen_result.add(entry_name)
-                result.append(
-                    DimensionInfo(
-                        name=entry_name,
-                        source=alias,
-                        label=dim.label,
-                        description=dim.description,
-                    )
+        for entry_name, alias in reachable_dimension_names(source_name, self._source_by_name):
+            src_name = alias_to_source.get(alias, alias)
+            dim = dim_lookup.get((src_name, entry_name.split(".")[-1]))
+            result.append(
+                DimensionInfo(
+                    name=entry_name,
+                    source=alias,
+                    label=dim.label if dim else None,
+                    description=dim.description if dim else None,
                 )
+            )
         return result
 
     # ------------------------------------------------------------------

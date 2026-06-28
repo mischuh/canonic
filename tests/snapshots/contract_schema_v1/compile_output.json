@@ -120,7 +120,7 @@
           "type": "array"
         },
         "contract_schema": {
-          "default": "1.3",
+          "default": "1.4",
           "title": "Contract Schema",
           "type": "string"
         },
@@ -134,6 +134,13 @@
             }
           ],
           "default": null
+        },
+        "related": {
+          "$ref": "#/$defs/RelatedOut",
+          "default": {
+            "unused_dimensions": [],
+            "sibling_metrics": []
+          }
         }
       },
       "required": [
@@ -142,6 +149,67 @@
         "freshness"
       ],
       "title": "QueryMetadata",
+      "type": "object"
+    },
+    "RelatedDimensionOut": {
+      "description": "An unused queryable dimension surfaced in ``metadata.related`` (SPEC-E7/E8 \u00a72.2).",
+      "properties": {
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "source": {
+          "title": "Source",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "source"
+      ],
+      "title": "RelatedDimensionOut",
+      "type": "object"
+    },
+    "RelatedMetricOut": {
+      "description": "An active sibling metric surfaced in ``metadata.related`` (SPEC-E7/E8 \u00a72.2).",
+      "properties": {
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "source": {
+          "title": "Source",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "source"
+      ],
+      "title": "RelatedMetricOut",
+      "type": "object"
+    },
+    "RelatedOut": {
+      "description": "The ``metadata.related`` block: unused dimensions and sibling metrics (SPEC-E7/E8 \u00a72.2).",
+      "properties": {
+        "unused_dimensions": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/RelatedDimensionOut"
+          },
+          "title": "Unused Dimensions",
+          "type": "array"
+        },
+        "sibling_metrics": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/RelatedMetricOut"
+          },
+          "title": "Sibling Metrics",
+          "type": "array"
+        }
+      },
+      "title": "RelatedOut",
       "type": "object"
     },
     "SourceFreshnessOut": {

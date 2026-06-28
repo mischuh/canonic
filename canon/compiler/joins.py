@@ -26,7 +26,13 @@ if TYPE_CHECKING:
 
     from canon.semantic.models import Join, SemanticSource
 
-__all__ = ["JoinEdge", "JoinPathCandidate", "build_alias_tree", "plan_joins"]
+__all__ = [
+    "JoinEdge",
+    "JoinPathCandidate",
+    "build_alias_tree",
+    "plan_joins",
+    "reachable_dimension_names",
+]
 
 
 @dataclass(frozen=True, slots=True)
@@ -83,6 +89,55 @@ def build_alias_tree(
                 alias_to_source[child_alias] = join.to
                 queue.append((child_alias, join.to))
     return alias_to_source
+
+
+def reachable_dimension_names(
+    source_name: str,
+    sources_by_name: dict[str, SemanticSource],
+) -> list[tuple[str, str]]:
+    """Return ``(qualified_dim_name, alias)`` for every dimension reachable from *source_name*.
+
+    Traverses the join graph breadth-first. When a dimension name appears under exactly
+    one alias the name is returned unqualified; when it appears under more than one alias
+    it is returned as ``"alias.dim"`` — the same string a caller can pass to ``query()``.
+
+    Used by the compiler to compute ``metadata.related.unused_dimensions``; also used by
+    :meth:`canon.core.service.CanonService._reachable_dimensions` to avoid duplicating
+    the traversal logic.
+    """
+    alias_to_source = build_alias_tree(source_name, sources_by_name)
+
+    all_dims: list[tuple[str, str]] = []  # (alias, dim_name)
+    seen_aliases: set[str] = set()
+    queue: list[str] = [source_name]
+    while queue:
+        alias = queue.pop(0)
+        if alias in seen_aliases:
+            continue
+        seen_aliases.add(alias)
+        src_name = alias_to_source.get(alias, alias)
+        src = sources_by_name.get(src_name)
+        if src is None:
+            continue
+        for d in src.dimensions:
+            all_dims.append((alias, d.name))
+        for join in src.joins:
+            child_alias = join.name or join.to
+            if child_alias not in seen_aliases:
+                queue.append(child_alias)
+
+    dim_aliases: dict[str, list[str]] = {}
+    for alias, dim_name in all_dims:
+        dim_aliases.setdefault(dim_name, []).append(alias)
+
+    seen_result: set[str] = set()
+    result: list[tuple[str, str]] = []
+    for alias, dim_name in all_dims:
+        entry_name = f"{alias}.{dim_name}" if len(dim_aliases[dim_name]) > 1 else dim_name
+        if entry_name not in seen_result:
+            seen_result.add(entry_name)
+            result.append((entry_name, alias))
+    return result
 
 
 def _rewrite_on(

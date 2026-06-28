@@ -261,3 +261,25 @@ class TestFromProject:
     def test_alias_from_project(self, tmp_contracts_dir: Path) -> None:
         resolver = ContractResolver.from_project(tmp_contracts_dir)
         assert isinstance(resolver.resolve_metric("rev"), Binding)
+
+
+class TestMetricsForSource:
+    def test_returns_sorted_metrics_for_source(self) -> None:
+        b1 = _binding("revenue", source="orders", measure="total_revenue")
+        b2 = _binding("order_count", source="orders", measure="cnt")
+        resolver = ContractResolver(bindings=[b1, b2], guardrails=[])
+        assert resolver.metrics_for_source("orders") == ["order_count", "revenue"]
+
+    def test_returns_empty_for_unknown_source(self) -> None:
+        resolver = ContractResolver(bindings=[_binding("revenue")], guardrails=[])
+        assert resolver.metrics_for_source("nonexistent") == []
+
+    def test_excludes_inactive_bindings(self) -> None:
+        active = _binding("revenue", source="orders", measure="total_revenue")
+        inactive = MetricBinding(
+            metric="deprecated_rev",
+            canonical=CanonicalRef(source="orders", measure="old_revenue"),
+            status=Status.DEPRECATED,
+        )
+        resolver = ContractResolver(bindings=[active, inactive], guardrails=[])
+        assert resolver.metrics_for_source("orders") == ["revenue"]
