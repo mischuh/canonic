@@ -1,0 +1,33 @@
+name: order_items
+connection: jaffle_duckdb
+table: main.order_items
+grain:
+- order_item_id
+columns:
+- name: order_item_id
+  type: int
+  nullable: false
+- name: order_id
+  type: int
+  nullable: false
+- name: product_id
+  type: int
+  nullable: false
+- name: quantity
+  type: int
+  nullable: false
+measures:
+- name: units_sold
+  expr: sum(quantity)
+  additivity: additive
+dimensions: []
+joins:
+- to: orders
+  on: order_items.order_id = orders.order_id
+  relationship: many_to_one
+- to: products
+  on: order_items.product_id = products.product_id
+  relationship: many_to_one
+meta:
+  source_fingerprint: 
+    sha256:846af03b3d11c595f70e628c2fa171420f02e262e96abd9a58027f9eec16bf47

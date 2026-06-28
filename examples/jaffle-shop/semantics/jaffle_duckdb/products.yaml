@@ -1,0 +1,45 @@
+name: products
+connection: jaffle_duckdb
+table: main.products
+grain:
+- product_id
+columns:
+- name: product_id
+  type: int
+  nullable: false
+- name: name
+  type: string
+  nullable: false
+- name: type
+  type: string
+  nullable: true
+- name: price
+  type: decimal
+  nullable: false
+- name: description
+  type: string
+  nullable: true
+measures:
+- name: row_count
+  expr: count(*)
+  additivity: additive
+- name: total_price
+  expr: sum(price)
+  additivity: additive
+dimensions:
+- name: name
+  column: name
+  label: Product Name
+  aliases: [produktname]
+- name: type
+  column: type
+  label: Product Type
+  aliases: [product_type, produkttyp, product_category]
+- name: description
+  column: description
+  label: Product Description
+  aliases: [produktbeschreibung, beschreibung]
+joins: []
+meta:
+  source_fingerprint: 
+    sha256:ba8cfd20d3af8fe446731ee93ea80a6926c5380afb291f01e7fd93da2cdca181

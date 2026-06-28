@@ -1,0 +1,6 @@
+metric: product_count
+canonical:
+  source: products
+  measure: row_count
+provenance: human_curated
+status: active

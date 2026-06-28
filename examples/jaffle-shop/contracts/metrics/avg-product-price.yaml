@@ -1,0 +1,8 @@
+metric: avg_product_price
+canonical:
+  kind: ratio
+  numerator: total_price
+  denominator: product_count
+  on_zero_denominator: "null"
+provenance: human_curated
+status: active

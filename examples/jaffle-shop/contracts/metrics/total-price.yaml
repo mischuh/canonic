@@ -1,0 +1,6 @@
+metric: total_price
+canonical:
+  source: products
+  measure: total_price
+provenance: human_curated
+status: active

@@ -1,0 +1,6 @@
+metric: num_customers
+canonical:
+  source: customers
+  measure: row_count
+provenance: human_curated
+status: active

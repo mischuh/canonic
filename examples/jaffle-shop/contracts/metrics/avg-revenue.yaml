@@ -1,0 +1,8 @@
+metric: avg_revenue
+canonical:
+  kind: ratio
+  numerator: revenue
+  denominator: num_customers
+  on_zero_denominator: "null"
+provenance: human_curated
+status: active

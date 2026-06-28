@@ -1,0 +1,38 @@
+name: stores
+connection: jaffle_duckdb
+table: main.stores
+grain:
+- store_id
+columns:
+- name: store_id
+  type: int
+  nullable: false
+- name: name
+  type: string
+  nullable: false
+- name: opened_at
+  type: date
+  nullable: false
+- name: tax_paid
+  type: decimal
+  nullable: true
+measures:
+- name: row_count
+  expr: count(*)
+  additivity: additive
+- name: total_tax_paid
+  expr: sum(tax_paid)
+  additivity: additive
+dimensions:
+- name: name
+  column: name
+  label: Store Name
+  aliases: [filialname]
+- name: opened_at
+  column: opened_at
+  label: Opening Date
+  aliases: [open_date, opened_date, eröffnungsdatum]
+joins: []
+meta:
+  source_fingerprint: 
+    sha256:8dbe415b8ffe2a8f3061e8f46e85b9d8e8dfb8fb44c3ac21aba0ea9b2a761b45

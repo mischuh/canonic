@@ -2,5 +2,5 @@ metric: revenue
 canonical:
   source: orders
   measure: revenue
-provenance: inferred
+provenance: human_curated
 status: active
