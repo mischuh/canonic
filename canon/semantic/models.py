@@ -150,6 +150,9 @@ class Dimension(BaseModel):
     name: str
     column: str
     granularity: str | None = None  # [P1] time granularity, e.g. "day"
+    label: str | None = None  # human-readable display name, e.g. "Product Type"
+    description: str | None = None  # freetext explanation
+    aliases: list[str] = []  # alternate lookup names, e.g. ["product_type"]
 
 
 class Join(BaseModel):

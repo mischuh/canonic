@@ -5,7 +5,7 @@ from __future__ import annotations
 import pytest
 
 from canon.compiler.query import SemanticQuery
-from canon.core.models import MetricDetail, MetricSummary
+from canon.core.models import DimensionInfo, MetricDetail, MetricSummary
 from canon.core.service import CanonService
 from canon.exc import Ambiguous, Unresolved
 
@@ -29,6 +29,13 @@ class TestListMetrics:
         metrics = [s.metric for s in summaries]
         assert metrics == sorted(metrics)
         assert len(metrics) == len(set(metrics))
+
+    def test_includes_dimensions(self, canon_service: CanonService) -> None:
+        summaries = canon_service.list_metrics()
+        s = next(s for s in summaries if s.metric == "revenue")
+        assert len(s.dimensions) > 0
+        assert all(isinstance(d, DimensionInfo) for d in s.dimensions)
+        assert any(d.name == "order_date" for d in s.dimensions)
 
 
 class TestListMetricsDistinctCount:
@@ -90,7 +97,7 @@ class TestDescribeMetric:
         assert detail.source == "orders"
         assert detail.measure == "total_revenue"
         assert "order_id" in detail.grain
-        assert "order_date" in detail.dimensions
+        assert any(d.name == "order_date" for d in detail.dimensions)
         assert "total_revenue" in detail.measures
         assert "rev" in detail.aliases
 
@@ -110,7 +117,7 @@ class TestDescribeMetricDistinctCount:
         assert detail.metric == "unique_customers"
         assert detail.source == "orders"
         assert detail.measure is None
-        assert "order_date" in detail.dimensions
+        assert any(d.name == "order_date" for d in detail.dimensions)
         assert "active_customers" in detail.aliases
 
     def test_alias_lookup(self, distinct_count_service: CanonService) -> None:
@@ -168,6 +175,27 @@ class TestResolveMetric:
         svc = CanonService(config=config, resolver=resolver, sources=[orders_source])
         with pytest.raises(Ambiguous, match="ambiguous"):
             svc.resolve_metric("revenue")
+
+
+class TestDescribeMetricComposite:
+    def test_ratio_returns_combined_dimensions(self, ratio_service: CanonService) -> None:
+        detail = ratio_service.describe_metric("avg_cost")
+        assert isinstance(detail, MetricDetail)
+        assert detail.source is None
+        assert detail.measure is None
+        assert detail.grain == []
+        dim_names = {d.name for d in detail.dimensions}
+        assert "order_date" in dim_names
+        assert "status" in dim_names
+
+    def test_ratio_aliases_preserved(self, ratio_service: CanonService) -> None:
+        detail = ratio_service.describe_metric("avg_cost")
+        assert "cost ratio" in detail.aliases
+
+    def test_weighted_avg_returns_dimensions(self, weighted_avg_service: CanonService) -> None:
+        detail = weighted_avg_service.describe_metric("avg_weighted_cost")
+        assert detail.source is None
+        assert len(detail.dimensions) > 0
 
 
 class TestCompileQuery:

@@ -510,7 +510,7 @@ def _render_describe_fallback(config: CanonConfig, sources: list[SemanticSource]
     if detail.grain:
         lines.append(f"  grain: {', '.join(detail.grain)}")
     if detail.dimensions:
-        lines.append(f"  dimensions: {', '.join(detail.dimensions[:5])}")
+        lines.append(f"  dimensions: {', '.join(d.name for d in detail.dimensions[:5])}")
     if detail.measures:
         lines.append(f"  measures: {', '.join(detail.measures[:5])}")
     _console.print(Panel("\n".join(lines), title="what you can ask", border_style="dim"))
