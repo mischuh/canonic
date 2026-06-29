@@ -638,3 +638,119 @@ def test_named_join_duplicate_alias_raises_validation_error() -> None:
                 Join(to="loc", on="bad.id = loc.id", relationship=Relationship.MANY_TO_ONE),
             ],
         )
+
+
+# --- SQLite-style DATE() filter rewriting ------------------------------------
+
+
+def test_filter_sqlite_date_subtraction(
+    resolver: ContractResolver, sources: list[SemanticSource]
+) -> None:
+    result = compile(
+        SemanticQuery(
+            metrics=["revenue"],
+            filters=["created_at >= DATE('now', '-3 months')"],
+        ),
+        resolver,
+        sources,
+    )
+    _parse_ok(result.sql)
+    assert "CURRENT_DATE" in result.sql.upper()
+    assert "INTERVAL" in result.sql.upper()
+
+
+def test_filter_sqlite_date_addition(
+    resolver: ContractResolver, sources: list[SemanticSource]
+) -> None:
+    result = compile(
+        SemanticQuery(
+            metrics=["revenue"],
+            filters=["created_at <= DATE('now', '+1 months')"],
+        ),
+        resolver,
+        sources,
+    )
+    _parse_ok(result.sql)
+    assert "CURRENT_DATE" in result.sql.upper()
+    assert "INTERVAL" in result.sql.upper()
+
+
+# --- Dialect-aware emission ---------------------------------------------------
+
+
+def test_compile_uses_postgres_dialect_by_default(
+    resolver: ContractResolver, sources: list[SemanticSource]
+) -> None:
+    result = compile(SemanticQuery(metrics=["revenue"]), resolver, sources)
+    assert result.dialect == "postgres"
+
+
+def test_compile_duckdb_dialect_via_connection_map(
+    resolver: ContractResolver, sources: list[SemanticSource]
+) -> None:
+    result = compile(
+        SemanticQuery(metrics=["revenue"]),
+        resolver,
+        sources,
+        connection_dialects={"warehouse_pg": "duckdb"},
+    )
+    assert result.dialect == "duckdb"
+
+
+def test_compile_duckdb_date_filter_emits_duckdb_interval(
+    resolver: ContractResolver, sources: list[SemanticSource]
+) -> None:
+    result = compile(
+        SemanticQuery(
+            metrics=["revenue"],
+            filters=["created_at >= DATE('now', '-3 months')"],
+        ),
+        resolver,
+        sources,
+        connection_dialects={"warehouse_pg": "duckdb"},
+    )
+    assert result.dialect == "duckdb"
+    assert "CURRENT_DATE" in result.sql.upper()
+    # DuckDB uses INTERVAL '3' MONTHS (separate tokens)
+    assert "INTERVAL '3' MONTHS" in result.sql
+
+
+def test_compile_postgres_date_filter_emits_postgres_interval(
+    resolver: ContractResolver, sources: list[SemanticSource]
+) -> None:
+    result = compile(
+        SemanticQuery(
+            metrics=["revenue"],
+            filters=["created_at >= DATE('now', '-3 months')"],
+        ),
+        resolver,
+        sources,
+    )
+    assert result.dialect == "postgres"
+    assert "CURRENT_DATE" in result.sql.upper()
+    # Postgres uses INTERVAL '3 MONTHS' (unit inside the string)
+    assert "INTERVAL '3 MONTHS'" in result.sql
+
+
+def test_compile_empty_connection_map_falls_back_to_postgres(
+    resolver: ContractResolver, sources: list[SemanticSource]
+) -> None:
+    result = compile(
+        SemanticQuery(metrics=["revenue"]),
+        resolver,
+        sources,
+        connection_dialects={},
+    )
+    assert result.dialect == "postgres"
+
+
+def test_compile_unknown_connection_falls_back_to_postgres(
+    resolver: ContractResolver, sources: list[SemanticSource]
+) -> None:
+    result = compile(
+        SemanticQuery(metrics=["revenue"]),
+        resolver,
+        sources,
+        connection_dialects={"other_connection": "duckdb"},
+    )
+    assert result.dialect == "postgres"

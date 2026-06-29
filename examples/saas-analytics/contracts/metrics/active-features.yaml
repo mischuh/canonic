@@ -1,0 +1,8 @@
+metric: active_features
+canonical:
+  kind: distinct_count
+  source: fct_feature_usage
+  distinct_on: feature_id
+provenance: human_curated
+aliases: ["features used", "distinct features", "feature adoption breadth"]
+status: active

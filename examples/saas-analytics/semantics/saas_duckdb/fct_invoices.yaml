@@ -1,0 +1,40 @@
+name: fct_invoices
+connection: saas_duckdb
+table: fct_invoices
+grain: [invoice_id]
+description: >
+  Authoritative (final) billing fact. One row per invoice. Refunds carry status='refunded'
+  and trial invoices carry is_trial=true — both are stripped from revenue by mandatory_filter
+  guardrails. See [[revenue-excludes-refunds-trials-caveat]].
+
+columns:
+  - { name: invoice_id,   type: int,     nullable: false }
+  - { name: customer_id,  type: int,     nullable: false }
+  - { name: invoice_date, type: date,    nullable: false }
+  - { name: amount,       type: decimal, nullable: false }
+  - { name: status,       type: string,  nullable: false }
+  - { name: is_trial,     type: bool,    nullable: false }
+
+measures:
+  - name: total_amount
+    expr: "sum(amount)"
+    additivity: additive
+  - name: invoice_count
+    expr: "count(invoice_id)"
+    additivity: additive
+
+dimensions:
+  - { name: invoice_date, column: invoice_date, label: "Invoice Date", granularity: day }
+  - { name: status,       column: status,       label: "Invoice Status" }
+  - { name: is_trial,     column: is_trial,     label: "Trial Flag" }
+
+joins:
+  - to: dim_customer
+    on: "fct_invoices.customer_id = dim_customer.customer_id"
+    relationship: many_to_one
+
+finality:
+  watermark: null   # this table is always final
+
+meta:
+  provenance: human_curated

@@ -1,0 +1,17 @@
+name: dim_industry
+connection: saas_duckdb
+table: dim_industry
+grain: [industry_id]
+description: "Industry dimension: industry rolled up to sector."
+
+columns:
+  - { name: industry_id,   type: int,    nullable: false }
+  - { name: industry_name, type: string, nullable: false }
+  - { name: sector,        type: string, nullable: false }
+
+dimensions:
+  - { name: industry, column: industry_name, label: "Industry" }
+  - { name: sector,   column: sector,        label: "Sector" }
+
+meta:
+  provenance: human_curated

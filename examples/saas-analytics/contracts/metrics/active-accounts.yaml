@@ -1,0 +1,10 @@
+# Helper metric: single-kind active-account count (denominator for arpu and churn_rate).
+# The standalone showcase distinct_count metric is active_subscribers; ratio components
+# must be single-kind, so this single binding wraps a count(distinct ...) measure.
+metric: active_accounts
+canonical:
+  kind: single
+  source: fct_mrr_snapshot
+  measure: active_account_count
+provenance: human_curated
+status: active

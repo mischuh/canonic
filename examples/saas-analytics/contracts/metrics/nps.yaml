@@ -1,0 +1,9 @@
+metric: nps
+canonical:
+  kind: ratio
+  numerator: nps_net
+  denominator: nps_responses
+  on_zero_denominator: null
+provenance: human_curated
+aliases: ["net promoter score"]
+status: active

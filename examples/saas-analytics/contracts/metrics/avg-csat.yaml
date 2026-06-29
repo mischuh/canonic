@@ -1,0 +1,8 @@
+metric: avg_csat
+canonical:
+  kind: single
+  source: fct_support_tickets
+  measure: avg_csat
+provenance: human_curated
+aliases: ["csat", "customer satisfaction", "average csat"]
+status: active

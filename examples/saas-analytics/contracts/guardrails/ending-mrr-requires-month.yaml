@@ -1,0 +1,10 @@
+id: ending-mrr-requires-month
+applies_to:
+  metric: ending_mrr
+kind: required_dimension
+severity: warn
+rationale: >
+  MRR is a point-in-time snapshot measure. Without grouping by snapshot_month a query
+  silently mixes monthly positions, which is almost never intended. This guardrail nudges
+  callers to group ending_mrr by snapshot_month. (required_dimension is a forward-looking
+  P1 contract kind: it is recorded and surfaced but not yet enforced by the compiler.)

@@ -1,0 +1,9 @@
+# Helper metric: numerator for cac (marketing budget).
+metric: campaign_spend
+canonical:
+  kind: single
+  source: dim_campaign
+  measure: campaign_budget
+provenance: human_curated
+aliases: ["marketing spend", "campaign budget"]
+status: active

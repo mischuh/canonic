@@ -1,0 +1,38 @@
+name: dim_customer
+connection: saas_duckdb
+table: dim_customer
+grain: [customer_id]
+description: "One row per customer account. Conformed dimension joined by every customer-scoped fact."
+
+columns:
+  - { name: customer_id,  type: int,    nullable: false }
+  - { name: company_name, type: string, nullable: false }
+  - { name: geo_id,       type: int,    nullable: false }
+  - { name: industry_id,  type: int,    nullable: false }
+  - { name: campaign_id,  type: int,    nullable: false }
+  - { name: rep_id,       type: int,    nullable: false }
+  - { name: segment,      type: string, nullable: false }
+  - { name: signup_date,  type: date,   nullable: false }
+
+dimensions:
+  - { name: customer_id,  column: customer_id,  label: "Customer ID" }
+  - { name: company_name, column: company_name, label: "Company" }
+  - { name: segment,      column: segment,      label: "Segment", aliases: ["customer segment", "tier"] }
+  - { name: signup_date,  column: signup_date,  label: "Signup Date", granularity: day }
+
+joins:
+  - to: dim_geo
+    on: "dim_customer.geo_id = dim_geo.geo_id"
+    relationship: many_to_one
+  - to: dim_industry
+    on: "dim_customer.industry_id = dim_industry.industry_id"
+    relationship: many_to_one
+  - to: dim_campaign
+    on: "dim_customer.campaign_id = dim_campaign.campaign_id"
+    relationship: many_to_one
+  - to: dim_sales_rep
+    on: "dim_customer.rep_id = dim_sales_rep.rep_id"
+    relationship: many_to_one
+
+meta:
+  provenance: human_curated

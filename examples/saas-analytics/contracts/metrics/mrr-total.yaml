@@ -1,0 +1,10 @@
+# Helper metric: additive within-period MRR sum (numerator for arpu).
+# Unlike ending_mrr (semi-additive), this is a plain additive sum so it can feed a ratio;
+# query it grouped by snapshot_month to get per-period figures.
+metric: mrr_total
+canonical:
+  kind: single
+  source: fct_mrr_snapshot
+  measure: mrr_sum
+provenance: human_curated
+status: active

@@ -1,0 +1,9 @@
+metric: win_rate
+canonical:
+  kind: ratio
+  numerator: won_opportunities
+  denominator: total_opportunities
+  on_zero_denominator: null
+provenance: human_curated
+aliases: ["close rate", "deal win rate"]
+status: active

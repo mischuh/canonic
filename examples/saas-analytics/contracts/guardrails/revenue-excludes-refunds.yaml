@@ -1,0 +1,8 @@
+id: revenue-excludes-refunds
+applies_to:
+  source: fct_invoices
+  measure: total_amount
+kind: mandatory_filter
+filter: "status != 'refunded'"
+severity: error
+rationale: "Refunds are accounting reversals, not revenue. The compiler injects this filter into every query that touches fct_invoices.total_amount, so revenue can never silently include refunded invoices."

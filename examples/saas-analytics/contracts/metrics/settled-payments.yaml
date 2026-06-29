@@ -1,0 +1,8 @@
+metric: settled_payments
+canonical:
+  kind: single
+  source: fct_payments
+  measure: settled_amount
+provenance: human_curated
+aliases: ["cash collected", "settled revenue", "collections"]
+status: active

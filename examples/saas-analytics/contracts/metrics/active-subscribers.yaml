@@ -1,0 +1,9 @@
+metric: active_subscribers
+canonical:
+  kind: distinct_count
+  source: fct_mrr_snapshot
+  distinct_on: customer_id
+  population_filter: "is_active = true"
+provenance: human_curated
+aliases: ["active customers", "paying customers", "logos"]
+status: active

@@ -1,0 +1,9 @@
+# Helper metric: denominator for nps (total responses).
+metric: nps_responses
+canonical:
+  kind: single
+  source: fct_nps_responses
+  measure: response_count
+provenance: human_curated
+aliases: ["survey responses", "nps response count"]
+status: active

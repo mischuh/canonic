@@ -1,0 +1,36 @@
+name: mart_account_health
+connection: saas_duckdb
+table: mart_account_health
+grain: [customer_id]
+description: >
+  Pre-aggregated data mart at customer grain: a single health row per account with a
+  pre-computed lifetime value. ltv_value is only meaningful at customer grain, so the
+  customer_ltv metric binds it as an OPAQUE measure. See [[ltv-methodology]].
+
+columns:
+  - { name: customer_id,     type: int,     nullable: false }
+  - { name: as_of_month,     type: date,    nullable: false }
+  - { name: health_score,    type: int,     nullable: false }
+  - { name: ltv_value,       type: decimal, nullable: false }
+  - { name: last_usage_date, type: date,    nullable: true  }
+  - { name: open_tickets,    type: int,     nullable: false }
+
+measures:
+  - name: ltv_value
+    expr: "ltv_value"   # opaque metric: pre-computed at customer grain, served as a direct lookup (no aggregate)
+    additivity: non_additive
+  - name: avg_health_score
+    expr: "avg(health_score)"
+    additivity: non_additive
+
+dimensions:
+  - { name: customer_id, column: customer_id, label: "Customer ID" }
+  - { name: as_of_month, column: as_of_month, label: "As-Of Month", granularity: month }
+
+joins:
+  - to: dim_customer
+    on: "mart_account_health.customer_id = dim_customer.customer_id"
+    relationship: many_to_one
+
+meta:
+  provenance: human_curated

@@ -1,0 +1,9 @@
+metric: churn_rate
+canonical:
+  kind: ratio
+  numerator: churned_customers
+  denominator: active_accounts
+  on_zero_denominator: null
+provenance: human_curated
+aliases: ["logo churn", "customer churn rate"]
+status: active

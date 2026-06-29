@@ -1,0 +1,24 @@
+name: dim_campaign
+connection: saas_duckdb
+table: dim_campaign
+grain: [campaign_id]
+description: "Marketing acquisition campaign. Carries the campaign budget used for CAC."
+
+columns:
+  - { name: campaign_id,   type: int,     nullable: false }
+  - { name: campaign_name, type: string,  nullable: false }
+  - { name: channel,       type: string,  nullable: false }
+  - { name: start_date,    type: date,    nullable: false }
+  - { name: budget,        type: decimal, nullable: false }
+
+measures:
+  - name: campaign_budget
+    expr: "sum(budget)"
+    additivity: additive
+
+dimensions:
+  - { name: campaign, column: campaign_name, label: "Campaign" }
+  - { name: channel,  column: channel,       label: "Acquisition Channel" }
+
+meta:
+  provenance: human_curated

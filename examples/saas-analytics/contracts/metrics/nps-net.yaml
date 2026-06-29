@@ -1,0 +1,8 @@
+# Helper metric: numerator for nps (promoters minus detractors).
+metric: nps_net
+canonical:
+  kind: single
+  source: fct_nps_responses
+  measure: net_promoter_count
+provenance: human_curated
+status: active

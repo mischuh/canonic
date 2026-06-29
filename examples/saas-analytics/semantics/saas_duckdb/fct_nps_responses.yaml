@@ -1,0 +1,38 @@
+name: fct_nps_responses
+connection: saas_duckdb
+table: fct_nps_responses
+grain: [response_id]
+description: "NPS survey responses. category: promoter (9-10), passive (7-8), detractor (0-6)."
+
+columns:
+  - { name: response_id,   type: int,    nullable: false }
+  - { name: customer_id,   type: int,    nullable: false }
+  - { name: response_date, type: date,   nullable: false }
+  - { name: score,         type: int,    nullable: false }
+  - { name: category,      type: string, nullable: false }
+
+measures:
+  - name: response_count
+    expr: "count(response_id)"
+    additivity: additive
+  - name: promoter_count
+    expr: "count(case when category = 'promoter' then response_id end)"
+    additivity: additive
+  - name: detractor_count
+    expr: "count(case when category = 'detractor' then response_id end)"
+    additivity: additive
+  - name: net_promoter_count
+    expr: "sum(case when category = 'promoter' then 1 when category = 'detractor' then -1 else 0 end)"
+    additivity: additive
+
+dimensions:
+  - { name: response_date, column: response_date, label: "Response Date", granularity: day }
+  - { name: category,      column: category,      label: "NPS Category" }
+
+joins:
+  - to: dim_customer
+    on: "fct_nps_responses.customer_id = dim_customer.customer_id"
+    relationship: many_to_one
+
+meta:
+  provenance: human_curated

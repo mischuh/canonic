@@ -1,0 +1,27 @@
+name: mart_cohort_retention
+connection: saas_duckdb
+table: mart_cohort_retention
+grain: [cohort_month, period_number]
+description: "Pre-aggregated data mart: signup-cohort retention. retention_rate is pre-computed and non-additive."
+
+columns:
+  - { name: cohort_month,       type: date,    nullable: false }
+  - { name: period_number,      type: int,     nullable: false }
+  - { name: cohort_size,        type: int,     nullable: false }
+  - { name: retained_customers, type: int,     nullable: false }
+  - { name: retention_rate,     type: decimal, nullable: false }
+
+measures:
+  - name: retained_customers_total
+    expr: "sum(retained_customers)"
+    additivity: additive
+  - name: avg_retention_rate
+    expr: "avg(retention_rate)"
+    additivity: non_additive
+
+dimensions:
+  - { name: cohort_month,  column: cohort_month,  label: "Cohort Month", granularity: month }
+  - { name: period_number, column: period_number, label: "Months Since Signup" }
+
+meta:
+  provenance: human_curated

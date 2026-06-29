@@ -1,0 +1,19 @@
+name: dim_feature
+connection: saas_duckdb
+table: dim_feature
+grain: [feature_id]
+description: "Product feature catalogue. tier_required is the minimum plan a feature needs."
+
+columns:
+  - { name: feature_id,    type: int,    nullable: false }
+  - { name: feature_name,  type: string, nullable: false }
+  - { name: module,        type: string, nullable: false }
+  - { name: tier_required, type: string, nullable: false }
+
+dimensions:
+  - { name: feature,       column: feature_name,  label: "Feature" }
+  - { name: module,        column: module,        label: "Module" }
+  - { name: tier_required, column: tier_required, label: "Minimum Plan" }
+
+meta:
+  provenance: human_curated

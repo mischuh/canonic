@@ -1,0 +1,40 @@
+name: fct_support_tickets
+connection: saas_duckdb
+table: fct_support_tickets
+grain: [ticket_id]
+description: "One row per support ticket. resolution_hours and csat_score are null while a ticket is open."
+
+columns:
+  - { name: ticket_id,        type: int,     nullable: false }
+  - { name: customer_id,      type: int,     nullable: false }
+  - { name: rep_id,           type: int,     nullable: false }
+  - { name: opened_date,      type: date,    nullable: false }
+  - { name: closed_date,      type: date,    nullable: true  }
+  - { name: priority,         type: string,  nullable: false }
+  - { name: status,           type: string,  nullable: false }
+  - { name: resolution_hours, type: decimal, nullable: true  }
+  - { name: csat_score,       type: int,     nullable: true  }
+
+measures:
+  - name: ticket_count
+    expr: "count(ticket_id)"
+    additivity: additive
+  - name: avg_csat
+    expr: "avg(csat_score)"
+    additivity: non_additive
+
+dimensions:
+  - { name: opened_date, column: opened_date, label: "Opened Date", granularity: day }
+  - { name: priority,    column: priority,    label: "Priority" }
+  - { name: status,      column: status,      label: "Ticket Status" }
+
+joins:
+  - to: dim_customer
+    on: "fct_support_tickets.customer_id = dim_customer.customer_id"
+    relationship: many_to_one
+  - to: dim_sales_rep
+    on: "fct_support_tickets.rep_id = dim_sales_rep.rep_id"
+    relationship: many_to_one
+
+meta:
+  provenance: human_curated

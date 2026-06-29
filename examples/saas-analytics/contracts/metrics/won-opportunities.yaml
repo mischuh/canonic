@@ -1,0 +1,9 @@
+# Helper metric: numerator for win_rate.
+metric: won_opportunities
+canonical:
+  kind: single
+  source: fct_opportunities
+  measure: won_count
+provenance: human_curated
+aliases: ["won deals", "closed won"]
+status: active

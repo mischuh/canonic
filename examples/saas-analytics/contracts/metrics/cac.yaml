@@ -1,0 +1,9 @@
+metric: cac
+canonical:
+  kind: ratio
+  numerator: campaign_spend
+  denominator: new_customers
+  on_zero_denominator: null
+provenance: human_curated
+aliases: ["customer acquisition cost", "acquisition cost"]
+status: active

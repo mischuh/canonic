@@ -1,0 +1,13 @@
+id: gross-revenue-2025-q1
+query:
+  metrics: [gross_revenue]
+  filters: ["invoice_date >= '2025-01-01'", "invoice_date < '2025-04-01'"]
+expect:
+  rows: 1
+  values:
+    gross_revenue: 17814.00
+  tolerance: 0.01
+source_of_truth: >
+  Seed data: paid, non-trial, non-refunded invoices for 2025-Q1. 12 active customers
+  (5 enterprise @ 999, 4 pro @ 199, 3 starter @ 49 = 5938/month) over 3 months = 17814.00.
+  The refunded and trial rows in Q1 are stripped by the revenue guardrails.

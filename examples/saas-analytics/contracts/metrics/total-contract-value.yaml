@@ -1,0 +1,9 @@
+# Helper metric: weight (denominator) for blended_discount.
+metric: total_contract_value
+canonical:
+  kind: single
+  source: fct_subscription_events
+  measure: total_contract_value
+provenance: human_curated
+aliases: ["total acv", "booked contract value"]
+status: active

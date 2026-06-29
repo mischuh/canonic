@@ -7,7 +7,7 @@ import sqlglot
 from sqlglot import exp
 
 from canon import exc
-from canon.compiler.dialect import DIALECT_ADAPTERS, PostgresDialectAdapter
+from canon.compiler.dialect import DIALECT_ADAPTERS, PostgresDialectAdapter, adapter_for
 from canon.semantic.models import NormalizedType
 
 
@@ -79,3 +79,60 @@ def test_map_type_to_postgres(adapter: PostgresDialectAdapter) -> None:
 def test_registry_exposes_postgres() -> None:
     assert "postgres" in DIALECT_ADAPTERS
     assert DIALECT_ADAPTERS["postgres"].dialect == "postgres"
+
+
+# --- adapter_for() -----------------------------------------------------------
+
+
+def test_adapter_for_registered_dialects() -> None:
+    assert adapter_for("postgres").dialect == "postgres"
+    assert adapter_for("duckdb").dialect == "duckdb"
+    assert adapter_for("sqlite").dialect == "sqlite"
+
+
+def test_adapter_for_type_aliases() -> None:
+    assert adapter_for("postgresql").dialect == "postgres"
+    assert adapter_for("pg").dialect == "postgres"
+
+
+def test_adapter_for_unregistered_sqlglot_dialect() -> None:
+    a = adapter_for("bigquery")
+    assert a.dialect == "bigquery"
+
+
+def test_adapter_for_unknown_falls_back_to_postgres() -> None:
+    a = adapter_for("nosuchthing")
+    assert a.dialect == "postgres"
+
+
+def test_duckdb_adapter_emits_duckdb_interval() -> None:
+    """DuckDB uses INTERVAL '3' MONTHS (number separate from unit) not INTERVAL '3 MONTHS'."""
+    neutral = exp.Sub(
+        this=exp.CurrentDate(),
+        expression=exp.Interval(this=exp.Literal.string("3"), unit=exp.Var(this="MONTHS")),
+    )
+    ast = exp.select(neutral)
+    duckdb_sql = adapter_for("duckdb").emit(ast)
+    postgres_sql = adapter_for("postgres").emit(ast)
+    # DuckDB form: INTERVAL '3' MONTHS — number and unit are separate tokens
+    assert "INTERVAL '3' MONTHS" in duckdb_sql
+    # Postgres form: INTERVAL '3 MONTHS' — unit is part of the quoted string
+    assert "INTERVAL '3 MONTHS'" in postgres_sql
+
+
+def test_duckdb_adapter_read_only_guards_still_apply() -> None:
+    ast = sqlglot.parse_one("DELETE FROM orders")
+    with pytest.raises(exc.ReadOnlyViolation):
+        adapter_for("duckdb").emit(ast)
+
+
+def test_duckdb_type_map() -> None:
+    a = adapter_for("duckdb")
+    assert a.map_type(NormalizedType.DECIMAL) == "DECIMAL"
+    assert a.map_type(NormalizedType.JSON) == "JSON"
+
+
+def test_sqlite_type_map() -> None:
+    a = adapter_for("sqlite")
+    assert a.map_type(NormalizedType.INT) == "INTEGER"
+    assert a.map_type(NormalizedType.BOOL) == "INTEGER"

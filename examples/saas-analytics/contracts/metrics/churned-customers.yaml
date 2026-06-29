@@ -1,0 +1,9 @@
+# Helper metric: denominator/numerator building block for churn_rate.
+metric: churned_customers
+canonical:
+  kind: single
+  source: fct_subscription_events
+  measure: churn_count
+provenance: human_curated
+aliases: ["churned logos", "churn count"]
+status: active

@@ -1,0 +1,9 @@
+metric: customer_ltv
+canonical:
+  kind: opaque
+  source: mart_account_health
+  measure: ltv_value
+  native_grain: [customer_id]
+provenance: human_curated
+aliases: ["ltv", "lifetime value", "customer lifetime value"]
+status: active

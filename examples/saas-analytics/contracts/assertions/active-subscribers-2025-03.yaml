@@ -1,0 +1,11 @@
+id: active-subscribers-2025-03
+query:
+  metrics: [active_subscribers]
+  filters: ["snapshot_month = '2025-03-01'"]
+expect:
+  rows: 1
+  values:
+    active_subscribers: 12
+source_of_truth: >
+  Seed data: all 12 customers are active in the 2025-03 snapshot (the earliest churn,
+  Hooli, takes effect after 2025-04). distinct customer_id where is_active = true = 12.

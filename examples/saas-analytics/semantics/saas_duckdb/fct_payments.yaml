@@ -1,0 +1,35 @@
+name: fct_payments
+connection: saas_duckdb
+table: fct_payments
+grain: [payment_id]
+description: "Payment transactions against invoices. Use settled_amount for cash actually collected."
+
+columns:
+  - { name: payment_id,   type: int,     nullable: false }
+  - { name: invoice_id,   type: int,     nullable: false }
+  - { name: customer_id,  type: int,     nullable: false }
+  - { name: payment_date, type: date,    nullable: false }
+  - { name: amount,       type: decimal, nullable: false }
+  - { name: method,       type: string,  nullable: false }
+  - { name: status,       type: string,  nullable: false }
+
+measures:
+  - name: payment_count
+    expr: "count(payment_id)"
+    additivity: additive
+  - name: settled_amount
+    expr: "sum(case when status = 'settled' then amount else 0 end)"
+    additivity: additive
+
+dimensions:
+  - { name: payment_date, column: payment_date, label: "Payment Date", granularity: day }
+  - { name: method,       column: method,       label: "Payment Method" }
+  - { name: status,       column: status,       label: "Payment Status" }
+
+joins:
+  - to: dim_customer
+    on: "fct_payments.customer_id = dim_customer.customer_id"
+    relationship: many_to_one
+
+meta:
+  provenance: human_curated

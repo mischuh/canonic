@@ -1,0 +1,31 @@
+name: fct_feature_usage
+connection: saas_duckdb
+table: fct_feature_usage
+grain: [feature_usage_id]
+description: "Per-feature usage. One row per customer × feature × month. Source for active_features (distinct feature adoption)."
+
+columns:
+  - { name: feature_usage_id, type: int,  nullable: false }
+  - { name: customer_id,      type: int,  nullable: false }
+  - { name: feature_id,       type: int,  nullable: false }
+  - { name: usage_date,       type: date, nullable: false }
+  - { name: event_count,      type: int,  nullable: false }
+
+measures:
+  - name: event_total
+    expr: "sum(event_count)"
+    additivity: additive
+
+dimensions:
+  - { name: usage_date, column: usage_date, label: "Usage Month", granularity: month }
+
+joins:
+  - to: dim_customer
+    on: "fct_feature_usage.customer_id = dim_customer.customer_id"
+    relationship: many_to_one
+  - to: dim_feature
+    on: "fct_feature_usage.feature_id = dim_feature.feature_id"
+    relationship: many_to_one
+
+meta:
+  provenance: human_curated

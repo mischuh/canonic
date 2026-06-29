@@ -1,0 +1,50 @@
+name: fct_subscription_events
+connection: saas_duckdb
+table: fct_subscription_events
+grain: [event_id]
+description: "One row per subscription lifecycle event (new, expansion, contraction, churn, reactivation)."
+
+columns:
+  - { name: event_id,       type: int,     nullable: false }
+  - { name: customer_id,    type: int,     nullable: false }
+  - { name: plan_id,        type: int,     nullable: false }
+  - { name: event_date,     type: date,    nullable: false }
+  - { name: event_type,     type: string,  nullable: false }
+  - { name: mrr_delta,      type: decimal, nullable: false }
+  - { name: contract_value, type: decimal, nullable: false }
+  - { name: discount_pct,   type: decimal, nullable: false }
+
+measures:
+  - name: event_count
+    expr: "count(event_id)"
+    additivity: additive
+  - name: new_customer_count
+    expr: "count(case when event_type = 'new' then event_id end)"
+    additivity: additive
+  - name: churn_count
+    expr: "count(case when event_type = 'churn' then event_id end)"
+    additivity: additive
+  - name: expansion_mrr_amount
+    expr: "sum(case when event_type = 'expansion' then mrr_delta else 0 end)"
+    additivity: additive
+  - name: total_contract_value
+    expr: "sum(contract_value)"
+    additivity: additive
+  - name: discount_value_sum
+    expr: "sum(discount_pct * contract_value)"
+    additivity: additive
+
+dimensions:
+  - { name: event_date, column: event_date, label: "Event Date", granularity: day }
+  - { name: event_type, column: event_type, label: "Event Type" }
+
+joins:
+  - to: dim_customer
+    on: "fct_subscription_events.customer_id = dim_customer.customer_id"
+    relationship: many_to_one
+  - to: dim_plan
+    on: "fct_subscription_events.plan_id = dim_plan.plan_id"
+    relationship: many_to_one
+
+meta:
+  provenance: human_curated

@@ -1,0 +1,9 @@
+# Helper metric: denominator for cac.
+metric: new_customers
+canonical:
+  kind: single
+  source: fct_subscription_events
+  measure: new_customer_count
+provenance: human_curated
+aliases: ["new logos", "acquired customers"]
+status: active

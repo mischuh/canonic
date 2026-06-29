@@ -1,0 +1,10 @@
+metric: p90_resolution_time
+canonical:
+  kind: percentile
+  source: fct_support_tickets
+  column: resolution_hours
+  quantile: 0.9
+  population_filter: "status = 'closed'"
+provenance: human_curated
+aliases: ["p90 resolution", "90th percentile resolution time", "resolution sla"]
+status: active
