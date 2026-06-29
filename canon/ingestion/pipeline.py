@@ -217,11 +217,14 @@ class IngestionPipeline:
     async def _emit(
         self, evidence: list[EvidenceItem]
     ) -> tuple[EmissionResult, list[SkippedEvidence]]:
-        """Stages 1–4: build → reconcile → refine → validate → emit (no side effects)."""
+        """Stages 1–4: build → reconcile → refine → enrich-examples → validate → emit."""
+        from canon.ingestion.examples import ExampleEnricher
+
         build = await self._builder.build(evidence)
         store = DiskAcceptedStore(self._project_root)
         report = self._engine.reconcile(build.proposals, store)
         report = await self._engine.refine(report, store)
+        report = ExampleEnricher(self._project_root, evidence).enrich(report)
         gate = ValidationGate(self._project_root, self._connectors, evidence)
         await gate.validate(build.proposals)  # raises before emit (S8)
         emission = self._emitter.emit(report)
