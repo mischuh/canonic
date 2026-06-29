@@ -18,6 +18,9 @@ __all__ = [
     "CollapseAgg",
     "ContractValidationError",
     "DeprecatedAlternative",
+    "Example",
+    "ExampleOriginKind",
+    "ExampleQuery",
     "FinalityRule",
     "Guardrail",
     "GuardrailKind",
@@ -218,6 +221,54 @@ class DeprecatedAlternative(BaseModel):
     reason: str
 
 
+class ExampleOriginKind(StrEnum):
+    """The evidence source that produced a usage example on a canonical binding (S13)."""
+
+    ASSERTION = "assertion"
+    OBSERVED_QUERY = "observed_query"
+    USAGE_EVIDENCE = "usage_evidence"
+
+
+class ExampleQuery(BaseModel):
+    """The semantic query captured in a usage example (S13 §schema)."""
+
+    model_config = ConfigDict(frozen=True)
+
+    metrics: list[str]
+    dimensions: list[str] = []
+    filters: list[str] = []
+
+
+class Example(BaseModel):
+    """One usage-backed example query attached to a canonical binding (S13).
+
+    ``origin`` is a typed discriminator string: ``observed_query``,
+    ``assertion:<id>``, or ``usage_evidence:<id>``.  Use :meth:`origin_kind`
+    to branch on it without string-parsing heuristics (AC4).
+    ``frequency`` is carried over from observed-query / usage-evidence when
+    available; omitted for assertion-sourced examples.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    query: ExampleQuery
+    origin: str
+    frequency: int | None = None
+
+    @staticmethod
+    def make_origin(kind: ExampleOriginKind, ref: str | None = None) -> str:
+        """Build the typed origin discriminator string."""
+        if kind is ExampleOriginKind.OBSERVED_QUERY:
+            return ExampleOriginKind.OBSERVED_QUERY
+        return f"{kind}:{ref}" if ref else str(kind)
+
+    @property
+    def origin_kind(self) -> ExampleOriginKind:
+        """The evidence-source kind, parsed from :attr:`origin` without heuristics."""
+        raw = self.origin.split(":")[0]
+        return ExampleOriginKind(raw)
+
+
 class MetricBinding(BaseModel):
     """Canonical metric→source binding (SPEC-E15 §2.2)."""
 
@@ -229,6 +280,7 @@ class MetricBinding(BaseModel):
     provenance: Provenance = Provenance.HUMAN_CURATED
     aliases: list[str] = []
     deprecated_alternatives: list[DeprecatedAlternative] = []
+    examples: list[Example] = []
     status: Status = Status.ACTIVE
 
     @model_validator(mode="after")

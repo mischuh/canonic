@@ -9,6 +9,9 @@ from canon.contracts.models import (
     AppliesTo,
     Assertion,
     CanonicalRef,
+    Example,
+    ExampleOriginKind,
+    ExampleQuery,
     FinalityRule,
     Guardrail,
     GuardrailKind,
@@ -197,3 +200,73 @@ class TestP1Stubs:
         )
         assert a.id == "revenue-2025-q1"
         assert a.source_of_truth is not None
+
+
+class TestExampleModels:
+    def test_example_origin_kind_values(self) -> None:
+        assert ExampleOriginKind.ASSERTION == "assertion"
+        assert ExampleOriginKind.OBSERVED_QUERY == "observed_query"
+        assert ExampleOriginKind.USAGE_EVIDENCE == "usage_evidence"
+
+    def test_make_origin_observed_query(self) -> None:
+        origin = Example.make_origin(ExampleOriginKind.OBSERVED_QUERY)
+        assert origin == "observed_query"
+
+    def test_make_origin_assertion(self) -> None:
+        origin = Example.make_origin(ExampleOriginKind.ASSERTION, "revenue-2025-q1")
+        assert origin == "assertion:revenue-2025-q1"
+
+    def test_make_origin_usage_evidence(self) -> None:
+        origin = Example.make_origin(ExampleOriginKind.USAGE_EVIDENCE, "question:412")
+        assert origin == "usage_evidence:question:412"
+
+    def test_origin_kind_property_observed(self) -> None:
+        e = Example(
+            query=ExampleQuery(metrics=["revenue"]),
+            origin="observed_query",
+            frequency=5,
+        )
+        assert e.origin_kind is ExampleOriginKind.OBSERVED_QUERY
+
+    def test_origin_kind_property_assertion(self) -> None:
+        e = Example(
+            query=ExampleQuery(metrics=["revenue"], filters=["order_date in 2025-Q1"]),
+            origin="assertion:revenue-2025-q1",
+        )
+        assert e.origin_kind is ExampleOriginKind.ASSERTION
+        assert e.frequency is None
+
+    def test_origin_kind_property_usage_evidence(self) -> None:
+        e = Example(
+            query=ExampleQuery(metrics=["revenue"]),
+            origin="usage_evidence:question:412",
+            frequency=38,
+        )
+        assert e.origin_kind is ExampleOriginKind.USAGE_EVIDENCE
+
+    def test_example_query_defaults(self) -> None:
+        q = ExampleQuery(metrics=["revenue"])
+        assert q.dimensions == []
+        assert q.filters == []
+
+    def test_metric_binding_has_examples_default(self) -> None:
+        b = MetricBinding(
+            metric="revenue",
+            canonical=CanonicalRef(source="orders", measure="total_revenue"),
+        )
+        assert b.examples == []
+
+    def test_metric_binding_with_examples_round_trips(self) -> None:
+        example = Example(
+            query=ExampleQuery(metrics=["revenue"], dimensions=["order_date"]),
+            origin="assertion:revenue-2025-q1",
+        )
+        b = MetricBinding(
+            metric="revenue",
+            canonical=CanonicalRef(source="orders", measure="total_revenue"),
+            examples=[example],
+        )
+        raw = b.model_dump(mode="json")
+        assert len(raw["examples"]) == 1
+        assert raw["examples"][0]["origin"] == "assertion:revenue-2025-q1"
+        assert raw["examples"][0]["frequency"] is None
