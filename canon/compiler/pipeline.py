@@ -9,13 +9,14 @@ canonicality — the compiler trusts its results and never reimplements them (§
 from __future__ import annotations
 
 import dataclasses
+import re
 from datetime import datetime
 from typing import TYPE_CHECKING, cast
 
 import sqlglot
 from sqlglot import exp
 
-from canon.compiler.dialect import DIALECT_ADAPTERS
+from canon.compiler.dialect import DIALECT_ADAPTERS, adapter_for  # noqa: F401 — re-exported
 from canon.compiler.joins import JoinEdge, build_alias_tree, plan_joins, reachable_dimension_names
 from canon.compiler.result import (
     CompileResult,
@@ -40,6 +41,8 @@ from canon.exc import Unreachable as UnreachableError
 from canon.semantic.models import Additivity, Measure, NormalizedType, Relationship
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping
+
     from canon.compiler.query import SemanticQuery
     from canon.contracts.models import FinalityRule
     from canon.contracts.resolver import ContractResolver
@@ -51,11 +54,34 @@ _DEDUP_ALIAS = "_base"
 _FANOUT = frozenset({Relationship.ONE_TO_MANY, Relationship.MANY_TO_MANY})
 
 
+_SQLITE_DATE_MOD_RE = re.compile(r"^([+-]?)\s*(\d+)\s+(\w+)$")
+
+
+def _rewrite_sqlite_date_modifiers(node: exp.Expression) -> exp.Expression:
+    """Rewrite SQLite DATE('now', modifier) → CURRENT_DATE ± INTERVAL 'N unit'."""
+    if not isinstance(node, exp.Date):
+        return node
+    zone = node.args.get("zone")
+    if zone is None:
+        return node
+    if not isinstance(node.this, exp.Literal) or node.this.name != "now":
+        return node
+    m = _SQLITE_DATE_MOD_RE.match(zone.name.strip())
+    if not m:
+        return node
+    sign, num, unit = m.groups()
+    interval = exp.Interval(this=exp.Literal.string(num), unit=exp.Var(this=unit.upper()))
+    if sign == "-":
+        return exp.Sub(this=exp.CurrentDate(), expression=interval)
+    return exp.Add(this=exp.CurrentDate(), expression=interval)
+
+
 # sqlglot builds many node classes dynamically, so mypy cannot see their inheritance
 # from ``exp.Expression``. These thin wrappers cast at the boundary so the rest of the
 # module stays strictly typed.
 def _parse(sql: str) -> exp.Expression:
-    return cast("exp.Expression", sqlglot.parse_one(sql))
+    parsed = cast("exp.Expression", sqlglot.parse_one(sql))
+    return parsed.transform(_rewrite_sqlite_date_modifiers)
 
 
 def _alias(expr: exp.Expression, name: str) -> exp.Expression:
@@ -64,6 +90,26 @@ def _alias(expr: exp.Expression, name: str) -> exp.Expression:
 
 def _func(name: str, *args: exp.Expression) -> exp.Expression:
     return cast("exp.Expression", exp.func(name, *args))
+
+
+def _dialect_for_bindings(
+    raw_bindings: list[tuple[str, ResolverBinding]],
+    sources_by_name: dict[str, SemanticSource],
+    connection_dialects: Mapping[str, str] | None,
+) -> str:
+    """Return the sqlglot dialect name for the primary binding's owning connection."""
+    if not connection_dialects:
+        return "postgres"
+    for _, b in raw_bindings:
+        source_name = b.source
+        if source_name is None and b.components is not None:
+            source_name = b.components.numerator.source
+        if source_name is None:
+            continue
+        src = sources_by_name.get(source_name)
+        if src is not None and src.connection:
+            return connection_dialects.get(src.connection, "postgres")
+    return "postgres"
 
 
 class _ResolvedMetric:
@@ -103,6 +149,8 @@ def compile(  # noqa: A001 — the public verb for this capability is "compile"
     query: SemanticQuery,
     resolver: ContractResolver,
     sources: list[SemanticSource],
+    *,
+    connection_dialects: Mapping[str, str] | None = None,
 ) -> CompileResult:
     """Compile a semantic query to read-only SQL and result metadata (SPEC §4)."""
     sources_by_name = {s.name: s for s in sources}
@@ -150,6 +198,10 @@ def compile(  # noqa: A001 — the public verb for this capability is "compile"
         if b.kind in {BindingKind.DISTINCT_COUNT, BindingKind.PERCENTILE}
     ]
     opaque_indices = [i for i, (_, b) in enumerate(raw_bindings) if b.kind is BindingKind.OPAQUE]
+
+    # Derive the target SQL dialect from the primary binding's connection.
+    dialect = _dialect_for_bindings(raw_bindings, sources_by_name, connection_dialects)
+
     if composite_indices:
         if len(query.metrics) > 1:
             raise UnsupportedMeasure(
@@ -158,7 +210,8 @@ def compile(  # noqa: A001 — the public verb for this capability is "compile"
             )
         _, composite = raw_bindings[0]
         return dataclasses.replace(
-            _compile_composite(query, composite, resolver, sources_by_name), related=related
+            _compile_composite(query, composite, resolver, sources_by_name, dialect=dialect),
+            related=related,
         )
     if semi_additive_indices:
         if len(query.metrics) > 1:
@@ -168,7 +221,8 @@ def compile(  # noqa: A001 — the public verb for this capability is "compile"
             )
         _, sa_binding = raw_bindings[0]
         return dataclasses.replace(
-            _compile_semi_additive(query, sa_binding, resolver, sources_by_name), related=related
+            _compile_semi_additive(query, sa_binding, resolver, sources_by_name, dialect=dialect),
+            related=related,
         )
     if recompute_indices:
         if len(query.metrics) > 1:
@@ -178,7 +232,9 @@ def compile(  # noqa: A001 — the public verb for this capability is "compile"
             )
         _, rg_binding = raw_bindings[0]
         return dataclasses.replace(
-            _compile_recompute_at_grain(query, rg_binding, resolver, sources_by_name),
+            _compile_recompute_at_grain(
+                query, rg_binding, resolver, sources_by_name, dialect=dialect
+            ),
             related=related,
         )
     if opaque_indices:
@@ -189,7 +245,8 @@ def compile(  # noqa: A001 — the public verb for this capability is "compile"
             )
         _, opaque_binding = raw_bindings[0]
         return dataclasses.replace(
-            _compile_opaque(query, opaque_binding, resolver, sources_by_name), related=related
+            _compile_opaque(query, opaque_binding, resolver, sources_by_name, dialect=dialect),
+            related=related,
         )
 
     metrics = _bindings_to_resolved(raw_bindings, sources_by_name)
@@ -267,7 +324,7 @@ def compile(  # noqa: A001 — the public verb for this capability is "compile"
 
     # Stage 7 — emit SQL through the dialect adapter.
     finality_meta: FinalityMetadata | None = None
-    adapter = DIALECT_ADAPTERS["postgres"]
+    adapter = adapter_for(dialect)
     if finality_rule is not None and time_dim_name is not None:
         from canon.contracts.finality import evaluate_watermark, watermark_to_iso
 
@@ -531,6 +588,8 @@ def _compile_composite(
     composite: ResolverBinding,
     resolver: ContractResolver,
     sources_by_name: dict[str, SemanticSource],
+    *,
+    dialect: str = "postgres",
 ) -> CompileResult:
     """Compile a composable_post_agg metric via CTE-per-leaf + divide (SPEC §4.1, §6 step 6b).
 
@@ -541,7 +600,7 @@ def _compile_composite(
     assert composite.components is not None  # noqa: S101 — routing guarantees composite kind
     components: ComponentBindings = composite.components
     on_zero = components.on_zero_denominator
-    adapter = DIALECT_ADAPTERS["postgres"]
+    adapter = adapter_for(dialect)
     queried_name = query.metrics[0]
 
     pop_filter = composite.binding.canonical.population_filter
@@ -676,6 +735,8 @@ def _compile_semi_additive(
     binding: ResolverBinding,
     resolver: ContractResolver,
     sources_by_name: dict[str, SemanticSource],
+    *,
+    dialect: str = "postgres",
 ) -> CompileResult:
     """Compile a semi_additive metric via window or nested-aggregate collapse (SPEC §4.2).
 
@@ -687,7 +748,7 @@ def _compile_semi_additive(
     """
     assert binding.semi_additive is not None  # noqa: S101 — routing guarantees semi_additive kind
     sa = binding.semi_additive
-    adapter = DIALECT_ADAPTERS["postgres"]
+    adapter = adapter_for(dialect)
     queried_name = query.metrics[0]
 
     assert binding.source is not None and binding.measure is not None  # noqa: S101
@@ -933,6 +994,8 @@ def _compile_recompute_at_grain(
     binding: ResolverBinding,
     resolver: ContractResolver,
     sources_by_name: dict[str, SemanticSource],
+    *,
+    dialect: str = "postgres",
 ) -> CompileResult:
     """Compile a recompute_at_grain metric (distinct_count / percentile) from base rows (§4.3).
 
@@ -943,7 +1006,7 @@ def _compile_recompute_at_grain(
     """
     assert binding.recompute_at_grain is not None  # noqa: S101 — routing guarantees this kind
     rg = binding.recompute_at_grain
-    adapter = DIALECT_ADAPTERS["postgres"]
+    adapter = adapter_for(dialect)
     queried_name = query.metrics[0]
 
     assert binding.source is not None  # noqa: S101 — enforced by model_validator
@@ -1042,6 +1105,8 @@ def _compile_opaque(
     binding: ResolverBinding,
     resolver: ContractResolver,
     sources_by_name: dict[str, SemanticSource],
+    *,
+    dialect: str = "postgres",
 ) -> CompileResult:
     """Compile an opaque metric — serve at native grain only, no re-aggregation (§4.4).
 
@@ -1050,7 +1115,7 @@ def _compile_opaque(
     """
     assert binding.opaque is not None  # noqa: S101 — routing guarantees this kind
     opaque = binding.opaque
-    adapter = DIALECT_ADAPTERS["postgres"]
+    adapter = adapter_for(dialect)
     queried_name = query.metrics[0]
 
     assert binding.source is not None and binding.measure is not None  # noqa: S101 — enforced by model_validator

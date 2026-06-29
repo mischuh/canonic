@@ -11,6 +11,7 @@ from pathlib import Path  # noqa: TC003 — used in function bodies, not just an
 from typing import TYPE_CHECKING, Any, cast
 
 from canon.compiler import SemanticQuery, compile
+from canon.compiler.dialect import adapter_for
 from canon.compiler.joins import build_alias_tree, reachable_dimension_names
 from canon.config import CanonConfig, load_config
 from canon.connectors.base import Capability, require_capability
@@ -44,6 +45,21 @@ if TYPE_CHECKING:
 __all__ = ["CanonService"]
 
 
+def _dialect_for_type(connector_type: str) -> str:
+    """Map a connector type string to a sqlglot dialect name.
+
+    Most connector types are already valid sqlglot dialect names (duckdb, sqlite, postgres).
+    This function normalises the few that are not and validates unknown types via adapter_for.
+    """
+    _OVERRIDES: dict[str, str] = {
+        "postgresql": "postgres",
+        "pg": "postgres",
+    }
+    dialect = _OVERRIDES.get(connector_type, connector_type)
+    # Validate via adapter_for so unknown types silently fall back to postgres.
+    return adapter_for(dialect).dialect
+
+
 class CanonService:
     """Capability layer loaded once per daemon/process (SPEC §2, §4).
 
@@ -68,6 +84,10 @@ class CanonService:
         )
         # name → source for fast lookup (sources have unique names within project)
         self._source_by_name: dict[str, SemanticSource] = {s.name: s for s in sources}
+        # connection id → sqlglot dialect name, derived from connection types in config
+        self._connection_dialects: dict[str, str] = {
+            c.id: _dialect_for_type(c.type) for c in config.connections
+        }
 
     @classmethod
     def from_project(cls, root: Path) -> CanonService:
@@ -270,7 +290,9 @@ class CanonService:
 
     def compile_query(self, query: SemanticQuery) -> CompileResult:
         """Compile a semantic query to SQL + metadata with no execution (SPEC §2)."""
-        return compile(query, self._resolver, self._sources)
+        return compile(
+            query, self._resolver, self._sources, connection_dialects=self._connection_dialects
+        )
 
     async def query(self, query: SemanticQuery, *, harness: bool = False) -> QueryResult:
         """Compile and execute a semantic query read-only (SPEC §2).
@@ -289,7 +311,9 @@ class CanonService:
         result: ResultSet | None = None
         error_code: str | None = None
         try:
-            compiled = compile(query, self._resolver, self._sources)
+            compiled = compile(
+                query, self._resolver, self._sources, connection_dialects=self._connection_dialects
+            )
             connection_id = self._connection_for_sql(compiled)
             result = await self._execute(compiled.sql, connection_id)
             query_result = QueryResult.from_parts(compiled, result)
@@ -329,7 +353,9 @@ class CanonService:
         from canon.contracts.assertions import assertion_to_query, match_result
 
         sq = assertion_to_query(assertion)
-        compiled = compile(sq, self._resolver, self._sources)
+        compiled = compile(
+            sq, self._resolver, self._sources, connection_dialects=self._connection_dialects
+        )
         result = await self._execute(compiled.sql, self._connection_for_sql(compiled))
         return match_result(assertion, result, resolved=compiled.resolved)
 
