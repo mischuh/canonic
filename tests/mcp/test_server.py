@@ -84,6 +84,49 @@ def _ambiguous_service(monkeypatch: pytest.MonkeyPatch) -> CanonService:
 
 
 @pytest.mark.asyncio
+async def test_get_overview(canon_service: CanonService) -> None:
+    mcp = build_server(canon_service)
+    async with Client(mcp) as client:
+        result = await client.call_tool("get_overview", {})
+    data = result.data
+    assert "domains" in data
+    assert isinstance(data["domains"], list)
+    orders = next((g for g in data["domains"] if g["name"] == "orders"), None)
+    assert orders is not None
+    assert any(m["name"] == "revenue" for m in orders["metrics"])
+    assert orders["sample_questions"]
+
+
+@pytest.mark.asyncio
+async def test_get_overview_domain_filter(canon_service: CanonService) -> None:
+    mcp = build_server(canon_service)
+    async with Client(mcp) as client:
+        result = await client.call_tool("get_overview", {"domain": "orders"})
+    data = result.data
+    assert len(data["domains"]) == 1
+    assert data["domains"][0]["name"] == "orders"
+
+
+@pytest.mark.asyncio
+async def test_get_overview_unknown_domain_empty(canon_service: CanonService) -> None:
+    mcp = build_server(canon_service)
+    async with Client(mcp) as client:
+        result = await client.call_tool("get_overview", {"domain": "nonexistent"})
+    data = result.data
+    assert data["domains"] == []
+
+
+@pytest.mark.asyncio
+async def test_describe_metric_includes_examples_field(canon_service: CanonService) -> None:
+    mcp = build_server(canon_service)
+    async with Client(mcp) as client:
+        result = await client.call_tool("describe_metric", {"name": "revenue"})
+    data = result.data
+    assert "examples" in data
+    assert isinstance(data["examples"], list)
+
+
+@pytest.mark.asyncio
 async def test_list_metrics(canon_service: CanonService) -> None:
     mcp = build_server(canon_service)
     async with Client(mcp) as client:
@@ -143,7 +186,7 @@ async def test_compile_query(canon_service: CanonService) -> None:
     assert "SELECT" in data["compiled"]["sql"].upper()
     assert data["metadata"]["resolved"]["metrics"]["revenue"] == "orders.total_revenue"
     assert any(g["id"] == "revenue-excludes-refunds" for g in data["metadata"]["guardrails_fired"])
-    assert data["metadata"]["contract_schema"] == "1.5"
+    assert data["metadata"]["contract_schema"] == "1.7"
     # S12: related block is always present
     assert "related" in data["metadata"]
     assert isinstance(data["metadata"]["related"]["unused_dimensions"], list)

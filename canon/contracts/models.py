@@ -278,6 +278,7 @@ class MetricBinding(BaseModel):
     owner: str | None = None
     canonical: CanonicalRef
     provenance: Provenance = Provenance.HUMAN_CURATED
+    label: str | None = None
     aliases: list[str] = []
     deprecated_alternatives: list[DeprecatedAlternative] = []
     examples: list[Example] = []

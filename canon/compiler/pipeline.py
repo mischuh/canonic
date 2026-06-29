@@ -1815,16 +1815,29 @@ def _build_finality_union(
                 )
             branch_metrics.append(_ResolvedMetric(name=m.name, source=src_name, measure=measure))
 
-        # Resolve dimensions on this realization source (same names must exist).
+        # Resolve dimensions with join-awareness (dimensions may live on joined sources).
+        branch_alias_to_source = build_alias_tree(src_name, sources_by_name)
         branch_dims: list[tuple[str, Dimension]] = []
         for _orig, dim in dimensions:
-            found = next((d for d in source.dimensions if d.name == dim.name), None)
-            if found is None:
+            resolved = _find_dimension(
+                dim.name, sources_by_name, owner=src_name, alias_to_source=branch_alias_to_source
+            )
+            if resolved is None:
                 raise UnreachableError(
                     f"finality realization source {src_name!r} does not declare "
                     f"dimension {dim.name!r}"
                 )
-            branch_dims.append((src_name, found))
+            branch_dims.append(resolved)
+
+        # Plan joins needed for non-owner dimensions in this branch.
+        needed_targets = {
+            branch_alias_to_source[alias]
+            for alias, _ in branch_dims
+            if alias != src_name and alias in branch_alias_to_source
+        }
+        branch_join_edges: list[JoinEdge] = (
+            plan_joins(src_name, needed_targets, sources_by_name) if needed_targets else []
+        )
 
         # Find the gate column (time dimension backing column on this source).
         gate_col: exp.Expression | None = None
@@ -1866,7 +1879,7 @@ def _build_finality_union(
             projections.append(_alias(_measure_expr(m.source, m.measure), col_alias))
         projections.append(_alias(is_final_val, "is_final"))
         select = select.select(*projections)
-        select = select.from_(_alias(exp.to_table(source.table), src_name))
+        select = _from_and_joins(select, src_name, branch_join_edges, sources_by_name)
         if branch_where:
             select = select.where(exp.and_(*branch_where))
         if group_exprs:
