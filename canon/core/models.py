@@ -16,6 +16,9 @@ from canon.connectors.base import (
     ResultSet,  # noqa: TC001 — Pydantic resolves field annotations at runtime
 )
 from canon.contract import CONTRACT_SCHEMA
+from canon.contracts.models import (
+    Example,  # noqa: TC001 — Pydantic resolves field annotations at runtime
+)
 
 if TYPE_CHECKING:
     from canon.compiler.result import CompileResult
@@ -24,10 +27,13 @@ __all__ = [
     "Compiled",
     "CompileOutput",
     "DimensionInfo",
+    "DomainGroup",
     "FinalityOut",
     "FiredGuardrailOut",
     "MetricDetail",
+    "MetricRef",
     "MetricSummary",
+    "OverviewResult",
     "QueryMetadata",
     "QueryResult",
     "RelatedDimensionOut",
@@ -143,6 +149,35 @@ class MetricDetail(BaseModel):
     measures: list[str]
     aliases: list[str] = []
     freshness: SourceFreshnessOut | None = None
+    examples: list[Example] = []
+
+
+class MetricRef(BaseModel):
+    """A metric reference carrying both its canonical name and a display label."""
+
+    model_config = ConfigDict(frozen=True)
+
+    name: str
+    label: str
+
+
+class DomainGroup(BaseModel):
+    """Metrics grouped under one domain with sample questions (SPEC §4.1 S12)."""
+
+    model_config = ConfigDict(frozen=True)
+
+    name: str
+    metrics: list[MetricRef]
+    dimensions: list[str] = []
+    sample_questions: list[str]
+
+
+class OverviewResult(BaseModel):
+    """Result of get_overview: metrics grouped by domain (SPEC §4.1 S12)."""
+
+    model_config = ConfigDict(frozen=True)
+
+    domains: list[DomainGroup]
 
 
 class Compiled(BaseModel):

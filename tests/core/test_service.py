@@ -5,7 +5,10 @@ from __future__ import annotations
 import pytest
 
 from canon.compiler.query import SemanticQuery
-from canon.core.models import DimensionInfo, MetricDetail, MetricSummary
+from canon.config import CanonConfig
+from canon.contracts.models import CanonicalRef, Example, ExampleQuery, MetricBinding, Status
+from canon.contracts.resolver import ContractResolver
+from canon.core.models import DimensionInfo, MetricDetail, MetricSummary, OverviewResult
 from canon.core.service import CanonService
 from canon.exc import Ambiguous, Unresolved
 
@@ -123,6 +126,103 @@ class TestDescribeMetricDistinctCount:
     def test_alias_lookup(self, distinct_count_service: CanonService) -> None:
         detail = distinct_count_service.describe_metric("active_customers")
         assert detail.metric == "unique_customers"
+
+
+class TestDescribeMetricExamples:
+    def test_examples_empty_by_default(self, canon_service: CanonService) -> None:
+        detail = canon_service.describe_metric("revenue")
+        assert detail.examples == []
+
+    def test_examples_populated_from_binding(
+        self,
+        orders_source,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        ex = Example(
+            query=ExampleQuery(metrics=["revenue"], dimensions=["order_date"]),
+            origin="observed_query",
+            frequency=10,
+        )
+        binding = MetricBinding(
+            metric="revenue",
+            canonical=CanonicalRef(source="orders", measure="total_revenue"),
+            status=Status.ACTIVE,
+            examples=[ex],
+        )
+        monkeypatch.setenv("PG_PASSWORD", "pw")
+        from tests.core.conftest import _DC_CONFIG
+
+        svc = CanonService(
+            config=CanonConfig.model_validate(_DC_CONFIG),
+            resolver=ContractResolver(bindings=[binding], guardrails=[]),
+            sources=[orders_source],
+        )
+        detail = svc.describe_metric("revenue")
+        assert len(detail.examples) == 1
+        assert detail.examples[0].query.dimensions == ["order_date"]
+        assert detail.examples[0].frequency == 10
+
+
+class TestGetOverview:
+    def test_returns_overview_result(self, canon_service: CanonService) -> None:
+        result = canon_service.get_overview()
+        assert isinstance(result, OverviewResult)
+
+    def test_groups_by_source(self, canon_service: CanonService) -> None:
+        result = canon_service.get_overview()
+        assert any(g.name == "orders" for g in result.domains)
+
+    def test_metrics_listed_in_group(self, canon_service: CanonService) -> None:
+        result = canon_service.get_overview()
+        orders_group = next(g for g in result.domains if g.name == "orders")
+        assert any(m.name == "revenue" for m in orders_group.metrics)
+
+    def test_dimensions_on_group(self, canon_service: CanonService) -> None:
+        result = canon_service.get_overview()
+        orders_group = next(g for g in result.domains if g.name == "orders")
+        assert "order_date" in orders_group.dimensions
+
+    def test_sample_questions_not_empty(self, canon_service: CanonService) -> None:
+        result = canon_service.get_overview()
+        for group in result.domains:
+            assert group.sample_questions, f"domain {group.name!r} has empty sample_questions"
+
+    def test_domain_filter(self, canon_service: CanonService) -> None:
+        result = canon_service.get_overview(domain="orders")
+        assert len(result.domains) == 1
+        assert result.domains[0].name == "orders"
+
+    def test_unknown_domain_returns_empty(self, canon_service: CanonService) -> None:
+        result = canon_service.get_overview(domain="nonexistent")
+        assert result.domains == []
+
+    def test_sample_questions_from_examples(
+        self,
+        orders_source,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        ex = Example(
+            query=ExampleQuery(metrics=["revenue"], dimensions=["region"]),
+            origin="observed_query",
+            frequency=38,
+        )
+        binding = MetricBinding(
+            metric="revenue",
+            canonical=CanonicalRef(source="orders", measure="total_revenue"),
+            status=Status.ACTIVE,
+            examples=[ex],
+        )
+        monkeypatch.setenv("PG_PASSWORD", "pw")
+        from tests.core.conftest import _DC_CONFIG
+
+        svc = CanonService(
+            config=CanonConfig.model_validate(_DC_CONFIG),
+            resolver=ContractResolver(bindings=[binding], guardrails=[]),
+            sources=[orders_source],
+        )
+        result = svc.get_overview()
+        orders_group = next(g for g in result.domains if g.name == "orders")
+        assert any("region" in q for q in orders_group.sample_questions)
 
 
 class TestResolveMetric:

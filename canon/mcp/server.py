@@ -100,6 +100,22 @@ def build_server(service: CanonService, *, suggestions: bool = False) -> FastMCP
         return {"accepted": True, "contract_schema": CONTRACT_SCHEMA}
 
     # ------------------------------------------------------------------
+    # Tool: get_overview  (E8 §4.1, P1)
+    # ------------------------------------------------------------------
+
+    @mcp.tool(
+        description=(
+            "Agent entry point: active metrics grouped by domain with plain-language sample "
+            "questions. Call this first to understand what is askable. "
+            "Pass 'domain' to narrow to one owning-source group."
+        )
+    )
+    @canon_error_response
+    async def get_overview(domain: str | None = None) -> dict[str, Any]:
+        overview = service.get_overview(domain=domain)
+        return overview.model_dump(mode="json")
+
+    # ------------------------------------------------------------------
     # Tool: list_metrics
     # ------------------------------------------------------------------
 
@@ -123,7 +139,7 @@ def build_server(service: CanonService, *, suggestions: bool = False) -> FastMCP
     @canon_error_response
     async def describe_metric(name: str) -> dict[str, Any]:
         detail = service.describe_metric(name)
-        return detail.model_dump()
+        return detail.model_dump(mode="json")
 
     # ------------------------------------------------------------------
     # Tool: resolve_metric

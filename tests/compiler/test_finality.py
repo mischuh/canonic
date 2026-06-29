@@ -215,3 +215,38 @@ class TestFinalityGuardrailsApplied:
         # The refund guardrail filter should appear in both branches
         assert result.sql.count("refunded") >= 1
         assert [g.id for g in result.guardrails_fired] == ["revenue-excludes-refunds"]
+
+
+class TestFinalityJoinedDimension:
+    """Finality queries that group by a dimension on a joined source produce valid SQL."""
+
+    def test_joined_dimension_produces_union_all(
+        self, finality_resolver: ContractResolver, sources: list[SemanticSource]
+    ) -> None:
+        result = compile(
+            SemanticQuery(metrics=["revenue"], dimensions=["order_date", "region"], as_of=_AS_OF),
+            finality_resolver,
+            sources,
+        )
+        assert "UNION ALL" in result.sql.upper()
+
+    def test_joined_dimension_has_join_in_each_branch(
+        self, finality_resolver: ContractResolver, sources: list[SemanticSource]
+    ) -> None:
+        result = compile(
+            SemanticQuery(metrics=["revenue"], dimensions=["order_date", "region"], as_of=_AS_OF),
+            finality_resolver,
+            sources,
+        )
+        # Both branches must join dim_customers to resolve "region"
+        assert result.sql.lower().count("dim_customers") >= 2
+
+    def test_joined_dimension_sql_is_valid(
+        self, finality_resolver: ContractResolver, sources: list[SemanticSource]
+    ) -> None:
+        result = compile(
+            SemanticQuery(metrics=["revenue"], dimensions=["order_date", "region"], as_of=_AS_OF),
+            finality_resolver,
+            sources,
+        )
+        _parse_ok_union(result.sql)

@@ -23,11 +23,15 @@ from canon.contracts.resolver import Binding
 from canon.contracts.resolver import Unresolved as ResolverUnresolved
 from canon.core.models import (
     DimensionInfo,
+    DomainGroup,
     MetricDetail,
+    MetricRef,
     MetricSummary,
+    OverviewResult,
     QueryResult,
     SourceFreshnessOut,
 )
+from canon.core.overview import questions_for_group
 from canon.exc import Ambiguous, CanonError, Unresolved, UnsupportedMeasure
 from canon.instrumentation.events import AnswerEventLog, DiskAnswerEventLog, NullAnswerEventLog
 from canon.instrumentation.models import AnswerEvent, _age_days, _sha256_json
@@ -43,6 +47,42 @@ if TYPE_CHECKING:
     from canon.semantic.models import SemanticSource
 
 __all__ = ["CanonService"]
+
+
+def _get_domain(binding: Any, resolver: Any) -> str:
+    """Return the domain (owning source name) for *binding*.
+
+    For source-bound kinds the canonical source is the domain.
+    For composite kinds (ratio/weighted_avg) we walk the numerator's resolved binding.
+    Falls back to the metric name when nothing resolves.
+    """
+    from canon.contracts.models import BindingKind
+
+    kind = binding.canonical.kind
+    metric: str = str(binding.metric)
+    if kind in {
+        BindingKind.SINGLE,
+        BindingKind.SEMI_ADDITIVE,
+        BindingKind.DISTINCT_COUNT,
+        BindingKind.PERCENTILE,
+        BindingKind.OPAQUE,
+    }:
+        source: str | None = binding.canonical.source
+        return source if source is not None else metric
+    if kind is BindingKind.RATIO:
+        num: str | None = binding.canonical.numerator
+    elif kind is BindingKind.WEIGHTED_AVG:
+        num = binding.canonical.weighted_sum
+    else:
+        return metric
+    if num is None:
+        return metric
+    candidates: list[Any] = resolver._name_index.get(num, [])
+    if candidates:
+        src: str | None = candidates[0].canonical.source
+        if src is not None:
+            return src
+    return metric
 
 
 def _dialect_for_type(connector_type: str) -> str:
@@ -213,6 +253,7 @@ class CanonService:
                 measures=all_measures,
                 aliases=list(binding.binding.aliases),
                 freshness=None,
+                examples=list(binding.binding.examples),
             )
         if binding.kind not in _DESCRIBABLE:
             raise UnsupportedMeasure(
@@ -242,7 +283,55 @@ class CanonService:
             measures=[m.name for m in source.measures],
             aliases=list(binding.binding.aliases),
             freshness=freshness,
+            examples=list(binding.binding.examples),
         )
+
+    def get_overview(self, domain: str | None = None) -> OverviewResult:
+        """Return active metrics grouped by domain with plain-language sample questions (S12).
+
+        ``domain`` filters to a single owning-source group; omit for all domains.
+        Each group carries the source's reachable dimension names and ≥1 sample question
+        (templated from binding examples or from dimensions when no usage evidence exists).
+        """
+        from canon.contracts.models import Status
+
+        source_to_metrics: dict[str, list[tuple[str, str]]] = {}
+        for name_list in self._resolver._name_index.values():
+            for b in name_list:
+                if b.status is not Status.ACTIVE:
+                    continue
+                d = _get_domain(b, self._resolver)
+                source_to_metrics.setdefault(d, [])
+                if any(n == b.metric for n, _ in source_to_metrics[d]):
+                    continue
+                display: str = b.label or b.metric.replace("_", " ")
+                source_to_metrics[d].append((b.metric, display))
+
+        groups: list[DomainGroup] = []
+        for src_name in sorted(source_to_metrics):
+            if domain is not None and src_name != domain:
+                continue
+            name_label_pairs = sorted(source_to_metrics[src_name], key=lambda x: x[0])
+            metric_refs = [MetricRef(name=n, label=lbl) for n, lbl in name_label_pairs]
+            dim_names = [d.name for d in self._reachable_dimensions(src_name)]
+            metrics_with_examples: list[tuple[str, list[Any]]] = []
+            for name, label in name_label_pairs:
+                bindings = self._resolver._name_index.get(name, [])
+                examples: list[Any] = []
+                for b in bindings:
+                    if b.metric == name and b.status is Status.ACTIVE:
+                        examples = list(b.examples)
+                        break
+                metrics_with_examples.append((label, examples))
+            groups.append(
+                DomainGroup(
+                    name=src_name,
+                    metrics=metric_refs,
+                    dimensions=dim_names,
+                    sample_questions=questions_for_group(metrics_with_examples, dim_names),
+                )
+            )
+        return OverviewResult(domains=groups)
 
     def _reachable_dimensions(self, source_name: str) -> list[DimensionInfo]:
         """All dimensions queryable from *source_name* via its declared join graph.

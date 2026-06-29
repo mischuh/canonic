@@ -121,6 +121,13 @@ def orders_rt() -> SemanticSource:
             Dimension(name="order_date", column="created_at", granularity="day"),
             Dimension(name="status", column="status"),
         ],
+        joins=[
+            Join(
+                to="customers",
+                on="orders_rt.customer_id = customers.customer_id",
+                relationship=Relationship.MANY_TO_ONE,
+            ),
+        ],
     )
 
 

@@ -20,6 +20,7 @@ from canon.cli.commands import (
     ingest,
     knowledge,
     mcp,
+    overview,
     query,
     report,
     review,
@@ -80,6 +81,7 @@ app.add_typer(knowledge.app, name="knowledge")
 app.add_typer(evaluate.app, name="eval")
 
 # Top-level single commands.
+app.command("overview")(overview.overview)
 app.command("setup")(setup.setup)
 app.command("ingest")(ingest.ingest)
 app.command("review")(review.review)
