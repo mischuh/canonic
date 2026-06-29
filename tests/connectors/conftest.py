@@ -18,6 +18,7 @@ if TYPE_CHECKING:
 
 from canon.config import Connection
 from canon.connectors.postgres import PostgresConnector
+from canon.connectors.redshift import RedshiftConnector
 from canon.connectors.sqlite import SQLiteConnector
 
 try:
@@ -90,6 +91,38 @@ def sqlite_offline_connector() -> SQLiteConnector:
         params={"path": ":memory:"},
     )
     return SQLiteConnector(connection)
+
+
+@pytest.fixture
+def offline_redshift_connector(monkeypatch: pytest.MonkeyPatch) -> RedshiftConnector:
+    """A Redshift connector that resolves credentials but never connects (unit tests)."""
+    monkeypatch.setenv("CANON_TEST_RS_PASSWORD", "secret")
+    connection = Connection(
+        id="warehouse_rs",
+        type="redshift",
+        params={"host": "redshift.example.com", "port": 5439, "user": "u", "dbname": "db"},
+        credentials_ref="env:CANON_TEST_RS_PASSWORD",
+    )
+    return RedshiftConnector(connection)
+
+
+@pytest.fixture
+async def redshift_connector(
+    postgres_container: dict[str, Any], monkeypatch: pytest.MonkeyPatch
+) -> AsyncIterator[RedshiftConnector]:
+    """RedshiftConnector pointed at the PostgreSQL testcontainer (wire-compatible)."""
+    monkeypatch.setenv("CANON_TEST_RS_PASSWORD", postgres_container["password"])
+    connection = Connection(
+        id="warehouse_rs",
+        type="redshift",
+        params={**postgres_container["params"], "row_limit": 5, "statement_timeout_ms": 5000},
+        credentials_ref="env:CANON_TEST_RS_PASSWORD",
+    )
+    connector = RedshiftConnector(connection)
+    try:
+        yield connector
+    finally:
+        await connector.aclose()
 
 
 @pytest.fixture

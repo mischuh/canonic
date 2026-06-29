@@ -16,6 +16,7 @@ from canon.connectors.metabase import MetabaseConnector
 from canon.connectors.notion import DEFAULT_API_VERSION as _NOTION_DEFAULT_API_VERSION
 from canon.connectors.notion import NotionConnector
 from canon.connectors.postgres import PostgresConnector
+from canon.connectors.redshift import RedshiftConnector
 from canon.connectors.sqlite import SQLiteConnector
 from canon.exc import ConnectionError, UnknownConnectorType
 
@@ -114,6 +115,7 @@ def _build_default_factory() -> ConnectorFactory:
     factory.register("metabase", MetabaseConnector)
     factory.register("notion", _make_notion)
     factory.register("postgres", PostgresConnector)
+    factory.register("redshift", RedshiftConnector)
     factory.register("sqlite", SQLiteConnector)
     return factory
 
