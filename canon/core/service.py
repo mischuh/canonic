@@ -100,6 +100,28 @@ def _dialect_for_type(connector_type: str) -> str:
     return adapter_for(dialect).dialect
 
 
+_FILE_PATH_PARAMS: dict[str, str] = {
+    "duckdb": "path",
+    "sqlite": "path",
+    "dbt": "manifest_path",
+}
+
+
+def _resolve_connection_paths(connections: list, root: Path) -> None:
+    """Resolve relative file paths in file-based connections against the project root.
+
+    Mutates params in-place so callers downstream always receive absolute paths,
+    regardless of the process working directory.
+    """
+    for conn in connections:
+        param_key = _FILE_PATH_PARAMS.get(conn.type)
+        if param_key is None:
+            continue
+        raw = conn.params.get(param_key)
+        if raw and not Path(raw).is_absolute():
+            conn.params[param_key] = str(root / raw)
+
+
 class CanonService:
     """Capability layer loaded once per daemon/process (SPEC §2, §4).
 
@@ -133,6 +155,7 @@ class CanonService:
     def from_project(cls, root: Path) -> CanonService:
         """Load config, resolver, and semantic sources from a project root."""
         config = load_config(root / "canon.yaml")
+        _resolve_connection_paths(config.connections, root)
         resolver = ContractResolver.from_project(root)
         sources = list_semantic_sources(root)
         return cls(
