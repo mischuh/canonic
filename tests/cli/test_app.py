@@ -12,19 +12,18 @@ _GROUPS = ["setup", "connection", "sl", "query", "sql", "knowledge", "status", "
 # Capability stubs that must exit 0 with a "not implemented yet" notice.
 # (``setup`` is now a real interactive command — see tests/cli/test_setup.py.)
 _STUBS = [
-    ["sl", "resolve", "revenue"],
-    ["sl", "compile", "-f", "q.json"],
     ["knowledge", "search", "orders"],
     ["completion"],
 ]
 
-# MCP, query, and sql are now real capability commands (E8/E5/E2) — they require a
-# project directory and exit non-zero when run outside one. Excluded from the stub test.
+# Real capability commands (E5/E7/E8/E2) that require a project directory and exit
+# non-zero when run outside one. Excluded from the stub test.
 _MCP_COMMANDS = [
     ["mcp", "start"],
     ["mcp", "stop"],
     ["mcp", "status"],
     ["sql", "SELECT 1"],
+    ["sl", "resolve", "revenue"],
 ]
 
 
@@ -75,5 +74,12 @@ def test_mcp_commands_require_project(
 def test_query_missing_file_is_clean_error(runner: CliRunner) -> None:
     """A missing query file is a typer validation error, not a traceback."""
     result = runner.invoke(app, ["query", "-f", "does-not-exist.json"])
+    assert result.exit_code != 0
+    assert result.exception is None or isinstance(result.exception, SystemExit)
+
+
+def test_sl_compile_missing_file_is_clean_error(runner: CliRunner) -> None:
+    """A missing compile query file is a typer validation error, not a traceback."""
+    result = runner.invoke(app, ["sl", "compile", "-f", "does-not-exist.json"])
     assert result.exit_code != 0
     assert result.exception is None or isinstance(result.exception, SystemExit)
