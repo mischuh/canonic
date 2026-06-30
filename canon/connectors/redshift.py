@@ -258,6 +258,7 @@ class RedshiftConnector(ConnectorBase):
                 relations[(schema, name)] = "materialized_view"
         except Exception as exc:
             logger.warning("could not fetch Redshift materialized views from SVV_MV_INFO: %s", exc)
+            await conn.rollback()
         return relations
 
     async def _fetch_columns(self, conn: Any) -> dict[tuple[str, str], list[ColumnInfo]]:
@@ -314,6 +315,7 @@ class RedshiftConnector(ConnectorBase):
             logger.warning(
                 "could not fetch Redshift materialized-view columns from pg_catalog: %s", exc
             )
+            await conn.rollback()
         return out
 
     async def _fetch_primary_keys(self, conn: Any) -> dict[tuple[str, str], list[str]]:
