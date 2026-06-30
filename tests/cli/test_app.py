@@ -40,10 +40,15 @@ def test_version_prints_package_version(runner: CliRunner) -> None:
     assert result.output.strip() == version("canon")
 
 
-def test_bare_invocation_exits_zero_without_traceback(runner: CliRunner) -> None:
-    result = runner.invoke(app, [])
-    assert result.exit_code == 0
-    assert "not implemented yet" in result.output
+def test_bare_invocation_shows_project_menu(runner: CliRunner, project_dir: None) -> None:
+    result = runner.invoke(app, [], input="4\n")
+    assert result.exit_code == 0, result.output
+    assert result.exception is None or isinstance(result.exception, SystemExit)
+
+
+def test_bare_invocation_json_exits_2(runner: CliRunner) -> None:
+    result = runner.invoke(app, ["--json"])
+    assert result.exit_code == 2
     assert result.exception is None or isinstance(result.exception, SystemExit)
 
 
