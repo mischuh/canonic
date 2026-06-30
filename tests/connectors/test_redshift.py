@@ -79,7 +79,7 @@ class TestTypeMapping:
 class TestConnectorSurface:
     def test_dsn_uses_asyncpg_driver(self, offline_redshift_connector: RedshiftConnector) -> None:
         dsn = offline_redshift_connector.dsn
-        assert dsn.startswith("postgresql+asyncpg://")
+        assert dsn.startswith("redshift+asyncpg://")
 
     def test_dsn_contains_host_and_credentials(
         self, offline_redshift_connector: RedshiftConnector
@@ -118,7 +118,7 @@ class TestConnectorSurface:
             credentials_ref="env:CANON_TEST_RS_DSN",
         )
         connector = RedshiftConnector(conn)
-        assert connector.dsn.startswith("postgresql+asyncpg://")
+        assert connector.dsn.startswith("redshift+asyncpg://")
         assert "my-cluster.us-east-1.redshift.amazonaws.com" in connector.dsn
 
 

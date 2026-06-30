@@ -23,6 +23,8 @@ from decimal import Decimal
 from typing import TYPE_CHECKING, Any
 
 from sqlalchemy import URL, make_url, text
+from sqlalchemy.dialects import registry as _dialect_registry
+from sqlalchemy.dialects.postgresql.asyncpg import PGDialect_asyncpg
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 
 from canon.connectors.base import (
@@ -47,6 +49,22 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 __all__ = ["RedshiftConnector"]
+
+
+class _RedshiftAsyncpgDialect(PGDialect_asyncpg):
+    """asyncpg dialect patched for Redshift wire-protocol compatibility.
+
+    Redshift does not support ``SHOW standard_conforming_strings``; it always
+    behaves as if the setting is ``on``.
+    """
+
+    name = "redshift"
+
+    def _set_backslash_escapes(self, _connection: Any) -> None:
+        self._backslash_escapes = False
+
+
+_dialect_registry.register("redshift.asyncpg", __name__, "_RedshiftAsyncpgDialect")
 
 _DEFAULT_ROW_LIMIT = 10_000
 _DEFAULT_STATEMENT_TIMEOUT_MS = 30_000
@@ -146,10 +164,10 @@ class RedshiftConnector(ConnectorBase):
         if credential.startswith(
             ("redshift://", "redshift+asyncpg://", "postgres://", "postgresql://")
         ):
-            self._url = make_url(credential).set(drivername="postgresql+asyncpg")
+            self._url = make_url(credential).set(drivername="redshift+asyncpg")
         else:
             self._url = URL.create(
-                "postgresql+asyncpg",
+                "redshift+asyncpg",
                 username=params.get("user"),
                 password=credential,
                 host=params.get("host"),
