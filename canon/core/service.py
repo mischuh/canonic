@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING, Any, cast
 from canon.compiler import SemanticQuery, compile
 from canon.compiler.dialect import adapter_for
 from canon.compiler.joins import build_alias_tree, reachable_dimension_names
-from canon.config import CanonConfig, load_config
+from canon.config import CanonConfig, Connection, load_config
 from canon.connectors.base import Capability, require_capability
 from canon.connectors.factory import default_factory
 from canon.contract import CONTRACT_SCHEMA
@@ -107,7 +107,7 @@ _FILE_PATH_PARAMS: dict[str, str] = {
 }
 
 
-def _resolve_connection_paths(connections: list, root: Path) -> None:
+def _resolve_connection_paths(connections: list[Connection], root: Path) -> None:
     """Resolve relative file paths in file-based connections against the project root.
 
     Mutates params in-place so callers downstream always receive absolute paths,
