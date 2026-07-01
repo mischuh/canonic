@@ -218,9 +218,7 @@ class ContractResolver:
             return Unresolved(name=name)
         if len(matches) > 1:
             candidates = tuple(sorted(matches, key=lambda b: (b.metric, b.aliases)))
-            logger.info(
-                "ambiguous metric: %r candidates=%s", name, [b.metric for b in candidates]
-            )
+            logger.info("ambiguous metric: %r candidates=%s", name, [b.metric for b in candidates])
             return Ambiguous(name=name, candidates=candidates)
         resolved = self._resolve_binding(matches[0], seen=frozenset({name}))
         if isinstance(resolved, Binding):
