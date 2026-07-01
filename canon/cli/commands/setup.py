@@ -64,7 +64,7 @@ from canon.semantic.models import NormalizedType
 
 if TYPE_CHECKING:
     from canon.compiler.query import SemanticQuery
-    from canon.connectors.base import Health, SchemaIntrospectable
+    from canon.connectors.base import Health, RelationSchema, SchemaIntrospectable
     from canon.core.models import QueryResult
     from canon.ingestion.emitter import EmittedDiff
     from canon.ingestion.pipeline import PipelineResult
@@ -660,6 +660,8 @@ def _prompt_connection(root: Path) -> Connection:
         health = _test_connection(conn)
         if health is not None and health.status == "ok":
             _console.print("[green]✓[/green] connection test passed")
+            if conn.type in ("postgres", "redshift"):
+                conn = _maybe_narrow_schema(conn)
             return conn
 
         if health is not None:
@@ -691,9 +693,6 @@ def _prompt_postgres_params() -> Connection:
         "user": typer.prompt("User", default="postgres"),
         "dbname": typer.prompt("Database"),
     }
-    schema = typer.prompt("Schema (optional)", default="")
-    if schema:
-        params["schema"] = schema
     env_var = typer.prompt(
         "Env var holding the password",
         default=f"CANON_{conn_id.upper()}_PASSWORD",
@@ -722,9 +721,6 @@ def _prompt_redshift_params() -> Connection:
         "user": typer.prompt("User"),
         "dbname": typer.prompt("Database"),
     }
-    schema = typer.prompt("Schema (optional)", default="")
-    if schema:
-        params["schema"] = schema
     env_var = typer.prompt(
         "Env var holding the password",
         default=f"CANON_{conn_id.upper()}_PASSWORD",
@@ -792,9 +788,150 @@ def _maybe_preview_schema(conn: Connection | None) -> bool:
     return True
 
 
-async def _introspect(conn: Connection) -> list[object]:
+async def _introspect(conn: Connection) -> list[RelationSchema]:
     connector = default_factory.create(conn)
     try:
         return list(await cast("SchemaIntrospectable", connector).introspect_schema())
     finally:
         await connector.aclose()
+
+
+def _maybe_narrow_schema(conn: Connection) -> Connection:
+    """Offer to discover schemas/tables and narrow conn.params to the user's picks."""
+    if not typer.confirm("Narrow down schemas/tables now?", default=True):
+        return conn
+    relations = _discover_relations(conn)
+    if relations is None:
+        return conn
+    if not relations:
+        _console.print("[dim]no relations found — nothing to narrow.[/dim]")
+        return conn
+
+    schemas = sorted({r.relation.split(".", 1)[0] for r in relations})
+    selected_schemas = _prompt_select_schemas(schemas)
+    if selected_schemas is not None:
+        conn.params["schemas"] = selected_schemas
+        relations = [r for r in relations if r.relation.split(".", 1)[0] in selected_schemas]
+
+    selected_tables = _prompt_select_tables(relations)
+    if selected_tables is not None:
+        conn.params["tables"] = selected_tables
+
+    return conn
+
+
+def _discover_relations(conn: Connection) -> list[RelationSchema] | None:
+    """Introspect conn (unfiltered) to discover what schemas/tables exist."""
+    try:
+        return asyncio.run(_introspect(conn))
+    except (CredentialError, ConnectionError) as exc:
+        _console.print(f"[yellow]schema discovery skipped:[/yellow] {exc}")
+        return None
+
+
+def _prompt_select_schemas(schemas: list[str]) -> list[str] | None:
+    """Show a numbered list of schemas and prompt for a selection; None means 'all'."""
+    table = Table(title="schemas")
+    table.add_column("#", justify="right")
+    table.add_column("schema")
+    for i, name in enumerate(schemas, start=1):
+        table.add_row(str(i), name)
+    _console.print(table)
+    while True:
+        choice = typer.prompt("Select schemas (e.g. 1,3,5-7) or 'all'", default="all")
+        if choice.strip().lower() == "all":
+            return None
+        try:
+            indices = _parse_index_ranges(choice, len(schemas))
+        except ValueError as exc:
+            _console.print(f"[red]{exc}[/red]")
+            continue
+        if not indices:
+            _console.print("[red]select at least one schema, or 'all'[/red]")
+            continue
+        return [schemas[i - 1] for i in sorted(indices)]
+
+
+def _prompt_select_tables(relations: list[RelationSchema]) -> list[str] | None:
+    """Show a numbered list of tables and prompt for a selection; None means 'all'."""
+    if not relations or not typer.confirm("Narrow down to specific tables too?", default=False):
+        return None
+    names = [r.relation for r in relations]
+    table = Table(title="tables")
+    table.add_column("#", justify="right")
+    table.add_column("table")
+    for i, name in enumerate(names, start=1):
+        table.add_row(str(i), name)
+    _console.print(table)
+    while True:
+        choice = typer.prompt(
+            "Select tables — indices/ranges (e.g. 1,3,5-7), glob patterns (e.g. fact_*), or 'all'",
+            default="all",
+        )
+        if choice.strip().lower() == "all":
+            return None
+        try:
+            selected = _parse_table_tokens(choice, names)
+        except ValueError as exc:
+            _console.print(f"[red]{exc}[/red]")
+            continue
+        if not selected:
+            _console.print("[red]select at least one table, or 'all'[/red]")
+            continue
+        return selected
+
+
+def _parse_index_ranges(text: str, count: int) -> set[int]:
+    """Parse comma-separated 1-based indices/ranges (e.g. '1,3,5-7') into a validated set."""
+    indices: set[int] = set()
+    for raw_token in text.split(","):
+        token = raw_token.strip()
+        if not token:
+            continue
+        if "-" in token:
+            start_s, _, end_s = token.partition("-")
+            if not (start_s.isdigit() and end_s.isdigit()):
+                raise ValueError(f"invalid range: {token!r}")
+            start, end = int(start_s), int(end_s)
+            if start > end:
+                raise ValueError(f"invalid range: {token!r}")
+            candidates: range | list[int] = range(start, end + 1)
+        else:
+            if not token.isdigit():
+                raise ValueError(f"invalid index: {token!r}")
+            candidates = [int(token)]
+        for i in candidates:
+            if not 1 <= i <= count:
+                raise ValueError(f"index {i} out of range (1-{count})")
+            indices.add(i)
+    return indices
+
+
+def _is_index_range(token: str) -> bool:
+    """True when token is a bare index ('7') or index range ('5-7'), not a glob pattern."""
+    if "-" in token:
+        start, _, end = token.partition("-")
+        return start.isdigit() and end.isdigit()
+    return token.isdigit()
+
+
+def _parse_table_tokens(text: str, names: list[str]) -> list[str]:
+    """Parse comma-separated tokens: index/range tokens resolve to names; other
+    tokens are kept verbatim as glob patterns (matched at introspection time)."""
+    count = len(names)
+    selected: list[str] = []
+    seen: set[str] = set()
+    for raw_token in text.split(","):
+        token = raw_token.strip()
+        if not token:
+            continue
+        if _is_index_range(token):
+            for i in sorted(_parse_index_ranges(token, count)):
+                name = names[i - 1]
+                if name not in seen:
+                    seen.add(name)
+                    selected.append(name)
+        elif token not in seen:
+            seen.add(token)
+            selected.append(token)
+    return selected

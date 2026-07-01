@@ -3,9 +3,13 @@
 from __future__ import annotations
 
 import json
+from types import SimpleNamespace
 from typing import TYPE_CHECKING
 
+import pytest
+
 from canon.cli.app import app
+from canon.cli.commands.setup import _parse_index_ranges, _parse_table_tokens
 from canon.config import load_config
 from canon.connectors.base import Health
 
@@ -13,6 +17,11 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from typer.testing import CliRunner
+
+
+def _relation(name: str) -> SimpleNamespace:
+    """A minimal stand-in for RelationSchema exposing only the ``.relation`` attribute."""
+    return SimpleNamespace(relation=name)
 
 
 class _FakeConnector:
@@ -53,8 +62,8 @@ _FRESH_INPUT = "\n".join(
         "",  # port → 5432
         "",  # user → postgres
         "analytics",  # database
-        "",  # schema (optional)
         "",  # env var → CANON_WAREHOUSE_PG_PASSWORD
+        "n",  # narrow schemas/tables? → No
         "",  # llm provider → openai_compatible
         "",  # base url
         "llama3",  # model
@@ -113,7 +122,6 @@ def test_connection_test_gates_recording(runner: CliRunner, tmp_path: Path, monk
             "",  # port
             "",  # user
             "db",  # database
-            "",  # schema
             "",  # env var
             "",  # Try again? → default yes
             # attempt 2
@@ -123,8 +131,8 @@ def test_connection_test_gates_recording(runner: CliRunner, tmp_path: Path, monk
             "",  # port
             "",  # user
             "db",  # database
-            "",  # schema
             "",  # env var
+            "n",  # narrow schemas/tables? → No
             # llm
             "",  # provider
             "",  # base url
@@ -140,6 +148,181 @@ def test_connection_test_gates_recording(runner: CliRunner, tmp_path: Path, monk
     assert "connection test failed" in result.output
     config = load_config(tmp_path / "canon.yaml")
     assert len(config.connections) == 1
+
+
+def test_declining_narrowing_writes_no_schema_or_table_params(
+    runner: CliRunner, tmp_path: Path, monkeypatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    _patch_connector(monkeypatch, _FakeConnector(Health(status="ok")))
+
+    result = runner.invoke(app, ["setup"], input=_FRESH_INPUT + "\n")
+
+    assert result.exit_code == 0, result.output
+    params = load_config(tmp_path / "canon.yaml").connections[0].params
+    assert "schemas" not in params
+    assert "tables" not in params
+
+
+def test_narrow_to_one_schema(runner: CliRunner, tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.chdir(tmp_path)
+    relations = [
+        _relation("finance.fact_revenue"),
+        _relation("public.orders"),
+        _relation("public.customers"),
+    ]
+    fake = _FakeConnector(Health(status="ok"), relations=relations)
+    # One connector creation for the connection test, one for schema discovery.
+    _patch_connector(monkeypatch, fake, fake)
+    narrow_input = "\n".join(
+        [
+            "",  # project name
+            "3",  # connection type → postgres
+            "",  # connection id
+            "",  # host
+            "",  # port
+            "",  # user
+            "db",  # database
+            "",  # env var
+            "",  # narrow schemas/tables? → default Yes
+            "2",  # select schemas → schema #2 (sorted: finance=1, public=2)
+            "",  # narrow tables too? → default No
+            "",  # llm provider
+            "",  # base url
+            "m",  # model
+            "",  # api key env
+            "",  # preview schema?
+        ]
+    )
+
+    result = runner.invoke(app, ["setup"], input=narrow_input + "\n")
+
+    assert result.exit_code == 0, result.output
+    params = load_config(tmp_path / "canon.yaml").connections[0].params
+    assert params["schemas"] == ["public"]
+    assert "tables" not in params
+
+
+def test_narrow_tables_with_index_and_glob(runner: CliRunner, tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.chdir(tmp_path)
+    relations = [
+        _relation("public.orders"),
+        _relation("public.fact_sales"),
+        _relation("finance.fact_revenue"),
+    ]
+    fake = _FakeConnector(Health(status="ok"), relations=relations)
+    _patch_connector(monkeypatch, fake, fake)
+    narrow_input = "\n".join(
+        [
+            "",  # project name
+            "3",  # connection type → postgres
+            "",  # connection id
+            "",  # host
+            "",  # port
+            "",  # user
+            "db",  # database
+            "",  # env var
+            "",  # narrow schemas/tables? → default Yes
+            "all",  # select schemas → all
+            "y",  # narrow tables too? → Yes
+            "1,fact_*",  # index 1 + a literal glob token
+            "",  # llm provider
+            "",  # base url
+            "m",  # model
+            "",  # api key env
+            "",  # preview schema?
+        ]
+    )
+
+    result = runner.invoke(app, ["setup"], input=narrow_input + "\n")
+
+    assert result.exit_code == 0, result.output
+    params = load_config(tmp_path / "canon.yaml").connections[0].params
+    assert "schemas" not in params
+    assert params["tables"] == ["public.orders", "fact_*"]
+
+
+def test_narrow_schema_invalid_index_reprompts(
+    runner: CliRunner, tmp_path: Path, monkeypatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    relations = [_relation("public.orders"), _relation("finance.fact_revenue")]
+    fake = _FakeConnector(Health(status="ok"), relations=relations)
+    _patch_connector(monkeypatch, fake, fake)
+    narrow_input = "\n".join(
+        [
+            "",  # project name
+            "3",  # connection type → postgres
+            "",  # connection id
+            "",  # host
+            "",  # port
+            "",  # user
+            "db",  # database
+            "",  # env var
+            "",  # narrow schemas/tables? → default Yes
+            "99",  # out of range → reprompt
+            "1",  # valid index
+            "",  # narrow tables too? → default No
+            "",  # llm provider
+            "",  # base url
+            "m",  # model
+            "",  # api key env
+            "",  # preview schema?
+        ]
+    )
+
+    result = runner.invoke(app, ["setup"], input=narrow_input + "\n")
+
+    assert result.exit_code == 0, result.output
+    assert "out of range" in result.output
+
+
+class TestParseIndexRanges:
+    def test_single_indices(self) -> None:
+        assert _parse_index_ranges("1,3", 5) == {1, 3}
+
+    def test_range(self) -> None:
+        assert _parse_index_ranges("2-4", 5) == {2, 3, 4}
+
+    def test_mixed(self) -> None:
+        assert _parse_index_ranges("1,3-4", 5) == {1, 3, 4}
+
+    def test_blank_tokens_ignored(self) -> None:
+        assert _parse_index_ranges("1,,3", 5) == {1, 3}
+
+    def test_out_of_range_raises(self) -> None:
+        with pytest.raises(ValueError, match="out of range"):
+            _parse_index_ranges("9", 5)
+
+    def test_non_numeric_raises(self) -> None:
+        with pytest.raises(ValueError, match="invalid index"):
+            _parse_index_ranges("abc", 5)
+
+    def test_backwards_range_raises(self) -> None:
+        with pytest.raises(ValueError, match="invalid range"):
+            _parse_index_ranges("5-1", 5)
+
+
+class TestParseTableTokens:
+    def test_index_resolves_to_name(self) -> None:
+        names = ["public.orders", "public.customers"]
+        assert _parse_table_tokens("1", names) == ["public.orders"]
+
+    def test_glob_token_kept_verbatim(self) -> None:
+        names = ["public.orders", "public.customers"]
+        assert _parse_table_tokens("fact_*", names) == ["fact_*"]
+
+    def test_mixed_index_and_glob(self) -> None:
+        names = ["public.orders", "public.customers"]
+        assert _parse_table_tokens("2,fact_*", names) == ["public.customers", "fact_*"]
+
+    def test_range_resolves_to_multiple_names(self) -> None:
+        names = ["a.t1", "a.t2", "a.t3"]
+        assert _parse_table_tokens("1-2", names) == ["a.t1", "a.t2"]
+
+    def test_duplicate_tokens_deduplicated(self) -> None:
+        names = ["a.t1", "a.t2"]
+        assert _parse_table_tokens("1,1,a.t1", names) == ["a.t1"]
 
 
 def test_resume_skips_completed_steps(runner: CliRunner, tmp_path: Path, monkeypatch) -> None:
@@ -197,8 +380,8 @@ def test_existing_project_menu_adds_connection(
             "",  # port
             "",  # user
             "db",  # database
-            "",  # schema
             "",  # env var
+            "n",  # narrow schemas/tables? → No
             "4",  # exit
         ]
     )

@@ -17,7 +17,7 @@ from sqlalchemy.exc import DBAPIError
 
 from canon.config import Connection
 from canon.connectors.base import AcquisitionTier, Capability
-from canon.connectors.redshift import RedshiftConnector, _normalize_type
+from canon.connectors.redshift import RedshiftConnector, _normalize_type, _resolve_search_path
 from canon.exc import ReadOnlyViolation
 
 
@@ -122,6 +122,18 @@ class TestConnectorSurface:
         assert "my-cluster.us-east-1.redshift.amazonaws.com" in connector.dsn
 
 
+class TestSearchPathPrecedence:
+    def test_schemas_list_takes_precedence_over_legacy_schema(self) -> None:
+        params = {"schemas": ["finance", "public"], "schema": "legacy"}
+        assert _resolve_search_path(params) == "finance,public"
+
+    def test_legacy_schema_used_when_schemas_absent(self) -> None:
+        assert _resolve_search_path({"schema": "legacy"}) == "legacy"
+
+    def test_none_when_neither_present(self) -> None:
+        assert _resolve_search_path({}) is None
+
+
 @pytest.mark.integration
 class TestRedshiftIntegration:
     """Integration suite using a PostgreSQL container as a Redshift wire-compatible proxy.
@@ -212,3 +224,37 @@ class TestRedshiftIntegration:
     ) -> None:
         with pytest.raises((DBAPIError, Exception)):
             await redshift_connector.run_read_only_sql("SELECT pg_sleep(30)")
+
+    async def test_introspection_excludes_unselected_schema(
+        self, postgres_container: dict[str, Any], monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("CANON_TEST_RS_PASSWORD", postgres_container["password"])
+        connection = Connection(
+            id="warehouse_rs",
+            type="redshift",
+            params={**postgres_container["params"], "schemas": ["nonexistent"]},
+            credentials_ref="env:CANON_TEST_RS_PASSWORD",
+        )
+        connector = RedshiftConnector(connection)
+        try:
+            relations = await connector.introspect_schema()
+        finally:
+            await connector.aclose()
+        assert relations == []
+
+    async def test_introspection_filters_by_table_glob(
+        self, postgres_container: dict[str, Any], monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("CANON_TEST_RS_PASSWORD", postgres_container["password"])
+        connection = Connection(
+            id="warehouse_rs",
+            type="redshift",
+            params={**postgres_container["params"], "tables": ["fct_*"]},
+            credentials_ref="env:CANON_TEST_RS_PASSWORD",
+        )
+        connector = RedshiftConnector(connection)
+        try:
+            relations = {r.relation for r in await connector.introspect_schema()}
+        finally:
+            await connector.aclose()
+        assert relations == {"analytics.fct_orders"}

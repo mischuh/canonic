@@ -28,7 +28,7 @@ from canon.ingestion.pending import (
 
 _PENDING_DIFFS_DIR = "pending-diffs"
 
-_ACTIONS = "[[a]]ccept / [[r]]eject / [[s]]kip / [[f]]reeze / [[q]]uit"
+_ACTIONS = r"\[a]ccept / \[r]eject / \[s]kip / \[f]reeze / \[q]uit"
 
 
 def _resolve_run_dir(project_root: Path, run_id: str | None) -> Path | None:
@@ -94,7 +94,7 @@ def review(
         _console.print()
         _console.print(
             f"[bold cyan]Proposal {idx}/{total}:[/bold cyan] {proposal.target}  "
-            f"[[yellow]{proposal.op}[/yellow], "
+            rf"\[[yellow]{proposal.op}[/yellow], "
             f"confidence: {diff.confidence:.2f}, "
             f"{diff.drafted_by.value}]"
         )
