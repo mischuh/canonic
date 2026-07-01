@@ -112,6 +112,26 @@ class TestReviewNoRuns:
         assert "run-id not found" in result.output
 
 
+class TestReviewMenuRendering:
+    def test_actions_menu_renders_literal_brackets(self, project: Path) -> None:
+        """Regression: the action hints must render as literal [a]/[r]/[s]/[f]/[q],
+        not be swallowed by Rich markup parsing (double-bracket escaping is broken)."""
+        _write_run(project)
+        result = CliRunner().invoke(app, ["review"], input="q\n")
+
+        assert result.exit_code == 0, result.output
+        assert "[a]ccept / [r]eject / [s]kip / [f]reeze / [q]uit" in result.output
+
+    def test_proposal_line_renders_literal_brackets(self, project: Path) -> None:
+        _write_run(project)
+        result = CliRunner().invoke(app, ["review"], input="q\n")
+
+        assert result.exit_code == 0, result.output
+        # Normalize away Rich's console-width word-wrapping before matching.
+        normalized = " ".join(result.output.split())
+        assert "[add, confidence: 0.95, deterministic]" in normalized
+
+
 class TestReviewAccept:
     def test_ac1_accept_writes_target_file(self, project: Path) -> None:
         """AC1: accepting a proposal writes the target file to the working directory."""

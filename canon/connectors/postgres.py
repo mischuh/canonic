@@ -3,6 +3,8 @@
 Implements the four P0 capabilities against PostgreSQL: ``capabilities``,
 ``test_connection``, ``introspect_schema`` (live, tier 1) and
 ``run_read_only_sql`` with defense-in-depth read-only enforcement (SPEC-E2 §3).
+``introspect_schema`` honors ``params["schemas"]``/``params["tables"]`` to narrow
+the relations it returns (see ``canon.connectors.relation_filter``).
 """
 
 from __future__ import annotations
@@ -30,6 +32,7 @@ from canon.connectors.base import (
     compute_fingerprint,
 )
 from canon.connectors.readonly import assert_read_only
+from canon.connectors.relation_filter import filter_relations
 from canon.credentials import resolve_credential
 
 if TYPE_CHECKING:
@@ -81,6 +84,14 @@ _PG_TYPE_MAP: dict[str, str] = {
 }
 
 _KIND_BY_TABLE_TYPE = {"BASE TABLE": "table", "VIEW": "view"}
+
+
+def _resolve_search_path(params: dict[str, Any]) -> str | None:
+    """Derive the connect-time search_path: ``schemas`` (list) over legacy ``schema``."""
+    schemas = params.get("schemas")
+    if schemas:
+        return ",".join(schemas)
+    return params.get("schema")
 
 
 def _normalize_type(raw: str, relation: str, column: str) -> str:
@@ -140,10 +151,12 @@ class PostgresConnector(ConnectorBase):
                 port=params.get("port"),
                 database=params.get("dbname") or params.get("database"),
             )
-        schema = params.get("schema")
+        search_path = _resolve_search_path(params)
         self._connect_args: dict[str, object] = (
-            {"server_settings": {"search_path": schema}} if schema else {}
+            {"server_settings": {"search_path": search_path}} if search_path else {}
         )
+        self._schemas_filter: list[str] | None = params.get("schemas")
+        self._tables_filter: list[str] | None = params.get("tables")
         self._row_limit = int(params.get("row_limit", _DEFAULT_ROW_LIMIT))
         self._statement_timeout_ms = int(
             params.get("statement_timeout_ms", _DEFAULT_STATEMENT_TIMEOUT_MS)
@@ -188,6 +201,7 @@ class PostgresConnector(ConnectorBase):
         engine = self._get_engine()
         async with engine.connect() as conn:
             relations = await self._fetch_relations(conn)
+            relations = filter_relations(relations, self._schemas_filter, self._tables_filter)
             columns = await self._fetch_columns(conn)
             primary_keys = await self._fetch_primary_keys(conn)
             foreign_keys = await self._fetch_foreign_keys(conn)

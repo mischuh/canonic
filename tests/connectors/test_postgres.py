@@ -15,7 +15,7 @@ from sqlalchemy.exc import DBAPIError
 
 from canon.config import Connection
 from canon.connectors.base import AcquisitionTier, Capability
-from canon.connectors.postgres import PostgresConnector, _normalize_type
+from canon.connectors.postgres import PostgresConnector, _normalize_type, _resolve_search_path
 from canon.exc import ReadOnlyViolation
 
 # ---------------------------------------------------------------------------
@@ -80,6 +80,18 @@ class TestConnectorSurface:
             Capability.TEST_CONNECTION,
             Capability.CAPABILITIES,
         }
+
+
+class TestSearchPathPrecedence:
+    def test_schemas_list_takes_precedence_over_legacy_schema(self) -> None:
+        params = {"schemas": ["finance", "public"], "schema": "legacy"}
+        assert _resolve_search_path(params) == "finance,public"
+
+    def test_legacy_schema_used_when_schemas_absent(self) -> None:
+        assert _resolve_search_path({"schema": "legacy"}) == "legacy"
+
+    def test_none_when_neither_present(self) -> None:
+        assert _resolve_search_path({}) is None
 
 
 # ---------------------------------------------------------------------------
@@ -168,3 +180,37 @@ class TestPostgresIntegration:
         # may surface raw (asyncpg) or wrapped (SQLAlchemy) depending on the path.
         with pytest.raises((DBAPIError, asyncpg.PostgresError)):
             await pg_connector.run_read_only_sql("SELECT pg_sleep(30)")
+
+    async def test_introspection_excludes_unselected_schema(
+        self, postgres_container: dict, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("CANON_TEST_PG_PASSWORD", postgres_container["password"])
+        connection = Connection(
+            id="warehouse_pg",
+            type="postgres",
+            params={**postgres_container["params"], "schemas": ["nonexistent"]},
+            credentials_ref="env:CANON_TEST_PG_PASSWORD",
+        )
+        connector = PostgresConnector(connection)
+        try:
+            relations = await connector.introspect_schema()
+        finally:
+            await connector.aclose()
+        assert relations == []
+
+    async def test_introspection_filters_by_table_glob(
+        self, postgres_container: dict, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("CANON_TEST_PG_PASSWORD", postgres_container["password"])
+        connection = Connection(
+            id="warehouse_pg",
+            type="postgres",
+            params={**postgres_container["params"], "tables": ["fct_*"]},
+            credentials_ref="env:CANON_TEST_PG_PASSWORD",
+        )
+        connector = PostgresConnector(connection)
+        try:
+            relations = {r.relation for r in await connector.introspect_schema()}
+        finally:
+            await connector.aclose()
+        assert relations == {"analytics.fct_orders"}

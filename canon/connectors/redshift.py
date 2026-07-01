@@ -12,6 +12,9 @@ used unchanged.  Key behavioral differences from the PostgreSQL connector:
 - Materialized views are discovered via ``SVV_MV_INFO`` (not ``pg_matviews``).
 - Redshift-specific types (SUPER, HLLSKETCH, VARBYTE, …) are mapped to json.
 - System schema exclusion includes ``pg_internal``.
+
+``introspect_schema`` honors ``params["schemas"]``/``params["tables"]`` to narrow
+the relations it returns (see ``canon.connectors.relation_filter``).
 """
 
 from __future__ import annotations
@@ -41,6 +44,7 @@ from canon.connectors.base import (
     compute_fingerprint,
 )
 from canon.connectors.readonly import assert_read_only
+from canon.connectors.relation_filter import filter_relations
 from canon.credentials import resolve_credential
 
 if TYPE_CHECKING:
@@ -118,6 +122,14 @@ _REDSHIFT_TYPE_MAP: dict[str, str] = {
 _KIND_BY_TABLE_TYPE = {"BASE TABLE": "table", "VIEW": "view"}
 
 
+def _resolve_search_path(params: dict[str, Any]) -> str | None:
+    """Derive the connect-time search_path: ``schemas`` (list) over legacy ``schema``."""
+    schemas = params.get("schemas")
+    if schemas:
+        return ",".join(schemas)
+    return params.get("schema")
+
+
 def _normalize_type(raw: str, relation: str, column: str) -> str:
     """Map a native Redshift type name to the normalized type set.
 
@@ -174,13 +186,15 @@ class RedshiftConnector(ConnectorBase):
                 port=int(params.get("port", _DEFAULT_PORT)),
                 database=params.get("dbname") or params.get("database"),
             )
-        schema = params.get("schema")
+        search_path = _resolve_search_path(params)
         self._connect_args: dict[str, object] = {}
-        if schema:
-            self._connect_args["server_settings"] = {"search_path": schema}
+        if search_path:
+            self._connect_args["server_settings"] = {"search_path": search_path}
         ssl_param = params.get("ssl")
         if ssl_param is not None:
             self._connect_args["ssl"] = ssl_param
+        self._schemas_filter: list[str] | None = params.get("schemas")
+        self._tables_filter: list[str] | None = params.get("tables")
         self._row_limit = int(params.get("row_limit", _DEFAULT_ROW_LIMIT))
         self._statement_timeout_ms = int(
             params.get("statement_timeout_ms", _DEFAULT_STATEMENT_TIMEOUT_MS)
@@ -225,6 +239,7 @@ class RedshiftConnector(ConnectorBase):
         engine = self._get_engine()
         async with engine.connect() as conn:
             relations = await self._fetch_relations(conn)
+            relations = filter_relations(relations, self._schemas_filter, self._tables_filter)
             columns = await self._fetch_columns(conn)
             primary_keys = await self._fetch_primary_keys(conn)
             foreign_keys = await self._fetch_foreign_keys(conn)

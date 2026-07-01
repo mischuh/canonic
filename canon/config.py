@@ -35,6 +35,15 @@ class ProjectConfig(BaseModel):
 
 
 class Connection(BaseModel):
+    """A configured data source (SPEC E1 §3).
+
+    ``params`` is a connector-specific bag (host, port, dbname, row_limit, ...). Postgres
+    and Redshift additionally recognize ``schema`` (legacy single search_path string),
+    ``schemas`` (list[str], preferred — also comma-joined into the search_path) and
+    ``tables`` (list[str] of fully-qualified "schema.table" names or glob patterns) to
+    narrow what ``introspect_schema()`` returns.
+    """
+
     id: str
     type: str
     params: dict[str, Any] = {}
