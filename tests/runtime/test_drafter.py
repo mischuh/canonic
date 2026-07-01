@@ -200,3 +200,72 @@ def test_dimension_label_prompt_lists_table_and_dimensions() -> None:
     assert "analytics.events" in prompt
     assert "status (column: status)" in prompt
     assert '"dimensions"' in prompt
+
+
+# ---------------------------------------------------------------------------
+# FK-less schema-join drafting (star/snowflake bootstrap task expansion)
+# ---------------------------------------------------------------------------
+
+
+def _dim_categories() -> RelationSchema:
+    cols = [
+        ColumnInfo(name="category_key", type="int", nullable=False, position=1),
+        ColumnInfo(name="label", type="string", nullable=True, position=2),
+    ]
+    return RelationSchema(
+        connection="warehouse_pg",
+        relation="analytics.dim_categories",
+        kind="table",
+        columns=cols,
+        primary_key=["category_key"],
+        acquisition_tier=AcquisitionTier.LIVE,
+        source_fingerprint=compute_fingerprint(cols, ["category_key"], []),
+    )
+
+
+async def test_draft_schema_joins_parses_response(
+    llm_config: LLMConfig, set_fake: Callable[..., None]
+) -> None:
+    set_fake(
+        content=(
+            '{"joins": [{"column": "category_key", "to": "dim_categories", '
+            '"to_column": "category_key", "confidence": 0.8, "reasoning": "name match"}]}'
+        )
+    )
+    drafter = RuntimeLLMDrafter(GenerationRuntime(llm_config))
+
+    drafts = await drafter.draft_schema_joins(
+        _schema_without_pk(), ["category_key"], {"dim_categories": _dim_categories()}
+    )
+
+    assert len(drafts) == 1
+    assert drafts[0].column == "category_key"
+    assert drafts[0].to == "dim_categories"
+    assert drafts[0].to_column == "category_key"
+    assert drafts[0].confidence == 0.8
+
+
+async def test_draft_schema_joins_empty_joins_list(
+    llm_config: LLMConfig, set_fake: Callable[..., None]
+) -> None:
+    set_fake(content='{"joins": []}')
+    drafter = RuntimeLLMDrafter(GenerationRuntime(llm_config))
+
+    drafts = await drafter.draft_schema_joins(
+        _schema_without_pk(), ["category_key"], {"dim_categories": _dim_categories()}
+    )
+
+    assert drafts == []
+
+
+def test_schema_join_prompt_lists_candidates_and_other_tables() -> None:
+    from canon.runtime.drafter import _schema_join_prompt
+
+    prompt = _schema_join_prompt(
+        _schema_without_pk(), ["category_key"], {"dim_categories": _dim_categories()}
+    )
+
+    assert "analytics.events" in prompt
+    assert "category_key" in prompt
+    assert "dim_categories: category_key, label" in prompt
+    assert '"joins"' in prompt

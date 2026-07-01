@@ -38,6 +38,7 @@ __all__ = [
     "ContextBuilder",
     "DimensionEnrichment",
     "GrainDraft",
+    "JoinDraft",
     "LLMDrafter",
     "NullLLMDrafter",
     "SkippedEvidence",
@@ -62,6 +63,21 @@ LLM_GRAIN_CONFIDENCE_CEILING = 0.85
 # stricter bar — a wrong alias silently misroutes a lookup, a wrong label is just ugly.
 LLM_LABEL_CONFIDENCE_THRESHOLD = 0.5
 LLM_ALIAS_CONFIDENCE_THRESHOLD = 0.75
+
+# Confidence gating for LLM-drafted FK-less joins (star/snowflake schemas with no declared
+# FK constraint): below-threshold guesses are dropped outright, the rest capped like grain.
+# Unlike labels/aliases, accepting a join always forces drafted_by/confidence down (see
+# _build_relation_schema) — a wrong join corrupts every query that uses it via fanout, so it
+# must never bypass review regardless of how confident the model claims to be.
+LLM_JOIN_CONFIDENCE_THRESHOLD = 0.5
+LLM_JOIN_CONFIDENCE_CEILING = 0.85
+
+# Surrogate-key-like column names shared by measure/dimension/join inference. The measures
+# duty excludes a bare "id" too (never summable); the dimension/join duty only excludes the
+# suffix form (a bare "id" is normally this table's own key, not a pointer elsewhere, so it
+# can still be a useful dimension — existing behavior, preserved as-is).
+_SURROGATE_KEY_RE = re.compile(r"(^id$|_(id|fk|key)$)", re.IGNORECASE)
+_ID_SUFFIX_RE = re.compile(r"_(id|fk|key)$", re.IGNORECASE)
 
 # Sentinel key in a proposal's content that signals an additive deprecated-alternative
 # merge rather than a full MetricBinding replacement (SPEC-E3 §3.3, E15 §2.2).
@@ -137,12 +153,31 @@ class DimensionEnrichment(BaseModel):
     reasoning: str = ""
 
 
+class JoinDraft(BaseModel):
+    """An LLM-drafted FK-less join candidate for one column with no declared foreign key.
+
+    ``column`` is local to the relation being built; ``to``/``to_column`` name the guessed
+    target relation and its referenced column. Never trusted blindly — the builder
+    revalidates both against the other relations known in the same evidence batch before
+    use (:meth:`ContextBuilder._draft_schema_joins`).
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    column: str
+    to: str
+    to_column: str
+    confidence: float = 0.0
+    reasoning: str = ""
+
+
 class LLMDrafter(Protocol):
     """The fuzzy-drafting seam (SPEC-E4 §4) — injected so the headless path stays LLM-free.
 
     Implementations propose the parts the deterministic core cannot assert: a grain when
-    no primary key is declared, joins inferred from observed-query evidence, and
-    human-readable labels/aliases for inferred dimensions. Every result is labelled
+    no primary key is declared, joins inferred from observed-query evidence, human-readable
+    labels/aliases for inferred dimensions, and FK-less joins guessed from column-name
+    convention across the relations in the same bootstrap batch. Every result is labelled
     ``drafted_by: llm`` by the builder and carries reduced confidence.
     """
 
@@ -160,13 +195,23 @@ class LLMDrafter(Protocol):
         """Propose a display label and, when confident, aliases for each dimension."""
         ...
 
+    async def draft_schema_joins(
+        self,
+        schema: RelationSchema,
+        candidate_columns: list[str],
+        other_relations: dict[str, RelationSchema],
+    ) -> list[JoinDraft]:
+        """Propose FK-less joins for candidate columns via naming convention + schema evidence."""
+        ...
+
 
 class NullLLMDrafter:
     """Default LLM stub for the headless path — proposes nothing, asserts nothing.
 
     Returns an empty grain candidate (so the proposal labels grain as a draft rather than
-    silently asserting one, SPEC-E4 §4 / S1-AC2), no joins, and no dimension enrichment.
-    A real LLM drafter (E10) is injected to replace it in interactive mode.
+    silently asserting one, SPEC-E4 §4 / S1-AC2), no joins, no dimension enrichment, and no
+    schema-based join guesses. A real LLM drafter (E10) is injected to replace it in
+    interactive mode.
     """
 
     async def draft_grain(self, schema: RelationSchema) -> GrainDraft:  # noqa: ARG002 — stub
@@ -180,6 +225,14 @@ class NullLLMDrafter:
         schema: RelationSchema,  # noqa: ARG002 — stub
         dimensions: list[dict[str, Any]],  # noqa: ARG002 — stub
     ) -> list[DimensionEnrichment]:
+        return []
+
+    async def draft_schema_joins(
+        self,
+        schema: RelationSchema,  # noqa: ARG002 — stub
+        candidate_columns: list[str],  # noqa: ARG002 — stub
+        other_relations: dict[str, RelationSchema],  # noqa: ARG002 — stub
+    ) -> list[JoinDraft]:
         return []
 
 
@@ -205,10 +258,21 @@ class ContextBuilder:
         measures (e.g. ``revenue``, ``order_count``) instead of generic inferred ones
         (``total_amount``, ``row_count``).  The short relation name (last dotted segment)
         is used as the lookup key so both ``main.orders`` and ``orders`` hit the same entry.
+
+        Every ``RelationSchema`` in the batch is also pre-collected the same way, so a
+        relation with no declared FK constraints can be matched against the other tables
+        introspected in this same run when guessing FK-less joins (SPEC-E4 §4 bootstrap
+        task expansion) — no ordering dependency on another relation's own drafted grain,
+        since only its declared columns are needed, not its resolved grain.
         """
         named_measures: dict[str, list[dict[str, Any]]] = {}
         named_grains: dict[str, list[str]] = {}
+        all_relations: dict[str, RelationSchema] = {}
         for item in evidence:
+            if item.kind == EvidenceKind.RELATION_SCHEMA:
+                relation_schema = RelationSchema.model_validate(item.payload)
+                all_relations[relation_schema.relation.split(".")[-1]] = relation_schema
+                continue
             if item.kind != EvidenceKind.DEFINITION:
                 continue
             if item.acquisition_tier != AcquisitionTier.MODELING:
@@ -245,7 +309,10 @@ class ContextBuilder:
                 rel_key = schema.relation.split(".")[-1]
                 proposals.append(
                     await self._build_relation_schema(
-                        item, named_measures.get(rel_key), named_grains.get(rel_key)
+                        item,
+                        named_measures.get(rel_key),
+                        named_grains.get(rel_key),
+                        all_relations,
                     )
                 )
             elif item.kind == EvidenceKind.USAGE_EVIDENCE:
@@ -268,6 +335,7 @@ class ContextBuilder:
         item: EvidenceItem,
         named_measures: list[dict[str, Any]] | None = None,
         named_grain: list[str] | None = None,
+        all_relations: dict[str, RelationSchema] | None = None,
     ) -> Proposal:
         """Map one ``RelationSchema`` to a ``semantics/<conn>/<name>.yaml`` draft proposal.
 
@@ -313,6 +381,31 @@ class ContextBuilder:
         dimensions = ContextBuilder._infer_dimensions(schema.columns)
         await self._enrich_dimensions(schema, dimensions)
 
+        candidate_columns = self._join_candidate_columns(schema)
+        other_relations = {
+            rel_name: rel_schema
+            for rel_name, rel_schema in (all_relations or {}).items()
+            if rel_name != name and rel_schema.connection == schema.connection
+        }
+        join_drafts = await self._draft_schema_joins(schema, candidate_columns, other_relations)
+        if join_drafts:
+            meta["join_draft"] = True
+            meta["join_reasoning"] = [
+                {
+                    "column": d.column,
+                    "to": d.to,
+                    "confidence": d.confidence,
+                    "reasoning": d.reasoning,
+                }
+                for d in join_drafts
+            ]
+            # Safety downgrade (never optional): a guessed join must never let this
+            # proposal pass first_run_auto_acceptable's drafted_by/confidence check
+            # (pipeline.py) — a wrong join corrupts every query that fans out through it,
+            # so it is always routed through the same review path as an uncertain grain.
+            confidence = min(confidence, min(d.confidence for d in join_drafts))
+            drafted_by = DraftedBy.LLM
+
         content: dict[str, Any] = {
             "name": name,
             "connection": schema.connection,
@@ -323,7 +416,7 @@ class ContextBuilder:
             ],
             "measures": measures,
             "dimensions": dimensions,
-            "joins": self._build_joins(name, schema.foreign_keys),
+            "joins": self._build_joins(name, schema.foreign_keys, join_drafts),
             "meta": meta,
         }
 
@@ -339,22 +432,35 @@ class ContextBuilder:
         )
 
     @staticmethod
-    def _build_joins(this_name: str, foreign_keys: list[ForeignKey]) -> list[dict[str, Any]]:
-        """Build join fragments, adding a disambiguating ``name`` when two FKs share a target.
+    def _build_joins(
+        this_name: str,
+        foreign_keys: list[ForeignKey],
+        drafted: list[JoinDraft] | None = None,
+    ) -> list[dict[str, Any]]:
+        """Build join fragments, adding a disambiguating ``name`` when two joins share a target.
 
-        When a table has multiple FKs pointing at the same target (e.g. pickup_location_id
-        and return_location_id both → locations), the default alias would collide. In that
-        case a unique alias is derived from the FK column by stripping common id/fk/key suffixes.
+        When a table has multiple joins pointing at the same target (e.g. pickup_location_id
+        and return_location_id both → locations) — whether both FK-declared, both LLM-drafted,
+        or one of each — the default alias would collide. In that case a unique alias is
+        derived from the join column by stripping common id/fk/key suffixes.
         """
         from collections import Counter
 
-        target_counts = Counter(fk.references.relation.split(".")[-1] for fk in foreign_keys)
-        return [
+        drafted = drafted or []
+        target_counts = Counter(
+            [fk.references.relation.split(".")[-1] for fk in foreign_keys] + [d.to for d in drafted]
+        )
+        joins = [
             ContextBuilder._fk_to_join(
                 this_name, fk, needs_alias=target_counts[fk.references.relation.split(".")[-1]] > 1
             )
             for fk in foreign_keys
         ]
+        joins.extend(
+            ContextBuilder._draft_to_join(this_name, d, needs_alias=target_counts[d.to] > 1)
+            for d in drafted
+        )
+        return joins
 
     @staticmethod
     def _fk_to_join(this_name: str, fk: ForeignKey, *, needs_alias: bool = False) -> dict[str, Any]:
@@ -382,6 +488,86 @@ class ContextBuilder:
         return result
 
     @staticmethod
+    def _draft_to_join(
+        this_name: str, draft: JoinDraft, *, needs_alias: bool = False
+    ) -> dict[str, Any]:
+        """Project a validated LLM join guess into a semantic join fragment.
+
+        Same shape and ``many_to_one`` assumption as an FK-derived join (a star-schema
+        fact→dimension pointer and a snowflake dimension→higher-aggregate-dimension rollup
+        are both many-to-one) — the only difference is provenance, tracked separately via
+        ``meta["join_draft"]`` on the enclosing proposal, not on the fragment itself.
+        """
+        result: dict[str, Any] = {
+            "to": draft.to,
+            "on": f"{this_name}.{draft.column} = {draft.to}.{draft.to_column}",
+            "relationship": Relationship.MANY_TO_ONE.value,
+        }
+        if needs_alias:
+            alias = re.sub(r"_(id|fk|key)$", "", draft.column, flags=re.IGNORECASE)
+            result["name"] = alias
+        return result
+
+    @staticmethod
+    def _join_candidate_columns(schema: RelationSchema) -> list[str]:
+        """Columns that look FK-like by naming convention but carry no declared FK constraint.
+
+        These are the candidates offered to the LLM for FK-less join guessing. Grain/PK
+        columns are not excluded: a bridge table's grain is often exactly its FK-like column
+        pair when the source database enforces no FK constraints at all.
+        """
+        declared = {col for fk in schema.foreign_keys for col in fk.columns}
+        return [
+            c.name
+            for c in schema.columns
+            if _ID_SUFFIX_RE.search(c.name) and c.name not in declared
+        ]
+
+    async def _draft_schema_joins(
+        self,
+        schema: RelationSchema,
+        candidate_columns: list[str],
+        other_relations: dict[str, RelationSchema],
+    ) -> list[JoinDraft]:
+        """Ask the drafter for FK-less joins inferred from column-name convention.
+
+        A no-op — no drafter call at all — when there are no candidate columns or no other
+        relations in the batch to match against (mirrors :meth:`_enrich_dimensions`'s early
+        return), so :class:`NullLLMDrafter` and the headless path never pay for a call that
+        cannot produce anything. Every returned candidate is revalidated against
+        ``other_relations`` before use: the referenced relation and column must both exist,
+        and the referenced local column must be one of the candidates actually offered — an
+        LLM response is never trusted blindly (SkippedEvidence philosophy, SPEC-E4 §3: a
+        hallucinated target is silently dropped, never raised).
+        """
+        if not candidate_columns or not other_relations:
+            return []
+        drafts = await self._llm_drafter.draft_schema_joins(
+            schema, candidate_columns, other_relations
+        )
+        valid: list[JoinDraft] = []
+        for draft in drafts:
+            if draft.confidence < LLM_JOIN_CONFIDENCE_THRESHOLD:
+                continue
+            if draft.column not in candidate_columns:
+                continue
+            target = other_relations.get(draft.to)
+            if target is None:
+                continue
+            if not any(c.name == draft.to_column for c in target.columns):
+                continue
+            valid.append(
+                JoinDraft(
+                    column=draft.column,
+                    to=draft.to,
+                    to_column=draft.to_column,
+                    confidence=min(draft.confidence, LLM_JOIN_CONFIDENCE_CEILING),
+                    reasoning=draft.reasoning,
+                )
+            )
+        return valid
+
+    @staticmethod
     def _infer_measures(columns: list[ColumnInfo]) -> list[dict[str, Any]]:
         """Derive additive measures deterministically from column types.
 
@@ -391,12 +577,11 @@ class ContextBuilder:
         immediately p0-compilable and MCP-servable after bootstrap.
         """
         _SUMMABLE = {"int", "float", "decimal"}
-        _ID_RE = re.compile(r"(^id$|_(id|fk|key)$)", re.IGNORECASE)
         measures: list[dict[str, Any]] = [
             {"name": "row_count", "expr": "count(*)", "additivity": "additive"}
         ]
         for col in columns:
-            if col.type in _SUMMABLE and not _ID_RE.search(col.name):
+            if col.type in _SUMMABLE and not _SURROGATE_KEY_RE.search(col.name):
                 measures.append(
                     {
                         "name": f"total_{col.name}",
@@ -415,11 +600,10 @@ class ContextBuilder:
         (``*_id``/``*_fk``/``*_key`` suffixes) are excluded because they are join
         keys, not useful group-by attributes.
         """
-        _ID_RE = re.compile(r"_(id|fk|key)$", re.IGNORECASE)
         dimensions: list[dict[str, Any]] = []
         for col in columns:
             if col.type in {"date", "timestamp", "bool"} or (
-                col.type == "string" and not _ID_RE.search(col.name)
+                col.type == "string" and not _ID_SUFFIX_RE.search(col.name)
             ):
                 dimensions.append({"name": col.name, "column": col.name})
         return dimensions

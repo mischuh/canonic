@@ -81,13 +81,15 @@ _LOW_CARDINALITY_TYPES = frozenset(
 class ReviewTier(IntEnum):
     """Priority tier for the curated first review (SPEC-onboarding §5, OB-S4).
 
-    Lower value = higher priority = shown first: grains corrupt every measure on their
-    source (highest blast radius), then LLM-named measures, then the low-confidence long tail.
+    Lower value = higher priority = shown first: grains and FK-less joins both corrupt query
+    correctness structurally (highest blast radius), then LLM-named measures, then the
+    low-confidence long tail.
     """
 
     GRAIN = 0
-    MEASURE = 1
-    LONG_TAIL = 2
+    JOIN = 1
+    MEASURE = 2
+    LONG_TAIL = 3
 
 
 @dataclasses.dataclass(frozen=True)
@@ -102,6 +104,10 @@ class _ReviewItem:
 
 _WHY_LINES: dict[ReviewTier, str] = {
     ReviewTier.GRAIN: "no primary key — grain is a guess; a wrong grain corrupts every measure here",
+    ReviewTier.JOIN: (
+        "no FK constraint — join target guessed from column-name convention; a wrong join "
+        "silently duplicates or drops rows"
+    ),
     ReviewTier.MEASURE: "LLM-named measure — confirm name/expr before trusting",
     ReviewTier.LONG_TAIL: "low-confidence inference — confirm before trusting",
 }
@@ -114,7 +120,7 @@ def _classify_withheld(
 ) -> list[_ReviewItem]:
     """Classify and sort withheld diffs into teachable review items (SPEC-onboarding §5, OB-S4).
 
-    Priority: grain drafts → LLM-named measures → long tail.
+    Priority: grain drafts → FK-less join drafts → LLM-named measures → long tail.
     Within each tier, higher incoming-join count (blast radius) sorts first.
     """
     items: list[_ReviewItem] = []
@@ -122,8 +128,11 @@ def _classify_withheld(
         source_name = Path(diff.target).stem
         content = contents.get(diff.target, {})
         is_grain_draft = content.get("meta", {}).get("grain_draft") is True
+        is_join_draft = content.get("meta", {}).get("join_draft") is True
         if is_grain_draft:
             tier = ReviewTier.GRAIN
+        elif is_join_draft:
+            tier = ReviewTier.JOIN
         elif diff.drafted_by is DraftedBy.LLM:
             tier = ReviewTier.MEASURE
         else:

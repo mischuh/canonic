@@ -16,10 +16,12 @@ from canon.connectors.base import (
 )
 from canon.ingestion.builder import (
     LLM_GRAIN_CONFIDENCE,
+    LLM_JOIN_CONFIDENCE_CEILING,
     BuildResult,
     ContextBuilder,
     DimensionEnrichment,
     GrainDraft,
+    JoinDraft,
     NullLLMDrafter,
     SkippedEvidence,
 )
@@ -361,6 +363,279 @@ class TestDimensionEnrichment:
 
 
 # ---------------------------------------------------------------------------
+# LLM-drafted FK-less joins (star/snowflake bootstrap task expansion)
+# ---------------------------------------------------------------------------
+
+
+def _orders_schema() -> RelationSchema:
+    cols = [
+        ColumnInfo(name="order_id", type="int", nullable=False),
+        ColumnInfo(name="category_key", type="int", nullable=True),
+    ]
+    return RelationSchema(
+        connection="warehouse_pg",
+        relation="analytics.fct_orders",
+        kind="table",
+        columns=cols,
+        primary_key=["order_id"],
+        acquisition_tier=AcquisitionTier.LIVE,
+        source_fingerprint=compute_fingerprint(cols, ["order_id"], []),
+    )
+
+
+def _categories_schema() -> RelationSchema:
+    cols = [
+        ColumnInfo(name="category_key", type="int", nullable=False),
+        ColumnInfo(name="label", type="string", nullable=True),
+    ]
+    return RelationSchema(
+        connection="warehouse_pg",
+        relation="analytics.dim_categories",
+        kind="table",
+        columns=cols,
+        primary_key=["category_key"],
+        acquisition_tier=AcquisitionTier.LIVE,
+        source_fingerprint=compute_fingerprint(cols, ["category_key"], []),
+    )
+
+
+def _rentals_schema() -> RelationSchema:
+    cols = [
+        ColumnInfo(name="rental_id", type="int", nullable=False),
+        ColumnInfo(name="pickup_location_id", type="int", nullable=False),
+        ColumnInfo(name="dropoff_location_id", type="int", nullable=True),
+    ]
+    fk = ForeignKey(
+        columns=["pickup_location_id"],
+        references=ForeignKeyRef(relation="analytics.dim_locations", columns=["location_id"]),
+    )
+    return RelationSchema(
+        connection="warehouse_pg",
+        relation="analytics.fct_rentals",
+        kind="table",
+        columns=cols,
+        primary_key=["rental_id"],
+        foreign_keys=[fk],
+        acquisition_tier=AcquisitionTier.LIVE,
+        source_fingerprint=compute_fingerprint(cols, ["rental_id"], [fk]),
+    )
+
+
+def _locations_schema() -> RelationSchema:
+    cols = [
+        ColumnInfo(name="location_id", type="int", nullable=False),
+        ColumnInfo(name="city", type="string", nullable=True),
+    ]
+    return RelationSchema(
+        connection="warehouse_pg",
+        relation="analytics.dim_locations",
+        kind="table",
+        columns=cols,
+        primary_key=["location_id"],
+        acquisition_tier=AcquisitionTier.LIVE,
+        source_fingerprint=compute_fingerprint(cols, ["location_id"], []),
+    )
+
+
+class TestSchemaJoinDrafting:
+    async def test_valid_draft_is_applied_and_forces_review(self) -> None:
+        class _StubDrafter(NullLLMDrafter):
+            async def draft_schema_joins(
+                self,
+                schema: RelationSchema,
+                candidate_columns: list[str],
+                other_relations: dict[str, RelationSchema],
+            ) -> list[JoinDraft]:
+                if schema.relation != "analytics.fct_orders":
+                    return []
+                return [
+                    JoinDraft(
+                        column="category_key",
+                        to="dim_categories",
+                        to_column="category_key",
+                        confidence=0.8,
+                        reasoning="matches by name",
+                    )
+                ]
+
+        result = await ContextBuilder(llm_drafter=_StubDrafter()).build(
+            [_evidence(_orders_schema()), _evidence(_categories_schema())]
+        )
+        orders = next(p for p in result.proposals if p.content["name"] == "fct_orders")
+
+        assert orders.content["joins"] == [
+            {
+                "to": "dim_categories",
+                "on": "fct_orders.category_key = dim_categories.category_key",
+                "relationship": Relationship.MANY_TO_ONE.value,
+            }
+        ]
+        assert orders.content["meta"]["join_draft"] is True
+        # Safety downgrade: a declared PK alone would give drafted_by=DETERMINISTIC,
+        # confidence=1.0 — a guessed join must force this into review regardless.
+        assert orders.drafted_by is DraftedBy.LLM
+        assert orders.confidence < 1.0
+
+    async def test_unknown_target_relation_is_discarded(self) -> None:
+        class _StubDrafter(NullLLMDrafter):
+            async def draft_schema_joins(
+                self,
+                schema: RelationSchema,
+                candidate_columns: list[str],
+                other_relations: dict[str, RelationSchema],
+            ) -> list[JoinDraft]:
+                return [
+                    JoinDraft(
+                        column="category_key", to="nonexistent", to_column="id", confidence=0.9
+                    )
+                ]
+
+        result = await ContextBuilder(llm_drafter=_StubDrafter()).build(
+            [_evidence(_orders_schema()), _evidence(_categories_schema())]
+        )
+        orders = next(p for p in result.proposals if p.content["name"] == "fct_orders")
+
+        assert orders.content["joins"] == []
+        assert orders.drafted_by is DraftedBy.DETERMINISTIC
+        assert orders.confidence == 1.0
+
+    async def test_unknown_target_column_is_discarded(self) -> None:
+        class _StubDrafter(NullLLMDrafter):
+            async def draft_schema_joins(
+                self,
+                schema: RelationSchema,
+                candidate_columns: list[str],
+                other_relations: dict[str, RelationSchema],
+            ) -> list[JoinDraft]:
+                return [
+                    JoinDraft(
+                        column="category_key",
+                        to="dim_categories",
+                        to_column="nonexistent_col",
+                        confidence=0.9,
+                    )
+                ]
+
+        result = await ContextBuilder(llm_drafter=_StubDrafter()).build(
+            [_evidence(_orders_schema()), _evidence(_categories_schema())]
+        )
+        orders = next(p for p in result.proposals if p.content["name"] == "fct_orders")
+
+        assert orders.content["joins"] == []
+        assert orders.drafted_by is DraftedBy.DETERMINISTIC
+
+    async def test_below_threshold_confidence_is_discarded(self) -> None:
+        class _StubDrafter(NullLLMDrafter):
+            async def draft_schema_joins(
+                self,
+                schema: RelationSchema,
+                candidate_columns: list[str],
+                other_relations: dict[str, RelationSchema],
+            ) -> list[JoinDraft]:
+                return [
+                    JoinDraft(
+                        column="category_key",
+                        to="dim_categories",
+                        to_column="category_key",
+                        confidence=0.2,
+                    )
+                ]
+
+        result = await ContextBuilder(llm_drafter=_StubDrafter()).build(
+            [_evidence(_orders_schema()), _evidence(_categories_schema())]
+        )
+        orders = next(p for p in result.proposals if p.content["name"] == "fct_orders")
+
+        assert orders.content["joins"] == []
+        assert orders.drafted_by is DraftedBy.DETERMINISTIC
+
+    async def test_confidence_is_capped_at_ceiling(self) -> None:
+        class _StubDrafter(NullLLMDrafter):
+            async def draft_schema_joins(
+                self,
+                schema: RelationSchema,
+                candidate_columns: list[str],
+                other_relations: dict[str, RelationSchema],
+            ) -> list[JoinDraft]:
+                if schema.relation != "analytics.fct_orders":
+                    return []
+                return [
+                    JoinDraft(
+                        column="category_key",
+                        to="dim_categories",
+                        to_column="category_key",
+                        confidence=0.99,
+                    )
+                ]
+
+        result = await ContextBuilder(llm_drafter=_StubDrafter()).build(
+            [_evidence(_orders_schema()), _evidence(_categories_schema())]
+        )
+        orders = next(p for p in result.proposals if p.content["name"] == "fct_orders")
+
+        assert orders.confidence == LLM_JOIN_CONFIDENCE_CEILING
+
+    async def test_shared_target_with_declared_fk_gets_disambiguating_alias(self) -> None:
+        class _StubDrafter(NullLLMDrafter):
+            async def draft_schema_joins(
+                self,
+                schema: RelationSchema,
+                candidate_columns: list[str],
+                other_relations: dict[str, RelationSchema],
+            ) -> list[JoinDraft]:
+                if "dropoff_location_id" not in candidate_columns:
+                    return []
+                return [
+                    JoinDraft(
+                        column="dropoff_location_id",
+                        to="dim_locations",
+                        to_column="location_id",
+                        confidence=0.8,
+                    )
+                ]
+
+        result = await ContextBuilder(llm_drafter=_StubDrafter()).build(
+            [_evidence(_rentals_schema()), _evidence(_locations_schema())]
+        )
+        rentals = next(p for p in result.proposals if p.content["name"] == "fct_rentals")
+
+        assert len(rentals.content["joins"]) == 2
+        assert {j["name"] for j in rentals.content["joins"]} == {
+            "pickup_location",
+            "dropoff_location",
+        }
+
+    async def test_single_relation_batch_skips_drafter_call(self) -> None:
+        """No other relation in the batch to match against ⇒ draft_schema_joins is never invoked."""
+        called = False
+
+        class _StubDrafter(NullLLMDrafter):
+            async def draft_schema_joins(
+                self,
+                schema: RelationSchema,
+                candidate_columns: list[str],
+                other_relations: dict[str, RelationSchema],
+            ) -> list[JoinDraft]:
+                nonlocal called
+                called = True
+                return []
+
+        schema = _relation_schema(foreign_keys=[_customer_fk()])
+        await ContextBuilder(llm_drafter=_StubDrafter()).build([_evidence(schema)])
+        assert called is False
+
+    async def test_null_llm_drafter_produces_no_drafted_joins(self) -> None:
+        """Headless/default path: NullLLMDrafter is a no-op, matching today's behavior."""
+        result = await ContextBuilder().build(
+            [_evidence(_orders_schema()), _evidence(_categories_schema())]
+        )
+        orders = next(p for p in result.proposals if p.content["name"] == "fct_orders")
+
+        assert orders.content["joins"] == []
+        assert orders.drafted_by is DraftedBy.DETERMINISTIC
+
+
+# ---------------------------------------------------------------------------
 # Determinism (AC3 / S9-AC1)
 # ---------------------------------------------------------------------------
 
@@ -514,3 +789,8 @@ class TestNullLLMDrafter:
         schema = _relation_schema(primary_key=[])
         dims = [{"name": "status", "column": "status"}]
         assert await NullLLMDrafter().draft_dimension_labels(schema, dims) == []
+
+    async def test_draft_schema_joins_is_empty(self) -> None:
+        schema = _relation_schema(primary_key=[])
+        other = {"dim_customers": _relation_schema()}
+        assert await NullLLMDrafter().draft_schema_joins(schema, ["customer_id"], other) == []
