@@ -386,7 +386,17 @@ async def test_interactive_mode_calls_drafter_for_no_pk_relation(tmp_path: Path)
             grain_calls.append(schema)
             return GrainDraft(grain=[], confidence=0.5)
 
+        async def draft_dimension_labels(
+            self, schema: Any, dimensions: list[dict[str, Any]]
+        ) -> list[Any]:
+            return []
+
         async def draft_joins(self, observed: dict[str, Any]) -> list[dict[str, Any]]:
+            return []
+
+        async def draft_schema_joins(
+            self, schema: Any, candidate_columns: list[str], other_relations: dict[str, Any]
+        ) -> list[Any]:
             return []
 
     scaffold_project(tmp_path)
@@ -403,6 +413,56 @@ async def test_interactive_mode_calls_drafter_for_no_pk_relation(tmp_path: Path)
 
     assert len(grain_calls) == 1
     assert grain_calls[0].relation == "analytics.events"
+
+
+async def test_first_run_excludes_relation_with_drafted_join(tmp_path: Path) -> None:
+    """A guessed FK-less join always forces drafted_by/confidence down — a wrong join must
+    never let a PK-bearing relation slip past first_run_auto_acceptable unreviewed."""
+    from canon.ingestion.builder import GrainDraft, JoinDraft
+
+    class StubDrafter:
+        async def draft_grain(self, schema: Any) -> GrainDraft:
+            return GrainDraft(grain=[], confidence=0.5)
+
+        async def draft_dimension_labels(
+            self, schema: Any, dimensions: list[dict[str, Any]]
+        ) -> list[Any]:
+            return []
+
+        async def draft_joins(self, observed: dict[str, Any]) -> list[dict[str, Any]]:
+            return []
+
+        async def draft_schema_joins(
+            self, schema: Any, candidate_columns: list[str], other_relations: dict[str, Any]
+        ) -> list[JoinDraft]:
+            if not candidate_columns:
+                return []
+            return [
+                JoinDraft(
+                    column=candidate_columns[0],
+                    to=next(iter(other_relations)),
+                    to_column=candidate_columns[0],
+                    confidence=0.9,
+                    reasoning="stub",
+                )
+            ]
+
+    scaffold_project(tmp_path)
+    pipeline = IngestionPipeline(
+        tmp_path,
+        {_CONN: FakeConnector([_customers(), _orders()])},
+        ReconcileConfig(),
+        headless=False,
+        drafter=StubDrafter(),
+    )
+    evidence = await evidence_from_introspection(FakeConnector([_customers(), _orders()]), _CONN)
+
+    result = await pipeline.run(evidence)
+
+    customers_diff = next(d for d in result.emission.diffs if "dim_customers" in d.target)
+    assert customers_diff.drafted_by is DraftedBy.LLM
+    assert customers_diff.confidence < 1.0
+    assert not first_run_auto_acceptable(customers_diff)
 
 
 async def test_no_models_configured_headless_is_deterministic(tmp_path: Path) -> None:

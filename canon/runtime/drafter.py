@@ -16,7 +16,9 @@ from pydantic import BaseModel, ConfigDict, Field
 from canon.ingestion.builder import (
     LLM_GRAIN_CONFIDENCE,
     LLM_GRAIN_CONFIDENCE_CEILING,
+    DimensionEnrichment,
     GrainDraft,
+    JoinDraft,
     NullLLMDrafter,
 )
 from canon.ingestion.reconciliation import NullReconcileDrafter, ResolutionDraft
@@ -132,6 +134,39 @@ class RuntimeLLMDrafter:
         """
         return []
 
+    async def draft_dimension_labels(
+        self, schema: RelationSchema, dimensions: list[dict[str, Any]]
+    ) -> list[DimensionEnrichment]:
+        """Propose a display label and, when confident, aliases for each dimension."""
+        completion = await self._runtime.generate(
+            _dimension_label_prompt(schema, dimensions),
+            task=Task.DRAFT,
+            system=_DIMENSION_LABEL_SYSTEM,
+            response_model=_DimensionLabelResponse,
+        )
+        if not completion.parsed:
+            return []
+        entries = completion.parsed.get("dimensions", [])
+        return [DimensionEnrichment.model_validate(e) for e in entries]
+
+    async def draft_schema_joins(
+        self,
+        schema: RelationSchema,
+        candidate_columns: list[str],
+        other_relations: dict[str, RelationSchema],
+    ) -> list[JoinDraft]:
+        """Propose FK-less joins for candidate columns via naming convention + schema evidence."""
+        completion = await self._runtime.generate(
+            _schema_join_prompt(schema, candidate_columns, other_relations),
+            task=Task.DRAFT,
+            system=_SCHEMA_JOIN_SYSTEM,
+            response_model=_SchemaJoinResponse,
+        )
+        if not completion.parsed:
+            return []
+        entries = completion.parsed.get("joins", [])
+        return [JoinDraft.model_validate(e) for e in entries]
+
 
 def _grain_prompt(schema: RelationSchema) -> str:
     """Render a relation's full evidence — schema, FKs, row count, and data profile — into a
@@ -179,6 +214,135 @@ def _grain_prompt(schema: RelationSchema) -> str:
         '"inferred_grain" (list of column names, minimal uniquely-identifying set), '
         '"confidence_score" (float 0.0-1.0, your own calibrated confidence in this grain), '
         '"reasoning" (1-3 sentences explaining why these columns and not others).'
+    )
+    return "\n".join(lines)
+
+
+_DIMENSION_LABEL_SYSTEM = (
+    "You are a data analyst helping onboard a new database into a business-facing semantic "
+    "layer. For each dimension listed, propose a short, human-readable display label in Title "
+    "Case (e.g. column 'product_type' -> label 'Product Type'; 'is_active' -> 'Is Active'). "
+    "Only when you are genuinely confident, also propose a short list of aliases: alternative "
+    "names a business user might type when searching for this concept (synonyms, common "
+    "abbreviations, or the same concept phrased differently) — never invent aliases you are "
+    "not sure fit, and leave the alias list empty rather than guess. Report your own calibrated "
+    "confidence per dimension; a generic surrogate id or timestamp column with no clear "
+    "business meaning should get a low confidence and an empty alias list. "
+    "Respond only with the requested JSON object — no prose outside it."
+)
+
+_DIMENSION_LABEL_EXAMPLES = """\
+### Example — table with a categorical dimension and a surrogate key
+Table name: 'analytics.products'
+Dimensions:
+- name (string, column: name)
+- type (string, column: type)
+- product_id (string, column: product_id)
+
+Answer:
+{"dimensions": [
+{"name": "name", "label": "Product Name", "aliases": [], "confidence": 0.6, \
+"reasoning": "A generic name field; no further synonyms are safe to assume."},
+{"name": "type", "label": "Product Type", "aliases": ["product_category", "category"], \
+"confidence": 0.8, "reasoning": "A categorical column commonly called 'category' in \
+e-commerce data."},
+{"name": "product_id", "label": "Product Id", "aliases": [], "confidence": 0.3, \
+"reasoning": "A surrogate key; no business synonym applies."}
+]}
+"""
+
+
+class _DimensionLabelResponse(BaseModel):
+    """Schema the model must satisfy when drafting dimension labels/aliases."""
+
+    dimensions: list[DimensionEnrichment] = []
+
+
+def _dimension_label_prompt(schema: RelationSchema, dimensions: list[dict[str, Any]]) -> str:
+    """Render a relation's already-inferred dimensions into a label/alias-drafting prompt."""
+    lines: list[str] = ["## Example\n", _DIMENSION_LABEL_EXAMPLES, "\n## Your task\n"]
+
+    lines.append(f"Table name: {schema.relation!r}")
+    lines.append("Dimensions:")
+    for dim in dimensions:
+        lines.append(f"- {dim['name']} (column: {dim['column']})")
+
+    lines.append(
+        '\nReturn a JSON object with key "dimensions": a list with one entry per dimension '
+        'above, each an object with "name" (must match exactly), "label" (Title Case display '
+        'name), "aliases" (list of strings, empty unless confident), "confidence" (float '
+        '0.0-1.0), and "reasoning" (one sentence).'
+    )
+    return "\n".join(lines)
+
+
+_SCHEMA_JOIN_SYSTEM = (
+    "You are a data warehouse analyst reviewing a database that declares no foreign-key "
+    "constraints, even though a star or snowflake schema exists in practice. For each "
+    "candidate column on the table under review, decide whether it is very likely a pointer "
+    "to one of the other listed tables (a star-schema fact table referencing a dimension via "
+    "a key column, or a snowflake-schema dimension rolling up to a higher-aggregate "
+    "dimension), based only on column-name convention and the columns each candidate target "
+    "table declares. Propose a join only when a target table and target column are a strong, "
+    "unambiguous match; skip a candidate column entirely rather than guess when no table name "
+    "clearly corresponds to it, or when it could plausibly match more than one target equally "
+    "well. Report your own calibrated confidence per proposed join. "
+    "Respond only with the requested JSON object — no prose outside it."
+)
+
+_SCHEMA_JOIN_EXAMPLES = """\
+### Example — star-schema fact table and a snowflake dimension rollup
+Table name: 'analytics.fct_orders'
+Candidate columns (no declared foreign key): customer_key, category_key
+Other tables in this connection:
+- dim_customers: customer_key, name, signup_date
+- dim_products: product_key, name, category_key
+- dim_categories: category_key, label
+
+Answer:
+{"joins": [
+{"column": "customer_key", "to": "dim_customers", "to_column": "customer_key", \
+"confidence": 0.85, "reasoning": "dim_customers declares the same customer_key column and \
+its name matches the target table exactly."},
+{"column": "category_key", "to": "dim_categories", "to_column": "category_key", \
+"confidence": 0.5, "reasoning": "Both dim_products and dim_categories declare category_key, \
+but dim_categories is the clearer target since its own primary concept is the category."}
+]}
+"""
+
+
+class _SchemaJoinResponse(BaseModel):
+    """Schema the model must satisfy when drafting FK-less joins."""
+
+    joins: list[JoinDraft] = []
+
+
+def _schema_join_prompt(
+    schema: RelationSchema,
+    candidate_columns: list[str],
+    other_relations: dict[str, RelationSchema],
+) -> str:
+    """Render a relation's FK-less candidate columns and sibling tables into a join-drafting
+    prompt — only column names and types are shared for each candidate target, not full
+    schemas, keeping the prompt compact even with many tables in the same connection.
+    """
+    lines: list[str] = ["## Example\n", _SCHEMA_JOIN_EXAMPLES, "\n## Your task\n"]
+
+    lines.append(f"Table name: {schema.relation!r}")
+    lines.append(f"Candidate columns (no declared foreign key): {', '.join(candidate_columns)}")
+
+    lines.append("Other tables in this connection:")
+    for rel_name, rel_schema in other_relations.items():
+        columns = ", ".join(c.name for c in rel_schema.columns)
+        lines.append(f"- {rel_name}: {columns}")
+
+    lines.append(
+        '\nReturn a JSON object with key "joins": a list with at most one entry per candidate '
+        'column that has a strong match, each an object with "column" (must match one of the '
+        'candidate columns above), "to" (must match one of the other table names above), '
+        '"to_column" (must be a column that table declares above), "confidence" (float '
+        '0.0-1.0), and "reasoning" (one sentence). Omit a candidate column entirely instead of '
+        "guessing when no target is a strong, unambiguous match."
     )
     return "\n".join(lines)
 
