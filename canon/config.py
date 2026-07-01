@@ -41,7 +41,11 @@ class Connection(BaseModel):
     and Redshift additionally recognize ``schema`` (legacy single search_path string),
     ``schemas`` (list[str], preferred — also comma-joined into the search_path) and
     ``tables`` (list[str] of fully-qualified "schema.table" names or glob patterns) to
-    narrow what ``introspect_schema()`` returns.
+    narrow what ``introspect_schema()`` returns, plus ``fetch_column_stats`` (bool,
+    default False) to additionally merge zero-scan cardinality/null-ratio column stats
+    from ``pg_stats`` into the returned schema (used to improve LLM grain inference).
+    Requesting ``fetch_column_stats`` on SQLite/DuckDB connections is a no-op (logged as
+    a warning) — neither engine exposes queryable planner statistics without a data scan.
     """
 
     id: str

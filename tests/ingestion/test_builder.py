@@ -163,7 +163,9 @@ class TestNoPrimaryKey:
     async def test_injected_drafter_is_used(self) -> None:
         class _StubDrafter(NullLLMDrafter):
             async def draft_grain(self, schema: RelationSchema) -> GrainDraft:
-                return GrainDraft(grain=["order_id"], confidence=0.6)
+                return GrainDraft(
+                    grain=["order_id"], confidence=0.6, reasoning="order_id is the surrogate key"
+                )
 
         schema = _relation_schema(primary_key=[])
         p = (await ContextBuilder(llm_drafter=_StubDrafter()).build([_evidence(schema)])).proposals[
@@ -172,6 +174,7 @@ class TestNoPrimaryKey:
         assert p.content["grain"] == ["order_id"]
         assert p.confidence == 0.6
         assert p.drafted_by is DraftedBy.LLM
+        assert p.content["meta"]["grain_reasoning"] == "order_id is the surrogate key"
 
     async def test_entity_grain_used_when_no_pk(self) -> None:
         """Modeling-tier ENTITY evidence provides grain for a schema with no declared PK."""

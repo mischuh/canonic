@@ -4,7 +4,9 @@ Implements the four P0 capabilities against PostgreSQL: ``capabilities``,
 ``test_connection``, ``introspect_schema`` (live, tier 1) and
 ``run_read_only_sql`` with defense-in-depth read-only enforcement (SPEC-E2 §3).
 ``introspect_schema`` honors ``params["schemas"]``/``params["tables"]`` to narrow
-the relations it returns (see ``canon.connectors.relation_filter``).
+the relations it returns (see ``canon.connectors.relation_filter``), and
+``params["fetch_column_stats"]`` (bool, default False) to additionally merge
+zero-scan cardinality/null-ratio stats from ``pg_stats`` onto each column.
 """
 
 from __future__ import annotations
@@ -115,6 +117,59 @@ def _normalize_type(raw: str, relation: str, column: str) -> str:
     return mapped
 
 
+def _normalize_distinct_count(n_distinct: float | None, row_estimate: int | None) -> int | None:
+    """Normalize pg_stats.n_distinct's dual-sign encoding into an absolute distinct-count estimate.
+
+    A positive value is an absolute estimated distinct-value count; a negative value is
+    -1 * (distinct fraction of rows), used when the planner expects cardinality to scale
+    with table size (e.g. near-unique columns). A negative value with no row estimate
+    available cannot be resolved to an absolute count and is dropped rather than guessed.
+    """
+    if n_distinct is None:
+        return None
+    if n_distinct >= 0:
+        return int(round(n_distinct))
+    if row_estimate is None or row_estimate <= 0:
+        return None
+    return int(round(-n_distinct * row_estimate))
+
+
+def _apply_column_stats(
+    cols: list[ColumnInfo],
+    stats: dict[str, tuple[float | None, float | None]],
+    row_estimate: int | None,
+) -> list[ColumnInfo]:
+    """Merge pg_stats-derived cardinality/null stats onto already-built ColumnInfo objects.
+
+    ColumnInfo is frozen, so enrichment goes through model_copy rather than attribute
+    assignment. A column absent from ``stats`` (never analyzed) is returned unchanged.
+    """
+    updated: list[ColumnInfo] = []
+    for col in cols:
+        entry = stats.get(col.name)
+        if entry is None:
+            updated.append(col)
+            continue
+        null_frac, n_distinct = entry
+        distinct_count = _normalize_distinct_count(n_distinct, row_estimate)
+        uniqueness_ratio = (
+            distinct_count / row_estimate
+            if distinct_count is not None and row_estimate is not None and row_estimate > 0
+            else None
+        )
+        updated.append(
+            col.model_copy(
+                update={
+                    "distinct_count_estimate": distinct_count,
+                    "null_fraction": null_frac,
+                    "uniqueness_ratio": uniqueness_ratio,
+                    "stats_source": "pg_stats",
+                }
+            )
+        )
+    return updated
+
+
 def _normalize_value_type(value: Any) -> str:
     """Best-effort normalized type name for a result value (P0)."""
     if isinstance(value, bool):  # bool is a subclass of int — check first
@@ -161,6 +216,7 @@ class PostgresConnector(ConnectorBase):
         self._statement_timeout_ms = int(
             params.get("statement_timeout_ms", _DEFAULT_STATEMENT_TIMEOUT_MS)
         )
+        self._fetch_column_stats = bool(params.get("fetch_column_stats", False))
         self._connection_id = connection.id
         self._engine: AsyncEngine | None = None
 
@@ -206,6 +262,9 @@ class PostgresConnector(ConnectorBase):
             primary_keys = await self._fetch_primary_keys(conn)
             foreign_keys = await self._fetch_foreign_keys(conn)
             row_estimates = await self._fetch_row_estimates(conn)
+            column_stats: dict[tuple[str, str], dict[str, tuple[float | None, float | None]]] = {}
+            if self._fetch_column_stats:
+                column_stats = await self._fetch_column_stats_map(conn)
 
         schemas: list[RelationSchema] = []
         for (schema, name), kind in sorted(relations.items()):
@@ -216,6 +275,8 @@ class PostgresConnector(ConnectorBase):
             pk = primary_keys.get((schema, name), [])
             fks = foreign_keys.get((schema, name), [])
             estimate = row_estimates.get((schema, name))
+            if self._fetch_column_stats:
+                cols = _apply_column_stats(cols, column_stats.get((schema, name), {}), estimate)
             schemas.append(
                 RelationSchema(
                     connection=self._connection_id,
@@ -373,6 +434,28 @@ class PostgresConnector(ConnectorBase):
             out[(schema, name)] = (
                 int(reltuples) if reltuples is not None and reltuples >= 0 else None
             )
+        return out
+
+    async def _fetch_column_stats_map(
+        self, conn: Any
+    ) -> dict[tuple[str, str], dict[str, tuple[float | None, float | None]]]:
+        """Zero-scan column cardinality/null stats from pg_stats (opt-in via fetch_column_stats).
+
+        Reads planner statistics populated by the last ANALYZE (autovacuum-triggered or
+        manual). A column with no pg_stats row (never analyzed) is simply absent from the
+        result — callers treat absence as "no stats available", the same pattern
+        _fetch_row_estimates already uses for un-estimated relations.
+        """
+        result = await conn.execute(
+            text(
+                "SELECT schemaname, tablename, attname, null_frac, n_distinct "
+                "FROM pg_stats "
+                "WHERE schemaname NOT IN ('pg_catalog', 'information_schema')"
+            )
+        )
+        out: dict[tuple[str, str], dict[str, tuple[float | None, float | None]]] = {}
+        for schema, name, column, null_frac, n_distinct in result:
+            out.setdefault((schema, name), {})[column] = (null_frac, n_distinct)
         return out
 
     async def run_read_only_sql(self, sql: str) -> ResultSet:

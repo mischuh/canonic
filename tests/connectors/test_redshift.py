@@ -12,6 +12,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+import asyncpg
 import pytest
 from sqlalchemy.exc import DBAPIError
 
@@ -191,6 +192,57 @@ class TestRedshiftIntegration:
             fk.references.relation == "analytics.dim_customers" and fk.columns == ["customer_id"]
             for fk in orders.foreign_keys
         )
+
+        # fetch_column_stats defaults to False — today's zero-scan behavior is unchanged.
+        order_id_col = next(c for c in orders.columns if c.name == "order_id")
+        assert order_id_col.stats_source is None
+        assert order_id_col.distinct_count_estimate is None
+
+    async def test_introspection_with_fetch_column_stats_populates_stats_fields(
+        self, postgres_container: dict[str, Any], monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("CANON_TEST_RS_PASSWORD", postgres_container["password"])
+        params = postgres_container["params"]
+        dsn = (
+            f"postgresql://{params['user']}:{postgres_container['password']}"
+            f"@{params['host']}:{params['port']}/{params['dbname']}"
+        )
+        conn = await asyncpg.connect(dsn)
+        try:
+            await conn.execute(
+                "INSERT INTO analytics.dim_customers (customer_id, name) VALUES "
+                "(90001, 'stats-a'), (90002, 'stats-b') ON CONFLICT DO NOTHING"
+            )
+            await conn.execute(
+                "INSERT INTO analytics.fct_orders (order_id, customer_id, amount) VALUES "
+                "(90001, 90001, 10.0), (90002, 90001, 20.0), (90003, 90002, NULL) "
+                "ON CONFLICT DO NOTHING"
+            )
+            await conn.execute("ANALYZE analytics.fct_orders")
+        finally:
+            await conn.close()
+
+        connection = Connection(
+            id="warehouse_rs",
+            type="redshift",
+            params={**params, "fetch_column_stats": True},
+            credentials_ref="env:CANON_TEST_RS_PASSWORD",
+        )
+        connector = RedshiftConnector(connection)
+        try:
+            schemas = {s.relation: s for s in await connector.introspect_schema()}
+        finally:
+            await connector.aclose()
+
+        orders = schemas["analytics.fct_orders"]
+        order_id_col = next(c for c in orders.columns if c.name == "order_id")
+        amount_col = next(c for c in orders.columns if c.name == "amount")
+
+        assert order_id_col.stats_source == "pg_stats"
+        assert order_id_col.null_fraction == 0.0
+        assert amount_col.stats_source == "pg_stats"
+        assert amount_col.null_fraction is not None
+        assert amount_col.null_fraction > 0.0
 
     async def test_select_returns_typed_resultset(
         self, redshift_connector: RedshiftConnector

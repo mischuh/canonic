@@ -8,7 +8,11 @@ from typing import TYPE_CHECKING, Any
 import pytest
 
 from canon.connectors.base import AcquisitionTier, ColumnInfo, RelationSchema, compute_fingerprint
-from canon.ingestion.builder import LLM_GRAIN_CONFIDENCE, ContextBuilder
+from canon.ingestion.builder import (
+    LLM_GRAIN_CONFIDENCE,
+    LLM_GRAIN_CONFIDENCE_CEILING,
+    ContextBuilder,
+)
 from canon.ingestion.models import DraftedBy, EvidenceItem
 from canon.runtime.drafter import RuntimeLLMDrafter
 from canon.runtime.generation import GenerationRuntime
@@ -78,3 +82,60 @@ async def test_draft_uses_openai_compatible_path(
     # The draft task resolves to the default model via the openai-compatible route.
     assert fake_litellm["model"] == "openai/small-local"
     assert fake_litellm["api_base"] == "http://localhost:11434/v1"
+
+
+async def test_draft_grain_reads_new_field_names_and_reasoning(
+    llm_config: LLMConfig, set_fake: Callable[..., None]
+) -> None:
+    set_fake(
+        content=(
+            '{"inferred_grain": ["id"], "confidence_score": 0.7, '
+            '"reasoning": "id is unique and not null"}'
+        )
+    )
+    drafter = RuntimeLLMDrafter(GenerationRuntime(llm_config))
+    builder = ContextBuilder(llm_drafter=drafter)
+
+    result = await builder.build([_evidence(_schema_without_pk())])
+
+    proposal = result.proposals[0]
+    assert proposal.content["grain"] == ["id"]
+    assert proposal.confidence == 0.7
+    assert proposal.content["meta"]["grain_reasoning"] == "id is unique and not null"
+
+
+async def test_draft_grain_caps_overconfident_self_report(
+    llm_config: LLMConfig, set_fake: Callable[..., None]
+) -> None:
+    set_fake(content='{"inferred_grain": ["id"], "confidence_score": 0.99}')
+    drafter = RuntimeLLMDrafter(GenerationRuntime(llm_config))
+    builder = ContextBuilder(llm_drafter=drafter)
+
+    result = await builder.build([_evidence(_schema_without_pk())])
+
+    assert result.proposals[0].confidence == LLM_GRAIN_CONFIDENCE_CEILING
+
+
+async def test_draft_grain_missing_confidence_falls_back_to_default(
+    llm_config: LLMConfig, set_fake: Callable[..., None]
+) -> None:
+    set_fake(content='{"inferred_grain": ["id"]}')
+    drafter = RuntimeLLMDrafter(GenerationRuntime(llm_config))
+    builder = ContextBuilder(llm_drafter=drafter)
+
+    result = await builder.build([_evidence(_schema_without_pk())])
+
+    assert result.proposals[0].confidence == LLM_GRAIN_CONFIDENCE
+
+
+async def test_draft_grain_empty_grain_yields_zero_confidence(
+    llm_config: LLMConfig, set_fake: Callable[..., None]
+) -> None:
+    set_fake(content='{"inferred_grain": [], "confidence_score": 0.9}')
+    drafter = RuntimeLLMDrafter(GenerationRuntime(llm_config))
+    builder = ContextBuilder(llm_drafter=drafter)
+
+    result = await builder.build([_evidence(_schema_without_pk())])
+
+    assert result.proposals[0].content["grain"] == []
+    assert result.proposals[0].confidence == 0.0

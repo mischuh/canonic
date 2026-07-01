@@ -152,6 +152,7 @@ class DuckDBConnector(ConnectorBase):
     def __init__(self, connection: Connection) -> None:
         self._path: str = connection.params.get("path", ":memory:")
         self._row_limit: int = int(connection.params.get("row_limit", _DEFAULT_ROW_LIMIT))
+        self._fetch_column_stats: bool = bool(connection.params.get("fetch_column_stats", False))
         self._connection_id: str = connection.id
 
     def capabilities(self) -> list[Capability]:
@@ -178,6 +179,12 @@ class DuckDBConnector(ConnectorBase):
         return await asyncio.to_thread(self._introspect_schema_sync)
 
     def _introspect_schema_sync(self) -> list[RelationSchema]:
+        if self._fetch_column_stats:
+            logger.warning(
+                "fetch_column_stats=True requested on DuckDB connection %r, but DuckDB has no "
+                "queryable planner statistics without a full table scan; ignoring (stats omitted)",
+                self._connection_id,
+            )
         read_only = self._path != ":memory:"
         con = duckdb.connect(self._path, read_only=read_only)
         try:

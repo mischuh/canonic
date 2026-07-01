@@ -11,9 +11,14 @@ from __future__ import annotations
 import json
 from typing import TYPE_CHECKING, Any
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict, Field
 
-from canon.ingestion.builder import LLM_GRAIN_CONFIDENCE, GrainDraft, NullLLMDrafter
+from canon.ingestion.builder import (
+    LLM_GRAIN_CONFIDENCE,
+    LLM_GRAIN_CONFIDENCE_CEILING,
+    GrainDraft,
+    NullLLMDrafter,
+)
 from canon.ingestion.reconciliation import NullReconcileDrafter, ResolutionDraft
 from canon.runtime.resolver import Task
 
@@ -29,15 +34,68 @@ if TYPE_CHECKING:
 __all__ = ["RuntimeLLMDrafter", "RuntimeReconcileDrafter", "make_drafter", "make_reconcile_drafter"]
 
 _GRAIN_SYSTEM = (
-    "You infer the grain (the minimal set of columns that uniquely identifies a row) of a "
-    "database relation that declares no primary key. Respond only with the requested JSON."
+    "You are a database schema analyst. Your task is to infer the GRAIN of a relation: the "
+    "minimal set of columns whose values together uniquely identify exactly one row. A correct "
+    "grain has no redundant columns (removing any column would make it ambiguous) and no "
+    "missing columns (some other row could otherwise share the same values). "
+    "Use the column types, nullability, foreign keys, row count, and — when provided — the "
+    "cardinality/null statistics to reason about which columns are candidate keys. A column "
+    "with an estimated uniqueness ratio near 1.0 is a strong single-column grain candidate; a "
+    "surrogate id-like column with low null fraction is preferred over nullable/low-cardinality "
+    "columns. Composite grains are common in event/log and bridge/junction tables. "
+    "Respond only with the requested JSON object — no prose outside it."
 )
+
+# Exactly two few-shot examples, written directly into the prompt as a module-level constant
+# (not loaded from a file) so the prompt stays self-contained and diffable in code review.
+_FEW_SHOT_EXAMPLES = """\
+### Example 1 — event/log table with a natural composite key
+Table name: 'analytics.stg_hubspot_page_views'
+Kind: table
+Estimated row count: 4,802,113
+Columns:
+- visitor_id (string, not null, uniqueness=0.041)
+- page_url (string, not null, uniqueness=0.002)
+- viewed_at (timestamp, not null, uniqueness=0.998)
+- session_id (string, nullable, null_fraction=0.12)
+
+Answer:
+{"inferred_grain": ["visitor_id", "page_url", "viewed_at"], "confidence_score": 0.82, \
+"reasoning": "No single column is unique (visitor_id and page_url both repeat heavily); the \
+combination of visitor, page, and timestamp is the natural grain of a page-view event log, \
+since the same visitor can view the same page at different times."}
+
+### Example 2 — junction/bridge table
+Table name: 'analytics.order_line_items'
+Kind: table
+Estimated row count: 918,442
+Columns:
+- order_id (int, not null, uniqueness=0.31)
+- product_id (int, not null, uniqueness=0.05)
+- quantity (int, not null)
+- unit_price (decimal, not null)
+
+Foreign keys:
+- (order_id) -> analytics.orders (id)
+- (product_id) -> analytics.products (id)
+
+Answer:
+{"inferred_grain": ["order_id", "product_id"], "confidence_score": 0.9, "reasoning": "This is \
+a bridge table between orders and products; the two foreign-key columns together identify one \
+line item, and quantity/unit_price are attributes, not identifiers."}
+"""
 
 
 class _GrainResponse(BaseModel):
     """Schema the model must satisfy when drafting a grain."""
 
-    grain: list[str]
+    model_config = ConfigDict(populate_by_name=True)
+
+    grain: list[str] = Field(alias="inferred_grain")
+    confidence: float = Field(
+        default=LLM_GRAIN_CONFIDENCE, ge=0.0, le=1.0, alias="confidence_score"
+    )
+    reasoning: str = ""
 
 
 class RuntimeLLMDrafter:
@@ -59,8 +117,13 @@ class RuntimeLLMDrafter:
             system=_GRAIN_SYSTEM,
             response_model=_GrainResponse,
         )
-        grain = completion.parsed["grain"] if completion.parsed else []
-        return GrainDraft(grain=grain, confidence=LLM_GRAIN_CONFIDENCE)
+        if not completion.parsed:
+            return GrainDraft(grain=[], confidence=LLM_GRAIN_CONFIDENCE, reasoning="")
+        grain = completion.parsed.get("grain", [])
+        raw_confidence = completion.parsed.get("confidence", LLM_GRAIN_CONFIDENCE)
+        reasoning = completion.parsed.get("reasoning", "")
+        confidence = min(float(raw_confidence), LLM_GRAIN_CONFIDENCE_CEILING) if grain else 0.0
+        return GrainDraft(grain=grain, confidence=confidence, reasoning=reasoning)
 
     async def draft_joins(self, observed: dict[str, Any]) -> list[dict[str, Any]]:  # noqa: ARG002
         """Propose joins from observed-query evidence.
@@ -71,14 +134,53 @@ class RuntimeLLMDrafter:
 
 
 def _grain_prompt(schema: RelationSchema) -> str:
-    """Render the relation's columns into a grain-inference prompt."""
-    columns = "\n".join(
-        f"- {c.name} ({c.type}{', nullable' if c.nullable else ''})" for c in schema.columns
+    """Render a relation's full evidence — schema, FKs, row count, and data profile — into a
+    grain-inference prompt with few-shot examples.
+
+    Every enrichment section degrades gracefully: foreign keys, row count, and the
+    data-profile (cardinality/null) section are omitted entirely when the relation carries
+    none (e.g. SQLite/DuckDB, or a Postgres relation with ``fetch_column_stats`` unset or
+    never-ANALYZE'd) rather than rendering an empty or misleading section.
+    """
+    lines: list[str] = ["## Examples\n", _FEW_SHOT_EXAMPLES, "\n## Your task\n"]
+
+    lines.append(f"Table name: {schema.relation!r}")
+    lines.append(f"Kind: {schema.kind}")
+    if schema.row_count_estimate is not None:
+        lines.append(f"Estimated row count: {schema.row_count_estimate:,}")
+
+    lines.append("\nColumns:")
+    for c in schema.columns:
+        parts = [f"- {c.name} ({c.type}", ", nullable" if c.nullable else ", not null"]
+        if c.uniqueness_ratio is not None:
+            parts.append(f", uniqueness={c.uniqueness_ratio:.3f}")
+        if c.null_fraction is not None:
+            parts.append(f", null_fraction={c.null_fraction:.3f}")
+        parts.append(")")
+        lines.append("".join(parts))
+
+    if schema.foreign_keys:
+        lines.append("\nForeign keys:")
+        for fk in schema.foreign_keys:
+            lines.append(
+                f"- ({', '.join(fk.columns)}) -> "
+                f"{fk.references.relation} ({', '.join(fk.references.columns)})"
+            )
+
+    if not any(c.stats_source for c in schema.columns):
+        lines.append(
+            "\nNote: no column-level cardinality/null statistics are available for this "
+            "relation (zero-scan mode, or never analyzed) — infer the grain from names, "
+            "types, nullability, and foreign keys alone."
+        )
+
+    lines.append(
+        "\nReturn a JSON object with exactly these keys: "
+        '"inferred_grain" (list of column names, minimal uniquely-identifying set), '
+        '"confidence_score" (float 0.0-1.0, your own calibrated confidence in this grain), '
+        '"reasoning" (1-3 sentences explaining why these columns and not others).'
     )
-    return (
-        f"Relation {schema.relation!r} has these columns:\n{columns}\n\n"
-        'Return the grain as a JSON object {"grain": [<column names>]}.'
-    )
+    return "\n".join(lines)
 
 
 _RECONCILE_SYSTEM = (
