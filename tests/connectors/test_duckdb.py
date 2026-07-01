@@ -259,6 +259,30 @@ async def test_introspect_schema_fingerprint(duckdb_db: tuple[DuckDBConnector, P
 
 
 @pytest.mark.asyncio
+async def test_fetch_column_stats_logs_warning_and_omits_stats(
+    duckdb_db: tuple[DuckDBConnector, Path], caplog: pytest.LogCaptureFixture
+) -> None:
+    """DuckDB has no queryable planner statistics — the option degrades gracefully."""
+    _, db_path = duckdb_db
+    connection = Connection(
+        id="warehouse_duckdb",
+        type="duckdb",
+        params={"path": str(db_path), "fetch_column_stats": True},
+    )
+    connector = DuckDBConnector(connection)
+
+    with caplog.at_level(logging.WARNING):
+        schemas = await connector.introspect_schema()
+
+    assert "fetch_column_stats" in caplog.text
+    orders = next(s for s in schemas if s.relation == "main.fct_orders")
+    for col in orders.columns:
+        assert col.stats_source is None
+        assert col.distinct_count_estimate is None
+        assert col.null_fraction is None
+
+
+@pytest.mark.asyncio
 async def test_run_read_only_sql_returns_typed_resultset(
     duckdb_db: tuple[DuckDBConnector, Path],
 ) -> None:

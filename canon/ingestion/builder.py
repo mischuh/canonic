@@ -48,6 +48,13 @@ __all__ = [
 DETERMINISTIC_CONFIDENCE = 1.0
 LLM_GRAIN_CONFIDENCE = 0.3
 
+# Ceiling applied to a drafter's self-reported confidence (SPEC-E10 grain-quality rework):
+# grain proposals are unconditionally excluded from auto-apply (AutoApplyConfig.never), so a
+# self-reported score is safe to surface, but small local models are frequently overconfident —
+# capping below DETERMINISTIC_CONFIDENCE keeps LLM-drafted grains visually distinguishable from
+# deterministic ones in review-queue sorting.
+LLM_GRAIN_CONFIDENCE_CEILING = 0.85
+
 # Sentinel key in a proposal's content that signals an additive deprecated-alternative
 # merge rather than a full MetricBinding replacement (SPEC-E3 §3.3, E15 §2.2).
 # Reconciliation detects this key and performs an idempotent append to the target binding's
@@ -101,6 +108,7 @@ class GrainDraft(BaseModel):
 
     grain: list[str] = []
     confidence: float = LLM_GRAIN_CONFIDENCE
+    reasoning: str = ""
 
 
 class LLMDrafter(Protocol):
@@ -252,6 +260,8 @@ class ContextBuilder:
             draft = await self._llm_drafter.draft_grain(schema)
             grain = list(draft.grain)
             meta["grain_draft"] = True
+            if draft.reasoning:
+                meta["grain_reasoning"] = draft.reasoning
             drafted_by = DraftedBy.LLM
             confidence = draft.confidence
 

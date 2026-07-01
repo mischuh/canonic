@@ -100,6 +100,14 @@ class ColumnInfo(BaseModel):
     nullable: bool = True
     position: int | None = None
 
+    # Optional zero-scan data-profile stats, populated only when a connector's
+    # fetch_column_stats param is enabled (Postgres/Redshift via pg_stats). Excluded from
+    # compute_fingerprint() so stats drift never triggers spurious schema-change detection.
+    distinct_count_estimate: int | None = None
+    null_fraction: float | None = None
+    uniqueness_ratio: float | None = None
+    stats_source: str | None = None
+
 
 class ForeignKeyRef(BaseModel):
     """The target side of a foreign-key relationship."""
@@ -177,7 +185,10 @@ def compute_fingerprint(
     or by hand fingerprints identically when its normalized shape matches.
     """
     payload = {
-        "columns": [c.model_dump() for c in columns],
+        "columns": [
+            {"name": c.name, "type": c.type, "nullable": c.nullable, "position": c.position}
+            for c in columns
+        ],
         "primary_key": primary_key,
         "foreign_keys": [fk.model_dump() for fk in foreign_keys],
     }
