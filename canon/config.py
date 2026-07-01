@@ -118,6 +118,13 @@ class ReconcileConfig(BaseModel):
     strict_contradictions: bool = False
 
 
+class LoggingConfig(BaseModel):
+    """Logging policy from the ``logging:`` section of canon.yaml."""
+
+    level: str = "WARNING"
+    file: str | None = None
+
+
 class YamlConfigSource(PydanticBaseSettingsSource):
     """Pydantic-settings source that reads a canon.yaml file via ruamel.yaml."""
 
@@ -157,6 +164,7 @@ class CanonConfig(BaseSettings):
     telemetry: TelemetryConfig = TelemetryConfig()
     reconcile: ReconcileConfig = ReconcileConfig()
     runtime: RuntimeConfig = RuntimeConfig()
+    logging: LoggingConfig = LoggingConfig()
 
     @model_validator(mode="after")
     def _enforce_air_gapped(self) -> CanonConfig:

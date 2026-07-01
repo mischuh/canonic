@@ -5,6 +5,7 @@ MCP and CLI adapters call this service; they do not duplicate any logic (SPEC §
 
 from __future__ import annotations
 
+import logging
 import time
 from datetime import UTC, datetime
 from pathlib import Path  # noqa: TC003 — used in function bodies, not just annotations
@@ -45,6 +46,8 @@ if TYPE_CHECKING:
     from canon.knowledge.results import SearchResult
     from canon.semantic.models import Dimension as _Dimension
     from canon.semantic.models import SemanticSource
+
+logger = logging.getLogger(__name__)
 
 __all__ = ["CanonService"]
 
@@ -422,11 +425,17 @@ class CanonService:
         connection_id: str | None = None
         result: ResultSet | None = None
         error_code: str | None = None
+        logger.info(
+            "query received: metrics=%s dimensions=%d",
+            query.metrics,
+            len(query.dimensions),
+        )
         try:
             compiled = compile(
                 query, self._resolver, self._sources, connection_dialects=self._connection_dialects
             )
             connection_id = self._connection_for_sql(compiled)
+            logger.info("connection selected: id=%s", connection_id)
             result = await self._execute(compiled.sql, connection_id)
             query_result = QueryResult.from_parts(compiled, result)
             await self._check_query_assertions(query, harness=harness)
@@ -436,6 +445,8 @@ class CanonService:
             raise
         finally:
             latency_ms = round((time.perf_counter() - started) * 1000)
+            if result is not None:
+                logger.info("query completed: latency_ms=%d rows=%d", latency_ms, len(result.rows))
             self._emit_answer_event(query, compiled, connection_id, result, latency_ms, error_code)
 
     async def _execute(self, sql: str, connection_id: str | None) -> ResultSet:
@@ -570,8 +581,8 @@ class CanonService:
                 error=error_code,
             )
             self._event_log.append(event)
-        except Exception:
-            pass  # emission is a side effect — never raises into the serving path (SPEC-E16 §9)
+        except Exception as exc:
+            logger.warning("answer event emission failed: %s", exc)
 
     async def run_sql(self, sql: str, connection: str | None = None) -> ResultSet:
         """Execute a raw read-only SQL string on the named connection (SPEC §2).
@@ -708,4 +719,8 @@ class CanonService:
             source = self._source_by_name.get(source_name)
             if source is not None:
                 return source.connection
+        logger.warning(
+            "no connection found: no loaded source matched resolved=%s",
+            list(compiled.resolved.values()),
+        )
         return None

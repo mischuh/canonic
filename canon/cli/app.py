@@ -67,6 +67,12 @@ def main(
 ) -> None:
     """Canon CLI entry point: sets global flags and dispatches subcommands."""
     get_cli_context(ctx).json_output = json_output
+
+    from canon.log import _effective_log_params, configure_logging
+
+    level, file = _effective_log_params("WARNING", None)
+    configure_logging(level=level, file=file)
+
     if ctx.invoked_subcommand is None:
         if json_output:
             typer.echo("interactive mode is not available with --json — run `canon --help`.")

@@ -1,0 +1,106 @@
+"""Tests for canon/log.py — central logging configuration."""
+
+from __future__ import annotations
+
+import logging
+
+import pytest
+
+from canon.log import _effective_log_params, configure_logging
+
+
+@pytest.fixture(autouse=True)
+def _reset_canon_logger():
+    """Restore the canon logger to a clean state after each test."""
+    yield
+    canon_logger = logging.getLogger("canon")
+    canon_logger.handlers.clear()
+    canon_logger.setLevel(logging.WARNING)
+    canon_logger.propagate = True
+
+
+class TestConfigureLogging:
+    def test_sets_level_on_canon_logger(self):
+        configure_logging(level="DEBUG")
+        assert logging.getLogger("canon").level == logging.DEBUG
+
+    def test_defaults_to_warning(self):
+        configure_logging()
+        assert logging.getLogger("canon").level == logging.WARNING
+
+    def test_unknown_level_falls_back_to_warning(self):
+        configure_logging(level="NOTAREAL")
+        assert logging.getLogger("canon").level == logging.WARNING
+
+    def test_case_insensitive_level(self):
+        configure_logging(level="info")
+        assert logging.getLogger("canon").level == logging.INFO
+
+    def test_idempotent_single_handler(self):
+        configure_logging(level="INFO")
+        configure_logging(level="DEBUG")
+        assert logging.getLogger("canon").level == logging.DEBUG
+        assert len(logging.getLogger("canon").handlers) == 1
+
+    def test_outputs_to_stderr_by_default(self, capsys):
+        configure_logging(level="DEBUG")
+        logging.getLogger("canon.test_output").debug("hello logging")
+        captured = capsys.readouterr()
+        assert "hello logging" in captured.err
+        assert captured.out == ""
+
+    def test_propagate_false(self):
+        configure_logging()
+        assert logging.getLogger("canon").propagate is False
+
+    def test_file_handler_created(self, tmp_path):
+        log_file = tmp_path / "canon.log"
+        configure_logging(level="DEBUG", file=str(log_file))
+        handlers = logging.getLogger("canon").handlers
+        assert len(handlers) == 1
+        assert isinstance(handlers[0], logging.FileHandler)
+
+    def test_file_receives_output(self, tmp_path):
+        log_file = tmp_path / "canon.log"
+        configure_logging(level="DEBUG", file=str(log_file))
+        logging.getLogger("canon.test_file").debug("written to file")
+        logging.getLogger("canon").handlers[0].flush()
+        content = log_file.read_text()
+        assert "written to file" in content
+
+
+class TestEffectiveLogParams:
+    def test_returns_config_values_when_no_env(self, monkeypatch):
+        monkeypatch.delenv("CANON_LOG_LEVEL", raising=False)
+        monkeypatch.delenv("CANON_LOG_FILE", raising=False)
+        level, file = _effective_log_params("INFO", "/tmp/canon.log")
+        assert level == "INFO"
+        assert file == "/tmp/canon.log"
+
+    def test_env_level_overrides_config(self, monkeypatch):
+        monkeypatch.setenv("CANON_LOG_LEVEL", "DEBUG")
+        monkeypatch.delenv("CANON_LOG_FILE", raising=False)
+        level, file = _effective_log_params("WARNING", None)
+        assert level == "DEBUG"
+        assert file is None
+
+    def test_env_file_overrides_config(self, monkeypatch):
+        monkeypatch.delenv("CANON_LOG_LEVEL", raising=False)
+        monkeypatch.setenv("CANON_LOG_FILE", "/tmp/override.log")
+        level, file = _effective_log_params("WARNING", "/tmp/config.log")
+        assert level == "WARNING"
+        assert file == "/tmp/override.log"
+
+    def test_both_env_vars_override(self, monkeypatch):
+        monkeypatch.setenv("CANON_LOG_LEVEL", "ERROR")
+        monkeypatch.setenv("CANON_LOG_FILE", "/tmp/env.log")
+        level, file = _effective_log_params("INFO", "/tmp/config.log")
+        assert level == "ERROR"
+        assert file == "/tmp/env.log"
+
+    def test_defaults_when_no_env_and_no_config(self, monkeypatch):
+        monkeypatch.delenv("CANON_LOG_LEVEL", raising=False)
+        monkeypatch.delenv("CANON_LOG_FILE", raising=False)
+        level, file = _effective_log_params("WARNING", None)
+        assert level == "WARNING"
+        assert file is None

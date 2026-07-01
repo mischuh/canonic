@@ -9,6 +9,7 @@ canonicality — the compiler trusts its results and never reimplements them (§
 from __future__ import annotations
 
 import dataclasses
+import logging
 import re
 from datetime import datetime
 from typing import TYPE_CHECKING, cast
@@ -47,6 +48,8 @@ if TYPE_CHECKING:
     from canon.contracts.models import FinalityRule
     from canon.contracts.resolver import ContractResolver
     from canon.semantic.models import Dimension, SemanticSource
+
+logger = logging.getLogger(__name__)
 
 __all__ = ["compile"]
 
@@ -156,6 +159,7 @@ def compile(  # noqa: A001 — the public verb for this capability is "compile"
     sources_by_name = {s.name: s for s in sources}
 
     # Stage 1 — resolve metric bindings; detect composite kinds and route accordingly.
+    logger.debug("stage 1: resolving metric bindings for metrics=%s", query.metrics)
     if not query.metrics:
         raise Unresolved("query requests at least one metric")
     raw_bindings: list[tuple[str, ResolverBinding]] = []
@@ -209,6 +213,7 @@ def compile(  # noqa: A001 — the public verb for this capability is "compile"
                 "remove other metrics from the request or split into separate queries"
             )
         _, composite = raw_bindings[0]
+        logger.info("compile path: composite metric=%s", query.metrics[0])
         return dataclasses.replace(
             _compile_composite(query, composite, resolver, sources_by_name, dialect=dialect),
             related=related,
@@ -220,6 +225,7 @@ def compile(  # noqa: A001 — the public verb for this capability is "compile"
                 "remove other metrics from the request or split into separate queries"
             )
         _, sa_binding = raw_bindings[0]
+        logger.info("compile path: semi_additive metric=%s", query.metrics[0])
         return dataclasses.replace(
             _compile_semi_additive(query, sa_binding, resolver, sources_by_name, dialect=dialect),
             related=related,
@@ -231,6 +237,7 @@ def compile(  # noqa: A001 — the public verb for this capability is "compile"
                 "remove other metrics from the request or split into separate queries"
             )
         _, rg_binding = raw_bindings[0]
+        logger.info("compile path: recompute_at_grain metric=%s", query.metrics[0])
         return dataclasses.replace(
             _compile_recompute_at_grain(
                 query, rg_binding, resolver, sources_by_name, dialect=dialect
@@ -244,15 +251,18 @@ def compile(  # noqa: A001 — the public verb for this capability is "compile"
                 "remove other metrics from the request or split into separate queries"
             )
         _, opaque_binding = raw_bindings[0]
+        logger.info("compile path: opaque metric=%s", query.metrics[0])
         return dataclasses.replace(
             _compile_opaque(query, opaque_binding, resolver, sources_by_name, dialect=dialect),
             related=related,
         )
 
+    logger.info("compile path: simple/additive metrics=%s", query.metrics)
     metrics = _bindings_to_resolved(raw_bindings, sources_by_name)
     owner = metrics[0].source  # FROM anchor
 
     # Stage 2 — resolve dimensions & filters to owning aliases.
+    logger.debug("stage 2: resolving dimensions and filters")
     alias_to_source = build_alias_tree(owner, sources_by_name)
     dimensions = _resolve_dimensions(query, sources_by_name, owner, alias_to_source)
     referenced = {alias for alias, _ in dimensions}
@@ -263,11 +273,13 @@ def compile(  # noqa: A001 — the public verb for this capability is "compile"
     referenced |= {owner}
 
     # Stage 3 — plan the join graph from the owner to every referenced alias.
+    logger.debug("stage 3: planning join graph")
     join_edges = plan_joins(
         owner, referenced - {owner}, sources_by_name, via=list(query.via) or None
     )
 
     # Stage 4 — fanout analysis: safety floor (SPEC-E15 §5) + dedup for additive fanout.
+    logger.debug("stage 4: fanout analysis")
     fanout = any(edge.join.relationship in _FANOUT for edge in join_edges)
     grouped = {dim.name for _alias, dim in dimensions}
 
@@ -283,6 +295,12 @@ def compile(  # noqa: A001 — the public verb for this capability is "compile"
 
         # Non-additive / semi-additive: safety floor — refuse corrupting aggregations.
         if fanout:
+            logger.warning(
+                "fanout unsafe: measure %s.%s is %s and a fanout join would corrupt the aggregate",
+                m.source,
+                m.measure.name,
+                add.value,
+            )
             raise FanoutUnsafe(
                 f"measure {m.source}.{m.measure.name!r} is {add.value} and a "
                 f"one_to_many/many_to_many join in this query would multiply its rows "
@@ -302,6 +320,7 @@ def compile(  # noqa: A001 — the public verb for this capability is "compile"
         # _build_simple recomputes the aggregate from base rows at the requested grain — safe.
 
     # Stage 5 — finality & coalescing [P1]: evaluate watermark, select sources per window.
+    logger.debug("stage 5: finality evaluation")
     finality_rule = resolver.finality_for(metrics[0].name) if len(metrics) == 1 else None
     time_dim_name: str | None = None
     if finality_rule is not None:
@@ -310,6 +329,7 @@ def compile(  # noqa: A001 — the public verb for this capability is "compile"
             finality_rule = None  # no time dimension → all rows implicitly final
 
     # Stage 5b — restrict_source: block queries that would pull provisional rows in guarded contexts.
+    logger.debug("stage 5b: restrict_source enforcement")
     _enforce_restrict_source(query, metrics, resolver, finality_rule, sources_by_name)
 
     # population_filter — defines the population the metric is about (§4.5); before guardrails.
@@ -319,10 +339,14 @@ def compile(  # noqa: A001 — the public verb for this capability is "compile"
         )
 
     # Stage 6 — enforce guardrails: AND mandatory filters into WHERE.
+    logger.debug("stage 6: enforcing guardrails")
     guard_conditions, fired = _enforce_guardrails(metrics, resolver, query.context, sources_by_name)
+    if fired:
+        logger.info("guardrails applied: count=%d ids=%s", len(fired), [g.id for g in fired])
     where_conditions += guard_conditions
 
     # Stage 7 — emit SQL through the dialect adapter.
+    logger.debug("stage 7: emitting SQL via dialect %s", dialect)
     finality_meta: FinalityMetadata | None = None
     adapter = adapter_for(dialect)
     if finality_rule is not None and time_dim_name is not None:
@@ -358,6 +382,7 @@ def compile(  # noqa: A001 — the public verb for this capability is "compile"
     sql = adapter.emit(ast, limit=query.limit)
 
     # Stage 8 — attach result metadata.
+    logger.debug("stage 8: attaching result metadata")
     if finality_meta is not None:
         used_sources = sorted(finality_meta.sources_used)
     else:
@@ -2050,4 +2075,7 @@ def _enforce_restrict_source(
             watermark_dt = evaluate_watermark(final_r.watermark, final_r.tz, query.as_of)
             time_names = _time_column_names(rule, sources_by_name)
             if _window_exceeds_watermark(query.filters, time_names, watermark_dt, sources_by_name):
+                logger.warning(
+                    "restrict_source enforced: guardrail=%s watermark exceeded", guardrail.id
+                )
                 raise GuardrailBlock(guardrail.rationale)

@@ -11,6 +11,7 @@ both explicitly.
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
@@ -38,6 +39,8 @@ if TYPE_CHECKING:
     from typing import Any
 
     from canon.contracts.models import Assertion
+
+logger = logging.getLogger(__name__)
 
 __all__ = [
     "Ambiguous",
@@ -209,17 +212,35 @@ class ContractResolver:
         ``context`` is accepted for interface stability but does not affect resolution in P0.
         """
         matches = self._name_index.get(name, [])
+        logger.debug("resolving metric: name=%r candidates=%d", name, len(matches))
         if not matches:
+            logger.info("metric unresolved: %r", name)
             return Unresolved(name=name)
         if len(matches) > 1:
             candidates = tuple(sorted(matches, key=lambda b: (b.metric, b.aliases)))
+            logger.info(
+                "ambiguous metric: %r candidates=%s", name, [b.metric for b in candidates]
+            )
             return Ambiguous(name=name, candidates=candidates)
-        return self._resolve_binding(matches[0], seen=frozenset({name}))
+        resolved = self._resolve_binding(matches[0], seen=frozenset({name}))
+        if isinstance(resolved, Binding):
+            if resolved.source and resolved.measure:
+                logger.info(
+                    "metric resolved: %r → %s.%s kind=%s",
+                    name,
+                    resolved.source,
+                    resolved.measure,
+                    resolved.kind.value,
+                )
+            else:
+                logger.info("metric resolved: %r kind=%s", name, resolved.kind.value)
+        return resolved
 
     def _resolve_component(
         self, name: str, seen: frozenset[str]
     ) -> Binding | Ambiguous | Unresolved:
         if name in seen:
+            logger.warning("cycle in composite resolution: %r chain=%s", name, sorted(seen))
             return Unresolved(name=name)
         matches = self._name_index.get(name, [])
         if not matches:
