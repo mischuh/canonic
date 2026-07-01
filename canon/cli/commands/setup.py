@@ -156,6 +156,17 @@ def setup(ctx: typer.Context) -> None:
     _run_wizard(root)
 
 
+def run_interactive() -> None:
+    """Entry point for bare ``canon``: wizard outside a project, menu inside one."""
+    from canon.config import find_project_root
+
+    root = find_project_root()
+    if root is not None:
+        _existing_project_menu(root)
+    else:
+        _run_wizard(Path.cwd())
+
+
 # --- fresh setup -----------------------------------------------------------
 
 

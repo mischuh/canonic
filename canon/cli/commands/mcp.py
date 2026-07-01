@@ -137,8 +137,6 @@ def start(
             else:
                 _console.print(f"MCP daemon started (http {host}:{port})")
         else:
-            if not json_output:
-                _console.print("Starting MCP server (stdio) — press Ctrl+C to stop.")
             start_stdio(service, root, suggestions=suggestions)
     except RuntimeError as exc:
         msg = str(exc)

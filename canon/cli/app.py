@@ -68,8 +68,12 @@ def main(
     """Canon CLI entry point: sets global flags and dispatches subcommands."""
     get_cli_context(ctx).json_output = json_output
     if ctx.invoked_subcommand is None:
-        # Bare ``canon`` will open the interactive wizard (E1); not implemented yet.
-        typer.echo("interactive mode not implemented yet — run `canon --help`.")
+        if json_output:
+            typer.echo("interactive mode is not available with --json — run `canon --help`.")
+            raise typer.Exit(2)
+        from canon.cli.commands.setup import run_interactive
+
+        run_interactive()
         raise typer.Exit(0)
 
 

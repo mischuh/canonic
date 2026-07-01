@@ -161,11 +161,20 @@ def start_stdio(service: object, project_root: Path, *, suggestions: bool = Fals
     The MCP client (e.g. Claude Code) manages the process lifetime; this function
     returns when the client disconnects or the process is killed.
     """
+    import logging
+
     from canon.mcp.server import build_server
+
+    # stdio transport uses stdout exclusively for JSON-RPC; redirect all logging to stderr
+    # so that startup banners and info messages don't corrupt the protocol stream.
+    for handler in logging.root.handlers:
+        if isinstance(handler, logging.StreamHandler) and handler.stream is sys.stdout:
+            handler.stream = sys.stderr
+    logging.basicConfig(stream=sys.stderr, force=True)
 
     _check_version_on_start(project_root)
     mcp = build_server(service, suggestions=suggestions)  # type: ignore[arg-type]
-    mcp.run(transport="stdio")
+    mcp.run(transport="stdio", show_banner=False)
 
 
 def start_http(

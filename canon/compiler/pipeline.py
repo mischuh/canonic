@@ -1280,7 +1280,12 @@ def _resolve_dimensions(
     for name in query.dimensions:
         found = _find_dimension(name, sources_by_name, owner, alias_to_source)
         if found is None:
-            suggestions = _dimension_suggestions(name, sources_by_name)
+            reachable_sources = {
+                src_name: sources_by_name[src_name]
+                for src_name in set(alias_to_source.values())
+                if src_name in sources_by_name
+            }
+            suggestions = _dimension_suggestions(name, reachable_sources)
             hint = f"; did you mean: {', '.join(suggestions)}" if suggestions else ""
             raise UnreachableError(
                 f"dimension {name!r} is not declared on any reachable source{hint}",
