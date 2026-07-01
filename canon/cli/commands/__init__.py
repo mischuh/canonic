@@ -47,4 +47,15 @@ def load_service(ctx: typer.Context) -> CanonService:
         else:
             _console.print(f"[red]error:[/red] {msg}")
         raise typer.Exit(1)
+
+    try:
+        from canon.config import load_config
+        from canon.log import _effective_log_params, configure_logging
+
+        cfg = load_config(root / "canon.yaml")
+        level, file = _effective_log_params(cfg.logging.level, cfg.logging.file)
+        configure_logging(level=level, file=file)
+    except Exception:
+        pass  # CanonService.from_project below will fail with a clearer error if config is broken
+
     return CanonService.from_project(root)
