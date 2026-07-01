@@ -386,6 +386,11 @@ async def test_interactive_mode_calls_drafter_for_no_pk_relation(tmp_path: Path)
             grain_calls.append(schema)
             return GrainDraft(grain=[], confidence=0.5)
 
+        async def draft_dimension_labels(
+            self, schema: Any, dimensions: list[dict[str, Any]]
+        ) -> list[Any]:
+            return []
+
         async def draft_joins(self, observed: dict[str, Any]) -> list[dict[str, Any]]:
             return []
 

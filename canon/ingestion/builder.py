@@ -36,6 +36,7 @@ from canon.semantic.models import Provenance, Relationship
 __all__ = [
     "BuildResult",
     "ContextBuilder",
+    "DimensionEnrichment",
     "GrainDraft",
     "LLMDrafter",
     "NullLLMDrafter",
@@ -54,6 +55,13 @@ LLM_GRAIN_CONFIDENCE = 0.3
 # capping below DETERMINISTIC_CONFIDENCE keeps LLM-drafted grains visually distinguishable from
 # deterministic ones in review-queue sorting.
 LLM_GRAIN_CONFIDENCE_CEILING = 0.85
+
+# Confidence thresholds gating LLM-drafted dimension labels/aliases (bootstrap task
+# expansion): a label is cosmetic formatting, so it's applied whenever the model is
+# reasonably sure; an alias is a factual claim consumed by MCP retrieval, so it needs a
+# stricter bar — a wrong alias silently misroutes a lookup, a wrong label is just ugly.
+LLM_LABEL_CONFIDENCE_THRESHOLD = 0.5
+LLM_ALIAS_CONFIDENCE_THRESHOLD = 0.75
 
 # Sentinel key in a proposal's content that signals an additive deprecated-alternative
 # merge rather than a full MetricBinding replacement (SPEC-E3 §3.3, E15 §2.2).
@@ -111,12 +119,31 @@ class GrainDraft(BaseModel):
     reasoning: str = ""
 
 
+class DimensionEnrichment(BaseModel):
+    """An LLM-drafted label/alias candidate for one already-inferred dimension.
+
+    ``name`` matches a dimension emitted by :meth:`ContextBuilder._infer_dimensions`;
+    ``confidence`` gates whether ``label``/``aliases`` are applied at all (SPEC-E4 §4
+    bootstrap task expansion) — an unresolved match or a below-threshold confidence
+    leaves the dimension exactly as the deterministic core produced it.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    name: str
+    label: str | None = None
+    aliases: list[str] = []
+    confidence: float = 0.0
+    reasoning: str = ""
+
+
 class LLMDrafter(Protocol):
     """The fuzzy-drafting seam (SPEC-E4 §4) — injected so the headless path stays LLM-free.
 
     Implementations propose the parts the deterministic core cannot assert: a grain when
-    no primary key is declared, and joins inferred from observed-query evidence. Every
-    result is labelled ``drafted_by: llm`` by the builder and carries reduced confidence.
+    no primary key is declared, joins inferred from observed-query evidence, and
+    human-readable labels/aliases for inferred dimensions. Every result is labelled
+    ``drafted_by: llm`` by the builder and carries reduced confidence.
     """
 
     async def draft_grain(self, schema: RelationSchema) -> GrainDraft:
@@ -127,19 +154,32 @@ class LLMDrafter(Protocol):
         """Propose joins from an ``observed_query`` payload."""
         ...
 
+    async def draft_dimension_labels(
+        self, schema: RelationSchema, dimensions: list[dict[str, Any]]
+    ) -> list[DimensionEnrichment]:
+        """Propose a display label and, when confident, aliases for each dimension."""
+        ...
+
 
 class NullLLMDrafter:
     """Default LLM stub for the headless path — proposes nothing, asserts nothing.
 
     Returns an empty grain candidate (so the proposal labels grain as a draft rather than
-    silently asserting one, SPEC-E4 §4 / S1-AC2) and no joins. A real LLM drafter (E10)
-    is injected to replace it in interactive mode.
+    silently asserting one, SPEC-E4 §4 / S1-AC2), no joins, and no dimension enrichment.
+    A real LLM drafter (E10) is injected to replace it in interactive mode.
     """
 
     async def draft_grain(self, schema: RelationSchema) -> GrainDraft:  # noqa: ARG002 — stub
         return GrainDraft(grain=[], confidence=LLM_GRAIN_CONFIDENCE)
 
     async def draft_joins(self, observed: dict[str, Any]) -> list[dict[str, Any]]:  # noqa: ARG002
+        return []
+
+    async def draft_dimension_labels(
+        self,
+        schema: RelationSchema,  # noqa: ARG002 — stub
+        dimensions: list[dict[str, Any]],  # noqa: ARG002 — stub
+    ) -> list[DimensionEnrichment]:
         return []
 
 
@@ -270,6 +310,9 @@ class ContextBuilder:
         else:
             measures = ContextBuilder._infer_measures(schema.columns)
 
+        dimensions = ContextBuilder._infer_dimensions(schema.columns)
+        await self._enrich_dimensions(schema, dimensions)
+
         content: dict[str, Any] = {
             "name": name,
             "connection": schema.connection,
@@ -279,7 +322,7 @@ class ContextBuilder:
                 {"name": c.name, "type": c.type, "nullable": c.nullable} for c in schema.columns
             ],
             "measures": measures,
-            "dimensions": ContextBuilder._infer_dimensions(schema.columns),
+            "dimensions": dimensions,
             "joins": self._build_joins(name, schema.foreign_keys),
             "meta": meta,
         }
@@ -380,6 +423,32 @@ class ContextBuilder:
             ):
                 dimensions.append({"name": col.name, "column": col.name})
         return dimensions
+
+    async def _enrich_dimensions(
+        self, schema: RelationSchema, dimensions: list[dict[str, Any]]
+    ) -> None:
+        """Fill in LLM-drafted ``label``/``aliases`` on ``dimensions`` in place.
+
+        A no-op with :class:`NullLLMDrafter` (headless/CI stays fully deterministic,
+        SPEC-E4 §9). A label is applied once the drafter clears
+        ``LLM_LABEL_CONFIDENCE_THRESHOLD``; aliases need the stricter
+        ``LLM_ALIAS_CONFIDENCE_THRESHOLD`` since a wrong alias can misroute a lookup,
+        while a wrong label is merely cosmetic. Unlike grain, this never changes the
+        proposal's own ``drafted_by``/``confidence`` — labels/aliases are additive
+        content, not a structural fact the review flow needs to gate on.
+        """
+        if not dimensions:
+            return
+        enrichments = await self._llm_drafter.draft_dimension_labels(schema, dimensions)
+        drafts = {d.name: d for d in enrichments}
+        for dim in dimensions:
+            draft = drafts.get(dim["name"])
+            if draft is None:
+                continue
+            if draft.label and draft.confidence >= LLM_LABEL_CONFIDENCE_THRESHOLD:
+                dim["label"] = draft.label
+            if draft.aliases and draft.confidence >= LLM_ALIAS_CONFIDENCE_THRESHOLD:
+                dim["aliases"] = list(draft.aliases)
 
     def _build_usage_evidence(self, item: EvidenceItem) -> list[Proposal]:
         """Map one ``UsageEvidence`` to a proposal against the contracts surface (SPEC-E3 §3.3).

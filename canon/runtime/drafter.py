@@ -16,6 +16,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from canon.ingestion.builder import (
     LLM_GRAIN_CONFIDENCE,
     LLM_GRAIN_CONFIDENCE_CEILING,
+    DimensionEnrichment,
     GrainDraft,
     NullLLMDrafter,
 )
@@ -132,6 +133,21 @@ class RuntimeLLMDrafter:
         """
         return []
 
+    async def draft_dimension_labels(
+        self, schema: RelationSchema, dimensions: list[dict[str, Any]]
+    ) -> list[DimensionEnrichment]:
+        """Propose a display label and, when confident, aliases for each dimension."""
+        completion = await self._runtime.generate(
+            _dimension_label_prompt(schema, dimensions),
+            task=Task.DRAFT,
+            system=_DIMENSION_LABEL_SYSTEM,
+            response_model=_DimensionLabelResponse,
+        )
+        if not completion.parsed:
+            return []
+        entries = completion.parsed.get("dimensions", [])
+        return [DimensionEnrichment.model_validate(e) for e in entries]
+
 
 def _grain_prompt(schema: RelationSchema) -> str:
     """Render a relation's full evidence — schema, FKs, row count, and data profile — into a
@@ -179,6 +195,64 @@ def _grain_prompt(schema: RelationSchema) -> str:
         '"inferred_grain" (list of column names, minimal uniquely-identifying set), '
         '"confidence_score" (float 0.0-1.0, your own calibrated confidence in this grain), '
         '"reasoning" (1-3 sentences explaining why these columns and not others).'
+    )
+    return "\n".join(lines)
+
+
+_DIMENSION_LABEL_SYSTEM = (
+    "You are a data analyst helping onboard a new database into a business-facing semantic "
+    "layer. For each dimension listed, propose a short, human-readable display label in Title "
+    "Case (e.g. column 'product_type' -> label 'Product Type'; 'is_active' -> 'Is Active'). "
+    "Only when you are genuinely confident, also propose a short list of aliases: alternative "
+    "names a business user might type when searching for this concept (synonyms, common "
+    "abbreviations, or the same concept phrased differently) — never invent aliases you are "
+    "not sure fit, and leave the alias list empty rather than guess. Report your own calibrated "
+    "confidence per dimension; a generic surrogate id or timestamp column with no clear "
+    "business meaning should get a low confidence and an empty alias list. "
+    "Respond only with the requested JSON object — no prose outside it."
+)
+
+_DIMENSION_LABEL_EXAMPLES = """\
+### Example — table with a categorical dimension and a surrogate key
+Table name: 'analytics.products'
+Dimensions:
+- name (string, column: name)
+- type (string, column: type)
+- product_id (string, column: product_id)
+
+Answer:
+{"dimensions": [
+{"name": "name", "label": "Product Name", "aliases": [], "confidence": 0.6, \
+"reasoning": "A generic name field; no further synonyms are safe to assume."},
+{"name": "type", "label": "Product Type", "aliases": ["product_category", "category"], \
+"confidence": 0.8, "reasoning": "A categorical column commonly called 'category' in \
+e-commerce data."},
+{"name": "product_id", "label": "Product Id", "aliases": [], "confidence": 0.3, \
+"reasoning": "A surrogate key; no business synonym applies."}
+]}
+"""
+
+
+class _DimensionLabelResponse(BaseModel):
+    """Schema the model must satisfy when drafting dimension labels/aliases."""
+
+    dimensions: list[DimensionEnrichment] = []
+
+
+def _dimension_label_prompt(schema: RelationSchema, dimensions: list[dict[str, Any]]) -> str:
+    """Render a relation's already-inferred dimensions into a label/alias-drafting prompt."""
+    lines: list[str] = ["## Example\n", _DIMENSION_LABEL_EXAMPLES, "\n## Your task\n"]
+
+    lines.append(f"Table name: {schema.relation!r}")
+    lines.append("Dimensions:")
+    for dim in dimensions:
+        lines.append(f"- {dim['name']} (column: {dim['column']})")
+
+    lines.append(
+        '\nReturn a JSON object with key "dimensions": a list with one entry per dimension '
+        'above, each an object with "name" (must match exactly), "label" (Title Case display '
+        'name), "aliases" (list of strings, empty unless confident), "confidence" (float '
+        '0.0-1.0), and "reasoning" (one sentence).'
     )
     return "\n".join(lines)
 

@@ -139,3 +139,64 @@ async def test_draft_grain_empty_grain_yields_zero_confidence(
 
     assert result.proposals[0].content["grain"] == []
     assert result.proposals[0].confidence == 0.0
+
+
+# ---------------------------------------------------------------------------
+# Dimension label/alias drafting (bootstrap task expansion)
+# ---------------------------------------------------------------------------
+
+
+def _status_dimension() -> list[dict[str, Any]]:
+    return [{"name": "status", "column": "status"}]
+
+
+async def test_draft_dimension_labels_parses_response(
+    llm_config: LLMConfig, set_fake: Callable[..., None]
+) -> None:
+    set_fake(
+        content=(
+            '{"dimensions": [{"name": "status", "label": "Order Status", '
+            '"aliases": ["order_state"], "confidence": 0.9, "reasoning": "categorical field"}]}'
+        )
+    )
+    drafter = RuntimeLLMDrafter(GenerationRuntime(llm_config))
+
+    drafts = await drafter.draft_dimension_labels(_schema_without_pk(), _status_dimension())
+
+    assert len(drafts) == 1
+    assert drafts[0].name == "status"
+    assert drafts[0].label == "Order Status"
+    assert drafts[0].aliases == ["order_state"]
+    assert drafts[0].confidence == 0.9
+
+
+async def test_draft_dimension_labels_defaults_missing_fields(
+    llm_config: LLMConfig, set_fake: Callable[..., None]
+) -> None:
+    set_fake(content='{"dimensions": [{"name": "status"}]}')
+    drafter = RuntimeLLMDrafter(GenerationRuntime(llm_config))
+
+    drafts = await drafter.draft_dimension_labels(_schema_without_pk(), _status_dimension())
+
+    assert drafts[0].label is None
+    assert drafts[0].aliases == []
+    assert drafts[0].confidence == 0.0
+
+
+async def test_draft_dimension_labels_empty_dimensions_list(
+    llm_config: LLMConfig, set_fake: Callable[..., None]
+) -> None:
+    set_fake(content='{"dimensions": []}')
+    drafter = RuntimeLLMDrafter(GenerationRuntime(llm_config))
+
+    assert await drafter.draft_dimension_labels(_schema_without_pk(), _status_dimension()) == []
+
+
+def test_dimension_label_prompt_lists_table_and_dimensions() -> None:
+    from canon.runtime.drafter import _dimension_label_prompt
+
+    prompt = _dimension_label_prompt(_schema_without_pk(), _status_dimension())
+
+    assert "analytics.events" in prompt
+    assert "status (column: status)" in prompt
+    assert '"dimensions"' in prompt

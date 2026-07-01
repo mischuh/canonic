@@ -18,6 +18,7 @@ from canon.ingestion.builder import (
     LLM_GRAIN_CONFIDENCE,
     BuildResult,
     ContextBuilder,
+    DimensionEnrichment,
     GrainDraft,
     NullLLMDrafter,
     SkippedEvidence,
@@ -228,6 +229,138 @@ class TestNoPrimaryKey:
 
 
 # ---------------------------------------------------------------------------
+# LLM-drafted dimension labels/aliases (bootstrap task expansion)
+# ---------------------------------------------------------------------------
+
+
+def _schema_with_status_dimension() -> RelationSchema:
+    cols = [
+        ColumnInfo(name="order_id", type="int", nullable=False, position=1),
+        ColumnInfo(name="status", type="string", nullable=True, position=2),
+    ]
+    return RelationSchema(
+        connection="warehouse_pg",
+        relation="analytics.fct_orders",
+        kind="table",
+        columns=cols,
+        primary_key=["order_id"],
+        acquisition_tier=AcquisitionTier.LIVE,
+        source_fingerprint=compute_fingerprint(cols, ["order_id"], []),
+    )
+
+
+class TestDimensionEnrichment:
+    async def test_label_applied_when_over_threshold(self) -> None:
+        class _StubDrafter(NullLLMDrafter):
+            async def draft_dimension_labels(
+                self, schema: RelationSchema, dimensions: list[dict[str, Any]]
+            ) -> list[DimensionEnrichment]:
+                return [DimensionEnrichment(name="status", label="Order Status", confidence=0.6)]
+
+        schema = _schema_with_status_dimension()
+        p = (await ContextBuilder(llm_drafter=_StubDrafter()).build([_evidence(schema)])).proposals[
+            0
+        ]
+        dim = next(d for d in p.content["dimensions"] if d["name"] == "status")
+        assert dim["label"] == "Order Status"
+        assert dim.get("aliases") in (None, [])
+
+    async def test_label_withheld_when_under_threshold(self) -> None:
+        class _StubDrafter(NullLLMDrafter):
+            async def draft_dimension_labels(
+                self, schema: RelationSchema, dimensions: list[dict[str, Any]]
+            ) -> list[DimensionEnrichment]:
+                return [DimensionEnrichment(name="status", label="Order Status", confidence=0.2)]
+
+        schema = _schema_with_status_dimension()
+        p = (await ContextBuilder(llm_drafter=_StubDrafter()).build([_evidence(schema)])).proposals[
+            0
+        ]
+        dim = next(d for d in p.content["dimensions"] if d["name"] == "status")
+        assert "label" not in dim
+
+    async def test_aliases_need_stricter_threshold_than_label(self) -> None:
+        class _StubDrafter(NullLLMDrafter):
+            async def draft_dimension_labels(
+                self, schema: RelationSchema, dimensions: list[dict[str, Any]]
+            ) -> list[DimensionEnrichment]:
+                return [
+                    DimensionEnrichment(
+                        name="status",
+                        label="Order Status",
+                        aliases=["order_state"],
+                        confidence=0.6,
+                    )
+                ]
+
+        schema = _schema_with_status_dimension()
+        p = (await ContextBuilder(llm_drafter=_StubDrafter()).build([_evidence(schema)])).proposals[
+            0
+        ]
+        dim = next(d for d in p.content["dimensions"] if d["name"] == "status")
+        assert dim["label"] == "Order Status"
+        assert "aliases" not in dim
+
+    async def test_aliases_applied_when_over_stricter_threshold(self) -> None:
+        class _StubDrafter(NullLLMDrafter):
+            async def draft_dimension_labels(
+                self, schema: RelationSchema, dimensions: list[dict[str, Any]]
+            ) -> list[DimensionEnrichment]:
+                return [
+                    DimensionEnrichment(
+                        name="status",
+                        label="Order Status",
+                        aliases=["order_state"],
+                        confidence=0.9,
+                    )
+                ]
+
+        schema = _schema_with_status_dimension()
+        p = (await ContextBuilder(llm_drafter=_StubDrafter()).build([_evidence(schema)])).proposals[
+            0
+        ]
+        dim = next(d for d in p.content["dimensions"] if d["name"] == "status")
+        assert dim["aliases"] == ["order_state"]
+
+    async def test_unmatched_dimension_name_is_ignored(self) -> None:
+        class _StubDrafter(NullLLMDrafter):
+            async def draft_dimension_labels(
+                self, schema: RelationSchema, dimensions: list[dict[str, Any]]
+            ) -> list[DimensionEnrichment]:
+                return [DimensionEnrichment(name="nonexistent", label="Nope", confidence=1.0)]
+
+        schema = _schema_with_status_dimension()
+        p = (await ContextBuilder(llm_drafter=_StubDrafter()).build([_evidence(schema)])).proposals[
+            0
+        ]
+        dim = next(d for d in p.content["dimensions"] if d["name"] == "status")
+        assert "label" not in dim
+
+    async def test_null_llm_drafter_leaves_dimensions_unlabeled(self) -> None:
+        """Headless/default path: NullLLMDrafter is a no-op, matching today's behavior."""
+        schema = _schema_with_status_dimension()
+        p = (await ContextBuilder().build([_evidence(schema)])).proposals[0]
+        dim = next(d for d in p.content["dimensions"] if d["name"] == "status")
+        assert dim == {"name": "status", "column": "status"}
+
+    async def test_no_dimensions_skips_drafter_call(self) -> None:
+        """No dimension columns ⇒ draft_dimension_labels is never invoked."""
+        called = False
+
+        class _StubDrafter(NullLLMDrafter):
+            async def draft_dimension_labels(
+                self, schema: RelationSchema, dimensions: list[dict[str, Any]]
+            ) -> list[DimensionEnrichment]:
+                nonlocal called
+                called = True
+                return []
+
+        schema = _relation_schema(foreign_keys=[_customer_fk()])
+        await ContextBuilder(llm_drafter=_StubDrafter()).build([_evidence(schema)])
+        assert called is False
+
+
+# ---------------------------------------------------------------------------
 # Determinism (AC3 / S9-AC1)
 # ---------------------------------------------------------------------------
 
@@ -376,3 +509,8 @@ class TestNullLLMDrafter:
     async def test_draft_joins_is_empty(self) -> None:
         observed: dict[str, Any] = {"joins_observed": [{"a": "b"}]}
         assert await NullLLMDrafter().draft_joins(observed) == []
+
+    async def test_draft_dimension_labels_is_empty(self) -> None:
+        schema = _relation_schema(primary_key=[])
+        dims = [{"name": "status", "column": "status"}]
+        assert await NullLLMDrafter().draft_dimension_labels(schema, dims) == []
