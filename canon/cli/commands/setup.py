@@ -642,16 +642,19 @@ def _prompt_connection(root: Path) -> Connection:
         "  [bold][2][/bold] DuckDB   — local .duckdb file, analytical workloads, no credentials"
     )
     _console.print("  [bold][3][/bold] Postgres — server-based, requires host/port/credentials")
+    _console.print("  [bold][4][/bold] Redshift — Amazon Redshift, requires host/port/credentials")
     while True:
-        choice = typer.prompt("Type [1=sqlite / 2=duckdb / 3=postgres]", default="1")
+        choice = typer.prompt("Type [1=sqlite / 2=duckdb / 3=postgres / 4=redshift]", default="1")
         if choice == "1":
             conn = _prompt_sqlite_params()
         elif choice == "2":
             conn = _prompt_duckdb_params()
         elif choice == "3":
             conn = _prompt_postgres_params()
+        elif choice == "4":
+            conn = _prompt_redshift_params()
         else:
-            _console.print("[red]enter 1, 2 or 3[/red]")
+            _console.print("[red]enter 1, 2, 3 or 4[/red]")
             continue
 
         health = _test_connection(conn)
@@ -705,6 +708,37 @@ def _prompt_postgres_params() -> Connection:
     return Connection(
         id=conn_id,
         type="postgres",
+        params=params,
+        credentials_ref=f"env:{env_var}",
+    )
+
+
+def _prompt_redshift_params() -> Connection:
+    """Collect params for a Redshift connection (server + credentials env var)."""
+    conn_id = typer.prompt("Connection id", default="warehouse_rs")
+    params: dict[str, object] = {
+        "host": typer.prompt("Host"),
+        "port": typer.prompt("Port", default=5439, type=int),
+        "user": typer.prompt("User"),
+        "dbname": typer.prompt("Database"),
+    }
+    schema = typer.prompt("Schema (optional)", default="")
+    if schema:
+        params["schema"] = schema
+    env_var = typer.prompt(
+        "Env var holding the password",
+        default=f"CANON_{conn_id.upper()}_PASSWORD",
+    )
+    if not os.environ.get(env_var):
+        _console.print(
+            f"\n[yellow]note:[/yellow] [bold]{env_var}[/bold] is not set in your current shell.\n"
+            f"  Before the connection test runs, open a new terminal tab and export it:\n"
+            f"  [bold]export {env_var}=<your-password>[/bold]\n"
+            "  Setup progress is saved — if you need to exit now, re-run [bold]canon setup[/bold] and it will resume here.\n"
+        )
+    return Connection(
+        id=conn_id,
+        type="redshift",
         params=params,
         credentials_ref=f"env:{env_var}",
     )
