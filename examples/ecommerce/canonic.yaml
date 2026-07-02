@@ -1,0 +1,41 @@
+version: 1
+
+project:
+  name: ecommerce-demo
+  default_connection: warehouse_pg
+
+connections:
+  - id: warehouse_pg
+    type: postgres
+    params:
+      host: localhost
+      port: 5432
+      user: postgres
+      dbname: postgres
+      schema: analytics
+    credentials_ref: env:CANONIC_PG_PASSWORD  # export CANONIC_PG_PASSWORD=<your-postgres-password>
+
+  # E3 definition connector: a compiled dbt manifest.json. No live database, no
+  # execution — Canonic parses the manifest into modeling-tier evidence (measures,
+  # joins, grain) that outranks raw Postgres introspection during reconciliation.
+  - id: warehouse_dbt
+    type: dbt
+    params:
+      manifest_path: dbt/manifest.json   # relative to this canonic.yaml
+
+llm:
+  provider: openai_compatible
+  base_url: http://127.0.0.1:8765/v1  # Ollama; swap for OpenAI/Anthropic in Phase 1
+  model: gemma-4-e2b-it-4bit
+  api_key_ref: env:CANONIC_LLM_API_KEY  
+
+reconcile:
+  strict_contradictions: false   # set to true to gate CI on any contradiction (exit 14)
+  auto_apply:
+    enabled: false               # propose-only by default; reviewed diffs become the commit
+
+telemetry:
+  enabled: false   # local event log only — nothing is sent off-machine
+
+runtime:
+  air_gapped: false   # set to true to enforce local-only endpoints at load time (SPEC-E16 §9)

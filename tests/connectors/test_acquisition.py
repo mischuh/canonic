@@ -10,14 +10,14 @@ from __future__ import annotations
 
 import pytest
 
-from canon.connectors.acquisition import (
+from canonic.connectors.acquisition import (
     AcquisitionLadder,
     probe_schema,
     relations_from_ddl,
     relations_from_schema_yaml,
     relations_from_semantic_sources,
 )
-from canon.connectors.base import (
+from canonic.connectors.base import (
     AcquisitionTier,
     Capability,
     ColumnInfo,
@@ -25,8 +25,8 @@ from canon.connectors.base import (
     Health,
     RelationSchema,
 )
-from canon.exc import SchemaMismatch
-from canon.semantic.models import Column, NormalizedType, SemanticSource
+from canonic.exc import SchemaMismatch
+from canonic.semantic.models import Column, NormalizedType, SemanticSource
 
 
 def _relation(relation: str, columns: dict[str, str], **kw: object) -> RelationSchema:

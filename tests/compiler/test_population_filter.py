@@ -18,8 +18,8 @@ from __future__ import annotations
 import pytest
 import sqlglot
 
-from canon.compiler import SemanticQuery, compile
-from canon.contracts.models import (
+from canonic.compiler import SemanticQuery, compile
+from canonic.contracts.models import (
     AppliesTo,
     BindingKind,
     CanonicalRef,
@@ -29,8 +29,8 @@ from canon.contracts.models import (
     MetricBinding,
     Severity,
 )
-from canon.contracts.resolver import ContractResolver
-from canon.semantic.models import Column, Dimension, Measure, SemanticSource
+from canonic.contracts.resolver import ContractResolver
+from canonic.semantic.models import Column, Dimension, Measure, SemanticSource
 
 # ---------------------------------------------------------------------------
 # Shared helpers

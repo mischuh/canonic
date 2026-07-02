@@ -1,9 +1,9 @@
-"""Tests for canon/contracts/bootstrap.py."""
+"""Tests for canonic/contracts/bootstrap.py."""
 
 from __future__ import annotations
 
-from canon.contracts.bootstrap import infer_p0_pairs, write_inferred_contracts
-from canon.semantic.models import Column, Measure, NormalizedType, SemanticSource
+from canonic.contracts.bootstrap import infer_p0_pairs, write_inferred_contracts
+from canonic.semantic.models import Column, Measure, NormalizedType, SemanticSource
 
 
 def _source(

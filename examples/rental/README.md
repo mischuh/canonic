@@ -1,6 +1,6 @@
-# Canon rental demo
+# Canonic rental demo
 
-An end-to-end Canon project built on a vehicle rental service: one SQLite connection,
+An end-to-end Canonic project built on a vehicle rental service: one SQLite connection,
 five dimensions, three fact tables, three canonical metrics, and two enforced guardrails.
 No external database required — the entire dataset lives in a single `rental.db` file.
 
@@ -31,20 +31,20 @@ FACTS
 # 1. Create the database (one-time)
 sqlite3 rental.db < setup.sql
 
-# 2. Set your LLM key (adjust canon.yaml if you use a different provider)
-export CANON_LLM_API_KEY=<your-key>
+# 2. Set your LLM key (adjust canonic.yaml if you use a different provider)
+export CANONIC_LLM_API_KEY=<your-key>
 
 # 3. Verify the project is recognised
-canon status
+canonic status
 
 # 4. Bootstrap the semantic layer from the live schema
-canon ingest --bootstrap
+canonic ingest --bootstrap
 
 # 5. Start the MCP server so agents can query it
-canon mcp start
+canonic mcp start
 
 # 6. (Optional) Run grain-inference accuracy baseline
-canon eval baseline \
+canonic eval baseline \
   --candidates candidates.yaml \
   --dataset eval/grain_cases.jsonl
 ```
@@ -53,9 +53,9 @@ canon eval baseline \
 
 | Step | What it proves |
 |---|---|
-| `canon ingest --bootstrap` | Bootstraps context from a real SQLite stack |
+| `canonic ingest --bootstrap` | Bootstraps context from a real SQLite stack |
 | `query()` + `search_knowledge()` via MCP | Agents get executable definitions + business meaning |
-| `canon eval baseline` | Grain-inference accuracy is tracked |
+| `canonic eval baseline` | Grain-inference accuracy is tracked |
 
 ## Metrics
 
@@ -78,7 +78,7 @@ Use `payments.total_paid` for financial reporting.
 ## Files
 
 ```
-canon.yaml                           ← project config — SQLite connection, LLM, reconcile settings
+canonic.yaml                           ← project config — SQLite connection, LLM, reconcile settings
 setup.sql                            ← DDL + seed data; creates the rental.db file
 semantics/rental_db/
   vehicle_categories.yaml            ← dim: category name, daily rate

@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from canon.compiler.result import CompileResult, FinalityMetadata, FiredGuardrail, SourceFreshness
-from canon.connectors.base import ResultColumn, ResultSet
-from canon.core.models import QueryMetadata
+from canonic.compiler.result import CompileResult, FinalityMetadata, FiredGuardrail, SourceFreshness
+from canonic.connectors.base import ResultColumn, ResultSet
+from canonic.core.models import QueryMetadata
 
 
 def _make_compile_result(with_finality: bool = True) -> CompileResult:

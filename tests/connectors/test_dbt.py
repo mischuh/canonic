@@ -10,7 +10,7 @@ import pytest
 if TYPE_CHECKING:
     from pathlib import Path
 
-from canon.connectors.base import (
+from canonic.connectors.base import (
     AcquisitionTier,
     Capability,
     DefinitionEntityType,
@@ -18,11 +18,11 @@ from canon.connectors.base import (
     DefinitionExtract,
     RelationSchema,
 )
-from canon.connectors.dbt import DbtConnector, _normalize_type
-from canon.exc import ConnectionError, UnsupportedSourceVersionError
-from canon.ingestion.models import EvidenceKind
-from canon.ingestion.source import evidence_from_definitions
-from canon.semantic.models import Additivity, Relationship
+from canonic.connectors.dbt import DbtConnector, _normalize_type
+from canonic.exc import ConnectionError, UnsupportedSourceVersionError
+from canonic.ingestion.models import EvidenceKind
+from canonic.ingestion.source import evidence_from_definitions
+from canonic.semantic.models import Additivity, Relationship
 
 
 class TestCapabilities:

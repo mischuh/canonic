@@ -8,19 +8,19 @@ from typing import TYPE_CHECKING, Any
 
 import pytest
 
-from canon.connectors.base import (
+from canonic.connectors.base import (
     Capability,
     UsageEvidence,
     UsageRole,
 )
-from canon.connectors.metabase import (
+from canonic.connectors.metabase import (
     MetabaseConnector,
     _assign_role,
     _extract_expr,
     _extract_references,
 )
-from canon.ingestion.models import EvidenceKind
-from canon.ingestion.source import evidence_from_docs
+from canonic.ingestion.models import EvidenceKind
+from canonic.ingestion.source import evidence_from_docs
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -52,7 +52,7 @@ def question_source(metabase_questions_path: Path) -> FixtureMetabaseQuestionSou
 
 @pytest.fixture
 def connector(question_source: FixtureMetabaseQuestionSource) -> MetabaseConnector:
-    from canon.config import Connection
+    from canonic.config import Connection
 
     conn = Connection(
         id="metabase_prod",
@@ -84,7 +84,7 @@ class TestTestConnection:
         assert "0.48" in (health.message or "")
 
     async def test_error_on_old_version(self, metabase_questions_path: Path) -> None:
-        from canon.config import Connection
+        from canonic.config import Connection
 
         conn = Connection(
             id="metabase_prod",
@@ -99,7 +99,7 @@ class TestTestConnection:
         assert "0.45" in (health.message or "")
 
     async def test_error_on_unparseable_version(self, metabase_questions_path: Path) -> None:
-        from canon.config import Connection
+        from canonic.config import Connection
 
         conn = Connection(
             id="metabase_prod",
@@ -114,8 +114,8 @@ class TestTestConnection:
 
     async def test_extract_raises_on_old_version(self, metabase_questions_path: Path) -> None:
         """SPEC-E3 §6, S5 — out-of-range server ingests nothing (AC1)."""
-        from canon.config import Connection
-        from canon.exc import ConnectionError, UnsupportedSourceVersionError
+        from canonic.config import Connection
+        from canonic.exc import ConnectionError, UnsupportedSourceVersionError
 
         conn = Connection(
             id="metabase_prod",
@@ -257,7 +257,7 @@ class TestExtractEvidence:
     async def test_fingerprints_stable_across_calls(
         self, question_source: FixtureMetabaseQuestionSource
     ) -> None:
-        from canon.config import Connection
+        from canonic.config import Connection
 
         conn = Connection(
             id="metabase_prod",

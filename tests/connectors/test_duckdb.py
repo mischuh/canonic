@@ -17,10 +17,10 @@ if TYPE_CHECKING:
     from collections.abc import Iterator
     from pathlib import Path
 
-from canon.config import Connection
-from canon.connectors.base import AcquisitionTier, Capability
-from canon.connectors.duckdb import DuckDBConnector, _normalize_type
-from canon.exc import ReadOnlyViolation
+from canonic.config import Connection
+from canonic.connectors.base import AcquisitionTier, Capability
+from canonic.connectors.duckdb import DuckDBConnector, _normalize_type
+from canonic.exc import ReadOnlyViolation
 
 _SEED_SQL = """
 CREATE TABLE dim_customers (

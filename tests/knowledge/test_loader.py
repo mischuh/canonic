@@ -10,14 +10,14 @@ import pytest
 if TYPE_CHECKING:
     from pathlib import Path
 
-from canon.exc import KnowledgePageError
-from canon.knowledge.loader import (
+from canonic.exc import KnowledgePageError
+from canonic.knowledge.loader import (
     load_knowledge_page,
     scope_from_path,
     slug_from_path,
 )
-from canon.knowledge.models import KnowledgeScope, UsageMode
-from canon.semantic.models import Provenance
+from canonic.knowledge.models import KnowledgeScope, UsageMode
+from canonic.semantic.models import Provenance
 
 
 def test_load_full_page_round_trips_fields(write_page, valid_page_md: str) -> None:

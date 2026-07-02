@@ -1,4 +1,4 @@
-"""Tests for daemon PID-file lifecycle (canon/mcp/daemon.py)."""
+"""Tests for daemon PID-file lifecycle (canonic/mcp/daemon.py)."""
 
 from __future__ import annotations
 
@@ -7,12 +7,12 @@ from pathlib import Path  # noqa: TC003
 
 import pytest
 
-from canon.mcp.daemon import DaemonState, _canon_version, read_state, status, stop
+from canonic.mcp.daemon import DaemonState, _canonic_version, read_state, status, stop
 
 
 @pytest.fixture
 def project_root(tmp_path: Path) -> Path:
-    (tmp_path / ".canon").mkdir()
+    (tmp_path / ".canonic").mkdir()
     return tmp_path
 
 
@@ -25,7 +25,7 @@ def _write_state_file(root: Path, pid: int, v: str, transport: str = "stdio") ->
         port=None,
         started_at="2026-01-01T00:00:00+00:00",
     )
-    (root / ".canon" / "mcp.json").write_text(state.to_json())
+    (root / ".canonic" / "mcp.json").write_text(state.to_json())
 
 
 class TestReadState:
@@ -40,7 +40,7 @@ class TestReadState:
         assert state.version == "1.0.0"
 
     def test_malformed_returns_none(self, project_root: Path) -> None:
-        (project_root / ".canon" / "mcp.json").write_text("not json{{{")
+        (project_root / ".canonic" / "mcp.json").write_text("not json{{{")
         assert read_state(project_root) is None
 
 
@@ -51,7 +51,7 @@ class TestStatus:
         assert s.pid is None
 
     def test_live_pid(self, project_root: Path) -> None:
-        _write_state_file(project_root, pid=os.getpid(), v=_canon_version())
+        _write_state_file(project_root, pid=os.getpid(), v=_canonic_version())
         s = status(project_root)
         assert s.running
         assert s.pid == os.getpid()
@@ -63,7 +63,7 @@ class TestStatus:
         _write_state_file(project_root, pid=dead_pid, v="1.0.0")
         s = status(project_root)
         assert not s.running
-        assert not (project_root / ".canon" / "mcp.json").exists()
+        assert not (project_root / ".canonic" / "mcp.json").exists()
 
     def test_version_mismatch_detected(self, project_root: Path) -> None:
         _write_state_file(project_root, pid=os.getpid(), v="0.0.0-old")
@@ -81,7 +81,7 @@ class TestStop:
         _write_state_file(project_root, pid=99999999, v="1.0.0")
         result = stop(project_root)
         assert result is False
-        assert not (project_root / ".canon" / "mcp.json").exists()
+        assert not (project_root / ".canonic" / "mcp.json").exists()
 
     def test_live_pid_sends_sigterm(self, project_root: Path) -> None:
         import signal
@@ -91,10 +91,10 @@ class TestStop:
         # Spawn a background sleep process we can safely kill.
         proc = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"])
         try:
-            _write_state_file(project_root, pid=proc.pid, v=_canon_version())
+            _write_state_file(project_root, pid=proc.pid, v=_canonic_version())
             result = stop(project_root)
             assert result is True
-            assert not (project_root / ".canon" / "mcp.json").exists()
+            assert not (project_root / ".canonic" / "mcp.json").exists()
             proc.wait(timeout=3)
             assert proc.returncode in (-signal.SIGTERM, -15, 1)
         finally:

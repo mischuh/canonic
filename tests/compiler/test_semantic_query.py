@@ -2,7 +2,7 @@
 
 import pytest
 
-from canon.compiler.query import SemanticQuery
+from canonic.compiler.query import SemanticQuery
 
 
 def test_filters_string_passthrough() -> None:

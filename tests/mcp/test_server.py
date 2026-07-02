@@ -1,4 +1,4 @@
-"""Tests for MCP tool registration and error mapping (canon/mcp/server.py).
+"""Tests for MCP tool registration and error mapping (canonic/mcp/server.py).
 
 Tools are called in-memory via the FastMCP Client against the built server so no
 transport is needed.
@@ -9,16 +9,16 @@ from __future__ import annotations
 import pytest
 from fastmcp import Client
 
-from canon.config import CanonConfig
-from canon.contracts.models import CanonicalRef, MetricBinding, Status
-from canon.contracts.resolver import ContractResolver
-from canon.core.service import CanonService  # noqa: TC001
-from canon.mcp.server import build_server
-from canon.semantic.models import Column, Dimension, Join, Measure, Relationship, SemanticSource
+from canonic.config import CanonicConfig
+from canonic.contracts.models import CanonicalRef, MetricBinding, Status
+from canonic.contracts.resolver import ContractResolver
+from canonic.core.service import CanonicService  # noqa: TC001
+from canonic.mcp.server import build_server
+from canonic.semantic.models import Column, Dimension, Join, Measure, Relationship, SemanticSource
 
 
-def _ambiguous_service(monkeypatch: pytest.MonkeyPatch) -> CanonService:
-    """Build a CanonService with two join paths from 'owner' to 'dim'."""
+def _ambiguous_service(monkeypatch: pytest.MonkeyPatch) -> CanonicService:
+    """Build a CanonicService with two join paths from 'owner' to 'dim'."""
     monkeypatch.setenv("PG_PASSWORD", "testpw")
     owner = SemanticSource(
         name="owner",
@@ -66,7 +66,7 @@ def _ambiguous_service(monkeypatch: pytest.MonkeyPatch) -> CanonService:
         ],
         guardrails=[],
     )
-    config = CanonConfig.model_validate(
+    config = CanonicConfig.model_validate(
         {
             "version": 1,
             "project": {"name": "test", "default_connection": "db"},
@@ -80,12 +80,12 @@ def _ambiguous_service(monkeypatch: pytest.MonkeyPatch) -> CanonService:
             ],
         }
     )
-    return CanonService(config=config, resolver=resolver, sources=[owner, hop_a, hop_b, dim])
+    return CanonicService(config=config, resolver=resolver, sources=[owner, hop_a, hop_b, dim])
 
 
 @pytest.mark.asyncio
-async def test_get_overview(canon_service: CanonService) -> None:
-    mcp = build_server(canon_service)
+async def test_get_overview(canonic_service: CanonicService) -> None:
+    mcp = build_server(canonic_service)
     async with Client(mcp) as client:
         result = await client.call_tool("get_overview", {})
     data = result.data
@@ -98,8 +98,8 @@ async def test_get_overview(canon_service: CanonService) -> None:
 
 
 @pytest.mark.asyncio
-async def test_get_overview_domain_filter(canon_service: CanonService) -> None:
-    mcp = build_server(canon_service)
+async def test_get_overview_domain_filter(canonic_service: CanonicService) -> None:
+    mcp = build_server(canonic_service)
     async with Client(mcp) as client:
         result = await client.call_tool("get_overview", {"domain": "orders"})
     data = result.data
@@ -108,8 +108,8 @@ async def test_get_overview_domain_filter(canon_service: CanonService) -> None:
 
 
 @pytest.mark.asyncio
-async def test_get_overview_unknown_domain_empty(canon_service: CanonService) -> None:
-    mcp = build_server(canon_service)
+async def test_get_overview_unknown_domain_empty(canonic_service: CanonicService) -> None:
+    mcp = build_server(canonic_service)
     async with Client(mcp) as client:
         result = await client.call_tool("get_overview", {"domain": "nonexistent"})
     data = result.data
@@ -117,8 +117,8 @@ async def test_get_overview_unknown_domain_empty(canon_service: CanonService) ->
 
 
 @pytest.mark.asyncio
-async def test_describe_metric_includes_examples_field(canon_service: CanonService) -> None:
-    mcp = build_server(canon_service)
+async def test_describe_metric_includes_examples_field(canonic_service: CanonicService) -> None:
+    mcp = build_server(canonic_service)
     async with Client(mcp) as client:
         result = await client.call_tool("describe_metric", {"name": "revenue"})
     data = result.data
@@ -127,8 +127,8 @@ async def test_describe_metric_includes_examples_field(canon_service: CanonServi
 
 
 @pytest.mark.asyncio
-async def test_list_metrics(canon_service: CanonService) -> None:
-    mcp = build_server(canon_service)
+async def test_list_metrics(canonic_service: CanonicService) -> None:
+    mcp = build_server(canonic_service)
     async with Client(mcp) as client:
         result = await client.call_tool("list_metrics", {})
     metrics = result.data
@@ -137,8 +137,8 @@ async def test_list_metrics(canon_service: CanonService) -> None:
 
 
 @pytest.mark.asyncio
-async def test_describe_metric(canon_service: CanonService) -> None:
-    mcp = build_server(canon_service)
+async def test_describe_metric(canonic_service: CanonicService) -> None:
+    mcp = build_server(canonic_service)
     async with Client(mcp) as client:
         result = await client.call_tool("describe_metric", {"name": "revenue"})
     data = result.data
@@ -148,8 +148,8 @@ async def test_describe_metric(canon_service: CanonService) -> None:
 
 
 @pytest.mark.asyncio
-async def test_describe_metric_unresolved_returns_error(canon_service: CanonService) -> None:
-    mcp = build_server(canon_service)
+async def test_describe_metric_unresolved_returns_error(canonic_service: CanonicService) -> None:
+    mcp = build_server(canonic_service)
     async with Client(mcp) as client:
         result = await client.call_tool("describe_metric", {"name": "mrr"})
     data = result.data
@@ -158,8 +158,8 @@ async def test_describe_metric_unresolved_returns_error(canon_service: CanonServ
 
 
 @pytest.mark.asyncio
-async def test_resolve_metric(canon_service: CanonService) -> None:
-    mcp = build_server(canon_service)
+async def test_resolve_metric(canonic_service: CanonicService) -> None:
+    mcp = build_server(canonic_service)
     async with Client(mcp) as client:
         result = await client.call_tool("resolve_metric", {"name": "rev"})
     data = result.data
@@ -168,8 +168,8 @@ async def test_resolve_metric(canon_service: CanonService) -> None:
 
 
 @pytest.mark.asyncio
-async def test_resolve_metric_unresolved(canon_service: CanonService) -> None:
-    mcp = build_server(canon_service)
+async def test_resolve_metric_unresolved(canonic_service: CanonicService) -> None:
+    mcp = build_server(canonic_service)
     async with Client(mcp) as client:
         result = await client.call_tool("resolve_metric", {"name": "unknown"})
     data = result.data
@@ -177,8 +177,8 @@ async def test_resolve_metric_unresolved(canon_service: CanonService) -> None:
 
 
 @pytest.mark.asyncio
-async def test_compile_query(canon_service: CanonService) -> None:
-    mcp = build_server(canon_service)
+async def test_compile_query(canonic_service: CanonicService) -> None:
+    mcp = build_server(canonic_service)
     async with Client(mcp) as client:
         result = await client.call_tool("compile_query", {"query": {"metrics": ["revenue"]}})
     data = result.data
@@ -198,8 +198,8 @@ async def test_compile_query(canon_service: CanonService) -> None:
 
 
 @pytest.mark.asyncio
-async def test_compile_query_unresolved_metric(canon_service: CanonService) -> None:
-    mcp = build_server(canon_service)
+async def test_compile_query_unresolved_metric(canonic_service: CanonicService) -> None:
+    mcp = build_server(canonic_service)
     async with Client(mcp) as client:
         result = await client.call_tool("compile_query", {"query": {"metrics": ["nonexistent"]}})
     data = result.data

@@ -1,9 +1,9 @@
 ---
 # Notion page properties:
-#   "Canon Type"   (select):       policy
-#   "Canon Topics" (multi-select): revenue, policy, reporting
-canon_type: policy
-canon_topics: [revenue, policy, reporting]
+#   "Canonic Type"   (select):       policy
+#   "Canonic Topics" (multi-select): revenue, policy, reporting
+canonic_type: policy
+canonic_topics: [revenue, policy, reporting]
 ---
 
 # Revenue Reporting Policy
@@ -35,7 +35,7 @@ discrepancy with a third-party payment processor or the ERP should be raised wit
 Do not reconcile against a system that records gross amounts — see the *Revenue Excludes Refunds*
 page for why net and gross figures differ.
 
-## How this becomes a Canon knowledge page
+## How this becomes a Canonic knowledge page
 
-Canon ingests this page as `DocEvidence` with `usage_hint: policy`. E6 writes it as a
+Canonic ingests this page as `DocEvidence` with `usage_hint: policy`. E6 writes it as a
 `policy`-mode knowledge page, searchable via `search_knowledge("revenue reporting")`.

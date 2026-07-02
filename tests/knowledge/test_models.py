@@ -7,13 +7,13 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-from canon.knowledge.models import (
+from canonic.knowledge.models import (
     KnowledgePage,
     KnowledgePageMeta,
     KnowledgeScope,
     UsageMode,
 )
-from canon.semantic.models import Provenance
+from canonic.semantic.models import Provenance
 
 
 def test_usage_mode_values() -> None:

@@ -6,9 +6,9 @@ import pytest
 import sqlglot
 from sqlglot import exp
 
-from canon import exc
-from canon.compiler.dialect import DIALECT_ADAPTERS, PostgresDialectAdapter, adapter_for
-from canon.semantic.models import NormalizedType
+from canonic import exc
+from canonic.compiler.dialect import DIALECT_ADAPTERS, PostgresDialectAdapter, adapter_for
+from canonic.semantic.models import NormalizedType
 
 
 @pytest.fixture

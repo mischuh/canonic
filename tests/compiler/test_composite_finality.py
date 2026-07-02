@@ -14,19 +14,19 @@ from datetime import UTC, datetime
 import pytest
 import sqlglot
 
-from canon.compiler import SemanticQuery, compile
-from canon.compiler.result import FinalityMetadata
-from canon.connectors.base import ResultColumn, ResultSet
-from canon.contracts.models import (
+from canonic.compiler import SemanticQuery, compile
+from canonic.compiler.result import FinalityMetadata
+from canonic.connectors.base import ResultColumn, ResultSet
+from canonic.contracts.models import (
     BindingKind,
     CanonicalRef,
     FinalityRule,
     MetricBinding,
     Realization,
 )
-from canon.contracts.resolver import ContractResolver
-from canon.core.models import QueryMetadata
-from canon.semantic.models import Column, Dimension, Measure, SemanticSource
+from canonic.contracts.resolver import ContractResolver
+from canonic.core.models import QueryMetadata
+from canonic.semantic.models import Column, Dimension, Measure, SemanticSource
 
 # ---------------------------------------------------------------------------
 # Fixtures — in-memory damages project with finality realizations

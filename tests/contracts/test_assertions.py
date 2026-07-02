@@ -6,9 +6,9 @@ from decimal import Decimal
 
 import pytest
 
-from canon.compiler.query import SemanticQuery
-from canon.connectors.base import ResultColumn, ResultSet
-from canon.contracts.assertions import (
+from canonic.compiler.query import SemanticQuery
+from canonic.connectors.base import ResultColumn, ResultSet
+from canonic.contracts.assertions import (
     AssertionOutcome,
     accuracy_report,
     assertion_metrics,
@@ -16,8 +16,8 @@ from canon.contracts.assertions import (
     is_executable,
     match_result,
 )
-from canon.contracts.models import Assertion, AssertionExpect
-from canon.exc import ValidationFailed
+from canonic.contracts.models import Assertion, AssertionExpect
+from canonic.exc import ValidationFailed
 
 
 def _assertion(**expect: object) -> Assertion:

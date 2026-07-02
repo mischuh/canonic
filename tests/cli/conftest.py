@@ -21,14 +21,14 @@ def runner() -> CliRunner:
 
 @pytest.fixture
 def project_dir(tmp_path, monkeypatch):
-    """A temp directory that is a valid canon project (cwd switched into it)."""
-    (tmp_path / "canon.yaml").write_text(_VALID_CONFIG)
+    """A temp directory that is a valid canonic project (cwd switched into it)."""
+    (tmp_path / "canonic.yaml").write_text(_VALID_CONFIG)
     monkeypatch.chdir(tmp_path)
     return tmp_path
 
 
 @pytest.fixture
 def outside_project(monkeypatch, tmp_path):
-    """Run from a temp dir with no canon.yaml and no last-project fallback."""
+    """Run from a temp dir with no canonic.yaml and no last-project fallback."""
     monkeypatch.chdir(tmp_path)
-    monkeypatch.setattr("canon.cli.commands.mcp._load_last_project", lambda: None)
+    monkeypatch.setattr("canonic.cli.commands.mcp._load_last_project", lambda: None)

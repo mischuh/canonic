@@ -6,7 +6,7 @@ select = ["E", "F", "I", "UP", "B", "SIM", "TCH"]
 ignore = ["E501"]
 
 [lint.isort]
-known-first-party = ["canon"]
+known-first-party = ["canonic"]
 
 [format]
 quote-style = "double"

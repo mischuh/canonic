@@ -5,7 +5,7 @@ from importlib.metadata import version
 import pytest
 from typer.testing import CliRunner
 
-from canon.cli.app import app
+from canonic.cli.app import app
 
 _GROUPS = ["setup", "connection", "sl", "query", "sql", "knowledge", "status", "mcp", "completion"]
 
@@ -37,7 +37,7 @@ def test_help_lists_all_subcommand_groups(runner: CliRunner) -> None:
 def test_version_prints_package_version(runner: CliRunner) -> None:
     result = runner.invoke(app, ["--version"])
     assert result.exit_code == 0
-    assert result.output.strip() == version("canon")
+    assert result.output.strip() == version("canonic")
 
 
 def test_bare_invocation_shows_project_menu(runner: CliRunner, project_dir: None) -> None:
@@ -73,7 +73,7 @@ def test_mcp_commands_require_project(
     """MCP/sql commands are real and exit non-zero outside a project directory."""
     result = runner.invoke(app, argv)
     assert result.exit_code != 0
-    assert "no canon project found" in result.output
+    assert "no canonic project found" in result.output
 
 
 def test_query_missing_file_is_clean_error(runner: CliRunner) -> None:

@@ -1,4 +1,4 @@
-"""Tests for canon/runtime/generation.py (SPEC-E10 §2, GH-61)."""
+"""Tests for canonic/runtime/generation.py (SPEC-E10 §2, GH-61)."""
 
 from __future__ import annotations
 
@@ -8,9 +8,9 @@ import litellm
 import pytest
 from pydantic import BaseModel
 
-from canon.airgap import EgressPolicy
-from canon.config import LLMConfig
-from canon.exc import (
+from canonic.airgap import EgressPolicy
+from canonic.config import LLMConfig
+from canonic.exc import (
     AirGappedViolation,
     CredentialError,
     ErrorCode,
@@ -19,9 +19,9 @@ from canon.exc import (
     StructuredOutputError,
     StructuredOutputUnsupported,
 )
-from canon.runtime.generation import GenerationRuntime
-from canon.runtime.models import Completion, Usage
-from canon.runtime.resolver import Task
+from canonic.runtime.generation import GenerationRuntime
+from canonic.runtime.models import Completion, Usage
+from canonic.runtime.resolver import Task
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -33,7 +33,7 @@ class _Grain(BaseModel):
 
 @pytest.fixture(autouse=True)
 def _key(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("CANON_LLM_KEY", "secret-token")
+    monkeypatch.setenv("CANONIC_LLM_KEY", "secret-token")
 
 
 # --- request construction (a) -------------------------------------------------
@@ -96,7 +96,7 @@ async def test_key_resolved_at_call_time_not_construction(
 ) -> None:
     # With the ref's env var unset, construction still succeeds — the key is only needed
     # at the point of egress, so a missing key fails the call, not the wiring.
-    monkeypatch.delenv("CANON_LLM_KEY", raising=False)
+    monkeypatch.delenv("CANONIC_LLM_KEY", raising=False)
     runtime = GenerationRuntime(llm_config)
     with pytest.raises(CredentialError):
         await runtime.generate("hi", task=Task.DRAFT)
@@ -119,7 +119,7 @@ async def test_key_resolved_fresh_each_call(
     await runtime.generate("hi", task=Task.DRAFT)
     assert fake_litellm["api_key"] == "secret-token"
 
-    monkeypatch.setenv("CANON_LLM_KEY", "rotated-token")
+    monkeypatch.setenv("CANONIC_LLM_KEY", "rotated-token")
     await runtime.generate("hi", task=Task.DRAFT)
     assert fake_litellm["api_key"] == "rotated-token"
 
@@ -131,12 +131,12 @@ async def test_required_ref_resolving_to_nothing_fails_at_call(
     # variable, never the value.
     runtime = GenerationRuntime(llm_config)
 
-    monkeypatch.delenv("CANON_LLM_KEY", raising=False)
-    with pytest.raises(CredentialError, match="CANON_LLM_KEY"):
+    monkeypatch.delenv("CANONIC_LLM_KEY", raising=False)
+    with pytest.raises(CredentialError, match="CANONIC_LLM_KEY"):
         await runtime.generate("hi", task=Task.DRAFT)
 
-    monkeypatch.setenv("CANON_LLM_KEY", "   ")
-    with pytest.raises(CredentialError, match="CANON_LLM_KEY"):
+    monkeypatch.setenv("CANONIC_LLM_KEY", "   ")
+    with pytest.raises(CredentialError, match="CANONIC_LLM_KEY"):
         await runtime.generate("hi", task=Task.DRAFT)
 
 
@@ -249,7 +249,7 @@ async def test_repoint_changes_only_base_url_and_key(
         provider="openai_compatible",
         base_url="http://localhost:11434/v1",
         model="small-local",
-        api_key_ref="env:CANON_LLM_KEY",
+        api_key_ref="env:CANONIC_LLM_KEY",
     )
     hosted = LLMConfig(
         provider="openai_compatible",

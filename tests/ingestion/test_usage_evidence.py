@@ -15,30 +15,30 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from typing import Any
 
-from canon.connectors.base import (
+from canonic.connectors.base import (
     AcquisitionTier,
     UsageDefinition,
     UsageEvidence,
     UsageRole,
 )
-from canon.ingestion.builder import (
+from canonic.ingestion.builder import (
     _DA_SENTINEL,
     ContextBuilder,
     _assertion_slug,
     _metric_slug,
 )
-from canon.ingestion.models import (
+from canonic.ingestion.models import (
     EvidenceItem,
     EvidenceKind,
     ProposalOp,
     ReconciliationDecision,
 )
-from canon.ingestion.reconciliation import (
+from canonic.ingestion.reconciliation import (
     ExistingFact,
     InMemoryAcceptedStore,
     ReconciliationEngine,
 )
-from canon.semantic.models import Provenance
+from canonic.semantic.models import Provenance
 
 _NOW = datetime(2026, 6, 19, 12, 0, 0, tzinfo=UTC)
 
@@ -459,7 +459,7 @@ class TestReconciliationTrustedExampleProposal:
 
 class TestUsageEvidenceKindRegistration:
     def test_usage_evidence_is_a_known_kind(self) -> None:
-        from canon.ingestion.models import KNOWN_EVIDENCE_KINDS, EvidenceKind
+        from canonic.ingestion.models import KNOWN_EVIDENCE_KINDS, EvidenceKind
 
         assert EvidenceKind.USAGE_EVIDENCE in KNOWN_EVIDENCE_KINDS
         assert "usage_evidence" in KNOWN_EVIDENCE_KINDS

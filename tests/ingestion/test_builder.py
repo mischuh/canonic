@@ -1,11 +1,11 @@
-"""Tests for canon/ingestion/builder.py (GH-33)."""
+"""Tests for canonic/ingestion/builder.py (GH-33)."""
 
 from __future__ import annotations
 
 from datetime import UTC, datetime
 from typing import Any
 
-from canon.connectors.base import (
+from canonic.connectors.base import (
     AcquisitionTier,
     ColumnInfo,
     DefinitionEntityType,
@@ -14,7 +14,7 @@ from canon.connectors.base import (
     RelationSchema,
     compute_fingerprint,
 )
-from canon.ingestion.builder import (
+from canonic.ingestion.builder import (
     LLM_GRAIN_CONFIDENCE,
     LLM_JOIN_CONFIDENCE_CEILING,
     BuildResult,
@@ -25,8 +25,8 @@ from canon.ingestion.builder import (
     NullLLMDrafter,
     SkippedEvidence,
 )
-from canon.ingestion.models import DraftedBy, EvidenceItem, EvidenceKind, ProposalOp
-from canon.semantic.models import Provenance, Relationship
+from canonic.ingestion.models import DraftedBy, EvidenceItem, EvidenceKind, ProposalOp
+from canonic.semantic.models import Provenance, Relationship
 
 # ---------------------------------------------------------------------------
 # Helpers

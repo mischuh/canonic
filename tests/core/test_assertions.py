@@ -7,17 +7,17 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-import canon.core.service as service_mod
-from canon.compiler.query import SemanticQuery
-from canon.config import CanonConfig
-from canon.connectors.base import Capability, ConnectorBase, Health, ResultColumn, ResultSet
-from canon.contracts.models import Assertion, AssertionExpect, CanonicalRef, MetricBinding
-from canon.contracts.resolver import ContractResolver
-from canon.core.service import CanonService
-from canon.exc import AssertionFailed
+import canonic.core.service as service_mod
+from canonic.compiler.query import SemanticQuery
+from canonic.config import CanonicConfig
+from canonic.connectors.base import Capability, ConnectorBase, Health, ResultColumn, ResultSet
+from canonic.contracts.models import Assertion, AssertionExpect, CanonicalRef, MetricBinding
+from canonic.contracts.resolver import ContractResolver
+from canonic.core.service import CanonicService
+from canonic.exc import AssertionFailed
 
 if TYPE_CHECKING:
-    from canon.semantic.models import SemanticSource
+    from canonic.semantic.models import SemanticSource
 
 
 class _FakeConnector(ConnectorBase):
@@ -40,8 +40,8 @@ class _FakeConnector(ConnectorBase):
         self.closed = True
 
 
-def _config() -> CanonConfig:
-    return CanonConfig.model_validate(
+def _config() -> CanonicConfig:
+    return CanonicConfig.model_validate(
         {
             "version": 1,
             "project": {"name": "test", "default_connection": "warehouse_pg"},
@@ -63,7 +63,7 @@ def _service(
     assertions: list[Assertion],
     result: ResultSet,
     monkeypatch: pytest.MonkeyPatch,
-) -> CanonService:
+) -> CanonicService:
     monkeypatch.setenv("PG_PASSWORD", "pw")
     monkeypatch.setattr(
         service_mod.default_factory, "for_id", lambda *a, **k: _FakeConnector(result)
@@ -78,7 +78,7 @@ def _service(
         guardrails=[],
         assertions=assertions,
     )
-    return CanonService(config=_config(), resolver=resolver, sources=[orders_source])
+    return CanonicService(config=_config(), resolver=resolver, sources=[orders_source])
 
 
 def _revenue_result(value: object) -> ResultSet:

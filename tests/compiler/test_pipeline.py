@@ -5,11 +5,11 @@ from __future__ import annotations
 import pytest
 import sqlglot
 
-from canon import exc
-from canon.compiler import SemanticQuery, compile
-from canon.contracts.models import CanonicalRef, MetricBinding
-from canon.contracts.resolver import ContractResolver
-from canon.semantic.models import Column, Dimension, Measure, SemanticSource
+from canonic import exc
+from canonic.compiler import SemanticQuery, compile
+from canonic.contracts.models import CanonicalRef, MetricBinding
+from canonic.contracts.resolver import ContractResolver
+from canonic.semantic.models import Column, Dimension, Measure, SemanticSource
 
 
 def _parse_ok(sql: str) -> None:
@@ -233,7 +233,7 @@ def test_s4_join_on_clause_with_physical_table_name(
     resolver: ContractResolver, customers: SemanticSource
 ) -> None:
     """ON clause written with the physical table name must compile; regression for fct_orders alias bug."""
-    from canon.semantic.models import Join, Relationship
+    from canonic.semantic.models import Join, Relationship
 
     orders = SemanticSource(
         name="orders",
@@ -273,7 +273,14 @@ def test_s4_join_on_clause_with_physical_table_name(
 
 
 def test_s4_ac2_ambiguous_join_path(sources: list[SemanticSource]) -> None:
-    from canon.semantic.models import Column, Dimension, Join, Measure, Relationship, SemanticSource
+    from canonic.semantic.models import (
+        Column,
+        Dimension,
+        Join,
+        Measure,
+        Relationship,
+        SemanticSource,
+    )
 
     o = SemanticSource(
         name="o",
@@ -321,7 +328,7 @@ def test_s4_ac2_ambiguous_join_path(sources: list[SemanticSource]) -> None:
     assert len(ei.value.candidates) == 2
     assert ei.value.owner == "o"
     assert ei.value.target == "c"
-    from canon.compiler.joins import JoinPathCandidate
+    from canonic.compiler.joins import JoinPathCandidate
 
     vias = {tuple(c.via) for c in ei.value.candidates}
     assert vias == {("a", "c"), ("b", "c")}
@@ -332,7 +339,14 @@ def test_s4_ac2_ambiguous_join_path(sources: list[SemanticSource]) -> None:
 
 
 def test_s4_ac2_via_resolves_ambiguity(sources: list[SemanticSource]) -> None:
-    from canon.semantic.models import Column, Dimension, Join, Measure, Relationship, SemanticSource
+    from canonic.semantic.models import (
+        Column,
+        Dimension,
+        Join,
+        Measure,
+        Relationship,
+        SemanticSource,
+    )
 
     o = SemanticSource(
         name="o",
@@ -383,7 +397,14 @@ def test_s4_ac2_via_resolves_ambiguity(sources: list[SemanticSource]) -> None:
 
 
 def test_s4_ac2_via_no_matching_path_raises_unreachable(sources: list[SemanticSource]) -> None:
-    from canon.semantic.models import Column, Dimension, Join, Measure, Relationship, SemanticSource
+    from canonic.semantic.models import (
+        Column,
+        Dimension,
+        Join,
+        Measure,
+        Relationship,
+        SemanticSource,
+    )
 
     o = SemanticSource(
         name="o",
@@ -493,7 +514,7 @@ def test_ambiguous_dim_across_two_reachable_sources_raises(
     resolver: ContractResolver, orders: SemanticSource
 ) -> None:
     """Two join-reachable sources both declaring 'tier' → Ambiguous, not a silent pick."""
-    from canon.semantic.models import Column, Dimension, Join, Relationship, SemanticSource
+    from canonic.semantic.models import Column, Dimension, Join, Relationship, SemanticSource
 
     left = SemanticSource(
         name="left_src",
@@ -547,7 +568,14 @@ def test_ambiguous_dim_across_two_reachable_sources_raises(
 
 def _make_role_sources() -> tuple[object, object, object]:
     """Build an owner with two named joins to the same 'loc' source (pickup/dropoff)."""
-    from canon.semantic.models import Column, Dimension, Join, Measure, Relationship, SemanticSource
+    from canonic.semantic.models import (
+        Column,
+        Dimension,
+        Join,
+        Measure,
+        Relationship,
+        SemanticSource,
+    )
 
     loc = SemanticSource(
         name="loc",
@@ -624,7 +652,7 @@ def test_named_join_unknown_role_raises_unreachable() -> None:
 def test_named_join_duplicate_alias_raises_validation_error() -> None:
     from pydantic import ValidationError
 
-    from canon.semantic.models import Column, Join, Relationship, SemanticSource
+    from canonic.semantic.models import Column, Join, Relationship, SemanticSource
 
     with pytest.raises(ValidationError, match="duplicate join alias"):
         SemanticSource(

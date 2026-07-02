@@ -1,19 +1,19 @@
-"""Tests for canon/ingestion/pending.py (GH-149) — SPEC-E4 §6, E1 §7."""
+"""Tests for canonic/ingestion/pending.py (GH-149) — SPEC-E4 §6, E1 §7."""
 
 from __future__ import annotations
 
 import json
 from typing import TYPE_CHECKING, Any
 
-from canon.ingestion.emitter import DiffEmitter
-from canon.ingestion.models import (
+from canonic.ingestion.emitter import DiffEmitter
+from canonic.ingestion.models import (
     Proposal,
     ProposalOp,
     ReconciliationDecision,
     ReconciliationEntry,
     ReconciliationReport,
 )
-from canon.ingestion.pending import (
+from canonic.ingestion.pending import (
     PendingDiffStore,
     PendingRun,
     PendingStatus,
@@ -23,7 +23,7 @@ from canon.ingestion.pending import (
     latest_run_id,
     update_status,
 )
-from canon.semantic.models import Provenance
+from canonic.semantic.models import Provenance
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -138,7 +138,7 @@ class TestPendingDiffStoreWrite:
 
         run_dir = PendingDiffStore(tmp_path).write(run_id, emission)
 
-        assert run_dir == tmp_path / ".canon" / "pending-diffs" / run_id
+        assert run_dir == tmp_path / ".canonic" / "pending-diffs" / run_id
         assert (run_dir / "report.yaml").exists()
         assert (run_dir / "status.yaml").exists()
         proposal_files = sorted((run_dir / "proposals").iterdir())
@@ -256,7 +256,7 @@ class TestPersistenceAcrossInstances:
         emission = _emission_with_diffs(1)
         PendingDiffStore(tmp_path).write(run_id, emission)
 
-        run_dir = tmp_path / ".canon" / "pending-diffs" / run_id
+        run_dir = tmp_path / ".canonic" / "pending-diffs" / run_id
         yaml = YAML()
         with (run_dir / "status.yaml").open() as f:
             data = yaml.load(f)
@@ -317,8 +317,8 @@ class TestCollisionGuard:
 class TestPipelineRunIdCrossReference:
     async def test_ac4_event_log_run_id_matches_pending_dir(self, tmp_path: Path) -> None:
         """AC4: every reconcile_decision event's run_id matches the pending-diffs dir name."""
-        from canon.config import ReconcileConfig, scaffold_project
-        from canon.connectors.base import (
+        from canonic.config import ReconcileConfig, scaffold_project
+        from canonic.connectors.base import (
             AcquisitionTier,
             Capability,
             ColumnInfo,
@@ -327,8 +327,8 @@ class TestPipelineRunIdCrossReference:
             RelationSchema,
             compute_fingerprint,
         )
-        from canon.ingestion.pipeline import IngestionPipeline
-        from canon.ingestion.source import evidence_from_introspection
+        from canonic.ingestion.pipeline import IngestionPipeline
+        from canonic.ingestion.source import evidence_from_introspection
 
         scaffold_project(tmp_path)
 
@@ -360,13 +360,13 @@ class TestPipelineRunIdCrossReference:
         pipeline = IngestionPipeline(tmp_path, {"test_conn": connector}, ReconcileConfig())
         await pipeline.run(evidence)
 
-        pending_root = tmp_path / ".canon" / "pending-diffs"
+        pending_root = tmp_path / ".canonic" / "pending-diffs"
         assert pending_root.exists(), "pending-diffs root not created"
         run_dirs = list(pending_root.iterdir())
         assert len(run_dirs) == 1, "expected exactly one pending-diff run dir"
         run_id = run_dirs[0].name
 
-        events_path = tmp_path / ".canon" / "events.jsonl"
+        events_path = tmp_path / ".canonic" / "events.jsonl"
         assert events_path.exists(), "events.jsonl not written"
         events = [json.loads(line) for line in events_path.read_text().splitlines()]
         reconcile_events = [e for e in events if e["kind"] == "reconcile_decision"]
@@ -466,7 +466,7 @@ class TestUpdateStatus:
 class TestApplyEntry:
     def test_ac1_add_writes_target_file(self, tmp_path: Path) -> None:
         """AC1: accepting an ADD proposal writes the target file to the working directory."""
-        from canon.config import scaffold_project
+        from canonic.config import scaffold_project
 
         scaffold_project(tmp_path)
         emission = _emission_with_diffs(1)
@@ -480,8 +480,8 @@ class TestApplyEntry:
 
     def test_ac5_freeze_writes_frozen_annotation(self, tmp_path: Path) -> None:
         """AC5: freeze writes meta.frozen=true; a subsequent ingest flags CONTRADICTION."""
-        from canon.config import scaffold_project
-        from canon.semantic.loader import load_semantic_source
+        from canonic.config import scaffold_project
+        from canonic.semantic.loader import load_semantic_source
 
         scaffold_project(tmp_path)
         emission = _emission_with_valid_source()
@@ -497,9 +497,9 @@ class TestApplyEntry:
 
     def test_ac5_frozen_fact_flags_contradiction_on_reingest(self, tmp_path: Path) -> None:
         """AC5: after freeze, a conflicting proposal yields CONTRADICTION not EDIT."""
-        from canon.config import ReconcileConfig, scaffold_project
-        from canon.ingestion.models import ReconciliationDecision
-        from canon.ingestion.reconciliation import DiskAcceptedStore, ReconciliationEngine
+        from canonic.config import ReconcileConfig, scaffold_project
+        from canonic.ingestion.models import ReconciliationDecision
+        from canonic.ingestion.reconciliation import DiskAcceptedStore, ReconciliationEngine
 
         scaffold_project(tmp_path)
         emission = _emission_with_valid_source()
@@ -519,7 +519,7 @@ class TestApplyEntry:
             op=ProposalOp.EDIT,
             content={**_VALID_SOURCE_CONTENT, "name": "different_orders"},
         )
-        from canon.ingestion.reconciliation import NullReconcileDrafter
+        from canonic.ingestion.reconciliation import NullReconcileDrafter
 
         engine = ReconciliationEngine(ReconcileConfig(), NullReconcileDrafter())
         report = engine.reconcile([conflicting_proposal], accepted_store)

@@ -14,11 +14,11 @@ from __future__ import annotations
 import pytest
 import sqlglot
 
-from canon import exc
-from canon.compiler import SemanticQuery, compile
-from canon.contracts.models import BindingKind, CanonicalRef, MetricBinding
-from canon.contracts.resolver import ContractResolver
-from canon.semantic.models import Column, Dimension, Measure, SemanticSource
+from canonic import exc
+from canonic.compiler import SemanticQuery, compile
+from canonic.contracts.models import BindingKind, CanonicalRef, MetricBinding
+from canonic.contracts.resolver import ContractResolver
+from canonic.semantic.models import Column, Dimension, Measure, SemanticSource
 
 # ---------------------------------------------------------------------------
 # Fixtures — customer_metrics pre-computed scores table
@@ -297,7 +297,7 @@ def test_population_filter_in_native_grain_lookup(
 
 def test_s7_ac1_opaque_component_in_ratio_rejected() -> None:
     """A ratio metric referencing an opaque component → ContractError at validation."""
-    from canon.contracts.validate import _validate_composite_binding
+    from canonic.contracts.validate import _validate_composite_binding
 
     opaque_binding = MetricBinding(
         metric="health_score",
@@ -336,7 +336,7 @@ def test_s7_ac1_opaque_component_in_ratio_rejected() -> None:
 
 def test_s7_ac1_opaque_component_as_numerator_rejected() -> None:
     """Opaque as numerator → ContractError."""
-    from canon.contracts.validate import _validate_composite_binding
+    from canonic.contracts.validate import _validate_composite_binding
 
     opaque_binding = MetricBinding(
         metric="health_score",

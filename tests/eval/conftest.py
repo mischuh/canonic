@@ -11,13 +11,13 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from canon.config import LLMConfig
-from canon.eval.candidates import NamedCandidate
-from canon.eval.dataset import GrainCase
-from canon.ingestion.builder import GrainDraft
+from canonic.config import LLMConfig
+from canonic.eval.candidates import NamedCandidate
+from canonic.eval.dataset import GrainCase
+from canonic.ingestion.builder import GrainDraft
 
 if TYPE_CHECKING:
-    from canon.connectors.base import RelationSchema
+    from canonic.connectors.base import RelationSchema
 
 
 class StubDrafter:

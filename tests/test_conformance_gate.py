@@ -11,10 +11,10 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from canon.compiler.query import SemanticQuery
-from canon.contract import CONTRACT_SCHEMA
-from canon.core.models import CompileOutput, QueryResult
-from canon.exc import EXIT_CODES, ErrorCode
+from canonic.compiler.query import SemanticQuery
+from canonic.contract import CONTRACT_SCHEMA
+from canonic.core.models import CompileOutput, QueryResult
+from canonic.exc import EXIT_CODES, ErrorCode
 
 _SNAPSHOTS = Path(__file__).parent / "snapshots" / "contract_schema_v1"
 
@@ -60,9 +60,9 @@ def test_contract_schema_stamped_in_snapshots() -> None:
         )
 
 
-_COMPILER_ROOT = Path(__file__).parent.parent / "canon" / "compiler"
+_COMPILER_ROOT = Path(__file__).parent.parent / "canonic" / "compiler"
 _RUNTIME_SYMBOLS = (
-    "canon.runtime",
+    "canonic.runtime",
     "GenerationRuntime",
     "EmbeddingRuntime",
     "RuntimeLLMDrafter",

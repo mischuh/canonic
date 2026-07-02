@@ -16,11 +16,11 @@ from __future__ import annotations
 import pytest
 import sqlglot
 
-from canon import exc
-from canon.compiler import SemanticQuery, compile
-from canon.contracts.models import BindingKind, CanonicalRef, MetricBinding
-from canon.contracts.resolver import ContractResolver
-from canon.semantic.models import Column, Dimension, Join, Measure, Relationship, SemanticSource
+from canonic import exc
+from canonic.compiler import SemanticQuery, compile
+from canonic.contracts.models import BindingKind, CanonicalRef, MetricBinding
+from canonic.contracts.resolver import ContractResolver
+from canonic.semantic.models import Column, Dimension, Join, Measure, Relationship, SemanticSource
 
 # ---------------------------------------------------------------------------
 # Fixtures — in-memory orders project for recompute_at_grain tests

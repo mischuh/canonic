@@ -1,4 +1,4 @@
-"""Tests for ``canon mcp`` CLI commands."""
+"""Tests for ``canonic mcp`` CLI commands."""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from canon.cli.app import app
+from canonic.cli.app import app
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -25,16 +25,16 @@ llm:
   model: llama3
 """
 
-# CanonService and daemon functions are lazy-imported inside start(), so
+# CanonicService and daemon functions are lazy-imported inside start(), so
 # patches must target their definition modules, not mcp itself.
-_PATCH_SERVICE = "canon.core.service.CanonService"
-_PATCH_START_HTTP = "canon.mcp.daemon.start_http"
-_PATCH_START_STDIO = "canon.mcp.daemon.start_stdio"
+_PATCH_SERVICE = "canonic.core.service.CanonicService"
+_PATCH_START_HTTP = "canonic.mcp.daemon.start_http"
+_PATCH_START_STDIO = "canonic.mcp.daemon.start_stdio"
 
 
 @pytest.fixture
 def project_dir(tmp_path: Path, monkeypatch) -> Path:
-    (tmp_path / "canon.yaml").write_text(_VALID_CONFIG)
+    (tmp_path / "canonic.yaml").write_text(_VALID_CONFIG)
     monkeypatch.chdir(tmp_path)
     return tmp_path
 
@@ -52,12 +52,12 @@ def _mock_service() -> MagicMock:
 
 def test_start_explicit_project_resolves(runner: CliRunner, tmp_path: Path) -> None:
     """--project <valid dir> starts without needing cwd to be the project."""
-    (tmp_path / "canon.yaml").write_text(_VALID_CONFIG)
+    (tmp_path / "canonic.yaml").write_text(_VALID_CONFIG)
 
     with (
         patch(_PATCH_SERVICE) as mock_cls,
         patch(_PATCH_START_HTTP),
-        patch("canon.cli.commands.mcp._save_last_project"),
+        patch("canonic.cli.commands.mcp._save_last_project"),
     ):
         mock_cls.from_project.return_value = _mock_service()
         result = runner.invoke(app, ["mcp", "start", "--http", "--project", str(tmp_path)])
@@ -67,20 +67,20 @@ def test_start_explicit_project_resolves(runner: CliRunner, tmp_path: Path) -> N
 
 
 def test_start_explicit_project_missing_yaml(runner: CliRunner, tmp_path: Path) -> None:
-    """--project pointing at dir with no canon.yaml exits with an error."""
+    """--project pointing at dir with no canonic.yaml exits with an error."""
     result = runner.invoke(app, ["mcp", "start", "--project", str(tmp_path)])
     assert result.exit_code == 1
-    assert "canon.yaml" in result.output
+    assert "canonic.yaml" in result.output
 
 
 def test_start_explicit_project_short_flag(runner: CliRunner, tmp_path: Path) -> None:
     """-p is an alias for --project."""
-    (tmp_path / "canon.yaml").write_text(_VALID_CONFIG)
+    (tmp_path / "canonic.yaml").write_text(_VALID_CONFIG)
 
     with (
         patch(_PATCH_SERVICE) as mock_cls,
         patch(_PATCH_START_HTTP),
-        patch("canon.cli.commands.mcp._save_last_project"),
+        patch("canonic.cli.commands.mcp._save_last_project"),
     ):
         mock_cls.from_project.return_value = _mock_service()
         result = runner.invoke(app, ["mcp", "start", "--http", "-p", str(tmp_path)])
@@ -96,18 +96,18 @@ def test_start_explicit_project_short_flag(runner: CliRunner, tmp_path: Path) ->
 def test_last_project_fallback_used_when_no_cwd_match(
     runner: CliRunner, tmp_path: Path, monkeypatch
 ) -> None:
-    """When cwd has no canon.yaml but _load_last_project points at a valid project."""
-    (tmp_path / "canon.yaml").write_text(_VALID_CONFIG)
+    """When cwd has no canonic.yaml but _load_last_project points at a valid project."""
+    (tmp_path / "canonic.yaml").write_text(_VALID_CONFIG)
 
     nowhere = tmp_path / "not-a-project"
     nowhere.mkdir()
     monkeypatch.chdir(nowhere)
 
     with (
-        patch("canon.cli.commands.mcp._load_last_project", return_value=tmp_path),
+        patch("canonic.cli.commands.mcp._load_last_project", return_value=tmp_path),
         patch(_PATCH_SERVICE) as mock_cls,
         patch(_PATCH_START_HTTP),
-        patch("canon.cli.commands.mcp._save_last_project"),
+        patch("canonic.cli.commands.mcp._save_last_project"),
     ):
         mock_cls.from_project.return_value = _mock_service()
         result = runner.invoke(app, ["mcp", "start", "--http"])
@@ -124,7 +124,7 @@ def test_no_project_anywhere_exits_with_error(
     nowhere.mkdir()
     monkeypatch.chdir(nowhere)
 
-    with patch("canon.cli.commands.mcp._load_last_project", return_value=None):
+    with patch("canonic.cli.commands.mcp._load_last_project", return_value=None):
         result = runner.invoke(app, ["mcp", "start"])
 
     assert result.exit_code == 1
@@ -143,7 +143,7 @@ def test_start_saves_last_project(runner: CliRunner, project_dir: Path) -> None:
     with (
         patch(_PATCH_SERVICE) as mock_cls,
         patch(_PATCH_START_HTTP),
-        patch("canon.cli.commands.mcp._save_last_project", side_effect=saved.append),
+        patch("canonic.cli.commands.mcp._save_last_project", side_effect=saved.append),
     ):
         mock_cls.from_project.return_value = _mock_service()
         result = runner.invoke(app, ["mcp", "start", "--http"])

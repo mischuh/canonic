@@ -9,14 +9,14 @@ import pytest
 if TYPE_CHECKING:
     from pathlib import Path
 
-from canon.eval.candidates import load_candidates
-from canon.eval.dataset import (
+from canonic.eval.candidates import load_candidates
+from canonic.eval.dataset import (
     default_dataset_path,
     default_reconcile_dataset_path,
     load_grain_cases,
     load_reconcile_cases,
 )
-from canon.exc import EvalDatasetError
+from canonic.exc import EvalDatasetError
 
 
 def test_shipped_dataset_loads_into_schemas() -> None:

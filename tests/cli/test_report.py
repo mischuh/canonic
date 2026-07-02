@@ -1,4 +1,4 @@
-"""Tests for ``canon report``."""
+"""Tests for ``canonic report``."""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING, Any
 
 import pytest
 
-from canon.cli.app import app
+from canonic.cli.app import app
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -38,9 +38,9 @@ def _event(**overrides: Any) -> dict[str, Any]:
     return {**_BASE_EVENT, **overrides}
 
 
-def _write_events(dotcanon: Path, events: list[dict[str, Any]]) -> None:
-    dotcanon.mkdir(parents=True, exist_ok=True)
-    (dotcanon / "events.jsonl").write_text(
+def _write_events(dotcanonic: Path, events: list[dict[str, Any]]) -> None:
+    dotcanonic.mkdir(parents=True, exist_ok=True)
+    (dotcanonic / "events.jsonl").write_text(
         "\n".join(json.dumps(e, sort_keys=True) for e in events) + "\n"
     )
 
@@ -54,7 +54,7 @@ def test_report_outside_project(runner: CliRunner, tmp_path: Path, monkeypatch) 
     monkeypatch.chdir(tmp_path)
     result = runner.invoke(app, ["report"])
     assert result.exit_code == 0
-    assert "no canon project found" in result.output
+    assert "no canonic project found" in result.output
 
 
 def test_report_outside_project_json(runner: CliRunner, tmp_path: Path, monkeypatch) -> None:
@@ -93,7 +93,7 @@ def test_report_empty_log_json(runner: CliRunner, project_dir: Path) -> None:
 
 def test_report_shows_counts(runner: CliRunner, project_dir: Path) -> None:
     _write_events(
-        project_dir / ".canon",
+        project_dir / ".canonic",
         [_event(latency_ms=100), _event(latency_ms=200, error="unresolved")],
     )
     result = runner.invoke(app, ["report"])
@@ -103,7 +103,7 @@ def test_report_shows_counts(runner: CliRunner, project_dir: Path) -> None:
 
 def test_report_shows_error_distribution(runner: CliRunner, project_dir: Path) -> None:
     _write_events(
-        project_dir / ".canon",
+        project_dir / ".canonic",
         [_event(), _event(error="unresolved"), _event(error="unresolved")],
     )
     result = runner.invoke(app, ["report"])
@@ -113,7 +113,7 @@ def test_report_shows_error_distribution(runner: CliRunner, project_dir: Path) -
 
 
 def test_report_shows_latency(runner: CliRunner, project_dir: Path) -> None:
-    _write_events(project_dir / ".canon", [_event(latency_ms=50), _event(latency_ms=150)])
+    _write_events(project_dir / ".canonic", [_event(latency_ms=50), _event(latency_ms=150)])
     result = runner.invoke(app, ["report"])
     assert result.exit_code == 0
     assert "p50" in result.output
@@ -122,7 +122,7 @@ def test_report_shows_latency(runner: CliRunner, project_dir: Path) -> None:
 
 def test_report_json_shape(runner: CliRunner, project_dir: Path) -> None:
     _write_events(
-        project_dir / ".canon",
+        project_dir / ".canonic",
         [_event(latency_ms=42, bytes_scanned=1024, error=None)],
     )
     result = runner.invoke(app, ["--json", "report"])
@@ -142,7 +142,7 @@ def test_report_json_shape(runner: CliRunner, project_dir: Path) -> None:
 
 def test_report_last_window(runner: CliRunner, project_dir: Path) -> None:
     events = [_event(latency_ms=i * 10) for i in range(1, 11)]
-    _write_events(project_dir / ".canon", events)
+    _write_events(project_dir / ".canonic", events)
 
     result = runner.invoke(app, ["--json", "report", "--last", "3"])
     assert result.exit_code == 0
@@ -162,7 +162,7 @@ def test_report_telemetry_off_by_default(runner: CliRunner, project_dir: Path) -
 
 
 # ---------------------------------------------------------------------------
-# OB-S6: funnel section in canon report
+# OB-S6: funnel section in canonic report
 # ---------------------------------------------------------------------------
 
 
@@ -174,7 +174,7 @@ def test_report_funnel_section_shown_when_milestones_present(
     runner: CliRunner, project_dir: Path
 ) -> None:
     _write_events(
-        project_dir / ".canon",
+        project_dir / ".canonic",
         [
             _funnel_event("setup_started", "2026-01-01T00:00:00+00:00"),
             _funnel_event("connection_added", "2026-01-01T00:00:10+00:00"),
@@ -192,7 +192,7 @@ def test_report_funnel_section_shown_when_milestones_present(
 def test_report_funnel_section_hidden_when_no_milestones(
     runner: CliRunner, project_dir: Path
 ) -> None:
-    _write_events(project_dir / ".canon", [_event(latency_ms=10)])
+    _write_events(project_dir / ".canonic", [_event(latency_ms=10)])
     result = runner.invoke(app, ["report"])
     assert result.exit_code == 0
     assert "onboarding funnel" not in result.output
@@ -200,7 +200,7 @@ def test_report_funnel_section_hidden_when_no_milestones(
 
 def test_report_json_includes_funnel(runner: CliRunner, project_dir: Path) -> None:
     _write_events(
-        project_dir / ".canon",
+        project_dir / ".canonic",
         [
             _funnel_event("setup_started", "2026-01-01T00:00:00+00:00"),
             _funnel_event("first_answer_served", "2026-01-01T00:01:30+00:00"),
@@ -217,7 +217,7 @@ def test_report_json_includes_funnel(runner: CliRunner, project_dir: Path) -> No
 def test_report_funnel_time_to_first_answer_none_when_missing_milestone(
     runner: CliRunner, project_dir: Path
 ) -> None:
-    _write_events(project_dir / ".canon", [_funnel_event("setup_started")])
+    _write_events(project_dir / ".canonic", [_funnel_event("setup_started")])
     result = runner.invoke(app, ["--json", "report"])
     payload = json.loads(result.output)
     assert payload["funnel"]["time_to_first_answer_seconds"] is None

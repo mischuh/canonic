@@ -10,7 +10,7 @@ import logging
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
-from canon.connectors.base import (
+from canonic.connectors.base import (
     AcquisitionTier,
     ColumnInfo,
     DefinitionEntityType,
@@ -28,9 +28,9 @@ from canon.connectors.base import (
 
 if TYPE_CHECKING:
     import pytest
-from canon.ingestion.builder import ContextBuilder, SkippedEvidence
-from canon.ingestion.models import EvidenceItem, EvidenceKind
-from canon.ingestion.source import evidence_from_definitions, evidence_from_docs
+from canonic.ingestion.builder import ContextBuilder, SkippedEvidence
+from canonic.ingestion.models import EvidenceItem, EvidenceKind
+from canonic.ingestion.source import evidence_from_definitions, evidence_from_docs
 
 _NOW = datetime(2026, 6, 19, 12, 0, 0, tzinfo=UTC)
 _SOURCE = "test_conn"
@@ -201,21 +201,21 @@ class TestAC2UnknownKindRecordedAndSkipped:
 
     async def test_unknown_type_logged_as_error(self, caplog: pytest.LogCaptureFixture) -> None:
         connector = FakeEvidenceExtractable([VendorSpecificBlob()])
-        with caplog.at_level(logging.ERROR, logger="canon.ingestion.source"):
+        with caplog.at_level(logging.ERROR, logger="canonic.ingestion.source"):
             await evidence_from_docs(connector, _SOURCE)
 
         assert any("unknown evidence kind" in r.message for r in caplog.records)
 
     async def test_log_contains_source(self, caplog: pytest.LogCaptureFixture) -> None:
         connector = FakeEvidenceExtractable([VendorSpecificBlob()])
-        with caplog.at_level(logging.ERROR, logger="canon.ingestion.source"):
+        with caplog.at_level(logging.ERROR, logger="canonic.ingestion.source"):
             await evidence_from_docs(connector, "my_source")
 
         assert any("my_source" in r.message for r in caplog.records)
 
     async def test_log_contains_native_ref(self, caplog: pytest.LogCaptureFixture) -> None:
         connector = FakeEvidenceExtractable([VendorSpecificBlob()])
-        with caplog.at_level(logging.ERROR, logger="canon.ingestion.source"):
+        with caplog.at_level(logging.ERROR, logger="canonic.ingestion.source"):
             await evidence_from_docs(connector, _SOURCE)
 
         assert any("vendor:blob:xyz" in r.message for r in caplog.records)
@@ -239,7 +239,7 @@ class TestAC2SchemaInvalidDropped:
             observed_at=_NOW,
         )
         connector = FakeEvidenceExtractable([invalid])
-        with caplog.at_level(logging.ERROR, logger="canon.ingestion.source"):
+        with caplog.at_level(logging.ERROR, logger="canonic.ingestion.source"):
             items = await evidence_from_docs(connector, _SOURCE)
 
         assert items == []
@@ -258,7 +258,7 @@ class TestAC2SchemaInvalidDropped:
             observed_at=_NOW,
         )
         connector = FakeEvidenceExtractable([invalid])
-        with caplog.at_level(logging.ERROR, logger="canon.ingestion.source"):
+        with caplog.at_level(logging.ERROR, logger="canonic.ingestion.source"):
             items = await evidence_from_docs(connector, _SOURCE)
 
         assert items == []

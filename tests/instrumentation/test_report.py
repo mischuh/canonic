@@ -5,8 +5,8 @@ from __future__ import annotations
 import json
 from typing import TYPE_CHECKING, Any
 
-from canon.instrumentation.models import AnswerEvent
-from canon.instrumentation.report import build_report, read_events
+from canonic.instrumentation.models import AnswerEvent
+from canonic.instrumentation.report import build_report, read_events
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -56,20 +56,20 @@ def test_read_events_missing_file(tmp_path: Path) -> None:
 
 
 def test_read_events_empty_log(tmp_path: Path) -> None:
-    (tmp_path / ".canon").mkdir()
-    (tmp_path / ".canon" / "events.jsonl").write_text("")
+    (tmp_path / ".canonic").mkdir()
+    (tmp_path / ".canonic" / "events.jsonl").write_text("")
     assert read_events(tmp_path) == []
 
 
 def test_read_events_returns_events(tmp_path: Path) -> None:
-    _write_events(tmp_path / ".canon", [_event(), _event(latency_ms=200)])
+    _write_events(tmp_path / ".canonic", [_event(), _event(latency_ms=200)])
     events = read_events(tmp_path)
     assert len(events) == 2
     assert all(isinstance(e, AnswerEvent) for e in events)
 
 
 def test_read_events_skips_malformed_line(tmp_path: Path) -> None:
-    log = tmp_path / ".canon" / "events.jsonl"
+    log = tmp_path / ".canonic" / "events.jsonl"
     log.parent.mkdir(parents=True)
     log.write_text(
         json.dumps(_event(), sort_keys=True)
@@ -83,7 +83,7 @@ def test_read_events_skips_malformed_line(tmp_path: Path) -> None:
 
 
 def test_read_events_skips_invalid_schema(tmp_path: Path) -> None:
-    log = tmp_path / ".canon" / "events.jsonl"
+    log = tmp_path / ".canonic" / "events.jsonl"
     log.parent.mkdir(parents=True)
     log.write_text(json.dumps(_event(), sort_keys=True) + "\n" + json.dumps({"ts": "x"}) + "\n")
     events = read_events(tmp_path)
@@ -92,7 +92,7 @@ def test_read_events_skips_invalid_schema(tmp_path: Path) -> None:
 
 def test_read_events_last_window(tmp_path: Path) -> None:
     events_data = [_event(latency_ms=i * 10) for i in range(1, 6)]
-    _write_events(tmp_path / ".canon", events_data)
+    _write_events(tmp_path / ".canonic", events_data)
     events = read_events(tmp_path, last=3)
     assert len(events) == 3
     assert events[0].latency_ms == 30

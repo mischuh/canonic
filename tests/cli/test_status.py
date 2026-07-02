@@ -1,4 +1,4 @@
-"""Tests for ``canon status``."""
+"""Tests for ``canonic status``."""
 
 import json
 from pathlib import Path
@@ -6,7 +6,7 @@ from typing import Any
 
 from typer.testing import CliRunner
 
-from canon.cli.app import app
+from canonic.cli.app import app
 
 _BASE_EVENT: dict[str, Any] = {
     "ts": "2026-01-01T00:00:00+00:00",
@@ -28,9 +28,9 @@ _BASE_EVENT: dict[str, Any] = {
 }
 
 
-def _write_events(dotcanon: Path, events: list[dict[str, Any]]) -> None:
-    dotcanon.mkdir(parents=True, exist_ok=True)
-    (dotcanon / "events.jsonl").write_text(
+def _write_events(dotcanonic: Path, events: list[dict[str, Any]]) -> None:
+    dotcanonic.mkdir(parents=True, exist_ok=True)
+    (dotcanonic / "events.jsonl").write_text(
         "\n".join(json.dumps(e, sort_keys=True) for e in events) + "\n"
     )
 
@@ -39,7 +39,7 @@ def test_status_outside_project(runner: CliRunner, tmp_path: Path, monkeypatch) 
     monkeypatch.chdir(tmp_path)
     result = runner.invoke(app, ["status"])
     assert result.exit_code == 0
-    assert "no canon project found" in result.output
+    assert "no canonic project found" in result.output
 
 
 def test_status_inside_project_prints_root_and_version(
@@ -49,12 +49,12 @@ def test_status_inside_project_prints_root_and_version(
     assert result.exit_code == 0
     assert str(project_dir) in result.output
     assert "config version: 1" in result.output
-    assert "absent" in result.output  # no .canon/ yet
+    assert "absent" in result.output  # no .canonic/ yet
     assert "1.7" in result.output  # contract_schema
 
 
-def test_status_detects_dotcanon(runner: CliRunner, project_dir: Path) -> None:
-    (project_dir / ".canon").mkdir()
+def test_status_detects_dotcanonic(runner: CliRunner, project_dir: Path) -> None:
+    (project_dir / ".canonic").mkdir()
     result = runner.invoke(app, ["status"])
     assert "present" in result.output
 
@@ -72,13 +72,13 @@ def test_status_json_inside_project(runner: CliRunner, project_dir: Path) -> Non
     payload = json.loads(result.output)
     assert payload["project_root"] == str(project_dir)
     assert payload["config_version"] == 1
-    assert payload["dotcanon_present"] is False
+    assert payload["dotcanonic_present"] is False
     assert payload["config_error"] is None
     assert payload["contract_schema"] == "1.7"
 
 
 def test_status_reports_invalid_config(runner: CliRunner, tmp_path: Path, monkeypatch) -> None:
-    (tmp_path / "canon.yaml").write_text("version: 1\nproject:\n  name: x\n")  # missing llm
+    (tmp_path / "canonic.yaml").write_text("version: 1\nproject:\n  name: x\n")  # missing llm
     monkeypatch.chdir(tmp_path)
     result = runner.invoke(app, ["status"])
     assert result.exit_code == 0
@@ -88,7 +88,7 @@ def test_status_reports_invalid_config(runner: CliRunner, tmp_path: Path, monkey
 
 def test_status_shows_event_summary(runner: CliRunner, project_dir: Path) -> None:
     _write_events(
-        project_dir / ".canon",
+        project_dir / ".canonic",
         [
             {**_BASE_EVENT, "error": None, "latency_ms": 50},
             {**_BASE_EVENT, "error": "unresolved", "latency_ms": 200},
@@ -108,7 +108,7 @@ def test_status_no_event_summary_when_empty(runner: CliRunner, project_dir: Path
 
 def test_status_json_includes_events(runner: CliRunner, project_dir: Path) -> None:
     _write_events(
-        project_dir / ".canon",
+        project_dir / ".canonic",
         [{**_BASE_EVENT, "error": None, "latency_ms": 75}],
     )
     result = runner.invoke(app, ["--json", "status"])

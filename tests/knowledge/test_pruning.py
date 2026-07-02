@@ -9,16 +9,16 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
-from canon.ingestion.models import DraftedBy, ProposalOp
-from canon.knowledge.models import KnowledgePageMeta, KnowledgeScope
-from canon.knowledge.pruning import PruneAdvisor
-from canon.semantic.models import Provenance
+from canonic.ingestion.models import DraftedBy, ProposalOp
+from canonic.knowledge.models import KnowledgePageMeta, KnowledgeScope
+from canonic.knowledge.pruning import PruneAdvisor
+from canonic.semantic.models import Provenance
 
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from canon.knowledge.models import KnowledgePage
-    from canon.knowledge.validation import EntityIndex, PageIndex
+    from canonic.knowledge.models import KnowledgePage
+    from canonic.knowledge.validation import EntityIndex, PageIndex
 
 # A live sl_ref and page ref present in the shared `entity_index` / `page_index` fixtures.
 _LIVE_SL = "warehouse_pg.orders.total_revenue"

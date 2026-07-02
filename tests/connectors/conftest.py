@@ -16,10 +16,10 @@ import pytest
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Iterator
 
-from canon.config import Connection
-from canon.connectors.postgres import PostgresConnector
-from canon.connectors.redshift import RedshiftConnector
-from canon.connectors.sqlite import SQLiteConnector
+from canonic.config import Connection
+from canonic.connectors.postgres import PostgresConnector
+from canonic.connectors.redshift import RedshiftConnector
+from canonic.connectors.sqlite import SQLiteConnector
 
 try:
     from testcontainers.postgres import PostgresContainer
@@ -96,12 +96,12 @@ def sqlite_offline_connector() -> SQLiteConnector:
 @pytest.fixture
 def offline_redshift_connector(monkeypatch: pytest.MonkeyPatch) -> RedshiftConnector:
     """A Redshift connector that resolves credentials but never connects (unit tests)."""
-    monkeypatch.setenv("CANON_TEST_RS_PASSWORD", "secret")
+    monkeypatch.setenv("CANONIC_TEST_RS_PASSWORD", "secret")
     connection = Connection(
         id="warehouse_rs",
         type="redshift",
         params={"host": "redshift.example.com", "port": 5439, "user": "u", "dbname": "db"},
-        credentials_ref="env:CANON_TEST_RS_PASSWORD",
+        credentials_ref="env:CANONIC_TEST_RS_PASSWORD",
     )
     return RedshiftConnector(connection)
 
@@ -111,12 +111,12 @@ async def redshift_connector(
     postgres_container: dict[str, Any], monkeypatch: pytest.MonkeyPatch
 ) -> AsyncIterator[RedshiftConnector]:
     """RedshiftConnector pointed at the PostgreSQL testcontainer (wire-compatible)."""
-    monkeypatch.setenv("CANON_TEST_RS_PASSWORD", postgres_container["password"])
+    monkeypatch.setenv("CANONIC_TEST_RS_PASSWORD", postgres_container["password"])
     connection = Connection(
         id="warehouse_rs",
         type="redshift",
         params={**postgres_container["params"], "row_limit": 5, "statement_timeout_ms": 5000},
-        credentials_ref="env:CANON_TEST_RS_PASSWORD",
+        credentials_ref="env:CANONIC_TEST_RS_PASSWORD",
     )
     connector = RedshiftConnector(connection)
     try:
@@ -128,12 +128,12 @@ async def redshift_connector(
 @pytest.fixture
 def offline_connector(monkeypatch: pytest.MonkeyPatch) -> PostgresConnector:
     """A connector that resolves credentials but never connects (unit tests)."""
-    monkeypatch.setenv("CANON_TEST_PG_PASSWORD", "secret")
+    monkeypatch.setenv("CANONIC_TEST_PG_PASSWORD", "secret")
     connection = Connection(
         id="warehouse_pg",
         type="postgres",
         params={"host": "localhost", "port": 5432, "user": "u", "dbname": "db"},
-        credentials_ref="env:CANON_TEST_PG_PASSWORD",
+        credentials_ref="env:CANONIC_TEST_PG_PASSWORD",
     )
     return PostgresConnector(connection)
 
@@ -172,12 +172,12 @@ def postgres_container() -> Iterator[dict[str, Any]]:
 async def pg_connector(
     postgres_container: dict[str, Any], monkeypatch: pytest.MonkeyPatch
 ) -> AsyncIterator[PostgresConnector]:
-    monkeypatch.setenv("CANON_TEST_PG_PASSWORD", postgres_container["password"])
+    monkeypatch.setenv("CANONIC_TEST_PG_PASSWORD", postgres_container["password"])
     connection = Connection(
         id="warehouse_pg",
         type="postgres",
         params={**postgres_container["params"], "row_limit": 5, "statement_timeout_ms": 5000},
-        credentials_ref="env:CANON_TEST_PG_PASSWORD",
+        credentials_ref="env:CANONIC_TEST_PG_PASSWORD",
     )
     connector = PostgresConnector(connection)
     try:

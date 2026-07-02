@@ -22,7 +22,7 @@ customers (summing it, averaging it over arbitrary dimensions) produces numbers 
 correspond to any real cohort calculation. To prevent silent misuse, `customer_ltv` is bound as an
 **opaque** metric with `native_grain: [customer_id]`.
 
-Canon serves it as a direct lookup at customer grain and refuses any other grain:
+Canonic serves it as a direct lookup at customer grain and refuses any other grain:
 
 > Querying `customer_ltv` grouped by `segment` returns `UNSUPPORTED_MEASURE` — "opaque and can only
 > be served at its native grain (customer_id)".

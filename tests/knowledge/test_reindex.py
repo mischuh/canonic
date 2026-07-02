@@ -8,12 +8,12 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from canon.knowledge.embeddings import VectorStore
+from canonic.knowledge.embeddings import VectorStore
 
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from canon.knowledge.models import KnowledgePage
+    from canonic.knowledge.models import KnowledgePage
     from tests.knowledge.conftest import KeywordEmbedder
 
 

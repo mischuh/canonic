@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from canon.eval.models import CaseOutcome, StructuredOutcome
-from canon.eval.scoring import median, score_grain, summarize
-from canon.runtime.resolver import Task
+from canonic.eval.models import CaseOutcome, StructuredOutcome
+from canonic.eval.scoring import median, score_grain, summarize
+from canonic.runtime.resolver import Task
 
 
 def test_score_grain_is_order_insensitive() -> None:

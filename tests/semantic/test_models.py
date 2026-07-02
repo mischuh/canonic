@@ -6,7 +6,7 @@ import pytest
 from pydantic import ValidationError
 from ruamel.yaml import YAML
 
-from canon.semantic.models import (
+from canonic.semantic.models import (
     Additivity,
     Measure,
     NormalizedType,

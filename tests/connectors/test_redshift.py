@@ -16,10 +16,10 @@ import asyncpg
 import pytest
 from sqlalchemy.exc import DBAPIError
 
-from canon.config import Connection
-from canon.connectors.base import AcquisitionTier, Capability
-from canon.connectors.redshift import RedshiftConnector, _normalize_type, _resolve_search_path
-from canon.exc import ReadOnlyViolation
+from canonic.config import Connection
+from canonic.connectors.base import AcquisitionTier, Capability
+from canonic.connectors.redshift import RedshiftConnector, _normalize_type, _resolve_search_path
+from canonic.exc import ReadOnlyViolation
 
 
 class TestTypeMapping:
@@ -97,26 +97,26 @@ class TestConnectorSurface:
         }
 
     def test_default_port_is_5439(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setenv("CANON_TEST_RS_PASSWORD", "pw")
+        monkeypatch.setenv("CANONIC_TEST_RS_PASSWORD", "pw")
         conn = Connection(
             id="rs",
             type="redshift",
             params={"host": "redshift.example.com", "user": "u", "dbname": "db"},
-            credentials_ref="env:CANON_TEST_RS_PASSWORD",
+            credentials_ref="env:CANONIC_TEST_RS_PASSWORD",
         )
         connector = RedshiftConnector(conn)
         assert ":5439/" in connector.dsn
 
     def test_dsn_from_url_credential(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setenv(
-            "CANON_TEST_RS_DSN",
+            "CANONIC_TEST_RS_DSN",
             "postgresql://admin:pw@my-cluster.us-east-1.redshift.amazonaws.com:5439/analytics",
         )
         conn = Connection(
             id="rs",
             type="redshift",
             params={},
-            credentials_ref="env:CANON_TEST_RS_DSN",
+            credentials_ref="env:CANONIC_TEST_RS_DSN",
         )
         connector = RedshiftConnector(conn)
         assert connector.dsn.startswith("redshift+asyncpg://")
@@ -152,12 +152,12 @@ class TestRedshiftIntegration:
         postgres_container: dict[str, Any],
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        monkeypatch.setenv("CANON_TEST_BAD_RS_PW", "definitely-wrong")
+        monkeypatch.setenv("CANONIC_TEST_BAD_RS_PW", "definitely-wrong")
         connection = Connection(
             id="warehouse_rs",
             type="redshift",
             params=postgres_container["params"],
-            credentials_ref="env:CANON_TEST_BAD_RS_PW",
+            credentials_ref="env:CANONIC_TEST_BAD_RS_PW",
         )
         connector = RedshiftConnector(connection)
         try:
@@ -201,7 +201,7 @@ class TestRedshiftIntegration:
     async def test_introspection_with_fetch_column_stats_populates_stats_fields(
         self, postgres_container: dict[str, Any], monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        monkeypatch.setenv("CANON_TEST_RS_PASSWORD", postgres_container["password"])
+        monkeypatch.setenv("CANONIC_TEST_RS_PASSWORD", postgres_container["password"])
         params = postgres_container["params"]
         dsn = (
             f"postgresql://{params['user']}:{postgres_container['password']}"
@@ -226,7 +226,7 @@ class TestRedshiftIntegration:
             id="warehouse_rs",
             type="redshift",
             params={**params, "fetch_column_stats": True},
-            credentials_ref="env:CANON_TEST_RS_PASSWORD",
+            credentials_ref="env:CANONIC_TEST_RS_PASSWORD",
         )
         connector = RedshiftConnector(connection)
         try:
@@ -280,12 +280,12 @@ class TestRedshiftIntegration:
     async def test_introspection_excludes_unselected_schema(
         self, postgres_container: dict[str, Any], monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        monkeypatch.setenv("CANON_TEST_RS_PASSWORD", postgres_container["password"])
+        monkeypatch.setenv("CANONIC_TEST_RS_PASSWORD", postgres_container["password"])
         connection = Connection(
             id="warehouse_rs",
             type="redshift",
             params={**postgres_container["params"], "schemas": ["nonexistent"]},
-            credentials_ref="env:CANON_TEST_RS_PASSWORD",
+            credentials_ref="env:CANONIC_TEST_RS_PASSWORD",
         )
         connector = RedshiftConnector(connection)
         try:
@@ -297,12 +297,12 @@ class TestRedshiftIntegration:
     async def test_introspection_filters_by_table_glob(
         self, postgres_container: dict[str, Any], monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        monkeypatch.setenv("CANON_TEST_RS_PASSWORD", postgres_container["password"])
+        monkeypatch.setenv("CANONIC_TEST_RS_PASSWORD", postgres_container["password"])
         connection = Connection(
             id="warehouse_rs",
             type="redshift",
             params={**postgres_container["params"], "tables": ["fct_*"]},
-            credentials_ref="env:CANON_TEST_RS_PASSWORD",
+            credentials_ref="env:CANONIC_TEST_RS_PASSWORD",
         )
         connector = RedshiftConnector(connection)
         try:

@@ -1,11 +1,11 @@
-"""Tests for MCP error serialisation (canon/mcp/errors.py)."""
+"""Tests for MCP error serialisation (canonic/mcp/errors.py)."""
 
 from __future__ import annotations
 
 import pytest
 
-from canon.exc import Ambiguous, CanonError, Unresolved
-from canon.mcp.errors import canon_error_response, error_payload
+from canonic.exc import Ambiguous, CanonicError, Unresolved
+from canonic.mcp.errors import canonic_error_response, error_payload
 
 
 def test_error_payload_unresolved() -> None:
@@ -24,14 +24,14 @@ def test_error_payload_ambiguous_with_candidates() -> None:
 
 
 def test_error_payload_no_code() -> None:
-    exc = CanonError("something internal")
+    exc = CanonicError("something internal")
     payload = error_payload(exc)
     assert payload["code"] == "internal_error"
 
 
 @pytest.mark.asyncio
-async def test_canon_error_response_wraps_canon_error() -> None:
-    @canon_error_response
+async def test_canonic_error_response_wraps_canonic_error() -> None:
+    @canonic_error_response
     async def failing_tool() -> dict:
         raise Unresolved("metric 'x' matches no active binding")
 
@@ -41,8 +41,8 @@ async def test_canon_error_response_wraps_canon_error() -> None:
 
 
 @pytest.mark.asyncio
-async def test_canon_error_response_passes_through_success() -> None:
-    @canon_error_response
+async def test_canonic_error_response_passes_through_success() -> None:
+    @canonic_error_response
     async def succeeding_tool() -> dict:
         return {"ok": True}
 
@@ -51,10 +51,10 @@ async def test_canon_error_response_passes_through_success() -> None:
 
 
 @pytest.mark.asyncio
-async def test_canon_error_response_reraises_non_canon() -> None:
-    @canon_error_response
+async def test_canonic_error_response_reraises_non_canonic() -> None:
+    @canonic_error_response
     async def broken_tool() -> dict:
-        raise ValueError("not a canon error")
+        raise ValueError("not a canonic error")
 
-    with pytest.raises(ValueError, match="not a canon error"):
+    with pytest.raises(ValueError, match="not a canonic error"):
         await broken_tool()

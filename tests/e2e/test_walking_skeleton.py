@@ -4,7 +4,7 @@ One query, two surfaces, identical result — against a live Postgres. Proves th
 adapter rule (SPEC-E7-E8 §2.1): CLI and MCP are thin transports over one core, and
 both emit a byte-identical core payload.
 
-Tests that drive the CLI must be synchronous: ``canon query``/``canon sql`` call
+Tests that drive the CLI must be synchronous: ``canonic query``/``canonic sql`` call
 ``asyncio.run(...)`` internally, which cannot run inside an active event loop. The
 MCP side of those tests is therefore invoked via ``asyncio.run`` rather than an
 ``async def`` test.
@@ -20,12 +20,12 @@ import pytest
 from fastmcp import Client
 from typer.testing import CliRunner
 
-from canon.cli.app import app
-from canon.config import CanonConfig
-from canon.contracts.models import CanonicalRef, MetricBinding
-from canon.contracts.resolver import ContractResolver
-from canon.core.service import CanonService
-from canon.mcp.server import build_server
+from canonic.cli.app import app
+from canonic.config import CanonicConfig
+from canonic.contracts.models import CanonicalRef, MetricBinding
+from canonic.contracts.resolver import ContractResolver
+from canonic.core.service import CanonicService
+from canonic.mcp.server import build_server
 
 from .conftest import EXPECTED_REVENUE
 
@@ -42,7 +42,7 @@ def _canonical(payload: Any) -> str:
     return json.dumps(payload, sort_keys=True, default=str)
 
 
-async def _mcp_call(service: CanonService, tool: str, args: Mapping[str, Any]) -> Any:
+async def _mcp_call(service: CanonicService, tool: str, args: Mapping[str, Any]) -> Any:
     mcp = build_server(service)
     async with Client(mcp) as client:
         result = await client.call_tool(tool, dict(args))
@@ -54,9 +54,9 @@ async def _mcp_call(service: CanonService, tool: str, args: Mapping[str, Any]) -
 # ----------------------------------------------------------------------------
 
 
-def test_compile_revenue(e2e_service: CanonService) -> None:
+def test_compile_revenue(e2e_service: CanonicService) -> None:
     """SQL carries the measure aggregate and the injected guardrail filter."""
-    from canon.compiler import SemanticQuery
+    from canonic.compiler import SemanticQuery
 
     result = e2e_service.compile_query(SemanticQuery(metrics=["revenue"]))
     sql = result.sql
@@ -67,9 +67,9 @@ def test_compile_revenue(e2e_service: CanonService) -> None:
 
 
 @pytest.mark.asyncio
-async def test_query_revenue(e2e_service: CanonService) -> None:
+async def test_query_revenue(e2e_service: CanonicService) -> None:
     """A live query returns rows, the fired guardrail, and freshness metadata."""
-    from canon.compiler import SemanticQuery
+    from canonic.compiler import SemanticQuery
 
     result = await e2e_service.query(SemanticQuery(metrics=["revenue"]))
     payload = result.model_dump(mode="json")
@@ -99,7 +99,7 @@ def test_parity(e2e_project: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     assert cli.exit_code == 0, cli.stdout
     cli_payload = json.loads(cli.stdout)
 
-    service = CanonService.from_project(e2e_project)
+    service = CanonicService.from_project(e2e_project)
     mcp_payload = asyncio.run(_mcp_call(service, "query", {"query": _REVENUE_QUERY}))
 
     assert _canonical(cli_payload) == _canonical(mcp_payload)
@@ -121,7 +121,7 @@ def test_read_only_violation(e2e_project: Path, monkeypatch: pytest.MonkeyPatch)
     assert cli.exit_code == 11
     assert json.loads(cli.stderr)["code"] == "read_only_violation"
 
-    service = CanonService.from_project(e2e_project)
+    service = CanonicService.from_project(e2e_project)
     mcp_payload = asyncio.run(_mcp_call(service, "run_sql", {"sql": "DROP TABLE fct_orders"}))
     assert mcp_payload["code"] == "read_only_violation"
 
@@ -143,7 +143,7 @@ def test_unresolved(e2e_project: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     assert cli.exit_code == 2
     assert json.loads(cli.stderr)["code"] == "unresolved"
 
-    service = CanonService.from_project(e2e_project)
+    service = CanonicService.from_project(e2e_project)
     mcp_payload = asyncio.run(
         _mcp_call(service, "query", {"query": {"metrics": ["does_not_exist"]}})
     )
@@ -160,7 +160,7 @@ def test_ambiguous(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """
     import asyncio
 
-    config = CanonConfig.model_validate(
+    config = CanonicConfig.model_validate(
         {
             "version": 1,
             "project": {"name": "ambiguous"},
@@ -181,7 +181,7 @@ def test_ambiguous(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         MetricBinding(metric="gross_revenue", canonical=ref, aliases=["rev"], status="active"),
     ]
     resolver = ContractResolver(bindings=bindings, guardrails=[])
-    service = CanonService(config=config, resolver=resolver, sources=[])
+    service = CanonicService(config=config, resolver=resolver, sources=[])
 
     # MCP surface: AMBIGUOUS with candidates.
     mcp_payload = asyncio.run(_mcp_call(service, "query", {"query": {"metrics": ["rev"]}}))
@@ -190,7 +190,7 @@ def test_ambiguous(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
 
     # CLI surface: exit 3. Inject the ambiguous service via the shared loader, so no
     # on-disk project is needed (the loader rejects ambiguity at load time anyway).
-    monkeypatch.setattr("canon.cli.commands.query.load_service", lambda _ctx: service)
+    monkeypatch.setattr("canonic.cli.commands.query.load_service", lambda _ctx: service)
     query_file = tmp_path / "q.json"
     query_file.write_text(json.dumps({"metrics": ["rev"]}))
     cli = CliRunner().invoke(app, ["--json", "query", "-f", str(query_file)])

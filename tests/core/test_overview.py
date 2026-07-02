@@ -1,9 +1,9 @@
-"""Unit tests for the pure overview helpers (canon/core/overview.py)."""
+"""Unit tests for the pure overview helpers (canonic/core/overview.py)."""
 
 from __future__ import annotations
 
-from canon.contracts.models import Example, ExampleQuery
-from canon.core.overview import questions_for_group, render_question
+from canonic.contracts.models import Example, ExampleQuery
+from canonic.core.overview import questions_for_group, render_question
 
 
 class TestRenderQuestion:

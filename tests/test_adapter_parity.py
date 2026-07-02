@@ -13,71 +13,71 @@ from typing import TYPE_CHECKING
 import pytest
 from fastmcp import Client
 
-from canon.compiler.query import SemanticQuery
-from canon.contract import CONTRACT_SCHEMA
-from canon.core.models import CompileOutput
-from canon.mcp.server import build_server
+from canonic.compiler.query import SemanticQuery
+from canonic.contract import CONTRACT_SCHEMA
+from canonic.core.models import CompileOutput
+from canonic.mcp.server import build_server
 
 if TYPE_CHECKING:
-    from canon.core.service import CanonService
+    from canonic.core.service import CanonicService
 
 
 @pytest.mark.asyncio
-async def test_compile_query_parity(canon_service: CanonService) -> None:
+async def test_compile_query_parity(canonic_service: CanonicService) -> None:
     """MCP compile_query and direct service path return identical payloads."""
     sq = SemanticQuery(metrics=["revenue"])
-    mcp = build_server(canon_service)
+    mcp = build_server(canonic_service)
 
     async with Client(mcp) as client:
         result = await client.call_tool("compile_query", {"query": {"metrics": ["revenue"]}})
     mcp_payload = result.data
 
-    compile_result = canon_service.compile_query(sq)
+    compile_result = canonic_service.compile_query(sq)
     service_payload = CompileOutput.from_compile_result(compile_result).model_dump(mode="json")
 
     assert mcp_payload == service_payload
 
 
 @pytest.mark.asyncio
-async def test_get_overview_parity(canon_service: CanonService) -> None:
+async def test_get_overview_parity(canonic_service: CanonicService) -> None:
     """MCP get_overview and direct service path return identical payloads (AC5)."""
-    mcp = build_server(canon_service)
+    mcp = build_server(canonic_service)
 
     async with Client(mcp) as client:
         result = await client.call_tool("get_overview", {})
     mcp_payload = result.data
 
-    service_payload = canon_service.get_overview().model_dump(mode="json")
+    service_payload = canonic_service.get_overview().model_dump(mode="json")
 
     assert mcp_payload == service_payload
 
 
 @pytest.mark.asyncio
-async def test_describe_metric_parity(canon_service: CanonService) -> None:
+async def test_describe_metric_parity(canonic_service: CanonicService) -> None:
     """MCP describe_metric and direct service path return identical payloads (AC5)."""
-    mcp = build_server(canon_service)
+    mcp = build_server(canonic_service)
 
     async with Client(mcp) as client:
         result = await client.call_tool("describe_metric", {"name": "revenue"})
     mcp_payload = result.data
 
-    service_payload = canon_service.describe_metric("revenue").model_dump(mode="json")
+    service_payload = canonic_service.describe_metric("revenue").model_dump(mode="json")
 
     assert mcp_payload == service_payload
 
 
 @pytest.mark.asyncio
-async def test_contract_info_returns_schema(canon_service: CanonService) -> None:
+async def test_contract_info_returns_schema(canonic_service: CanonicService) -> None:
     """contract_info tool returns the current contract_schema version."""
-    mcp = build_server(canon_service)
+    mcp = build_server(canonic_service)
     async with Client(mcp) as client:
         result = await client.call_tool("contract_info", {})
     assert result.data == {"contract_schema": CONTRACT_SCHEMA}
 
 
 @pytest.mark.asyncio
-async def test_negotiate_contract_accepts_matching_major(canon_service: CanonService) -> None:
-    mcp = build_server(canon_service)
+async def test_negotiate_contract_accepts_matching_major(canonic_service: CanonicService) -> None:
+    mcp = build_server(canonic_service)
     async with Client(mcp) as client:
         result = await client.call_tool("negotiate_contract", {"contract_major": 1})
     assert result.data["accepted"] is True
@@ -85,10 +85,10 @@ async def test_negotiate_contract_accepts_matching_major(canon_service: CanonSer
 
 
 @pytest.mark.asyncio
-async def test_negotiate_contract_rejects_mismatched_major(canon_service: CanonService) -> None:
+async def test_negotiate_contract_rejects_mismatched_major(canonic_service: CanonicService) -> None:
     from fastmcp.exceptions import ToolError
 
-    mcp = build_server(canon_service)
+    mcp = build_server(canonic_service)
     with pytest.raises(ToolError, match="MAJOR mismatch"):
         async with Client(mcp) as client:
             await client.call_tool("negotiate_contract", {"contract_major": 99})

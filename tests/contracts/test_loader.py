@@ -1,4 +1,4 @@
-"""Tests for canon/contracts/loader.py — YAML loading, file:line errors, AC1."""
+"""Tests for canonic/contracts/loader.py — YAML loading, file:line errors, AC1."""
 
 from __future__ import annotations
 
@@ -6,13 +6,13 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from canon.contracts.loader import (
+from canonic.contracts.loader import (
     contracts_dir_scaffold,
     load_assertions,
     load_guardrails,
     load_metric_bindings,
 )
-from canon.exc import ContractError
+from canonic.exc import ContractError
 
 if TYPE_CHECKING:
     from pathlib import Path

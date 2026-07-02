@@ -1,4 +1,4 @@
-"""Tests for ``canon assert`` — the accuracy harness CI gate (SPEC-Fuller-E15 §3.4, GH-110)."""
+"""Tests for ``canonic assert`` — the accuracy harness CI gate (SPEC-Fuller-E15 §3.4, GH-110)."""
 
 from __future__ import annotations
 
@@ -7,9 +7,9 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-import canon.cli.commands.assertions as assert_mod
-from canon.cli.app import app
-from canon.contracts.assertions import AssertionOutcome, accuracy_report
+import canonic.cli.commands.assertions as assert_mod
+from canonic.cli.app import app
+from canonic.contracts.assertions import AssertionOutcome, accuracy_report
 
 if TYPE_CHECKING:
     from typer.testing import CliRunner

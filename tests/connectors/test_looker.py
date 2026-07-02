@@ -8,20 +8,20 @@ from typing import TYPE_CHECKING, Any
 
 import pytest
 
-from canon.connectors.base import (
+from canonic.connectors.base import (
     Capability,
     UsageEvidence,
     UsageRole,
 )
-from canon.connectors.looker import (
+from canonic.connectors.looker import (
     SUPPORTED_API_VERSION,
     LookerConnector,
     _assign_role,
     _extract_expr,
     _extract_references,
 )
-from canon.ingestion.models import EvidenceKind
-from canon.ingestion.source import evidence_from_docs
+from canonic.ingestion.models import EvidenceKind
+from canonic.ingestion.source import evidence_from_docs
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -53,7 +53,7 @@ def look_source(looker_looks_path: Path) -> FixtureLookerLookSource:
 
 @pytest.fixture
 def connector(look_source: FixtureLookerLookSource) -> LookerConnector:
-    from canon.config import Connection
+    from canonic.config import Connection
 
     conn = Connection(
         id="looker_prod",
@@ -85,7 +85,7 @@ class TestTestConnection:
         assert SUPPORTED_API_VERSION in (health.message or "")
 
     async def test_error_on_unsupported_version(self, looker_looks_path: Path) -> None:
-        from canon.config import Connection
+        from canonic.config import Connection
 
         conn = Connection(
             id="looker_prod",
@@ -101,8 +101,8 @@ class TestTestConnection:
 
     async def test_extract_raises_on_unsupported_version(self, looker_looks_path: Path) -> None:
         """SPEC-E3 §6, S5 — out-of-range server ingests nothing (AC1)."""
-        from canon.config import Connection
-        from canon.exc import ConnectionError, UnsupportedSourceVersionError
+        from canonic.config import Connection
+        from canonic.exc import ConnectionError, UnsupportedSourceVersionError
 
         conn = Connection(
             id="looker_prod",
@@ -217,7 +217,7 @@ class TestExtractEvidence:
     async def test_fingerprints_stable_across_calls(
         self, look_source: FixtureLookerLookSource
     ) -> None:
-        from canon.config import Connection
+        from canonic.config import Connection
 
         conn = Connection(
             id="looker_prod",

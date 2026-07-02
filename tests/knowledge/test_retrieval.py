@@ -5,15 +5,15 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from canon.knowledge.models import KnowledgePage, KnowledgePageMeta, KnowledgeScope, UsageMode
-from canon.knowledge.results import MatchedOn
-from canon.knowledge.retrieval import KnowledgeSearch
-from canon.semantic.models import Measure, compute_measure_fingerprint
+from canonic.knowledge.models import KnowledgePage, KnowledgePageMeta, KnowledgeScope, UsageMode
+from canonic.knowledge.results import MatchedOn
+from canonic.knowledge.retrieval import KnowledgeSearch
+from canonic.semantic.models import Measure, compute_measure_fingerprint
 
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from canon.knowledge.validation import EntityIndex
+    from canonic.knowledge.validation import EntityIndex
     from tests.knowledge.conftest import KeywordEmbedder
 
 

@@ -5,15 +5,15 @@ from __future__ import annotations
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING
 
-from canon.knowledge.drift import DriftDetector
-from canon.knowledge.models import KnowledgePageMeta
-from canon.semantic.models import Measure, compute_measure_fingerprint
+from canonic.knowledge.drift import DriftDetector
+from canonic.knowledge.models import KnowledgePageMeta
+from canonic.semantic.models import Measure, compute_measure_fingerprint
 
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from canon.knowledge.models import KnowledgePage
-    from canon.knowledge.validation import EntityIndex
+    from canonic.knowledge.models import KnowledgePage
+    from canonic.knowledge.validation import EntityIndex
 
 _REVENUE = "warehouse_pg.orders.total_revenue"
 _LIVE_FP = compute_measure_fingerprint(Measure(name="total_revenue", expr="sum(amount)"))

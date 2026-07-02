@@ -1,4 +1,4 @@
-"""The headless exit-code contract: a raised CanonError becomes a structured exit.
+"""The headless exit-code contract: a raised CanonicError becomes a structured exit.
 
 This is the basis for the §5.6 CI-gate role; per-error end-to-end coverage lands
 with the real capabilities (E2/E5).
@@ -10,10 +10,10 @@ import pytest
 import typer
 from typer.testing import CliRunner
 
-from canon import exc
-from canon.cli._errors import CliContext, handle_errors
+from canonic import exc
+from canonic.cli._errors import CliContext, handle_errors
 
-_CASES: list[tuple[type[exc.CanonError], int]] = [
+_CASES: list[tuple[type[exc.CanonicError], int]] = [
     (exc.Unresolved, 2),
     (exc.Ambiguous, 3),
     (exc.GuardrailBlock, 8),
@@ -25,7 +25,7 @@ _CASES: list[tuple[type[exc.CanonError], int]] = [
 ]
 
 
-def _app_raising(error_cls: type[exc.CanonError]) -> typer.Typer:
+def _app_raising(error_cls: type[exc.CanonicError]) -> typer.Typer:
     app = typer.Typer()
 
     @app.callback()
@@ -41,7 +41,9 @@ def _app_raising(error_cls: type[exc.CanonError]) -> typer.Typer:
 
 
 @pytest.mark.parametrize(("error_cls", "expected_exit"), _CASES)
-def test_canon_error_maps_to_exit_code(error_cls: type[exc.CanonError], expected_exit: int) -> None:
+def test_canonic_error_maps_to_exit_code(
+    error_cls: type[exc.CanonicError], expected_exit: int
+) -> None:
     result = CliRunner().invoke(_app_raising(error_cls), ["boom"])
     assert result.exit_code == expected_exit
     assert result.exception is None or isinstance(result.exception, SystemExit)

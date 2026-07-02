@@ -1,10 +1,10 @@
-# SaaS Analytics — Canon Example
+# SaaS Analytics — Canonic Example
 
-A complete, self-contained **data-warehouse** example for Canon: a SaaS subscription business
+A complete, self-contained **data-warehouse** example for Canonic: a SaaS subscription business
 modelled Kimball-style as a **Business Vault** (dimensions + facts, including a monthly snapshot
 fact) with a condensed **Data Mart** layer on top — all in a single bundled **DuckDB** file.
 
-It is the broadest example in this repo: it exercises **every metric binding kind Canon supports**,
+It is the broadest example in this repo: it exercises **every metric binding kind Canonic supports**,
 all three guardrail kinds, finality/restrict-source, query-based assertions, and a global knowledge
 base — in one place.
 
@@ -15,9 +15,9 @@ base — in one place.
 | **Snapshot fact** | `fct_mrr_snapshot` — drives the semi-additive `ending_mrr` |
 | **Full metric spectrum** | all 7 binding kinds (see catalogue below) |
 | **Guardrails** | `mandatory_filter`, `restrict_source` (+ finality), `required_dimension` |
-| **Assertions** | query-based, seed-derived expected values (`canon assert` → 100%) |
+| **Assertions** | query-based, seed-derived expected values (`canonic assert` → 100%) |
 | **Knowledge** | `knowledge/global/` — definitions, caveats, policies |
-| **MCP serving** | `canon mcp start` — expose everything to any MCP agent |
+| **MCP serving** | `canonic mcp start` — expose everything to any MCP agent |
 
 ## Schema
 
@@ -60,15 +60,15 @@ cd examples/saas-analytics
 bash scripts/build.sh
 
 # Run a few demo queries (the SemanticQuery JSON shape)
-canon query -f <(echo '{"metrics":["ending_mrr"],"dimensions":["snapshot_month"]}')
-canon query -f <(echo '{"metrics":["arpu"],"dimensions":["snapshot_month"]}')
-canon query -f <(echo '{"metrics":["customer_ltv"],"dimensions":["customer_id"]}')
+canonic query -f <(echo '{"metrics":["ending_mrr"],"dimensions":["snapshot_month"]}')
+canonic query -f <(echo '{"metrics":["arpu"],"dimensions":["snapshot_month"]}')
+canonic query -f <(echo '{"metrics":["customer_ltv"],"dimensions":["customer_id"]}')
 
 # Run the contract assertions (gates on accuracy)
-canon assert
+canonic assert
 
 # Start the MCP server for agent access
-canon mcp start
+canonic mcp start
 ```
 
 No LLM is required: this example ships hand-curated semantics and contracts. The DuckDB connection is
@@ -109,10 +109,10 @@ Try it:
 
 ```bash
 # refunds + trials are silently excluded; provisional rows excluded under board_reporting
-canon query -f <(echo '{"metrics":["gross_revenue"],"context":"board_reporting"}')
+canonic query -f <(echo '{"metrics":["gross_revenue"],"context":"board_reporting"}')
 
 # opaque grain guard: this errors with UNSUPPORTED_MEASURE
-canon query -f <(echo '{"metrics":["customer_ltv"],"dimensions":["segment"]}')
+canonic query -f <(echo '{"metrics":["customer_ltv"],"dimensions":["segment"]}')
 ```
 
 ## Assertions
@@ -122,7 +122,7 @@ canon query -f <(echo '{"metrics":["customer_ltv"],"dimensions":["segment"]}')
 - `gross-revenue-2025-q1` → `17814.00` (paid, non-trial, non-refunded invoices, Q1)
 - `active-subscribers-2025-03` → `12`
 
-`canon assert` runs them and reports accuracy (expected: **100%**).
+`canonic assert` runs them and reports accuracy (expected: **100%**).
 
 ## Knowledge
 

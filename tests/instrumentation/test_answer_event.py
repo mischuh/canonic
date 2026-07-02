@@ -9,10 +9,10 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from canon.compiler.query import SemanticQuery
-from canon.config import CanonConfig
-from canon.connectors.base import Capability, ResultSet
-from canon.contracts.models import (
+from canonic.compiler.query import SemanticQuery
+from canonic.config import CanonicConfig
+from canonic.connectors.base import Capability, ResultSet
+from canonic.contracts.models import (
     AppliesTo,
     CanonicalRef,
     Guardrail,
@@ -21,21 +21,21 @@ from canon.contracts.models import (
     Severity,
     Status,
 )
-from canon.contracts.resolver import ContractResolver
-from canon.core.service import CanonService
-from canon.exc import Unresolved
-from canon.ingestion.emitter import DiskEventLog
-from canon.ingestion.models import (
+from canonic.contracts.resolver import ContractResolver
+from canonic.core.service import CanonicService
+from canonic.exc import Unresolved
+from canonic.ingestion.emitter import DiskEventLog
+from canonic.ingestion.models import (
     DraftedBy,
     Proposal,
     ProposalOp,
     ReconciliationDecision,
     ReconciliationEntry,
 )
-from canon.instrumentation.events import DiskAnswerEventLog
-from canon.instrumentation.models import AnswerEvent, ReconcileDecisionEvent, _sha256_json
-from canon.instrumentation.report import read_events
-from canon.semantic.models import Column, Dimension, Measure, Provenance, SemanticSource
+from canonic.instrumentation.events import DiskAnswerEventLog
+from canonic.instrumentation.models import AnswerEvent, ReconcileDecisionEvent, _sha256_json
+from canonic.instrumentation.report import read_events
+from canonic.semantic.models import Column, Dimension, Measure, Provenance, SemanticSource
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -47,7 +47,7 @@ def _make_service(
     tmp_path: Path,
     *,
     event_log_root: Path | None = None,
-) -> CanonService:
+) -> CanonicService:
     monkeypatch.setenv("PG_PASSWORD", "testpw")
     binding = MetricBinding(
         metric="revenue",
@@ -77,7 +77,7 @@ def _make_service(
         dimensions=[Dimension(name="status", column="status")],
     )
     resolver = ContractResolver(bindings=[binding], guardrails=[guardrail])
-    config = CanonConfig.model_validate(
+    config = CanonicConfig.model_validate(
         {
             "version": 1,
             "project": {"name": "test", "default_connection": "warehouse_pg"},
@@ -102,7 +102,7 @@ def _make_service(
         }
     )
     log_root = event_log_root if event_log_root is not None else tmp_path
-    return CanonService(
+    return CanonicService(
         config=config,
         resolver=resolver,
         sources=[source],
@@ -121,7 +121,7 @@ def _fake_connector(bytes_scanned: int | None = 1024) -> Any:
 
 
 def _read_events(tmp_path: Path) -> list[dict[str, Any]]:
-    log_file = tmp_path / ".canon" / "events.jsonl"
+    log_file = tmp_path / ".canonic" / "events.jsonl"
     return [json.loads(line) for line in log_file.read_text().splitlines()]
 
 
@@ -139,7 +139,7 @@ async def test_ac1_event_written_on_served_answer(
         def for_id(self, _cfg, _cid):
             return _fake_connector(bytes_scanned=10485760)
 
-    monkeypatch.setattr("canon.core.service.default_factory", _StubFactory())
+    monkeypatch.setattr("canonic.core.service.default_factory", _StubFactory())
 
     q = SemanticQuery(metrics=["revenue"])
     await svc.query(q)
@@ -172,12 +172,12 @@ async def test_ac2_log_contains_no_sql_or_rows(
         def for_id(self, _cfg, _cid):
             return _fake_connector()
 
-    monkeypatch.setattr("canon.core.service.default_factory", _StubFactory())
+    monkeypatch.setattr("canonic.core.service.default_factory", _StubFactory())
 
     q = SemanticQuery(metrics=["revenue"])
     await svc.query(q)
 
-    raw_line = (tmp_path / ".canon" / "events.jsonl").read_text()
+    raw_line = (tmp_path / ".canonic" / "events.jsonl").read_text()
 
     # No SQL text in the log
     assert "SELECT" not in raw_line.upper()
@@ -295,7 +295,7 @@ async def test_append_only_two_queries_two_lines(
         def for_id(self, _cfg, _cid):
             return _fake_connector()
 
-    monkeypatch.setattr("canon.core.service.default_factory", _StubFactory())
+    monkeypatch.setattr("canonic.core.service.default_factory", _StubFactory())
 
     q = SemanticQuery(metrics=["revenue"])
     await svc.query(q)
@@ -332,7 +332,7 @@ async def test_null_event_log_writes_nothing(
         dimensions=[],
     )
     resolver = ContractResolver(bindings=[binding], guardrails=[])
-    config = CanonConfig.model_validate(
+    config = CanonicConfig.model_validate(
         {
             "version": 1,
             "project": {"name": "test", "default_connection": "warehouse_pg"},
@@ -357,17 +357,17 @@ async def test_null_event_log_writes_nothing(
         }
     )
     # No event_log — defaults to NullAnswerEventLog
-    svc = CanonService(config=config, resolver=resolver, sources=[source])
+    svc = CanonicService(config=config, resolver=resolver, sources=[source])
 
     class _StubFactory:
         def for_id(self, _cfg, _cid):
             return _fake_connector()
 
-    monkeypatch.setattr("canon.core.service.default_factory", _StubFactory())
+    monkeypatch.setattr("canonic.core.service.default_factory", _StubFactory())
 
     await svc.query(SemanticQuery(metrics=["revenue"]))
 
-    assert not (tmp_path / ".canon" / "events.jsonl").exists()
+    assert not (tmp_path / ".canonic" / "events.jsonl").exists()
 
 
 # ---------------------------------------------------------------------------
@@ -413,11 +413,11 @@ def _answer_event() -> AnswerEvent:
 
 
 def test_s4_both_kinds_in_one_file(tmp_path: Path) -> None:
-    """AC1 — served_answer and reconcile_decision both land in .canon/events.jsonl."""
+    """AC1 — served_answer and reconcile_decision both land in .canonic/events.jsonl."""
     DiskAnswerEventLog(tmp_path).append(_answer_event())
     DiskEventLog(tmp_path).append([_reconcile_entry()], run_id="test-run-id")
 
-    log_path = tmp_path / ".canon" / "events.jsonl"
+    log_path = tmp_path / ".canonic" / "events.jsonl"
     assert log_path.exists()
     lines = log_path.read_text().splitlines()
     assert len(lines) == 2
@@ -453,12 +453,12 @@ def test_s5_logging_works_under_air_gapped(tmp_path: Path) -> None:
     """AC1 (GH-81) — local event logging is unaffected when runtime.air_gapped is true.
 
     The event log is pure local I/O; the air-gapped flag only blocks telemetry egress,
-    not the write to .canon/events.jsonl.
+    not the write to .canonic/events.jsonl.
     """
     log = DiskAnswerEventLog(tmp_path)
     log.append(_answer_event())
 
-    log_path = tmp_path / ".canon" / "events.jsonl"
+    log_path = tmp_path / ".canonic" / "events.jsonl"
     assert log_path.exists(), "events.jsonl must be written regardless of air-gapped mode"
     lines = log_path.read_text().splitlines()
     assert len(lines) == 1

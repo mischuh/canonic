@@ -1,4 +1,4 @@
--- Rental Service demo database for Canon
+-- Rental Service demo database for Canonic
 -- 5 dimensions · 3 fact tables · 40 rentals · 32 payments · 8 damage records
 --
 -- Usage: sqlite3 rental.db < setup.sql

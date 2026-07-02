@@ -1,20 +1,20 @@
-"""Tests for ConnectorFactory and the builtin registry (canon/connectors/factory.py, E2 S9)."""
+"""Tests for ConnectorFactory and the builtin registry (canonic/connectors/factory.py, E2 S9)."""
 
 from __future__ import annotations
 
 import pytest
 
-from canon.config import CanonConfig, Connection
-from canon.connectors.base import ConnectorBase, Health
-from canon.connectors.factory import ConnectorFactory, default_factory
-from canon.connectors.postgres import PostgresConnector
-from canon.exc import ConnectionError, UnknownConnectorType
+from canonic.config import CanonicConfig, Connection
+from canonic.connectors.base import ConnectorBase, Health
+from canonic.connectors.factory import ConnectorFactory, default_factory
+from canonic.connectors.postgres import PostgresConnector
+from canonic.exc import ConnectionError, UnknownConnectorType
 
 
 @pytest.fixture
-def config_with_pg(monkeypatch: pytest.MonkeyPatch) -> CanonConfig:
+def config_with_pg(monkeypatch: pytest.MonkeyPatch) -> CanonicConfig:
     monkeypatch.setenv("PG_PASSWORD", "testpw")
-    return CanonConfig.model_validate(
+    return CanonicConfig.model_validate(
         {
             "version": 1,
             "project": {"name": "test", "default_connection": "warehouse_pg"},
@@ -43,13 +43,15 @@ def config_with_pg(monkeypatch: pytest.MonkeyPatch) -> CanonConfig:
 # --- AC1: factory.create dispatches to the right class ---------------------------
 
 
-def test_create_postgres(monkeypatch: pytest.MonkeyPatch, config_with_pg: CanonConfig) -> None:
+def test_create_postgres(monkeypatch: pytest.MonkeyPatch, config_with_pg: CanonicConfig) -> None:
     conn = config_with_pg.connections[0]
     connector = default_factory.create(conn)
     assert isinstance(connector, PostgresConnector)
 
 
-def test_instantiate_postgres(monkeypatch: pytest.MonkeyPatch, config_with_pg: CanonConfig) -> None:
+def test_instantiate_postgres(
+    monkeypatch: pytest.MonkeyPatch, config_with_pg: CanonicConfig
+) -> None:
     conn = config_with_pg.connections[0]
     connector = default_factory.instantiate("postgres", conn)
     assert isinstance(connector, PostgresConnector)
@@ -109,24 +111,24 @@ def test_register_unknown_in_isolated_factory(monkeypatch: pytest.MonkeyPatch) -
 # --- for_id: resolve by connection id or project default -------------------------
 
 
-def test_for_id_default(config_with_pg: CanonConfig) -> None:
+def test_for_id_default(config_with_pg: CanonicConfig) -> None:
     connector = default_factory.for_id(config_with_pg, connection_id=None)
     assert isinstance(connector, PostgresConnector)
 
 
-def test_for_id_explicit(config_with_pg: CanonConfig) -> None:
+def test_for_id_explicit(config_with_pg: CanonicConfig) -> None:
     connector = default_factory.for_id(config_with_pg, connection_id="warehouse_pg")
     assert isinstance(connector, PostgresConnector)
 
 
-def test_for_id_unknown(config_with_pg: CanonConfig) -> None:
+def test_for_id_unknown(config_with_pg: CanonicConfig) -> None:
     with pytest.raises(ConnectionError, match="unknown connection 'nonexistent'"):
         default_factory.for_id(config_with_pg, connection_id="nonexistent")
 
 
 def test_for_id_no_default(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("PG_PASSWORD", "pw")
-    config = CanonConfig.model_validate(
+    config = CanonicConfig.model_validate(
         {
             "version": 1,
             "project": {"name": "test"},

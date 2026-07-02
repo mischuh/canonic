@@ -10,11 +10,11 @@
           {"plain_text": "Test account policy"}
         ]
       },
-      "Canon Type": {
+      "Canonic Type": {
         "type": "select",
         "select": {"name": "policy"}
       },
-      "Canon Topics": {
+      "Canonic Topics": {
         "type": "multi_select",
         "multi_select": [
           {"name": "customers"},
@@ -35,11 +35,11 @@
           {"plain_text": "Revenue caveat — refunds"}
         ]
       },
-      "Canon Type": {
+      "Canonic Type": {
         "type": "select",
         "select": {"name": "caveat"}
       },
-      "Canon Topics": {
+      "Canonic Topics": {
         "type": "multi_select",
         "multi_select": [
           {"name": "revenue"}
@@ -59,7 +59,7 @@
           {"plain_text": "General data glossary"}
         ]
       },
-      "Canon Topics": {
+      "Canonic Topics": {
         "type": "multi_select",
         "multi_select": []
       }
@@ -77,15 +77,15 @@
           {"plain_text": "Unknown page type"}
         ]
       },
-      "Canon Type": {
+      "Canonic Type": {
         "type": "select",
         "select": {"name": "unknown_kind"}
       },
-      "Canon Topics": {
+      "Canonic Topics": {
         "type": "multi_select",
         "multi_select": []
       }
     },
-    "_body": "This page has an unrecognized Canon Type."
+    "_body": "This page has an unrecognized Canonic Type."
   }
 ]

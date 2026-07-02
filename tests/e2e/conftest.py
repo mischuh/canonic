@@ -3,7 +3,7 @@
 A live PostgreSQL 16 is provided via testcontainers (the project convention; see
 ``tests/connectors/conftest.py``) and seeded with the ecommerce fixture data. The
 fixture project under ``fixture_project/`` is copied to a tmp dir and its
-``canon.yaml`` rewritten with the container's coordinates so both serving surfaces
+``canonic.yaml`` rewritten with the container's coordinates so both serving surfaces
 (CLI and MCP) talk to the same database.
 """
 
@@ -17,7 +17,7 @@ from typing import TYPE_CHECKING, Any
 import pytest
 from ruamel.yaml import YAML
 
-from canon.core.service import CanonService
+from canonic.core.service import CanonicService
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -122,12 +122,12 @@ def e2e_project(
     """Copy the fixture project to a tmp dir, wired to the live container.
 
     Rewrites the connection params (host/port/user/dbname) — which are static in
-    canon.yaml — and exports the password via ``CANON_PG_PASSWORD``.
+    canonic.yaml — and exports the password via ``CANONIC_PG_PASSWORD``.
     """
     root = tmp_path / "project"
     shutil.copytree(_FIXTURE_PROJECT, root)
 
-    config_path = root / "canon.yaml"
+    config_path = root / "canonic.yaml"
     yaml = YAML()
     data = yaml.load(config_path.read_text())
     params = data["connections"][0]["params"]
@@ -138,11 +138,11 @@ def e2e_project(
     with config_path.open("w") as f:
         yaml.dump(data, f)
 
-    monkeypatch.setenv("CANON_PG_PASSWORD", e2e_postgres["password"])
+    monkeypatch.setenv("CANONIC_PG_PASSWORD", e2e_postgres["password"])
     return root
 
 
 @pytest.fixture
-def e2e_service(e2e_project: Path) -> CanonService:
-    """A CanonService loaded from the live-wired fixture project."""
-    return CanonService.from_project(e2e_project)
+def e2e_service(e2e_project: Path) -> CanonicService:
+    """A CanonicService loaded from the live-wired fixture project."""
+    return CanonicService.from_project(e2e_project)
