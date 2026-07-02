@@ -1,7 +1,7 @@
-# Canon runtime state (not committed)
-.canon/index/
-.canon/embeddings/
-.canon/setup-state.json
+# Canonic runtime state (not committed)
+.canonic/index/
+.canonic/embeddings/
+.canonic/setup-state.json
 
 # Derived context (commit after review)
 # semantics/
