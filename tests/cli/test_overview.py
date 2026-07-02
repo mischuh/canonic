@@ -1,4 +1,4 @@
-"""Tests for ``canon overview`` and ``canon sl describe`` commands (GH-157)."""
+"""Tests for ``canonic overview`` and ``canonic sl describe`` commands (GH-157)."""
 
 from __future__ import annotations
 
@@ -8,7 +8,7 @@ from pathlib import Path  # noqa: TC003 — runtime use in fixture type hints
 import pytest
 from typer.testing import CliRunner
 
-from canon.cli.app import app
+from canonic.cli.app import app
 
 _CONFIG = """\
 version: 1
@@ -19,7 +19,7 @@ connections:
   - id: warehouse_pg
     type: postgres
     params: {host: localhost, port: 5432, user: u, dbname: db}
-    credentials_ref: env:CANON_PW
+    credentials_ref: env:CANONIC_PW
 llm:
   provider: openai_compatible
   base_url: http://localhost:11434/v1
@@ -57,14 +57,14 @@ status: active
 
 @pytest.fixture
 def project_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    (tmp_path / "canon.yaml").write_text(_CONFIG)
+    (tmp_path / "canonic.yaml").write_text(_CONFIG)
     sem = tmp_path / "semantics" / "warehouse_pg"
     sem.mkdir(parents=True)
     (sem / "orders.yaml").write_text(_ORDERS_YAML)
     contracts = tmp_path / "contracts" / "metrics"
     contracts.mkdir(parents=True)
     (contracts / "revenue.yaml").write_text(_REVENUE_YAML)
-    monkeypatch.setenv("CANON_PW", "test")
+    monkeypatch.setenv("CANONIC_PW", "test")
     monkeypatch.chdir(tmp_path)
     return tmp_path
 

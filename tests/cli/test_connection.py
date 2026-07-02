@@ -1,4 +1,4 @@
-"""Tests for ``canon connection`` subcommands: list, test, add, remove."""
+"""Tests for ``canonic connection`` subcommands: list, test, add, remove."""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ import json
 import pytest
 from typer.testing import CliRunner
 
-from canon.cli.app import app
+from canonic.cli.app import app
 
 _BASE_CONFIG = """\
 version: 1
@@ -34,14 +34,14 @@ project:
 
 @pytest.fixture
 def project_dir(tmp_path, monkeypatch):
-    (tmp_path / "canon.yaml").write_text(_BASE_CONFIG)
+    (tmp_path / "canonic.yaml").write_text(_BASE_CONFIG)
     monkeypatch.chdir(tmp_path)
     return tmp_path
 
 
 @pytest.fixture
 def empty_project_dir(tmp_path, monkeypatch):
-    (tmp_path / "canon.yaml").write_text(_NO_CONNECTIONS_CONFIG)
+    (tmp_path / "canonic.yaml").write_text(_NO_CONNECTIONS_CONFIG)
     monkeypatch.chdir(tmp_path)
     return tmp_path
 
@@ -105,7 +105,7 @@ class TestConnectionTest:
         assert result.exit_code == 1
 
     def test_test_bad_path_reports_error(self, runner, tmp_path, monkeypatch):
-        cfg = tmp_path / "canon.yaml"
+        cfg = tmp_path / "canonic.yaml"
         cfg.write_text(
             "version: 1\nproject:\n  name: t\nconnections:\n"
             "  - id: bad\n    type: sqlite\n    params:\n      path: /no/such/file.db\n"

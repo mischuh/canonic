@@ -8,18 +8,18 @@ from typing import TYPE_CHECKING, Any
 
 import pytest
 
-from canon.connectors.base import (
+from canonic.connectors.base import (
     Capability,
     DocEvidence,
     UsageHint,
 )
-from canon.connectors.notion import (
+from canonic.connectors.notion import (
     SUPPORTED_API_VERSIONS,
     NotionConnector,
     _usage_hint_for,
 )
-from canon.ingestion.models import EvidenceKind
-from canon.ingestion.source import evidence_from_docs
+from canonic.ingestion.models import EvidenceKind
+from canonic.ingestion.source import evidence_from_docs
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -142,14 +142,14 @@ class TestExtractEvidence:
         assert len(caveat_docs) == 1
         assert caveat_docs[0].native_ref == "notion:page:def456"
 
-    async def test_missing_canon_type_defaults_to_reference(
+    async def test_missing_canonic_type_defaults_to_reference(
         self, connector: NotionConnector
     ) -> None:
         docs = await connector.extract_evidence()
         glossary = next(d for d in docs if "glossary" in d.title.lower())
         assert glossary.usage_hint == UsageHint.REFERENCE
 
-    async def test_unrecognized_canon_type_defaults_to_reference_with_warning(
+    async def test_unrecognized_canonic_type_defaults_to_reference_with_warning(
         self, connector: NotionConnector, caplog: pytest.LogCaptureFixture
     ) -> None:
         with caplog.at_level(logging.WARNING):
@@ -184,8 +184,8 @@ class TestExtractEvidence:
     async def test_unsupported_version_raises_connection_error(
         self, page_source: FixtureNotionPageSource
     ) -> None:
-        from canon.exc import ConnectionError as CanonConnectionError
-        from canon.exc import UnsupportedSourceVersionError
+        from canonic.exc import ConnectionError as CanonicConnectionError
+        from canonic.exc import UnsupportedSourceVersionError
 
         bad = NotionConnector(page_source=page_source, api_version="2020-01-01")
         with pytest.raises(UnsupportedSourceVersionError, match="unsupported") as excinfo:
@@ -193,7 +193,7 @@ class TestExtractEvidence:
         exc = excinfo.value
         assert exc.detected == "2020-01-01"
         assert exc.exit_code == 13
-        assert isinstance(exc, CanonConnectionError)
+        assert isinstance(exc, CanonicConnectionError)
 
     async def test_doc_evidence_round_trips(self, connector: NotionConnector) -> None:
         docs = await connector.extract_evidence()

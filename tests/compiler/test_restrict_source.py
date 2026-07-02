@@ -7,12 +7,12 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from canon.compiler import SemanticQuery, compile
-from canon.exc import GuardrailBlock
+from canonic.compiler import SemanticQuery, compile
+from canonic.exc import GuardrailBlock
 
 if TYPE_CHECKING:
-    from canon.contracts.resolver import ContractResolver
-    from canon.semantic.models import SemanticSource
+    from canonic.contracts.resolver import ContractResolver
+    from canonic.semantic.models import SemanticSource
 
 
 _AS_OF = datetime(2026, 6, 13, 10, 0, 0, tzinfo=UTC)

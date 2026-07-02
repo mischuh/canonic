@@ -7,15 +7,15 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from canon.exc import KnowledgePageError
-from canon.knowledge.loader import user_from_path
-from canon.knowledge.models import KnowledgeScope
-from canon.knowledge.scope import CollisionResult, ScopeResolver
+from canonic.exc import KnowledgePageError
+from canonic.knowledge.loader import user_from_path
+from canonic.knowledge.models import KnowledgeScope
+from canonic.knowledge.scope import CollisionResult, ScopeResolver
 
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from canon.knowledge.models import KnowledgePage
+    from canonic.knowledge.models import KnowledgePage
 
 
 # --- user_from_path -------------------------------------------------------------------------

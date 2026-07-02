@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from canon.contracts.models import (
+from canonic.contracts.models import (
     AppliesTo,
     CanonicalRef,
     FinalityRule,
@@ -15,8 +15,8 @@ from canon.contracts.models import (
     RestrictTo,
     Severity,
 )
-from canon.contracts.resolver import ContractResolver
-from canon.semantic.models import (
+from canonic.contracts.resolver import ContractResolver
+from canonic.semantic.models import (
     Column,
     Dimension,
     Join,

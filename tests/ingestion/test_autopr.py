@@ -1,4 +1,4 @@
-"""Tests for canon/ingestion/autopr.py (GH-38) — headless auto-PR orchestration (SPEC-E4 §6).
+"""Tests for canonic/ingestion/autopr.py (GH-38) — headless auto-PR orchestration (SPEC-E4 §6).
 
 Drives :class:`AutoPRPublisher` against a recording fake so the git/gh seam is exercised without
 shelling out, and probes :class:`SubprocessPublisher` error translation on a failing command.
@@ -10,13 +10,13 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from canon.connectors.base import AcquisitionTier
-from canon.exc import CanonError
-from canon.ingestion.autopr import AutoPRPublisher, SubprocessPublisher
-from canon.ingestion.emitter import ContradictionNote, DiffFormat, EmissionResult, EmittedDiff
-from canon.ingestion.models import ProposalOp, ReconciliationReport
-from canon.ingestion.pipeline import PipelineResult
-from canon.semantic.models import Provenance
+from canonic.connectors.base import AcquisitionTier
+from canonic.exc import CanonicError
+from canonic.ingestion.autopr import AutoPRPublisher, SubprocessPublisher
+from canonic.ingestion.emitter import ContradictionNote, DiffFormat, EmissionResult, EmittedDiff
+from canonic.ingestion.models import ProposalOp, ReconciliationReport
+from canonic.ingestion.pipeline import PipelineResult
+from canonic.semantic.models import Provenance
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
@@ -121,8 +121,8 @@ async def test_publish_noop_without_diffs(tmp_path: Path) -> None:
 
 
 async def test_subprocess_publisher_raises_on_failure(tmp_path: Path) -> None:
-    """A non-zero subprocess exit surfaces as a structured CanonError, never a traceback."""
+    """A non-zero subprocess exit surfaces as a structured CanonicError, never a traceback."""
     publisher = SubprocessPublisher(tmp_path)
 
-    with pytest.raises(CanonError):
+    with pytest.raises(CanonicError):
         await publisher._run("sh", "-c", "exit 1")

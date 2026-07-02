@@ -1,4 +1,4 @@
-"""Tests for the ``canon setup`` wizard (GH-15 / SPEC E1 §4)."""
+"""Tests for the ``canonic setup`` wizard (GH-15 / SPEC E1 §4)."""
 
 from __future__ import annotations
 
@@ -8,10 +8,10 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from canon.cli.app import app
-from canon.cli.commands.setup import _parse_index_ranges, _parse_table_tokens
-from canon.config import load_config
-from canon.connectors.base import Health
+from canonic.cli.app import app
+from canonic.cli.commands.setup import _parse_index_ranges, _parse_table_tokens
+from canonic.config import load_config
+from canonic.connectors.base import Health
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -49,7 +49,7 @@ def _patch_connector(monkeypatch, *connectors: _FakeConnector) -> None:
         def create(self, _conn):
             return next(seq)
 
-    monkeypatch.setattr("canon.cli.commands.setup.default_factory", _StubFactory())
+    monkeypatch.setattr("canonic.cli.commands.setup.default_factory", _StubFactory())
 
 
 # Prompt answers for a happy-path fresh run using the Postgres path.
@@ -62,7 +62,7 @@ _FRESH_INPUT = "\n".join(
         "",  # port → 5432
         "",  # user → postgres
         "analytics",  # database
-        "",  # env var → CANON_WAREHOUSE_PG_PASSWORD
+        "",  # env var → CANONIC_WAREHOUSE_PG_PASSWORD
         "n",  # narrow schemas/tables? → No
         "",  # llm provider → openai_compatible
         "",  # base url
@@ -80,13 +80,13 @@ def test_fresh_setup_scaffolds_project(runner: CliRunner, tmp_path: Path, monkey
     result = runner.invoke(app, ["setup"], input=_FRESH_INPUT + "\n")
 
     assert result.exit_code == 0, result.output
-    for name in ("canon.yaml", "semantics", "knowledge", "contracts", "raw-sources"):
+    for name in ("canonic.yaml", "semantics", "knowledge", "contracts", "raw-sources"):
         assert (tmp_path / name).exists(), name
     assert (tmp_path / "contracts" / "metrics").is_dir()
     gitignore = (tmp_path / ".gitignore").read_text()
-    assert ".canon/" in gitignore
+    assert ".canonic/" in gitignore
     # The written config re-parses cleanly.
-    config = load_config(tmp_path / "canon.yaml")
+    config = load_config(tmp_path / "canonic.yaml")
     assert config.project.name == tmp_path.name
     assert config.connections[0].id == "warehouse_pg"
     assert config.project.default_connection == "warehouse_pg"
@@ -98,10 +98,10 @@ def test_secret_indirection_never_literal(runner: CliRunner, tmp_path: Path, mon
 
     runner.invoke(app, ["setup"], input=_FRESH_INPUT + "\n")
 
-    text = (tmp_path / "canon.yaml").read_text()
+    text = (tmp_path / "canonic.yaml").read_text()
     # Only the env: indirection ref is written — never an inline credential value.
-    assert "credentials_ref: env:CANON_WAREHOUSE_PG_PASSWORD" in text
-    assert load_config(tmp_path / "canon.yaml").connections[0].credentials_ref.startswith("env:")
+    assert "credentials_ref: env:CANONIC_WAREHOUSE_PG_PASSWORD" in text
+    assert load_config(tmp_path / "canonic.yaml").connections[0].credentials_ref.startswith("env:")
 
 
 def test_connection_test_gates_recording(runner: CliRunner, tmp_path: Path, monkeypatch) -> None:
@@ -146,7 +146,7 @@ def test_connection_test_gates_recording(runner: CliRunner, tmp_path: Path, monk
 
     assert result.exit_code == 0, result.output
     assert "connection test failed" in result.output
-    config = load_config(tmp_path / "canon.yaml")
+    config = load_config(tmp_path / "canonic.yaml")
     assert len(config.connections) == 1
 
 
@@ -159,7 +159,7 @@ def test_declining_narrowing_writes_no_schema_or_table_params(
     result = runner.invoke(app, ["setup"], input=_FRESH_INPUT + "\n")
 
     assert result.exit_code == 0, result.output
-    params = load_config(tmp_path / "canon.yaml").connections[0].params
+    params = load_config(tmp_path / "canonic.yaml").connections[0].params
     assert "schemas" not in params
     assert "tables" not in params
 
@@ -198,7 +198,7 @@ def test_narrow_to_one_schema(runner: CliRunner, tmp_path: Path, monkeypatch) ->
     result = runner.invoke(app, ["setup"], input=narrow_input + "\n")
 
     assert result.exit_code == 0, result.output
-    params = load_config(tmp_path / "canon.yaml").connections[0].params
+    params = load_config(tmp_path / "canonic.yaml").connections[0].params
     assert params["schemas"] == ["public"]
     assert "tables" not in params
 
@@ -237,7 +237,7 @@ def test_narrow_tables_with_index_and_glob(runner: CliRunner, tmp_path: Path, mo
     result = runner.invoke(app, ["setup"], input=narrow_input + "\n")
 
     assert result.exit_code == 0, result.output
-    params = load_config(tmp_path / "canon.yaml").connections[0].params
+    params = load_config(tmp_path / "canonic.yaml").connections[0].params
     assert "schemas" not in params
     assert params["tables"] == ["public.orders", "fact_*"]
 
@@ -327,8 +327,8 @@ class TestParseTableTokens:
 
 def test_resume_skips_completed_steps(runner: CliRunner, tmp_path: Path, monkeypatch) -> None:
     monkeypatch.chdir(tmp_path)
-    dotcanon = tmp_path / ".canon"
-    dotcanon.mkdir()
+    dotcanonic = tmp_path / ".canonic"
+    dotcanonic.mkdir()
     state = {
         "project_name": "resumed",
         "connection": {
@@ -342,7 +342,7 @@ def test_resume_skips_completed_steps(runner: CliRunner, tmp_path: Path, monkeyp
         "schema_previewed": False,
         "completed_steps": ["name", "connection"],
     }
-    (dotcanon / "setup-state.json").write_text(json.dumps(state))
+    (dotcanonic / "setup-state.json").write_text(json.dumps(state))
     # default_factory.create must NOT be called — leave it unpatched to catch a stray call.
 
     resume_input = "\n".join(["", "", "m", "", ""])  # provider, url, model, api key, preview
@@ -350,21 +350,21 @@ def test_resume_skips_completed_steps(runner: CliRunner, tmp_path: Path, monkeyp
 
     assert result.exit_code == 0, result.output
     assert "Connection id" not in result.output  # connection step was skipped
-    config = load_config(tmp_path / "canon.yaml")
+    config = load_config(tmp_path / "canonic.yaml")
     assert config.project.name == "resumed"
     assert config.connections[0].id == "warehouse_pg"
     # Checkpoint cleared on success.
-    assert not (dotcanon / "setup-state.json").exists()
+    assert not (dotcanonic / "setup-state.json").exists()
 
 
 def test_existing_project_menu_exit_does_not_overwrite(
     runner: CliRunner, project_dir: Path
 ) -> None:
-    before = (project_dir / "canon.yaml").read_bytes()
+    before = (project_dir / "canonic.yaml").read_bytes()
     result = runner.invoke(app, ["setup"], input="4\n")  # exit immediately
     assert result.exit_code == 0, result.output
     assert "project menu" in result.output
-    assert (project_dir / "canon.yaml").read_bytes() == before
+    assert (project_dir / "canonic.yaml").read_bytes() == before
 
 
 def test_existing_project_menu_adds_connection(
@@ -387,7 +387,7 @@ def test_existing_project_menu_adds_connection(
     )
     result = runner.invoke(app, ["setup"], input=menu_input + "\n")
     assert result.exit_code == 0, result.output
-    config = load_config(project_dir / "canon.yaml")
+    config = load_config(project_dir / "canonic.yaml")
     assert [c.id for c in config.connections] == ["newconn"]
     assert config.project.name == "test-project"  # untouched
 
@@ -412,7 +412,7 @@ def test_sqlite_connection_path(runner: CliRunner, tmp_path: Path, monkeypatch) 
     )
     result = runner.invoke(app, ["setup"], input=sqlite_input + "\n")
     assert result.exit_code == 0, result.output
-    config = load_config(tmp_path / "canon.yaml")
+    config = load_config(tmp_path / "canonic.yaml")
     conn = config.connections[0]
     assert conn.id == "local_sqlite"
     assert conn.type == "sqlite"
@@ -449,4 +449,4 @@ def test_json_mode_rejected(runner: CliRunner, tmp_path: Path, monkeypatch) -> N
     result = runner.invoke(app, ["--json", "setup"])
     assert result.exit_code == 1
     assert "interactive" in result.output
-    assert not (tmp_path / "canon.yaml").exists()
+    assert not (tmp_path / "canonic.yaml").exists()

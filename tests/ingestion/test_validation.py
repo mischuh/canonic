@@ -1,4 +1,4 @@
-"""Tests for canon/ingestion/validation.py (GH-36) — SPEC-E4 §10 validation gate.
+"""Tests for canonic/ingestion/validation.py (GH-36) — SPEC-E4 §10 validation gate.
 
 The gate reuses the E2 schema probe and the E5 semantic/contract validators on the proposed
 (not-yet-committed) state. Tests drive it with a fake connector (no live DB) and proposals
@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from canon.connectors.base import (
+from canonic.connectors.base import (
     AcquisitionTier,
     Capability,
     ColumnInfo,
@@ -21,10 +21,10 @@ from canon.connectors.base import (
     RelationSchema,
     compute_fingerprint,
 )
-from canon.exc import ErrorCode, SchemaMismatch, ValidationFailed
-from canon.ingestion.builder import ContextBuilder
-from canon.ingestion.models import EvidenceItem, Proposal
-from canon.ingestion.validation import ValidationGate, ViolationKind
+from canonic.exc import ErrorCode, SchemaMismatch, ValidationFailed
+from canonic.ingestion.builder import ContextBuilder
+from canonic.ingestion.models import EvidenceItem, Proposal
+from canonic.ingestion.validation import ValidationGate, ViolationKind
 
 if TYPE_CHECKING:
     from pathlib import Path

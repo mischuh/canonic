@@ -1,4 +1,4 @@
-"""Tests for `canon ingest` (GH-37) — CLI surface over the E4 pipeline (SPEC-E4 §2, §7, §8)."""
+"""Tests for `canonic ingest` (GH-37) — CLI surface over the E4 pipeline (SPEC-E4 §2, §7, §8)."""
 
 from __future__ import annotations
 
@@ -8,8 +8,8 @@ from typing import TYPE_CHECKING
 import pytest
 from typer.testing import CliRunner
 
-from canon.cli.app import app
-from canon.connectors.base import (
+from canonic.cli.app import app
+from canonic.connectors.base import (
     Capability,
     ColumnInfo,
     ConnectorBase,
@@ -30,7 +30,7 @@ connections:
   - id: warehouse_pg
     type: postgres
     params: {host: localhost, port: 5432, user: u, dbname: db}
-    credentials_ref: env:CANON_PW
+    credentials_ref: env:CANONIC_PW
 llm:
   provider: openai_compatible
   base_url: http://localhost:11434/v1
@@ -61,7 +61,7 @@ class _FakeConnector(ConnectorBase):
 
 
 class _UnreachableConnector(ConnectorBase):
-    """A connector whose introspection raises a raw (non-canon) transport error."""
+    """A connector whose introspection raises a raw (non-canonic) transport error."""
 
     def capabilities(self) -> list[Capability]:
         return [Capability.INTROSPECT_SCHEMA, Capability.TEST_CONNECTION]
@@ -114,15 +114,15 @@ meta:
 
 @pytest.fixture
 def project(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    """A valid canon project with one connection; connector resolution is stubbed offline."""
-    (tmp_path / "canon.yaml").write_text(_CONFIG)
+    """A valid canonic project with one connection; connector resolution is stubbed offline."""
+    (tmp_path / "canonic.yaml").write_text(_CONFIG)
     monkeypatch.chdir(tmp_path)
 
     class _StubFactory:
         def create(self, _conn):
             return _FakeConnector()
 
-    monkeypatch.setattr("canon.cli.commands.ingest.default_factory", _StubFactory())
+    monkeypatch.setattr("canonic.cli.commands.ingest.default_factory", _StubFactory())
     return tmp_path
 
 
@@ -130,7 +130,7 @@ def project(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 def publisher(monkeypatch: pytest.MonkeyPatch) -> _RecordingPublisher:
     """Inject a recording publisher so the auto-PR step never shells out to git/gh."""
     pub = _RecordingPublisher()
-    monkeypatch.setattr("canon.cli.commands.ingest.build_publisher", lambda _root: pub)
+    monkeypatch.setattr("canonic.cli.commands.ingest.build_publisher", lambda _root: pub)
     return pub
 
 
@@ -180,7 +180,7 @@ def test_unreachable_source_exits_connection_error(
         def create(self, _conn):
             return _UnreachableConnector()
 
-    monkeypatch.setattr("canon.cli.commands.ingest.default_factory", _UnreachableFactory())
+    monkeypatch.setattr("canonic.cli.commands.ingest.default_factory", _UnreachableFactory())
 
     result = CliRunner().invoke(app, ["ingest"])
 
@@ -248,8 +248,8 @@ def test_dry_run_never_publishes(project: Path, publisher: _RecordingPublisher) 
 
 def test_ob_s6_first_curated_review_completed_emitted_after_ingest(project: Path) -> None:
     """first_curated_review_completed is emitted on the first successful (non-dry-run) ingest."""
-    from canon.instrumentation.models import FunnelMilestone
-    from canon.instrumentation.report import read_events
+    from canonic.instrumentation.models import FunnelMilestone
+    from canonic.instrumentation.report import read_events
 
     result = CliRunner().invoke(app, ["ingest", "--bootstrap"])
 
@@ -261,8 +261,8 @@ def test_ob_s6_first_curated_review_completed_emitted_after_ingest(project: Path
 
 def test_ob_s6_first_curated_review_completed_emitted_only_once(project: Path) -> None:
     """A second ingest run does NOT re-emit first_curated_review_completed (once-only guard)."""
-    from canon.instrumentation.models import FunnelMilestone
-    from canon.instrumentation.report import read_events
+    from canonic.instrumentation.models import FunnelMilestone
+    from canonic.instrumentation.report import read_events
 
     CliRunner().invoke(app, ["ingest", "--bootstrap"])
     CliRunner().invoke(app, ["ingest", "--bootstrap"])
@@ -274,8 +274,8 @@ def test_ob_s6_first_curated_review_completed_emitted_only_once(project: Path) -
 
 def test_ob_s6_dry_run_does_not_emit_first_curated_review_completed(project: Path) -> None:
     """--dry-run must NOT emit first_curated_review_completed (nothing reviewed)."""
-    from canon.instrumentation.models import FunnelMilestone
-    from canon.instrumentation.report import read_events
+    from canonic.instrumentation.models import FunnelMilestone
+    from canonic.instrumentation.report import read_events
 
     result = CliRunner().invoke(app, ["ingest", "--dry-run"])
 

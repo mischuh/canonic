@@ -14,9 +14,9 @@ import re
 import pytest
 import sqlglot
 
-from canon import exc
-from canon.compiler import SemanticQuery, compile
-from canon.contracts.models import (
+from canonic import exc
+from canonic.compiler import SemanticQuery, compile
+from canonic.contracts.models import (
     AppliesTo,
     BindingKind,
     CanonicalRef,
@@ -26,8 +26,8 @@ from canon.contracts.models import (
     OnZeroDenominator,
     Severity,
 )
-from canon.contracts.resolver import ContractResolver
-from canon.semantic.models import Column, Dimension, Join, Measure, Relationship, SemanticSource
+from canonic.contracts.resolver import ContractResolver
+from canonic.semantic.models import Column, Dimension, Join, Measure, Relationship, SemanticSource
 
 # ---------------------------------------------------------------------------
 # Fixtures — in-memory damages + customers project
@@ -366,8 +366,8 @@ def test_s7_cycle_raises_contract_error() -> None:
     import tempfile
     from pathlib import Path
 
-    from canon.contracts.validate import validate_contracts
-    from canon.exc import ContractError
+    from canonic.contracts.validate import validate_contracts
+    from canonic.exc import ContractError
 
     # Build a minimal project with a→b→a cycle in the ratio definitions.
     with tempfile.TemporaryDirectory() as tmpdir:
@@ -400,8 +400,8 @@ def test_s7_missing_component_raises_contract_error() -> None:
     import tempfile
     from pathlib import Path
 
-    from canon.contracts.validate import validate_contracts
-    from canon.exc import ContractError
+    from canonic.contracts.validate import validate_contracts
+    from canonic.exc import ContractError
 
     with tempfile.TemporaryDirectory() as tmpdir:
         root = Path(tmpdir)

@@ -6,8 +6,8 @@ from pathlib import Path  # noqa: TC003
 
 import pytest
 
-from canon.config import CanonConfig
-from canon.contracts.models import (
+from canonic.config import CanonicConfig
+from canonic.contracts.models import (
     AppliesTo,
     CanonicalRef,
     Guardrail,
@@ -16,9 +16,9 @@ from canon.contracts.models import (
     Severity,
     Status,
 )
-from canon.contracts.resolver import ContractResolver
-from canon.core.service import CanonService
-from canon.semantic.models import (
+from canonic.contracts.resolver import ContractResolver
+from canonic.core.service import CanonicService
+from canonic.semantic.models import (
     Column,
     Dimension,
     Measure,
@@ -88,7 +88,7 @@ rationale: "Refunds are reversals, not revenue."
 @pytest.fixture
 def project_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     """A minimal project root with config, semantics, and contracts."""
-    (tmp_path / "canon.yaml").write_text(_CONFIG_YAML)
+    (tmp_path / "canonic.yaml").write_text(_CONFIG_YAML)
 
     sem = tmp_path / "semantics" / "warehouse_pg"
     sem.mkdir(parents=True)
@@ -194,28 +194,28 @@ def percentile_service(
     percentile_binding: MetricBinding,
     orders_source: SemanticSource,
     monkeypatch: pytest.MonkeyPatch,
-) -> CanonService:
-    """A CanonService with a percentile metric for tests."""
+) -> CanonicService:
+    """A CanonicService with a percentile metric for tests."""
     monkeypatch.setenv("PG_PASSWORD", "testpassword")
     resolver = ContractResolver(bindings=[percentile_binding], guardrails=[])
-    config = CanonConfig.model_validate(_DC_CONFIG)
-    return CanonService(config=config, resolver=resolver, sources=[orders_source])
+    config = CanonicConfig.model_validate(_DC_CONFIG)
+    return CanonicService(config=config, resolver=resolver, sources=[orders_source])
 
 
 @pytest.fixture
-def canon_service(
+def canonic_service(
     revenue_binding: MetricBinding,
     refund_guardrail: Guardrail,
     orders_source: SemanticSource,
     monkeypatch: pytest.MonkeyPatch,
-) -> CanonService:
-    """A CanonService wired from in-memory objects (no filesystem needed)."""
+) -> CanonicService:
+    """A CanonicService wired from in-memory objects (no filesystem needed)."""
     monkeypatch.setenv("PG_PASSWORD", "testpassword")
     resolver = ContractResolver(
         bindings=[revenue_binding],
         guardrails=[refund_guardrail],
     )
-    config = CanonConfig.model_validate(
+    config = CanonicConfig.model_validate(
         {
             "version": 1,
             "project": {"name": "test", "default_connection": "warehouse_pg"},
@@ -239,7 +239,7 @@ def canon_service(
             },
         }
     )
-    return CanonService(config=config, resolver=resolver, sources=[orders_source])
+    return CanonicService(config=config, resolver=resolver, sources=[orders_source])
 
 
 _DC_CONFIG = {
@@ -262,12 +262,12 @@ def distinct_count_service(
     distinct_count_binding: MetricBinding,
     orders_source: SemanticSource,
     monkeypatch: pytest.MonkeyPatch,
-) -> CanonService:
-    """A CanonService with a distinct_count metric for describe_metric tests."""
+) -> CanonicService:
+    """A CanonicService with a distinct_count metric for describe_metric tests."""
     monkeypatch.setenv("PG_PASSWORD", "testpassword")
     resolver = ContractResolver(bindings=[distinct_count_binding], guardrails=[])
-    config = CanonConfig.model_validate(_DC_CONFIG)
-    return CanonService(config=config, resolver=resolver, sources=[orders_source])
+    config = CanonicConfig.model_validate(_DC_CONFIG)
+    return CanonicService(config=config, resolver=resolver, sources=[orders_source])
 
 
 @pytest.fixture
@@ -296,14 +296,14 @@ def ratio_service(
     damage_count_binding: MetricBinding,
     orders_source: SemanticSource,
     monkeypatch: pytest.MonkeyPatch,
-) -> CanonService:
-    """A CanonService with a ratio metric + its two SINGLE components."""
+) -> CanonicService:
+    """A CanonicService with a ratio metric + its two SINGLE components."""
     monkeypatch.setenv("PG_PASSWORD", "testpassword")
     resolver = ContractResolver(
         bindings=[ratio_binding, revenue_binding, damage_count_binding], guardrails=[]
     )
-    config = CanonConfig.model_validate(_DC_CONFIG)
-    return CanonService(config=config, resolver=resolver, sources=[orders_source])
+    config = CanonicConfig.model_validate(_DC_CONFIG)
+    return CanonicService(config=config, resolver=resolver, sources=[orders_source])
 
 
 @pytest.fixture
@@ -323,11 +323,11 @@ def weighted_avg_service(
     damage_count_binding: MetricBinding,
     orders_source: SemanticSource,
     monkeypatch: pytest.MonkeyPatch,
-) -> CanonService:
-    """A CanonService with a weighted_avg metric + its two SINGLE components."""
+) -> CanonicService:
+    """A CanonicService with a weighted_avg metric + its two SINGLE components."""
     monkeypatch.setenv("PG_PASSWORD", "testpassword")
     resolver = ContractResolver(
         bindings=[weighted_avg_binding, revenue_binding, damage_count_binding], guardrails=[]
     )
-    config = CanonConfig.model_validate(_DC_CONFIG)
-    return CanonService(config=config, resolver=resolver, sources=[orders_source])
+    config = CanonicConfig.model_validate(_DC_CONFIG)
+    return CanonicService(config=config, resolver=resolver, sources=[orders_source])

@@ -1,4 +1,4 @@
-"""Tests for ``canon review`` (GH-150, AC1/AC2/AC4/AC5)."""
+"""Tests for ``canonic review`` (GH-150, AC1/AC2/AC4/AC5)."""
 
 from __future__ import annotations
 
@@ -7,17 +7,17 @@ from typing import TYPE_CHECKING, Any
 import pytest
 from typer.testing import CliRunner
 
-from canon.cli.app import app
-from canon.ingestion.emitter import DiffEmitter
-from canon.ingestion.models import (
+from canonic.cli.app import app
+from canonic.ingestion.emitter import DiffEmitter
+from canonic.ingestion.models import (
     Proposal,
     ProposalOp,
     ReconciliationDecision,
     ReconciliationEntry,
     ReconciliationReport,
 )
-from canon.ingestion.pending import PendingDiffStore, PendingRun, ProposalStatus
-from canon.semantic.models import Provenance
+from canonic.ingestion.pending import PendingDiffStore, PendingRun, ProposalStatus
+from canonic.semantic.models import Provenance
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -32,7 +32,7 @@ connections:
   - id: warehouse_pg
     type: postgres
     params: {host: localhost, port: 5432, user: u, dbname: db}
-    credentials_ref: env:CANON_PW
+    credentials_ref: env:CANONIC_PW
 llm:
   provider: openai_compatible
   base_url: http://localhost:11434/v1
@@ -91,10 +91,10 @@ def _write_run(project_root: Path, n: int = 1) -> Path:
 
 @pytest.fixture
 def project(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    """A valid canon project in tmp_path; cwd is set to it."""
-    from canon.config import scaffold_project
+    """A valid canonic project in tmp_path; cwd is set to it."""
+    from canonic.config import scaffold_project
 
-    (tmp_path / "canon.yaml").write_text(_CONFIG)
+    (tmp_path / "canonic.yaml").write_text(_CONFIG)
     scaffold_project(tmp_path)
     monkeypatch.chdir(tmp_path)
     return tmp_path
@@ -217,7 +217,7 @@ class TestReviewQuit:
 class TestReviewFreeze:
     def test_ac5_freeze_writes_frozen_annotation(self, project: Path) -> None:
         """AC5: freeze writes the file and sets meta.frozen=true."""
-        from canon.semantic.loader import load_semantic_source
+        from canonic.semantic.loader import load_semantic_source
 
         _write_run(project)
         result = CliRunner().invoke(app, ["review"], input="f\n")

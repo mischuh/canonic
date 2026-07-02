@@ -1,7 +1,7 @@
 # Labeled grain-inference cases for the ecommerce demo (SPEC-E10 §7).
 # Mirrors the analytics schema in setup.sql — primary keys intentionally omitted
 # so the drafter must infer the grain from column names and types.
-# Run: canon eval baseline --candidates candidates.yaml --dataset eval/grain_cases.jsonl
+# Run: canonic eval baseline --candidates candidates.yaml --dataset eval/grain_cases.jsonl
 {"relation": "analytics.dim_customers", "columns": [{"name": "customer_id", "type": "int", "nullable": false}, {"name": "email", "type": "string", "nullable": false}, {"name": "country", "type": "string", "nullable": false}], "expected_grain": ["customer_id"]}
 {"relation": "analytics.dim_products", "columns": [{"name": "product_id", "type": "int", "nullable": false}, {"name": "name", "type": "string", "nullable": false}, {"name": "category", "type": "string", "nullable": false}, {"name": "unit_price", "type": "decimal", "nullable": false}], "expected_grain": ["product_id"]}
 {"relation": "analytics.dim_channels", "columns": [{"name": "channel_id", "type": "int", "nullable": false}, {"name": "name", "type": "string", "nullable": false}], "expected_grain": ["channel_id"]}

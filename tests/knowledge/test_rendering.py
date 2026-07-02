@@ -4,14 +4,14 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from canon.knowledge.rendering import DefinitionRenderer
-from canon.knowledge.validation import EntityIndex
-from canon.semantic.models import Column, Measure, NormalizedType, SemanticSource
+from canonic.knowledge.rendering import DefinitionRenderer
+from canonic.knowledge.validation import EntityIndex
+from canonic.semantic.models import Column, Measure, NormalizedType, SemanticSource
 
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from canon.knowledge.models import KnowledgePage
+    from canonic.knowledge.models import KnowledgePage
 
 _DIRECTIVE = "{{ sl:warehouse_pg.orders.total_revenue.expr }}"
 

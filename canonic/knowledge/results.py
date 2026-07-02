@@ -1,0 +1,130 @@
+"""Retrieval result models — the ``SearchResult`` shape (SPEC-E6 §5.3).
+
+A P1 capability surface, **additive** to the frozen P0 serving contract: it introduces
+``search``/``search_context`` output without touching ``query``/``compile``/errors
+(SPEC P0-interface-freeze §4.1). Models are frozen, matching the rest of the knowledge
+layer.
+"""
+
+from __future__ import annotations
+
+from enum import StrEnum
+
+from pydantic import BaseModel, ConfigDict
+
+from canonic.knowledge.models import (  # noqa: TC001 — Pydantic resolves annotations at runtime
+    KnowledgePage,
+    KnowledgeScope,
+    UsageMode,
+)
+
+__all__ = [
+    "Annotation",
+    "Caveat",
+    "Hit",
+    "MatchedOn",
+    "ReviewFlag",
+    "SearchResult",
+    "Subgraph",
+]
+
+
+class MatchedOn(StrEnum):
+    """Which retrieval arm surfaced a hit (SPEC-E6 §5.3)."""
+
+    LEXICAL = "lexical"  # tantivy BM25 arm — always available
+    VECTOR = "vector"  # numpy cosine arm — only when embeddings are installed
+
+
+class Annotation(BaseModel):
+    """A strict-additive user page attached to a global hit (SPEC-E6 §4).
+
+    The global page stays authoritative; this carries the colliding user page as a
+    personal annotation, never a replacement.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    page: str  # the annotating user page's id/slug
+    scope: str  # owner-qualified scope label, e.g. "user:alice"
+
+
+class Hit(BaseModel):
+    """One ranked page in a search result (SPEC-E6 §5.3)."""
+
+    model_config = ConfigDict(frozen=True)
+
+    page: str  # page id/slug
+    scope: KnowledgeScope
+    score: float  # fused (RRF) score; higher is better
+    summary: str
+    matched_on: list[MatchedOn]  # arm(s) that surfaced this hit
+    usage_mode: UsageMode = UsageMode.REFERENCE  # §8: lets callers distinguish policy pages
+    sl_refs: list[str] = []  # bound semantic entities (E5)
+    annotations: list[Annotation] = []  # attached user pages (§4 strict-additive)
+
+
+class Caveat(BaseModel):
+    """A ``usage_mode: caveat`` page surfaced because a hit references its bound entity (§8).
+
+    Auto-surfaced even though the caveat was not matched by the query, so a relevant warning
+    rides along with the result (S7). ``triggered_by`` names the entities whose appearance in
+    the hits surfaced it.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    page: str  # the caveat page's id/slug
+    scope: KnowledgeScope
+    summary: str
+    sl_refs: list[str] = []  # the caveat's bound semantic entities (E5)
+    triggered_by: list[str] = []  # entity names in the hits that surfaced this caveat
+
+
+class ReviewFlag(BaseModel):
+    """A served page whose bound measure definition drifted, needing prose review (§7).
+
+    Surfaced when a returned page's recorded ``meta.bound_fingerprints`` no longer match the
+    live measure definition: the rendered ``{{ sl:….expr }}`` auto-updates, but the prose
+    around it may be stale (S5 AC2). The flag is a review signal — never a silent edit;
+    resolution flows through E4's diff/review. ``drifted_refs`` names the bound entities whose
+    definition changed, sorted for deterministic output.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    page: str  # the drifted page's id/slug
+    scope: KnowledgeScope
+    drifted_refs: list[str] = []  # bound entity names whose live definition changed
+    message: str  # ready-to-surface review caveat
+
+
+class Subgraph(BaseModel):
+    """The connected context bundle returned by graph traversal (SPEC-E6 §6).
+
+    ``expand`` walks the reference graph from seed hits and returns the deduped, bounded
+    set of pages reached plus the live semantic entities they bind. ``pages`` is what flows
+    into :attr:`SearchResult.traversed`; ``entities`` is carried for callers that want the
+    reached ``sl_ref`` targets directly.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    pages: list[KnowledgePage] = []
+    entities: list[str] = []  # sl_ref targets reached, sorted
+
+
+class SearchResult(BaseModel):
+    """The full result of a hybrid search (SPEC-E6 §5.3)."""
+
+    model_config = ConfigDict(frozen=True)
+
+    hits: list[Hit]
+    # Graph-expanded pages (§6); set to a traversal's ``Subgraph.pages``. Empty unless the
+    # caller requested expansion — additive to the §5.3 shape.
+    traversed: list[KnowledgePage] = []
+    # Caveat pages auto-surfaced because a hit references their bound entity (§8); additive.
+    caveats: list[Caveat] = []
+    # Returned pages whose bound measure definition drifted, flagged for prose review (§7);
+    # empty unless an entity index was supplied to compare against. Additive.
+    review_flags: list[ReviewFlag] = []

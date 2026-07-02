@@ -1,4 +1,4 @@
-"""Tests for canon/contracts/validate.py — cross-surface validation, AC2."""
+"""Tests for canonic/contracts/validate.py — cross-surface validation, AC2."""
 
 from __future__ import annotations
 
@@ -6,8 +6,8 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from canon.contracts.validate import validate_contracts
-from canon.exc import ContractError
+from canonic.contracts.validate import validate_contracts
+from canonic.exc import ContractError
 
 if TYPE_CHECKING:
     from pathlib import Path

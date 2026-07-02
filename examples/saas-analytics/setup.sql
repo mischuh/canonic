@@ -1,5 +1,5 @@
 -- =====================================================================
--- Canon SaaS-Analytics demo warehouse (DuckDB)
+-- Canonic SaaS-Analytics demo warehouse (DuckDB)
 --
 -- A small but realistic SaaS subscription warehouse modelled Kimball-style:
 --   Business Vault : 8 dimensions + 10 fact tables (incl. a monthly snapshot fact)

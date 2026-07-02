@@ -7,12 +7,12 @@ from typing import TYPE_CHECKING
 
 import sqlglot
 
-from canon.compiler import SemanticQuery, compile
-from canon.compiler.result import FinalityMetadata
+from canonic.compiler import SemanticQuery, compile
+from canonic.compiler.result import FinalityMetadata
 
 if TYPE_CHECKING:
-    from canon.contracts.resolver import ContractResolver
-    from canon.semantic.models import SemanticSource
+    from canonic.contracts.resolver import ContractResolver
+    from canonic.semantic.models import SemanticSource
 
 
 def _parse_ok_union(sql: str) -> None:

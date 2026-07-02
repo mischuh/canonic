@@ -1,9 +1,9 @@
 ---
 # Notion page properties:
-#   "Canon Type"   (select):       caveat
-#   "Canon Topics" (multi-select): revenue, refunds, guardrails
-canon_type: caveat
-canon_topics: [revenue, refunds, guardrails]
+#   "Canonic Type"   (select):       caveat
+#   "Canonic Topics" (multi-select): revenue, refunds, guardrails
+canonic_type: caveat
+canonic_topics: [revenue, refunds, guardrails]
 ---
 
 # Revenue Excludes Refunds
@@ -22,15 +22,15 @@ A refund is an accounting reversal. Including it would:
 
 ## What this means when comparing to external systems
 
-If you compare Canon revenue figures to a third-party payment processor or an ERP that
+If you compare Canonic revenue figures to a third-party payment processor or an ERP that
 records **gross** amounts (before refunds), expect a gap. The gap equals the sum of refunded
 order amounts in the comparison period.
 
 In the ecommerce demo data this gap is **260.00** (orders 2 and 8, both `status = 'refunded'`).
 
-## How this becomes a Canon knowledge page
+## How this becomes a Canonic knowledge page
 
-Canon ingests this page as `DocEvidence` with `usage_hint: caveat`. E6 writes it as a
+Canonic ingests this page as `DocEvidence` with `usage_hint: caveat`. E6 writes it as a
 `caveat`-mode knowledge page and **auto-surfaces** it alongside any search result that touches
 `orders.total_revenue` — so the warning rides along even if the original query was about
 reporting policy, not refunds.

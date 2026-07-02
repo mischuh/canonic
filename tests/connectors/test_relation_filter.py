@@ -7,7 +7,7 @@ absent-filter passthrough behavior.
 
 from __future__ import annotations
 
-from canon.connectors.relation_filter import filter_relations
+from canonic.connectors.relation_filter import filter_relations
 
 _RELATIONS: dict[tuple[str, str], str] = {
     ("public", "orders"): "table",

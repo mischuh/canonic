@@ -4,11 +4,11 @@ from __future__ import annotations
 
 import pytest
 
-from canon import exc
-from canon.exc import EXIT_CODES, CanonError, ErrorCode
+from canonic import exc
+from canonic.exc import EXIT_CODES, CanonicError, ErrorCode
 
 # (exception class, expected exit code) for every registry entry.
-_REGISTRY: list[tuple[type[CanonError], int]] = [
+_REGISTRY: list[tuple[type[CanonicError], int]] = [
     (exc.Unresolved, 2),
     (exc.Ambiguous, 3),
     (exc.Unreachable, 4),
@@ -36,12 +36,12 @@ def test_every_error_code_has_a_unique_exit_value() -> None:
 
 
 @pytest.mark.parametrize(("error_cls", "expected_exit"), _REGISTRY)
-def test_subclass_exit_code(error_cls: type[CanonError], expected_exit: int) -> None:
+def test_subclass_exit_code(error_cls: type[CanonicError], expected_exit: int) -> None:
     assert error_cls("boom").exit_code == expected_exit
 
 
 def test_base_error_without_code_uses_exit_one() -> None:
-    assert CanonError("boom").exit_code == 1
+    assert CanonicError("boom").exit_code == 1
 
 
 def test_errors_without_registry_code_use_exit_one() -> None:
@@ -50,9 +50,9 @@ def test_errors_without_registry_code_use_exit_one() -> None:
     assert exc.SemanticSourceError("x").exit_code == 1
 
 
-def test_all_subclasses_derive_from_canon_error() -> None:
+def test_all_subclasses_derive_from_canonic_error() -> None:
     for error_cls, _ in _REGISTRY:
-        assert issubclass(error_cls, CanonError)
+        assert issubclass(error_cls, CanonicError)
 
 
 def test_unsupported_source_version_reuses_connection_error() -> None:

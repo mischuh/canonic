@@ -6,14 +6,14 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from canon.exc import ErrorCode, KnowledgeReferenceError
-from canon.knowledge.models import KnowledgeScope
-from canon.knowledge.validation import EntityIndex, PageIndex, ReferenceValidator
+from canonic.exc import ErrorCode, KnowledgeReferenceError
+from canonic.knowledge.models import KnowledgeScope
+from canonic.knowledge.validation import EntityIndex, PageIndex, ReferenceValidator
 
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from canon.knowledge.models import KnowledgePage
+    from canonic.knowledge.models import KnowledgePage
 
 
 # --- EntityIndex / PageIndex builders -------------------------------------------------

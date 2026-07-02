@@ -4,13 +4,13 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from canon.knowledge.index import KnowledgeIndex
-from canon.knowledge.models import KnowledgeScope
+from canonic.knowledge.index import KnowledgeIndex
+from canonic.knowledge.models import KnowledgeScope
 
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from canon.knowledge.models import KnowledgePage
+    from canonic.knowledge.models import KnowledgePage
 
 
 def test_summary_match_outranks_body_match(
@@ -58,7 +58,7 @@ def test_persisted_index_under_path(
     make_search_page: Callable[..., KnowledgePage],
 ) -> None:
     """A path-backed index builds the directory and searches like the RAM one."""
-    index_dir = tmp_path / ".canon" / "index" / "knowledge"
+    index_dir = tmp_path / ".canonic" / "index" / "knowledge"
     index = KnowledgeIndex.build([make_search_page("p", summary="alpha")], path=index_dir)
 
     assert index_dir.exists()

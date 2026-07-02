@@ -1,4 +1,4 @@
-"""Tests for canon/ingestion/models.py (GH-32)."""
+"""Tests for canonic/ingestion/models.py (GH-32)."""
 
 from __future__ import annotations
 
@@ -7,8 +7,8 @@ from datetime import UTC, datetime
 import pytest
 from pydantic import ValidationError
 
-from canon.connectors.base import AcquisitionTier
-from canon.ingestion.models import (
+from canonic.connectors.base import AcquisitionTier
+from canonic.ingestion.models import (
     KNOWN_EVIDENCE_KINDS,
     DraftedBy,
     EvidenceItem,
@@ -19,7 +19,7 @@ from canon.ingestion.models import (
     ReconciliationEntry,
     ReconciliationReport,
 )
-from canon.semantic.models import Provenance
+from canonic.semantic.models import Provenance
 
 # ---------------------------------------------------------------------------
 # Helpers

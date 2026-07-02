@@ -8,8 +8,8 @@ from zoneinfo import ZoneInfo
 import pytest
 from pydantic import ValidationError
 
-from canon.contracts.finality import evaluate_watermark, validate_finality_rule, watermark_to_iso
-from canon.contracts.models import FinalityRule, Realization
+from canonic.contracts.finality import evaluate_watermark, validate_finality_rule, watermark_to_iso
+from canonic.contracts.models import FinalityRule, Realization
 
 
 class TestEvaluateWatermark:

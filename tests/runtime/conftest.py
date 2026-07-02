@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import pytest
 
-from canon.config import LLMConfig
+from canonic.config import LLMConfig
 
 
 @pytest.fixture
@@ -18,6 +18,6 @@ def llm_config() -> LLMConfig:
         provider="openai_compatible",
         base_url="http://localhost:11434/v1",
         model="small-local",
-        api_key_ref="env:CANON_LLM_KEY",
+        api_key_ref="env:CANONIC_LLM_KEY",
         tasks={"reconcile": "stronger-model"},
     )

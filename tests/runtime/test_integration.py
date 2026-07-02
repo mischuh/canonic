@@ -1,11 +1,11 @@
 """Optional live check against a real OpenAI-compatible endpoint (SPEC-E10 S1-AC1).
 
-Skipped unless ``CANON_LLM_BASE_URL`` points at a running server (e.g. a local Ollama,
+Skipped unless ``CANONIC_LLM_BASE_URL`` points at a running server (e.g. a local Ollama,
 llama.cpp, or vLLM ``/v1``). This is the literal AC1 manual proof: a real draft over the
 ``openai_compatible`` path with no engine-specific code. Configure with:
 
-    CANON_LLM_BASE_URL=http://localhost:11434/v1 \
-    CANON_LLM_MODEL=llama3.2 \
+    CANONIC_LLM_BASE_URL=http://localhost:11434/v1 \
+    CANONIC_LLM_MODEL=llama3.2 \
     pytest -m integration tests/runtime/test_integration.py
 """
 
@@ -16,14 +16,14 @@ import os
 import pytest
 from pydantic import BaseModel
 
-from canon.config import LLMConfig
-from canon.runtime.generation import GenerationRuntime
+from canonic.config import LLMConfig
+from canonic.runtime.generation import GenerationRuntime
 
-_BASE_URL = os.environ.get("CANON_LLM_BASE_URL")
+_BASE_URL = os.environ.get("CANONIC_LLM_BASE_URL")
 
 pytestmark = [
     pytest.mark.integration,
-    pytest.mark.skipif(not _BASE_URL, reason="set CANON_LLM_BASE_URL to run the live check"),
+    pytest.mark.skipif(not _BASE_URL, reason="set CANONIC_LLM_BASE_URL to run the live check"),
 ]
 
 
@@ -35,8 +35,8 @@ def _config() -> LLMConfig:
     return LLMConfig(
         provider="openai_compatible",
         base_url=_BASE_URL or "",
-        model=os.environ.get("CANON_LLM_MODEL", "llama3.2"),
-        api_key_ref="env:CANON_LLM_KEY" if os.environ.get("CANON_LLM_KEY") else None,
+        model=os.environ.get("CANONIC_LLM_MODEL", "llama3.2"),
+        api_key_ref="env:CANONIC_LLM_KEY" if os.environ.get("CANONIC_LLM_KEY") else None,
     )
 
 

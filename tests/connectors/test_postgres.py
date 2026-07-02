@@ -13,10 +13,10 @@ import asyncpg
 import pytest
 from sqlalchemy.exc import DBAPIError
 
-from canon.config import Connection
-from canon.connectors.base import AcquisitionTier, Capability
-from canon.connectors.postgres import PostgresConnector, _normalize_type, _resolve_search_path
-from canon.exc import ReadOnlyViolation
+from canonic.config import Connection
+from canonic.connectors.base import AcquisitionTier, Capability
+from canonic.connectors.postgres import PostgresConnector, _normalize_type, _resolve_search_path
+from canonic.exc import ReadOnlyViolation
 
 # ---------------------------------------------------------------------------
 # Unit: type mapping
@@ -110,12 +110,12 @@ class TestPostgresIntegration:
         postgres_container: dict,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        monkeypatch.setenv("CANON_TEST_BAD_PW", "definitely-wrong")
+        monkeypatch.setenv("CANONIC_TEST_BAD_PW", "definitely-wrong")
         connection = Connection(
             id="warehouse_pg",
             type="postgres",
             params=postgres_container["params"],
-            credentials_ref="env:CANON_TEST_BAD_PW",
+            credentials_ref="env:CANONIC_TEST_BAD_PW",
         )
         connector = PostgresConnector(connection)
         try:
@@ -161,7 +161,7 @@ class TestPostgresIntegration:
     async def test_introspection_with_fetch_column_stats_populates_stats_fields(
         self, postgres_container: dict, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        monkeypatch.setenv("CANON_TEST_PG_PASSWORD", postgres_container["password"])
+        monkeypatch.setenv("CANONIC_TEST_PG_PASSWORD", postgres_container["password"])
         params = postgres_container["params"]
         dsn = (
             f"postgresql://{params['user']}:{postgres_container['password']}"
@@ -186,7 +186,7 @@ class TestPostgresIntegration:
             id="warehouse_pg",
             type="postgres",
             params={**params, "fetch_column_stats": True},
-            credentials_ref="env:CANON_TEST_PG_PASSWORD",
+            credentials_ref="env:CANONIC_TEST_PG_PASSWORD",
         )
         connector = PostgresConnector(connection)
         try:
@@ -238,12 +238,12 @@ class TestPostgresIntegration:
     async def test_introspection_excludes_unselected_schema(
         self, postgres_container: dict, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        monkeypatch.setenv("CANON_TEST_PG_PASSWORD", postgres_container["password"])
+        monkeypatch.setenv("CANONIC_TEST_PG_PASSWORD", postgres_container["password"])
         connection = Connection(
             id="warehouse_pg",
             type="postgres",
             params={**postgres_container["params"], "schemas": ["nonexistent"]},
-            credentials_ref="env:CANON_TEST_PG_PASSWORD",
+            credentials_ref="env:CANONIC_TEST_PG_PASSWORD",
         )
         connector = PostgresConnector(connection)
         try:
@@ -255,12 +255,12 @@ class TestPostgresIntegration:
     async def test_introspection_filters_by_table_glob(
         self, postgres_container: dict, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        monkeypatch.setenv("CANON_TEST_PG_PASSWORD", postgres_container["password"])
+        monkeypatch.setenv("CANONIC_TEST_PG_PASSWORD", postgres_container["password"])
         connection = Connection(
             id="warehouse_pg",
             type="postgres",
             params={**postgres_container["params"], "tables": ["fct_*"]},
-            credentials_ref="env:CANON_TEST_PG_PASSWORD",
+            credentials_ref="env:CANONIC_TEST_PG_PASSWORD",
         )
         connector = PostgresConnector(connection)
         try:

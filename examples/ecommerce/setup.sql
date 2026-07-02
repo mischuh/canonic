@@ -1,5 +1,5 @@
--- Canon ecommerce demo — idempotent setup, safe to re-run against an existing database:
---   psql "$CANON_PG_DSN" < setup.sql
+-- Canonic ecommerce demo — idempotent setup, safe to re-run against an existing database:
+--   psql "$CANONIC_PG_DSN" < setup.sql
 --
 -- Tables are dropped in reverse FK order and recreated from scratch each run,
 -- so schema changes (e.g. new columns) are always applied cleanly.

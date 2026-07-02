@@ -1,8 +1,8 @@
 # Candidate local models for the E10 baseline harness (SPEC-E10 §7, GH-66).
 # Copy, edit to point at your running local servers, then:
-#   canon eval baseline --candidates candidates.yaml
+#   canonic eval baseline --candidates candidates.yaml
 #
-# Each entry mirrors a canon.yaml `llm` block. `openai_compatible` covers local runtimes
+# Each entry mirrors a canonic.yaml `llm` block. `openai_compatible` covers local runtimes
 # (Ollama, vLLM, LM Studio, llama.cpp, TGI) and hosted endpoints — they differ only by
 # `base_url` and whether a key is needed. Local servers usually need no key (omit api_key_ref).
 candidates:

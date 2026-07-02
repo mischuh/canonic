@@ -6,17 +6,17 @@ from datetime import UTC, datetime
 
 import pytest
 
-from canon.eval.dataset import ReconcileCase
-from canon.eval.harness import run_baseline
-from canon.eval.models import StructuredOutcome
-from canon.exc import (
+from canonic.eval.dataset import ReconcileCase
+from canonic.eval.harness import run_baseline
+from canonic.eval.models import StructuredOutcome
+from canonic.exc import (
     CredentialError,
     GenerationError,
     StructuredOutputError,
     StructuredOutputUnsupported,
 )
-from canon.ingestion.reconciliation import ResolutionDraft
-from canon.runtime.resolver import Task
+from canonic.ingestion.reconciliation import ResolutionDraft
+from canonic.runtime.resolver import Task
 from tests.eval.conftest import StubDrafter, StubUsageReader, make_candidate
 
 

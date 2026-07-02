@@ -1,19 +1,19 @@
-# Canon ecommerce demo
+# Canonic ecommerce demo
 
-A small but end-to-end Canon project: a Postgres connection, a four-source star schema
+A small but end-to-end Canonic project: a Postgres connection, a four-source star schema
 (two facts, three dimensions), three canonical metrics, one enforced guardrail, and a
 companion dbt manifest demonstrating the E3 definition connector.
 Covers the complete **Phase 1 loop**: ingest bootstraps context from a real stack, the
-MCP server gives agents both executable definitions and business meaning, and `canon eval`
+MCP server gives agents both executable definitions and business meaning, and `canonic eval`
 tracks accuracy. See [E3 connectors](#e3-connectors--definitions--evidence-beyond-the-primary-source)
 for the dbt / Notion / Metabase / Looker sources that feed meaning beyond raw introspection.
 
 ## Phase 1 loop
 
 ```
-canon ingest --bootstrap          # 1. bootstrap: introspect Postgres → write semantics/*.yaml
-canon mcp start                   # 2. serve: agents call query() + search_knowledge() together
-canon eval baseline \             # 3. track: measure grain-inference accuracy on the live schema
+canonic ingest --bootstrap          # 1. bootstrap: introspect Postgres → write semantics/*.yaml
+canonic mcp start                   # 2. serve: agents call query() + search_knowledge() together
+canonic eval baseline \             # 3. track: measure grain-inference accuracy on the live schema
   --candidates candidates.yaml \
   --dataset eval/grain_cases.jsonl
 ```
@@ -22,19 +22,19 @@ Each step proves one Phase 1 exit criterion:
 
 | Step | Criterion |
 | --- | --- |
-| `canon ingest --bootstrap` | Bootstraps context from a real stack |
+| `canonic ingest --bootstrap` | Bootstraps context from a real stack |
 | `query()` + `search_knowledge()` | Agents get both executable definitions and business meaning |
-| `canon eval baseline` | Accuracy is tracked |
+| `canonic eval baseline` | Accuracy is tracked |
 
 ## What's in here
 
 ```
-canon.yaml                              ← project config + Postgres connection + dbt connection
+canonic.yaml                              ← project config + Postgres connection + dbt connection
 setup.sql                               ← CREATE TABLE + seed data (10 orders, 17 line items,
                                           5 customers, 5 products, 3 channels)
 dbt/manifest.json                       ← E3 definition connector: compiled dbt manifest mirroring
                                           the star schema (measures, entities, joins) — runs offline
-candidates.yaml                         ← local model candidates for canon eval baseline
+candidates.yaml                         ← local model candidates for canonic eval baseline
 eval/grain_cases.jsonl                  ← labeled grain-inference cases for the ecommerce schema
 semantics/warehouse_pg/
   orders.yaml                           ← fact: revenue/order_count measures, joins to customers + channels
@@ -55,16 +55,16 @@ knowledge/global/
   units-sold-definition.md              ← usage_mode: definition — what units_sold means + live expr
   order-items-fanout-caveat.md          ← usage_mode: caveat — line-item fanout trap (auto-surfaces)
 docs/notion-pages/                      ← sample Notion page sources for the DocEvidence connector
-  revenue-definition.md                 ← Canon Type: definition — prose the Notion connector ingests
-  revenue-excludes-refunds-caveat.md    ← Canon Type: caveat   — auto-surfaced next to revenue
-  revenue-reporting-policy.md           ← Canon Type: policy   — month-end cutoff rules
-  units-sold-definition.md              ← Canon Type: definition — prose for the units_sold metric
-  order-items-fanout-caveat.md          ← Canon Type: caveat   — auto-surfaced next to units_sold
+  revenue-definition.md                 ← Canonic Type: definition — prose the Notion connector ingests
+  revenue-excludes-refunds-caveat.md    ← Canonic Type: caveat   — auto-surfaced next to revenue
+  revenue-reporting-policy.md           ← Canonic Type: policy   — month-end cutoff rules
+  units-sold-definition.md              ← Canonic Type: definition — prose for the units_sold metric
+  order-items-fanout-caveat.md          ← Canonic Type: caveat   — auto-surfaced next to units_sold
 ```
 
 ## Prerequisites
 
-- Python ≥ 3.13, Canon installed (`pip install -e ../..` from this directory)
+- Python ≥ 3.13, Canonic installed (`pip install -e ../..` from this directory)
 - A Postgres database you can write to (local Docker, Neon free tier, etc.)
 
 ## Setup
@@ -72,21 +72,21 @@ docs/notion-pages/                      ← sample Notion page sources for the D
 **1. Create the tables and seed data:**
 
 ```sh
-export CANON_PG_PASSWORD=postgres   # password for the postgres user
-psql "postgres://postgres:${CANON_PG_PASSWORD}@localhost:5432/postgres" < setup.sql
+export CANONIC_PG_PASSWORD=postgres   # password for the postgres user
+psql "postgres://postgres:${CANONIC_PG_PASSWORD}@localhost:5432/postgres" < setup.sql
 ```
 
 The script is **idempotent** — re-running it drops and recreates all tables in the correct
 order, so schema changes (e.g. a new column) are always applied cleanly. The `analytics`
-schema is declared once in `canon.yaml` (`schema: analytics`) and applied as `search_path`
+schema is declared once in `canonic.yaml` (`schema: analytics`) and applied as `search_path`
 on every session — no need to embed it in the connection string.
 
 **2. Verify the project is recognised:**
 
 ```sh
-cd examples/ecommerce   # ← must run canon commands from here
-canon status
-# Canon project: ecommerce-demo (version 1)
+cd examples/ecommerce   # ← must run canonic commands from here
+canonic status
+# Canonic project: ecommerce-demo (version 1)
 # Root: /path/to/examples/ecommerce
 # Connection: warehouse_pg (postgres)
 ```
@@ -96,7 +96,7 @@ canon status
 **Stdio — for Claude Code / Cursor (the MCP client owns the process):**
 
 ```sh
-canon mcp start
+canonic mcp start
 ```
 
 Add this to your Claude Code MCP config (`~/.claude.json` or the project `.claude.json`):
@@ -104,8 +104,8 @@ Add this to your Claude Code MCP config (`~/.claude.json` or the project `.claud
 ```json
 {
   "mcpServers": {
-    "canon": {
-      "command": "canon",
+    "canonic": {
+      "command": "canonic",
       "args": ["mcp", "start"],
       "cwd": "/absolute/path/to/examples/ecommerce"
     }
@@ -115,17 +115,17 @@ Add this to your Claude Code MCP config (`~/.claude.json` or the project `.claud
 
 ```
 "mcpServers": {
-    "canon": {
+    "canonic": {
       "command": "/Users/mirko/.local/bin/uv",
       "args": [
         "run",
         "--with",
-        "canon@/Users/mirko/dev/canon", 
-        "canon",
+        "canonic@/Users/mirko/dev/canonic", 
+        "canonic",
         "mcp",
         "start"
       ],
-      "cwd": "/Users/mirko/dev/canon/examples/rental"
+      "cwd": "/Users/mirko/dev/canonic/examples/rental"
     }
   },
 ```
@@ -133,16 +133,16 @@ Add this to your Claude Code MCP config (`~/.claude.json` or the project `.claud
 **HTTP daemon — background process, multiple clients can connect:**
 
 ```sh
-canon mcp start --http --port 7474
-canon mcp status   # shows: running | PID | version | transport
-canon mcp stop     # SIGTERM + removes .canon/mcp.json
+canonic mcp start --http --port 7474
+canonic mcp status   # shows: running | PID | version | transport
+canonic mcp stop     # SIGTERM + removes .canonic/mcp.json
 ```
 
 If the daemon starts but immediately dies (e.g. port already in use, import error), check
-`.canon/mcp.log` — stdout and stderr from the daemon process are written there:
+`.canonic/mcp.log` — stdout and stderr from the daemon process are written there:
 
 ```sh
-tail -f .canon/mcp.log
+tail -f .canonic/mcp.log
 ```
 
 Connect your MCP client to the running daemon — no `command`/`args`, just a URL:
@@ -151,7 +151,7 @@ Connect your MCP client to the running daemon — no `command`/`args`, just a UR
 ```json
 {
   "mcpServers": {
-    "canon": {
+    "canonic": {
       "transport": "streamable-http",
       "url": "http://127.0.0.1:7474/mcp"
     }
@@ -162,8 +162,8 @@ Connect your MCP client to the running daemon — no `command`/`args`, just a UR
 The server uses FastMCP's **Streamable HTTP** transport (MCP spec 2025-03-26) at `/mcp`.
 If your client only supports SSE, use `/sse` instead.
 
-Only `--http` mode writes `.canon/mcp.json`. In stdio mode the MCP client owns the
-process — no state file is created and `.canon/` stays absent; that is expected.
+Only `--http` mode writes `.canonic/mcp.json`. In stdio mode the MCP client owns the
+process — no state file is created and `.canonic/` stays absent; that is expected.
 
 ## Example tool calls
 
@@ -269,7 +269,7 @@ search_knowledge("revenue definition")
 
 ## Ingestion — keep semantics current as the schema evolves
 
-`canon ingest` refreshes the semantic files from the live Postgres schema.  The demo project
+`canonic ingest` refreshes the semantic files from the live Postgres schema.  The demo project
 ships with **hand-authored** (`provenance: human_curated`) files; an ingest run reconciles the
 live schema against them and surfaces any drift as a reviewable diff — without overwriting the
 curated definitions silently.
@@ -277,7 +277,7 @@ curated definitions silently.
 **Dry run — see what would change, write nothing:**
 
 ```sh
-canon ingest --dry-run
+canonic ingest --dry-run
 # Decisions: add: 0, no_op: 2, …
 # (no_op because orders.yaml and customers.yaml already match the live schema)
 ```
@@ -285,23 +285,23 @@ canon ingest --dry-run
 **Bootstrap a connection from scratch** (for a fresh project without hand-authored files):
 
 ```sh
-canon ingest --bootstrap
+canonic ingest --bootstrap
 # Introspects warehouse_pg → writes semantics/warehouse_pg/*.yaml deterministically
 ```
 
 **Full ingest — propose diffs for review:**
 
 ```sh
-canon ingest
+canonic ingest
 # Writes raw-sources/warehouse_pg/evidence.jsonl (committed, reproducible)
-# Writes .canon/ingest-events.jsonl             (local audit log, git-ignored)
+# Writes .canonic/ingest-events.jsonl             (local audit log, git-ignored)
 # Edits no committed semantics in place
 ```
 
 **JSON output — machine-readable reconciliation report:**
 
 ```sh
-canon --json ingest --dry-run
+canonic --json ingest --dry-run
 # {"diffs": […], "notes": [], "report": {"entries": […], "summary": {"add": 0, "no_op": 2, …}}}
 ```
 
@@ -309,10 +309,10 @@ canon --json ingest --dry-run
 
 ```sh
 # Same result on every run with the same schema (identical proposals, identical JSON):
-canon ingest --headless --no-pr
+canonic ingest --headless --no-pr
 
 # Full CI recipe: open a PR if diffs exist, fail on contradictions:
-canon --json ingest --headless --strict
+canonic --json ingest --headless --strict
 # exit 0  → clean run (PR opened if diffs, or no-op)
 # exit 9  → VALIDATION_FAILED — proposed output invalid, no PR
 # exit 13 → CONNECTION_ERROR  — Postgres unreachable
@@ -322,12 +322,12 @@ canon --json ingest --headless --strict
 Example GitHub Actions job (add to `.github/workflows/`):
 
 ```yaml
-- name: Canon ingest
-  run: canon --json ingest --headless --strict
+- name: Canonic ingest
+  run: canonic --json ingest --headless --strict
   working-directory: examples/ecommerce
   env:
     CI: "true"
-    CANON_PG_PASSWORD: ${{ secrets.CANON_PG_PASSWORD }}
+    CANONIC_PG_PASSWORD: ${{ secrets.CANONIC_PG_PASSWORD }}
 ```
 
 **Contradiction example** — what happens when schema drift conflicts with a curated fact:
@@ -340,7 +340,7 @@ resolve.
 
 ## E3 connectors — definitions & evidence beyond the primary source
 
-Postgres introspection (E2) tells Canon what tables *exist*; the **E3 connectors** tell it
+Postgres introspection (E2) tells Canonic what tables *exist*; the **E3 connectors** tell it
 what those tables *mean*. They fall into two capability classes, and the core dispatches on
 the capability a connector advertises — never on the vendor name (SPEC-E3 §2):
 
@@ -355,7 +355,7 @@ Two invariants hold for every E3 connector:
 - **No execution.** None of them advertise `run_read_only_sql` — a definition or BI source is
   read for *meaning*, never queried for *data* (SPEC-E3 §2, S8). The no-execution guard is
   structural: there is no code path from an E3 connector to a database.
-- **Normalized seam.** Each connector emits Canon's normalized evidence schema, re-validated
+- **Normalized seam.** Each connector emits Canonic's normalized evidence schema, re-validated
   before it crosses into the pipeline; unknown or invalid evidence is logged and dropped, never
   passed through half-formed (SPEC-E3 §7, S7). No vendor shape ever reaches the reconciler.
 
@@ -363,7 +363,7 @@ Two invariants hold for every E3 connector:
 
 This demo ships a compiled dbt manifest at [`dbt/manifest.json`](dbt/manifest.json) modeling the
 same star schema (`fct_orders`, `fct_order_items`, three dimensions) with measures, entities,
-and joins. It is wired into [`canon.yaml`](canon.yaml) as a second connection — **no database,
+and joins. It is wired into [`canonic.yaml`](canonic.yaml) as a second connection — **no database,
 no credentials**:
 
 ```yaml
@@ -371,15 +371,15 @@ connections:
   - id: warehouse_dbt
     type: dbt
     params:
-      manifest_path: dbt/manifest.json   # relative to canon.yaml
+      manifest_path: dbt/manifest.json   # relative to canonic.yaml
     # no credentials_ref — a manifest is a local file, not a guarded endpoint
 ```
 
-`canon ingest` reconciles the manifest into reviewable semantic proposals exactly like the
+`canonic ingest` reconciles the manifest into reviewable semantic proposals exactly like the
 Postgres path — but entirely from the file, so it runs with **no Postgres and no LLM**:
 
 ```sh
-canon ingest --connection warehouse_dbt --dry-run
+canonic ingest --connection warehouse_dbt --dry-run
 # # Ingest reconciliation summary
 # ## Decisions
 # - add: 5            ← one proposal per dbt model
@@ -396,7 +396,7 @@ canon ingest --connection warehouse_dbt --dry-run
 What the connector pulls out of the manifest, all at acquisition tier `modeling`:
 
 - **`RelationSchema`** per model — columns + normalized types, primary key, and foreign keys
-  lifted into Canon's join shape (`many_to_one`).
+  lifted into Canonic's join shape (`many_to_one`).
 - **`DefinitionEvidence`** for each `model`, `entity`, `join`, `measure`, and `dimension` —
   e.g. `total_revenue` (`agg: sum` → `additive`), the `order_id` grain, the
   `orders → customers` join.
@@ -417,7 +417,7 @@ These read prose and BI usage rather than schema. Unlike dbt they require a reac
 and a credential. To make the evidence flow concrete without a live Notion workspace, this demo
 ships five sample Notion page sources in [`docs/notion-pages/`](docs/notion-pages/) — one per
 knowledge page type, in the format the Notion connector expects. You can read them to understand
-what to write in your own Notion workspace before pointing Canon at it.
+what to write in your own Notion workspace before pointing Canonic at it.
 
 Add any evidence connector as another connection:
 
@@ -430,7 +430,7 @@ connections:
       api_version: "2022-06-28"        # optional; pins the Notion API version
     credentials_ref: env:NOTION_TOKEN
 
-  # BI questions → UsageEvidence (candidates only — never auto-promoted to canon, FR-13)
+  # BI questions → UsageEvidence (candidates only — never auto-promoted to canonic, FR-13)
   - id: bi_metabase
     type: metabase
     params:
@@ -455,26 +455,26 @@ connections:
 
   | Notion property | Type | Maps to |
   | --- | --- | --- |
-  | `Canon Type` | select | `DocEvidence.usage_hint` → E6 `usage_mode` |
-  | `Canon Topics` | multi-select | `DocEvidence.topic_refs` (candidates for E6 to resolve) |
+  | `Canonic Type` | select | `DocEvidence.usage_hint` → E6 `usage_mode` |
+  | `Canonic Topics` | multi-select | `DocEvidence.topic_refs` (candidates for E6 to resolve) |
 
   The sample files in [`docs/notion-pages/`](docs/notion-pages/) show this format — the YAML
   frontmatter in those files represents the Notion sidebar properties; the Markdown body becomes
-  `DocEvidence.body`. Each file also includes a short **"How this becomes a Canon knowledge page"**
+  `DocEvidence.body`. Each file also includes a short **"How this becomes a Canonic knowledge page"**
   section explaining the ingestion chain for that specific page type.
 - **Metabase / Looker → `UsageEvidence`.** A dashboard's metric definition is observed BI
-  usage, a reconciliation *signal* — a candidate, never canon. Its `role` is bounded to
+  usage, a reconciliation *signal* — a candidate, never canonic. Its `role` is bounded to
   `alternative` (feeds deprecated-alternatives) or `trusted_example` (feeds assertion
   candidates); there is no `canonical` role, so auto-promotion of a BI question to a canonical
   binding is structurally unrepresentable (PRD FR-13, SPEC-E3 §3.3).
 
-Once configured, a full `canon ingest` (no `--connection`) gathers evidence from **every**
+Once configured, a full `canonic ingest` (no `--connection`) gathers evidence from **every**
 connection in one pass — Postgres introspection, dbt definitions, and doc/usage evidence —
 dispatching on each connector's declared capabilities and merging the normalized streams.
 
-## Accuracy tracking — `canon eval baseline`
+## Accuracy tracking — `canonic eval baseline`
 
-`canon eval` measures how accurately a local model infers grain from schema alone (SPEC-E10
+`canonic eval` measures how accurately a local model infers grain from schema alone (SPEC-E10
 §7). The harness runs the production `draft` path over the labeled cases in
 `eval/grain_cases.jsonl` and writes a markdown report.
 
@@ -482,7 +482,7 @@ dispatching on each connector's declared capabilities and merging the normalized
 
 ```sh
 # Point candidates.yaml at your running model server, then:
-canon eval baseline \
+canonic eval baseline \
   --candidates candidates.yaml \
   --dataset eval/grain_cases.jsonl \
   --out docs/baseline-models.md
@@ -499,7 +499,7 @@ single surrogate key (`dim_customers`, `dim_channels`, `fct_orders`), descriptiv
 (`dim_products`), and a line-item fact (`fct_order_items`) where `order_item_id` is the grain
 rather than the composite `(order_id, product_id)`.
 
-No LLM config is needed to run the rest of the project — `canon eval baseline` is the only
+No LLM config is needed to run the rest of the project — `canonic eval baseline` is the only
 command that makes live model calls.
 
 ## CLI usage
@@ -517,7 +517,7 @@ EOF
 **Human output (Rich table):**
 
 ```sh
-canon query -f q.json
+canonic query -f q.json
 # ┏━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━┓
 # ┃ order_date          ┃ total_revenue ┃
 # ┡━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━┩
@@ -528,7 +528,7 @@ canon query -f q.json
 **Machine output (`--json`) — byte-identical to the MCP `query` tool:**
 
 ```sh
-canon --json query -f q.json
+canonic --json query -f q.json
 ```
 
 ```json
@@ -549,17 +549,17 @@ canon --json query -f q.json
 cat > q.json <<'EOF'
 {"metrics": ["revenue", "order_count"], "dimensions": ["country"]}
 EOF
-canon --json query -f q.json
+canonic --json query -f q.json
 ```
 
 **Raw read-only SQL:**
 
 ```sh
-canon sql "SELECT status, sum(amount) FROM analytics.fct_orders GROUP BY status"
-canon --json sql "SELECT count(*) FROM analytics.fct_orders"
+canonic sql "SELECT status, sum(amount) FROM analytics.fct_orders GROUP BY status"
+canonic --json sql "SELECT count(*) FROM analytics.fct_orders"
 
 # Non-SELECT is rejected before touching the database:
-canon sql "DROP TABLE analytics.fct_orders"
+canonic sql "DROP TABLE analytics.fct_orders"
 # error: read_only_violation: …
 # echo $? → 11
 ```
@@ -571,27 +571,27 @@ canon sql "DROP TABLE analytics.fct_orders"
 cat > q.json <<'EOF'
 {"metrics": ["mrr"]}
 EOF
-canon --json query -f q.json   # stderr: {"code": "unresolved", "message": "…"}
+canonic --json query -f q.json   # stderr: {"code": "unresolved", "message": "…"}
 echo $?                        # 2
 ```
 
-**CLI vs. MCP — same result:** `canon --json query` and the MCP `query` tool both call
-the same `CanonService` and serialize via the same Pydantic model. The walking-skeleton
+**CLI vs. MCP — same result:** `canonic --json query` and the MCP `query` tool both call
+the same `CanonicService` and serialize via the same Pydantic model. The walking-skeleton
 E2E test (`tests/e2e/test_walking_skeleton.py::test_parity`) asserts byte-identical
 payloads against live Postgres on every CI run.
 
-## Event log & observability (`canon report`)
+## Event log & observability (`canonic report`)
 
 Every query the MCP server or CLI serves appends a `served_answer` event to
-`.canon/events.jsonl` — a local, append-only NDJSON file that is git-ignored. Every
-`canon ingest` run appends `reconcile_decision` events to the same file. Both kinds share
+`.canonic/events.jsonl` — a local, append-only NDJSON file that is git-ignored. Every
+`canonic ingest` run appends `reconcile_decision` events to the same file. Both kinds share
 one unified log; nothing leaves the machine.
 
 **Human report — counts, latency, bytes scanned, error distribution:**
 
 ```sh
-canon report
-# canon report  (telemetry: off)
+canonic report
+# canonic report  (telemetry: off)
 #
 # answers:        42  (2026-06-01T08:00:00Z → 2026-06-19T16:45:12Z)
 # latency:        p50 310ms  p95 1240ms  min 85ms  max 2110ms  avg 420ms
@@ -609,13 +609,13 @@ canon report
 **Restrict to the last N events:**
 
 ```sh
-canon report --last 100
+canonic report --last 100
 ```
 
 **Machine-readable — for dashboards or CI:**
 
 ```sh
-canon --json report --last 50
+canonic --json report --last 50
 # {"count": 42, "error_distribution": {"ok": 40, "unresolved": 2},
 #  "latency": {"p50_ms": 310, "p95_ms": 1240, …},
 #  "bytes_scanned": {"total": 1234567, …},
@@ -642,23 +642,23 @@ nothing is sent off-machine. To enforce this at the config level and prevent it 
 being enabled accidentally, set `runtime.air_gapped: true`:
 
 ```yaml
-# canon.yaml
+# canonic.yaml
 runtime:
   air_gapped: true   # blocks telemetry.enabled: true at load time (exit 18)
 ```
 
-With `air_gapped: true`, Canon also validates at load time that:
+With `air_gapped: true`, Canonic also validates at load time that:
 
 - The LLM `base_url` resolves only to a loopback or explicitly allowlisted address.
 - Secret refs (`credentials_ref`, `api_key_ref`) use only local schemes — `env:`, `file:`,
   or `keyring:`. Remote secret services (e.g. `vault:`) are rejected.
 
 The daemon never starts mis-configured — any violation is a hard exit 18 before the first
-query is served. `canon status` is the fastest way to confirm a config passes:
+query is served. `canonic status` is the fastest way to confirm a config passes:
 
 ```sh
-canon status
-# Canon project: ecommerce-demo (version 1)   ← load succeeded, all constraints satisfied
+canonic status
+# Canonic project: ecommerce-demo (version 1)   ← load succeeded, all constraints satisfied
 ```
 
 To add an on-prem inference host outside loopback:
@@ -727,10 +727,10 @@ the semantic source.
 
 ```python
 from pathlib import Path
-from canon.knowledge import (
+from canonic.knowledge import (
     KnowledgeSearch, EntityIndex, load_knowledge_page,
 )
-from canon.semantic.loader import list_semantic_sources
+from canonic.semantic.loader import list_semantic_sources
 
 root = Path(".")  # from examples/ecommerce/
 
@@ -763,8 +763,8 @@ print([(c.page, c.triggered_by) for c in result2.caveats])
 ### Live rendering
 
 ```python
-from canon.knowledge import DefinitionRenderer
-from canon.knowledge.loader import load_knowledge_page
+from canonic.knowledge import DefinitionRenderer
+from canonic.knowledge.loader import load_knowledge_page
 
 page = load_knowledge_page(root / "knowledge/global/revenue-definition.md")
 renderer = DefinitionRenderer(entity_index)
@@ -783,7 +783,7 @@ reflect `sum(amount * fx_rate)` automatically — no page edit needed.
 If the `expr` in `orders.yaml` changes, `DriftDetector` flags the page for prose review:
 
 ```python
-from canon.knowledge import DriftDetector
+from canonic.knowledge import DriftDetector
 
 detector = DriftDetector()
 

@@ -1,9 +1,9 @@
 ---
 # Notion page properties:
-#   "Canon Type"   (select):       caveat
-#   "Canon Topics" (multi-select): order_items, fanout, units_sold, line_revenue
-canon_type: caveat
-canon_topics: [order_items, fanout, units_sold, line_revenue]
+#   "Canonic Type"   (select):       caveat
+#   "Canonic Topics" (multi-select): order_items, fanout, units_sold, line_revenue
+canonic_type: caveat
+canonic_topics: [order_items, fanout, units_sold, line_revenue]
 ---
 
 # Order Items Fanout Trap
@@ -35,7 +35,7 @@ If you need both in one view: run two separate queries and join on `order_id` in
 orders). In the ecommerce demo data both equal **3790.50**. A discrepancy signals either a
 data error or an accidental cross-fact join.
 
-## How this becomes a Canon knowledge page
+## How this becomes a Canonic knowledge page
 
-Canon ingests this page as `DocEvidence` with `usage_hint: caveat`. E6 auto-surfaces it
+Canonic ingests this page as `DocEvidence` with `usage_hint: caveat`. E6 auto-surfaces it
 whenever `order_items.units_sold` or `order_items.line_revenue` appears in a search result.

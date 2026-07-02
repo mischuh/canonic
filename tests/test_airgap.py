@@ -1,4 +1,4 @@
-"""Tests for canon/airgap.py — the air-gapped egress guard (SPEC-E10 §4, GH-63)."""
+"""Tests for canonic/airgap.py — the air-gapped egress guard (SPEC-E10 §4, GH-63)."""
 
 from __future__ import annotations
 
@@ -7,8 +7,8 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from canon.airgap import LOCAL_REF_SCHEMES, EgressPolicy, guard_telemetry
-from canon.exc import AirGappedViolation, ErrorCode
+from canonic.airgap import LOCAL_REF_SCHEMES, EgressPolicy, guard_telemetry
+from canonic.exc import AirGappedViolation, ErrorCode
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -98,7 +98,7 @@ def test_check_url_without_host_is_rejected() -> None:
 # --- check_ref_local ----------------------------------------------------------
 
 
-@pytest.mark.parametrize("ref", ["env:CANON_LLM_KEY", "file:.canon/secret", "keyring:canon"])
+@pytest.mark.parametrize("ref", ["env:CANONIC_LLM_KEY", "file:.canonic/secret", "keyring:canonic"])
 def test_check_ref_local_allows_local_schemes(ref: str) -> None:
     EgressPolicy().check_ref_local(ref, what="llm.api_key_ref")  # no raise
 

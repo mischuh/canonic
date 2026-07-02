@@ -1,5 +1,5 @@
-# Canon local state & secrets
-.canon/
+# Canonic local state & secrets
+.canonic/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

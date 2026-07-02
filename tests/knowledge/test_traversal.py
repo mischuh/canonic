@@ -4,14 +4,14 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from canon.knowledge.models import KnowledgePage, KnowledgeScope
-from canon.knowledge.results import Hit
-from canon.knowledge.traversal import GraphTraversal
+from canonic.knowledge.models import KnowledgePage, KnowledgeScope
+from canonic.knowledge.results import Hit
+from canonic.knowledge.traversal import GraphTraversal
 
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from canon.knowledge.validation import EntityIndex
+    from canonic.knowledge.validation import EntityIndex
 
 
 def _seed(page: KnowledgePage) -> Hit:

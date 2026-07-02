@@ -20,7 +20,7 @@ from typing import TYPE_CHECKING, Any
 import pytest
 from pydantic import ValidationError
 
-from canon.connectors.base import (
+from canonic.connectors.base import (
     AcquisitionTier,
     Capability,
     ConnectorBase,
@@ -35,15 +35,15 @@ from canon.connectors.base import (
     UsageHint,
     require_capability,
 )
-from canon.exc import (
-    CanonError,
+from canonic.exc import (
+    CanonicError,
     CapabilityNotSupportedError,
     ConnectionError,
     ReadOnlyViolation,
     SchemaMismatch,
 )
-from canon.ingestion.models import EvidenceKind
-from canon.ingestion.source import gather_evidence
+from canonic.ingestion.models import EvidenceKind
+from canonic.ingestion.source import gather_evidence
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -145,17 +145,17 @@ class TestConnectorBase:
 
 
 class TestExceptions:
-    def test_read_only_violation_is_canon_error(self) -> None:
+    def test_read_only_violation_is_canonic_error(self) -> None:
         err = ReadOnlyViolation("INSERT not allowed")
-        assert isinstance(err, CanonError)
+        assert isinstance(err, CanonicError)
 
-    def test_schema_mismatch_is_canon_error(self) -> None:
+    def test_schema_mismatch_is_canonic_error(self) -> None:
         err = SchemaMismatch("column 'foo' missing")
-        assert isinstance(err, CanonError)
+        assert isinstance(err, CanonicError)
 
-    def test_connection_error_is_canon_error(self) -> None:
+    def test_connection_error_is_canonic_error(self) -> None:
         err = ConnectionError("could not connect")
-        assert isinstance(err, CanonError)
+        assert isinstance(err, CanonicError)
 
 
 @pytest.mark.asyncio
@@ -256,11 +256,11 @@ def any_offline_connector(
     looker_looks_path: Path,
 ) -> ConnectorBase:
     """Offline instance of each registered connector type."""
-    from canon.config import Connection
-    from canon.connectors.dbt import DbtConnector
-    from canon.connectors.looker import LookerConnector
-    from canon.connectors.metabase import MetabaseConnector
-    from canon.connectors.notion import NotionConnector
+    from canonic.config import Connection
+    from canonic.connectors.dbt import DbtConnector
+    from canonic.connectors.looker import LookerConnector
+    from canonic.connectors.metabase import MetabaseConnector
+    from canonic.connectors.notion import NotionConnector
 
     match request.param:
         case "postgres":
@@ -360,7 +360,7 @@ class _DualCapabilityConnector(ConnectorBase):
         return Health(status="ok")
 
     async def extract_definitions(self) -> DefinitionExtract:
-        from canon.connectors.base import (
+        from canonic.connectors.base import (
             AcquisitionTier,
             DefinitionEntityType,
             DefinitionEvidence,
@@ -459,11 +459,11 @@ def _out_of_range_connector(
     looker_looks_path: Path,
 ) -> ConnectorBase:
     """Build each evidence connector pinned to an unsupported source version."""
-    from canon.config import Connection
-    from canon.connectors.dbt import DbtConnector
-    from canon.connectors.looker import LookerConnector
-    from canon.connectors.metabase import MetabaseConnector
-    from canon.connectors.notion import NotionConnector
+    from canonic.config import Connection
+    from canonic.connectors.dbt import DbtConnector
+    from canonic.connectors.looker import LookerConnector
+    from canonic.connectors.metabase import MetabaseConnector
+    from canonic.connectors.notion import NotionConnector
 
     match param:
         case "dbt":
@@ -529,7 +529,7 @@ async def test_e3_unsupported_version_ingests_nothing(
     ``gather_evidence`` dispatches on capabilities with no vendor branches; the
     connector's own version guard must abort before any item is produced.
     """
-    from canon.exc import UnsupportedSourceVersionError
+    from canonic.exc import UnsupportedSourceVersionError
 
     connector = _out_of_range_connector(
         param,

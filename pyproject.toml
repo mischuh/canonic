@@ -1,5 +1,5 @@
 [project]
-name = "canon"
+name = "canonic"
 version = "0.1.0"
 description = "The Open Context Layer for Data Agents"
 readme = "README.md"
@@ -30,7 +30,7 @@ embeddings = [
 ]
 
 [project.scripts]
-canon = "canon.cli.app:app"
+canonic = "canonic.cli.app:app"
 
 [dependency-groups]
 dev = [
@@ -69,7 +69,7 @@ select = ["E", "F", "I", "UP", "B", "SIM", "TCH"]
 ignore = ["E501"]
 
 [tool.ruff.lint.isort]
-known-first-party = ["canon"]
+known-first-party = ["canonic"]
 
 [tool.hatch.build.targets.wheel]
-packages = ["canon"]
+packages = ["canonic"]

@@ -1,4 +1,4 @@
-"""Tests for canon/runtime/embeddings.py — the local embedding runtime (SPEC-E10 §5, GH-64).
+"""Tests for canonic/runtime/embeddings.py — the local embedding runtime (SPEC-E10 §5, GH-64).
 
 No mock library and no model download: the optional ``sentence-transformers`` backend is
 substituted by patching the module-level ``_load_backend`` seam, matching the codebase's
@@ -12,10 +12,10 @@ from typing import TYPE_CHECKING
 import numpy as np
 import pytest
 
-from canon.config import EmbeddingConfig
-from canon.exc import EmbeddingUnavailable
-from canon.runtime import embeddings as embeddings_module
-from canon.runtime.embeddings import EmbeddingRuntime
+from canonic.config import EmbeddingConfig
+from canonic.exc import EmbeddingUnavailable
+from canonic.runtime import embeddings as embeddings_module
+from canonic.runtime.embeddings import EmbeddingRuntime
 
 if TYPE_CHECKING:
     from collections.abc import Sequence

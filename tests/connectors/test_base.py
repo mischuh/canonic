@@ -1,8 +1,8 @@
-"""Tests for canon.connectors.base — compute_fingerprint's stats-exclusion contract."""
+"""Tests for canonic.connectors.base — compute_fingerprint's stats-exclusion contract."""
 
 from __future__ import annotations
 
-from canon.connectors.base import ColumnInfo, compute_fingerprint
+from canonic.connectors.base import ColumnInfo, compute_fingerprint
 
 
 def _column(**overrides: object) -> ColumnInfo:

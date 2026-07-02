@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
-from canon.eval.harness import run_baseline
-from canon.eval.report import render_markdown
+from canonic.eval.harness import run_baseline
+from canonic.eval.report import render_markdown
 from tests.eval.conftest import StubDrafter, StubUsageReader, make_candidate
 
 
@@ -22,11 +22,11 @@ async def _report(grain_cases):
 async def test_render_includes_table_and_metadata(grain_cases) -> None:
     md = render_markdown(await _report(grain_cases))
 
-    assert "# Canon local-model baseline" in md
+    assert "# Canonic local-model baseline" in md
     assert "2026-06-18T12:00:00+00:00" in md
     assert "| Model | Accuracy | Structured output | p50 latency |" in md
     assert "small-local (`qwen2.5:3b`)" in md
-    assert "`canon eval baseline`" in md  # re-run instructions
+    assert "`canonic eval baseline`" in md  # re-run instructions
 
 
 async def test_render_marks_recommended_and_notes_reconcile_pending(grain_cases) -> None:

@@ -1,20 +1,20 @@
-"""Tests for canon/ingestion/emitter.py (GH-35) — SPEC-E4 §6 diff emission & audit trail."""
+"""Tests for canonic/ingestion/emitter.py (GH-35) — SPEC-E4 §6 diff emission & audit trail."""
 
 from __future__ import annotations
 
 import json
 from typing import TYPE_CHECKING, Any
 
-from canon.connectors.base import AcquisitionTier, ColumnInfo, RelationSchema, compute_fingerprint
-from canon.ingestion.builder import ContextBuilder
-from canon.ingestion.emitter import (
+from canonic.connectors.base import AcquisitionTier, ColumnInfo, RelationSchema, compute_fingerprint
+from canonic.ingestion.builder import ContextBuilder
+from canonic.ingestion.emitter import (
     AuditTrailWriter,
     DiffEmitter,
     DiffFormat,
     DiskEventLog,
     DiskSnapshotStore,
 )
-from canon.ingestion.models import (
+from canonic.ingestion.models import (
     EvidenceItem,
     Proposal,
     ProposalOp,
@@ -22,11 +22,11 @@ from canon.ingestion.models import (
     ReconciliationEntry,
     ReconciliationReport,
 )
-from canon.ingestion.reconciliation import (
+from canonic.ingestion.reconciliation import (
     InMemoryAcceptedStore,
     ReconciliationEngine,
 )
-from canon.semantic.models import Provenance
+from canonic.semantic.models import Provenance
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -308,7 +308,7 @@ class TestEventLog:
             _entry(ReconciliationDecision.NO_OP),
         )
         DiskEventLog(tmp_path).append(report.entries, run_id="20260626T143201Z")
-        log = (tmp_path / ".canon" / "events.jsonl").read_text()
+        log = (tmp_path / ".canonic" / "events.jsonl").read_text()
         events = [json.loads(line) for line in log.splitlines()]
         assert len(events) == 2
         add_event = events[0]
@@ -324,7 +324,7 @@ class TestEventLog:
         log = DiskEventLog(tmp_path)
         log.append(_report(_entry(ReconciliationDecision.ADD)).entries, run_id="run-1")
         log.append(_report(_entry(ReconciliationDecision.EDIT)).entries, run_id="run-2")
-        text = (tmp_path / ".canon" / "events.jsonl").read_text()
+        text = (tmp_path / ".canonic" / "events.jsonl").read_text()
         assert len(text.splitlines()) == 2
 
 
@@ -421,7 +421,7 @@ class TestPipelineIntegration:
         snap_fps = {json.loads(line)["source_fingerprint"] for line in snapshot.splitlines()}
         assert fingerprint in snap_fps
 
-        events = (tmp_path / ".canon" / "events.jsonl").read_text().splitlines()
+        events = (tmp_path / ".canonic" / "events.jsonl").read_text().splitlines()
         ev = json.loads(events[0])
         assert ev["kind"] == "reconcile_decision"
         assert ev["decision"] == "add"

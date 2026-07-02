@@ -9,8 +9,8 @@ from __future__ import annotations
 
 import pytest
 
-from canon.connectors.readonly import assert_read_only
-from canon.exc import ErrorCode, ReadOnlyViolation
+from canonic.connectors.readonly import assert_read_only
+from canonic.exc import ErrorCode, ReadOnlyViolation
 
 
 class TestAssertReadOnly:

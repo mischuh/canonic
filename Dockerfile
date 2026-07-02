@@ -7,6 +7,6 @@ RUN pip install uv
 COPY pyproject.toml uv.lock ./
 RUN uv sync --frozen --no-dev
 
-COPY canon/ ./canon/
+COPY canonic/ ./canonic/
 
-ENTRYPOINT ["uv", "run", "canon"]
+ENTRYPOINT ["uv", "run", "canonic"]

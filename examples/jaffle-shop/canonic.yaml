@@ -1,0 +1,35 @@
+version: 1
+
+project:
+  name: jaffle-shop-demo
+  default_connection: jaffle_duckdb
+
+connections:
+  - id: jaffle_duckdb
+    type: duckdb
+    params:
+      path: jaffle_shop.duckdb   # bundled pre-built database; see scripts/build.sh to regenerate
+
+  # E3 definition connector: compiled dbt manifest.json — modeling-tier evidence
+  # (semantic models, metrics, grain, joins) that outranks raw introspection during
+  # reconciliation. No live database required for this connector.
+  - id: jaffle_dbt
+    type: dbt
+    params:
+      manifest_path: dbt/manifest.json   # relative to this canonic.yaml
+
+llm:
+  provider: openai_compatible
+  base_url: http://127.0.0.1:11434/v1   # Ollama; swap for OpenAI/Anthropic as needed
+  model: gemma-4-e4b-it-4bit
+  api_key_ref: env:CANONIC_LLM_API_KEY
+
+reconcile:
+  strict_contradictions: false
+  auto_apply:
+    enabled: true   # propose-only; review diffs before committing
+    min_confidence: 0.95
+    max_provenance: inferred
+
+telemetry:
+  enabled: false   # local event log only — nothing leaves the machine

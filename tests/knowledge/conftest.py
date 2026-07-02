@@ -9,14 +9,14 @@ from typing import TYPE_CHECKING
 import numpy as np
 import pytest
 
-from canon.knowledge.models import (
+from canonic.knowledge.models import (
     KnowledgePage,
     KnowledgePageMeta,
     KnowledgeScope,
     UsageMode,
 )
-from canon.knowledge.validation import EntityIndex, PageIndex
-from canon.semantic.models import Column, Dimension, Measure, NormalizedType, SemanticSource
+from canonic.knowledge.validation import EntityIndex, PageIndex
+from canonic.semantic.models import Column, Dimension, Measure, NormalizedType, SemanticSource
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence

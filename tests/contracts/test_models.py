@@ -1,11 +1,11 @@
-"""Unit tests for canon/contracts/models.py — within-model validation."""
+"""Unit tests for canonic/contracts/models.py — within-model validation."""
 
 from __future__ import annotations
 
 import pytest
 from pydantic import ValidationError
 
-from canon.contracts.models import (
+from canonic.contracts.models import (
     AppliesTo,
     Assertion,
     CanonicalRef,
@@ -21,7 +21,7 @@ from canon.contracts.models import (
     Severity,
     Status,
 )
-from canon.semantic.models import Provenance
+from canonic.semantic.models import Provenance
 
 
 class TestEnums:

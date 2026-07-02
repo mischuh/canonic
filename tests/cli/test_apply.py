@@ -1,4 +1,4 @@
-"""Tests for ``canon apply`` (GH-150, AC2/AC3)."""
+"""Tests for ``canonic apply`` (GH-150, AC2/AC3)."""
 
 from __future__ import annotations
 
@@ -7,17 +7,17 @@ from typing import TYPE_CHECKING, Any
 import pytest
 from typer.testing import CliRunner
 
-from canon.cli.app import app
-from canon.ingestion.emitter import DiffEmitter
-from canon.ingestion.models import (
+from canonic.cli.app import app
+from canonic.ingestion.emitter import DiffEmitter
+from canonic.ingestion.models import (
     Proposal,
     ProposalOp,
     ReconciliationDecision,
     ReconciliationEntry,
     ReconciliationReport,
 )
-from canon.ingestion.pending import PendingDiffStore, PendingRun, ProposalStatus
-from canon.semantic.models import Provenance
+from canonic.ingestion.pending import PendingDiffStore, PendingRun, ProposalStatus
+from canonic.semantic.models import Provenance
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -32,7 +32,7 @@ connections:
   - id: warehouse_pg
     type: postgres
     params: {host: localhost, port: 5432, user: u, dbname: db}
-    credentials_ref: env:CANON_PW
+    credentials_ref: env:CANONIC_PW
 llm:
   provider: openai_compatible
   base_url: http://localhost:11434/v1
@@ -76,9 +76,9 @@ def _write_run(project_root: Path, targets: list[str]) -> Path:
 
 @pytest.fixture
 def project(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    from canon.config import scaffold_project
+    from canonic.config import scaffold_project
 
-    (tmp_path / "canon.yaml").write_text(_CONFIG)
+    (tmp_path / "canonic.yaml").write_text(_CONFIG)
     scaffold_project(tmp_path)
     monkeypatch.chdir(tmp_path)
     return tmp_path
@@ -191,11 +191,11 @@ class TestApplyErrors:
         result = CliRunner().invoke(app, ["apply", str(tmp_path / "nonexistent")])
 
         assert result.exit_code == 1
-        assert "no canon project found" in result.output
+        assert "no canonic project found" in result.output
 
     def test_exits_when_run_dir_not_found(self, project: Path) -> None:
         result = CliRunner().invoke(
-            app, ["apply", str(project / ".canon" / "pending-diffs" / "nope")]
+            app, ["apply", str(project / ".canonic" / "pending-diffs" / "nope")]
         )
 
         assert result.exit_code == 1

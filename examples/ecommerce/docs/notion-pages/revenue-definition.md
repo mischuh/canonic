@@ -1,10 +1,10 @@
 ---
-# Notion page properties — set these in the Notion sidebar before connecting Canon.
+# Notion page properties — set these in the Notion sidebar before connecting Canonic.
 # The Notion connector reads them deterministically; no LLM is involved.
-#   "Canon Type"   (select):       definition
-#   "Canon Topics" (multi-select): revenue, metrics, definitions
-canon_type: definition
-canon_topics: [revenue, metrics, definitions]
+#   "Canonic Type"   (select):       definition
+#   "Canonic Topics" (multi-select): revenue, metrics, definitions
+canonic_type: definition
+canonic_topics: [revenue, metrics, definitions]
 ---
 
 # Revenue Definition
@@ -31,13 +31,13 @@ The exclusion is automatically enforced: the `revenue-excludes-refunds` guardrai
 One row per order. The metric is fully additive across all dimensions available on the `orders`
 source — customer country, sales channel, and order date.
 
-## How this becomes a Canon knowledge page
+## How this becomes a Canonic knowledge page
 
-When Canon ingests this Notion page, it produces a `DocEvidence` record with:
+When Canonic ingests this Notion page, it produces a `DocEvidence` record with:
 - `title`: "Revenue Definition"
 - `body`: the prose above
-- `usage_hint`: `definition` (from the *Canon Type* property)
-- `topic_refs`: `["revenue", "metrics", "definitions"]` (from *Canon Topics* — resolved as candidates)
+- `usage_hint`: `definition` (from the *Canonic Type* property)
+- `topic_refs`: `["revenue", "metrics", "definitions"]` (from *Canonic Topics* — resolved as candidates)
 - `acquisition_tier`: `hand_authored`
 
 E6 then writes this as a `definition`-mode knowledge page and surfaces it in `search_knowledge("revenue definition")`.

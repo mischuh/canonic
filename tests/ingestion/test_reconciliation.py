@@ -1,26 +1,26 @@
-"""Tests for canon/ingestion/reconciliation.py (GH-34) — SPEC-E4 §5 decision table."""
+"""Tests for canonic/ingestion/reconciliation.py (GH-34) — SPEC-E4 §5 decision table."""
 
 from __future__ import annotations
 
 from typing import Any
 
-from canon.config import AutoApplyConfig, ReconcileConfig
-from canon.connectors.base import AcquisitionTier, ColumnInfo, RelationSchema, compute_fingerprint
-from canon.ingestion.builder import ContextBuilder
-from canon.ingestion.models import (
+from canonic.config import AutoApplyConfig, ReconcileConfig
+from canonic.connectors.base import AcquisitionTier, ColumnInfo, RelationSchema, compute_fingerprint
+from canonic.ingestion.builder import ContextBuilder
+from canonic.ingestion.models import (
     EvidenceItem,
     Proposal,
     ProposalOp,
     ReconciliationDecision,
 )
-from canon.ingestion.reconciliation import (
+from canonic.ingestion.reconciliation import (
     ExistingFact,
     InMemoryAcceptedStore,
     NullReconcileDrafter,
     ReconciliationEngine,
     ResolutionDraft,
 )
-from canon.semantic.models import Provenance
+from canonic.semantic.models import Provenance
 
 # ---------------------------------------------------------------------------
 # Helpers

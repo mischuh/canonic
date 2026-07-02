@@ -7,15 +7,15 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
-from canon.instrumentation.events import DiskAnswerEventLog, emit_milestone, emit_milestone_once
-from canon.instrumentation.models import FunnelEvent, FunnelMilestone
-from canon.instrumentation.report import build_funnel, read_events
+from canonic.instrumentation.events import DiskAnswerEventLog, emit_milestone, emit_milestone_once
+from canonic.instrumentation.models import FunnelEvent, FunnelMilestone
+from canonic.instrumentation.report import build_funnel, read_events
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
-_EVENTS_FILE = Path(".canon") / "events.jsonl"
+_EVENTS_FILE = Path(".canonic") / "events.jsonl"
 
 
 def _read_raw_lines(root: Path) -> list[dict[str, Any]]:
@@ -114,9 +114,9 @@ def test_multiple_different_milestones_all_recorded(tmp_path: Path) -> None:
 
 
 def test_read_events_funnel_milestone_filters_other_kinds(tmp_path: Path) -> None:
-    canon_dir = tmp_path / ".canon"
-    canon_dir.mkdir()
-    log_path = canon_dir / "events.jsonl"
+    canonic_dir = tmp_path / ".canonic"
+    canonic_dir.mkdir()
+    log_path = canonic_dir / "events.jsonl"
     other_event = {
         "ts": _ts(),
         "kind": "served_answer",
@@ -148,9 +148,9 @@ def test_read_events_funnel_milestone_filters_other_kinds(tmp_path: Path) -> Non
 
 
 def test_read_events_skips_malformed_funnel_line(tmp_path: Path) -> None:
-    canon_dir = tmp_path / ".canon"
-    canon_dir.mkdir()
-    log_path = canon_dir / "events.jsonl"
+    canonic_dir = tmp_path / ".canonic"
+    canonic_dir.mkdir()
+    log_path = canonic_dir / "events.jsonl"
     log_path.write_text(
         '{"kind": "funnel_milestone", "ts": "2026-01-01T00:00:00Z", "milestone": "unknown_milestone"}\n'
         '{"kind": "funnel_milestone", "ts": "2026-01-01T00:00:00Z", "milestone": "setup_started"}\n'

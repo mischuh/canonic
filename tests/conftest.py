@@ -8,8 +8,8 @@ from typing import TYPE_CHECKING, Any
 import litellm
 import pytest
 
-from canon.config import CanonConfig
-from canon.contracts.models import (
+from canonic.config import CanonicConfig
+from canonic.contracts.models import (
     AppliesTo,
     CanonicalRef,
     Guardrail,
@@ -18,9 +18,9 @@ from canon.contracts.models import (
     Severity,
     Status,
 )
-from canon.contracts.resolver import ContractResolver
-from canon.core.service import CanonService
-from canon.semantic.models import Column, Dimension, Measure, SemanticSource
+from canonic.contracts.resolver import ContractResolver
+from canonic.core.service import CanonicService
+from canonic.semantic.models import Column, Dimension, Measure, SemanticSource
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -106,7 +106,9 @@ def orders_source() -> SemanticSource:
 
 
 @pytest.fixture
-def canon_service(orders_source: SemanticSource, monkeypatch: pytest.MonkeyPatch) -> CanonService:
+def canonic_service(
+    orders_source: SemanticSource, monkeypatch: pytest.MonkeyPatch
+) -> CanonicService:
     monkeypatch.setenv("PG_PASSWORD", "testpw")
     binding = MetricBinding(
         metric="revenue",
@@ -128,7 +130,7 @@ def canon_service(orders_source: SemanticSource, monkeypatch: pytest.MonkeyPatch
         rationale="Refunds are reversals, not revenue.",
     )
     resolver = ContractResolver(bindings=[binding, order_count_binding], guardrails=[guardrail])
-    config = CanonConfig.model_validate(
+    config = CanonicConfig.model_validate(
         {
             "version": 1,
             "project": {"name": "test", "default_connection": "warehouse_pg"},
@@ -152,4 +154,4 @@ def canon_service(orders_source: SemanticSource, monkeypatch: pytest.MonkeyPatch
             },
         }
     )
-    return CanonService(config=config, resolver=resolver, sources=[orders_source])
+    return CanonicService(config=config, resolver=resolver, sources=[orders_source])

@@ -12,11 +12,11 @@ from __future__ import annotations
 import pytest
 import sqlglot
 
-from canon import exc
-from canon.compiler import SemanticQuery, compile
-from canon.contracts.models import BindingKind, CanonicalRef, CollapseAgg, MetricBinding
-from canon.contracts.resolver import ContractResolver
-from canon.semantic.models import Column, Dimension, Join, Measure, Relationship, SemanticSource
+from canonic import exc
+from canonic.compiler import SemanticQuery, compile
+from canonic.contracts.models import BindingKind, CanonicalRef, CollapseAgg, MetricBinding
+from canonic.contracts.resolver import ContractResolver
+from canonic.semantic.models import Column, Dimension, Join, Measure, Relationship, SemanticSource
 
 # ---------------------------------------------------------------------------
 # Fixtures — in-memory inventory_snapshots project
@@ -394,8 +394,8 @@ def test_validate_rejects_non_additive_base_measure() -> None:
     import tempfile
     from pathlib import Path
 
-    from canon.contracts.validate import validate_contracts
-    from canon.exc import ContractError
+    from canonic.contracts.validate import validate_contracts
+    from canonic.exc import ContractError
 
     with tempfile.TemporaryDirectory() as tmpdir:
         root = Path(tmpdir)
@@ -433,8 +433,8 @@ def test_validate_rejects_missing_collapse_dimension() -> None:
     import tempfile
     from pathlib import Path
 
-    from canon.contracts.validate import validate_contracts
-    from canon.exc import ContractError
+    from canonic.contracts.validate import validate_contracts
+    from canonic.exc import ContractError
 
     with tempfile.TemporaryDirectory() as tmpdir:
         root = Path(tmpdir)

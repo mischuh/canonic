@@ -1,22 +1,22 @@
-"""Tests for canon/credentials.py — credentials_ref resolution (E1 §3/§7, #65)."""
+"""Tests for canonic/credentials.py — credentials_ref resolution (E1 §3/§7, #65)."""
 
 from __future__ import annotations
 
 import pytest
 
-from canon.credentials import resolve_credential
-from canon.exc import CredentialError
+from canonic.credentials import resolve_credential
+from canonic.exc import CredentialError
 
 
 def test_env_ref_resolves(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("CANON_TEST_SECRET", "s3cr3t")
-    assert resolve_credential("env:CANON_TEST_SECRET") == "s3cr3t"
+    monkeypatch.setenv("CANONIC_TEST_SECRET", "s3cr3t")
+    assert resolve_credential("env:CANONIC_TEST_SECRET") == "s3cr3t"
 
 
 def test_env_ref_missing_var_raises(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.delenv("CANON_TEST_SECRET", raising=False)
-    with pytest.raises(CredentialError, match="CANON_TEST_SECRET"):
-        resolve_credential("env:CANON_TEST_SECRET")
+    monkeypatch.delenv("CANONIC_TEST_SECRET", raising=False)
+    with pytest.raises(CredentialError, match="CANONIC_TEST_SECRET"):
+        resolve_credential("env:CANONIC_TEST_SECRET")
 
 
 @pytest.mark.parametrize("value", ["", "   ", "\t\n"])
@@ -25,9 +25,9 @@ def test_env_ref_empty_value_resolves_to_nothing(
 ) -> None:
     # An env var that exists but holds an empty/whitespace value "resolves to nothing"
     # and fails with a clear, value-free error (#65).
-    monkeypatch.setenv("CANON_TEST_SECRET", value)
-    with pytest.raises(CredentialError, match="CANON_TEST_SECRET"):
-        resolve_credential("env:CANON_TEST_SECRET")
+    monkeypatch.setenv("CANONIC_TEST_SECRET", value)
+    with pytest.raises(CredentialError, match="CANONIC_TEST_SECRET"):
+        resolve_credential("env:CANONIC_TEST_SECRET")
 
 
 def test_env_ref_missing_var_name_raises() -> None:
@@ -37,7 +37,7 @@ def test_env_ref_missing_var_name_raises() -> None:
 
 def test_malformed_ref_raises() -> None:
     with pytest.raises(CredentialError, match="malformed"):
-        resolve_credential("CANON_TEST_SECRET")
+        resolve_credential("CANONIC_TEST_SECRET")
 
 
 @pytest.mark.parametrize("scheme", ["file", "keyring"])

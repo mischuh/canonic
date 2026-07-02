@@ -1,6 +1,6 @@
 # Local model candidates for the E10 accuracy baseline.
 # Run from examples/ecommerce/:
-#   canon eval baseline --candidates candidates.yaml --dataset eval/grain_cases.jsonl
+#   canonic eval baseline --candidates candidates.yaml --dataset eval/grain_cases.jsonl
 #
 # Swap base_url / model to point at your running local server (Ollama, vLLM, LM Studio, llama.cpp).
 # A hosted endpoint differs only by base_url and api_key_ref (SPEC-E10 §2, S1-AC2).
@@ -23,4 +23,4 @@ candidates:
   #   provider: openai_compatible
   #   base_url: https://api.your-vendor.com/v1
   #   model: your-model-id
-  #   api_key_ref: env:CANON_LLM_KEY
+  #   api_key_ref: env:CANONIC_LLM_KEY

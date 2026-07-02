@@ -1,6 +1,6 @@
-# Canon local-model baseline
+# Canonic local-model baseline
 
-_Generated 2026-06-18T17:27:58+00:00 — re-run with `canon eval baseline` (SPEC-E10 §7, GH-66)._
+_Generated 2026-06-18T17:27:58+00:00 — re-run with `canonic eval baseline` (SPEC-E10 §7, GH-66)._
 
 Measures the LLM-in-loop **drafting** that feeds compilable semantics — not literal
 compiler quality, since the E5 compiler is deterministic and LLM-free. Per task and
@@ -28,7 +28,7 @@ reconcile path (SPEC-E10 §7, GH-66).
 Regenerate before tagging a release so the baseline tracks reality as models churn:
 
 ```bash
-canon eval baseline --candidates candidates.yaml --out docs/baseline-models.md
+canonic eval baseline --candidates candidates.yaml --out docs/baseline-models.md
 ```
 
 `--candidates` is a YAML list of `openai_compatible` models (see

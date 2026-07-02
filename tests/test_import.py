@@ -1,5 +1,5 @@
-import canon
+import canonic
 
 
 def test_package_importable() -> None:
-    assert canon is not None
+    assert canonic is not None

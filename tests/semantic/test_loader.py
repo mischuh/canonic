@@ -10,8 +10,8 @@ import pytest
 if TYPE_CHECKING:
     from pathlib import Path
 
-from canon.exc import SemanticSourceError
-from canon.semantic.loader import (
+from canonic.exc import SemanticSourceError
+from canonic.semantic.loader import (
     dump_semantic_source,
     list_semantic_sources,
     load_semantic_source,

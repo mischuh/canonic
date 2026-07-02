@@ -17,10 +17,10 @@ if TYPE_CHECKING:
     from pathlib import Path
 import pytest
 
-from canon.config import Connection
-from canon.connectors.base import AcquisitionTier, Capability
-from canon.connectors.sqlite import SQLiteConnector, _normalize_type
-from canon.exc import ReadOnlyViolation
+from canonic.config import Connection
+from canonic.connectors.base import AcquisitionTier, Capability
+from canonic.connectors.sqlite import SQLiteConnector, _normalize_type
+from canonic.exc import ReadOnlyViolation
 
 # ---------------------------------------------------------------------------
 # Seed SQL mirroring the Postgres fixture schema to enable cross-connector

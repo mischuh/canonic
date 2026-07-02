@@ -11,7 +11,7 @@ meta:
 ---
 
 **Monthly Recurring Revenue (MRR)** is the recurring subscription revenue on the books at the
-end of a month. Canon exposes it as the `ending_mrr` metric.
+end of a month. Canonic exposes it as the `ending_mrr` metric.
 
 The live expression — rendered directly from the semantic layer, so this definition can never drift:
 

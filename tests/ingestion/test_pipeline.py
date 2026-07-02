@@ -1,4 +1,4 @@
-"""Tests for canon/ingestion/pipeline.py (GH-37) — SPEC-E4 §2 orchestration, §7, §8.
+"""Tests for canonic/ingestion/pipeline.py (GH-37) — SPEC-E4 §2 orchestration, §7, §8.
 
 Drives the full four-stage pipeline through a fake connector (no live DB) so the proposal and
 file shapes are exactly production. Covers idempotency (S6), determinism (S9-AC1), the
@@ -13,14 +13,14 @@ from typing import TYPE_CHECKING, Any
 
 import pytest
 
-from canon.config import (
+from canonic.config import (
     LOCAL_STATE_DIR,
     LLMConfig,
     ReconcileConfig,
     RuntimeConfig,
     scaffold_project,
 )
-from canon.connectors.base import (
+from canonic.connectors.base import (
     Capability,
     ColumnInfo,
     ConnectorBase,
@@ -30,12 +30,12 @@ from canon.connectors.base import (
     RelationSchema,
     compute_fingerprint,
 )
-from canon.exc import ValidationFailed
-from canon.ingestion.models import DraftedBy, ProposalOp, ReconciliationDecision
-from canon.ingestion.pipeline import IngestionPipeline, first_run_auto_acceptable
-from canon.ingestion.source import evidence_from_introspection
-from canon.runtime.drafter import make_drafter
-from canon.semantic.loader import load_semantic_source
+from canonic.exc import ValidationFailed
+from canonic.ingestion.models import DraftedBy, ProposalOp, ReconciliationDecision
+from canonic.ingestion.pipeline import IngestionPipeline, first_run_auto_acceptable
+from canonic.ingestion.source import evidence_from_introspection
+from canonic.runtime.drafter import make_drafter
+from canonic.semantic.loader import load_semantic_source
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -171,7 +171,7 @@ async def test_bootstrap_is_one_time_subsequent_ingest_is_propose_only(tmp_path:
 async def test_re_bootstrap_on_non_empty_project_is_propose_only(tmp_path: Path) -> None:
     """OB-S3 AC2: re-running bootstrap() when accepted context exists never auto-writes.
 
-    Covers the ``canon ingest --bootstrap`` re-run hole: a brand-new PK table appearing
+    Covers the ``canonic ingest --bootstrap`` re-run hole: a brand-new PK table appearing
     upstream must not be silently written into the project.
     """
     pipeline = _pipeline(tmp_path, [_customers()])
@@ -377,7 +377,7 @@ async def test_headless_mode_is_byte_identical_across_runs(
 
 async def test_interactive_mode_calls_drafter_for_no_pk_relation(tmp_path: Path) -> None:
     """Interactive mode wires the injected drafter; draft_grain is called for a no-PK relation."""
-    from canon.ingestion.builder import GrainDraft
+    from canonic.ingestion.builder import GrainDraft
 
     grain_calls: list[Any] = []
 
@@ -418,7 +418,7 @@ async def test_interactive_mode_calls_drafter_for_no_pk_relation(tmp_path: Path)
 async def test_first_run_excludes_relation_with_drafted_join(tmp_path: Path) -> None:
     """A guessed FK-less join always forces drafted_by/confidence down — a wrong join must
     never let a PK-bearing relation slip past first_run_auto_acceptable unreviewed."""
-    from canon.ingestion.builder import GrainDraft, JoinDraft
+    from canonic.ingestion.builder import GrainDraft, JoinDraft
 
     class StubDrafter:
         async def draft_grain(self, schema: Any) -> GrainDraft:

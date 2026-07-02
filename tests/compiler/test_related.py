@@ -7,17 +7,17 @@ from __future__ import annotations
 
 import pytest
 
-from canon.compiler.pipeline import compile
-from canon.compiler.query import SemanticQuery
-from canon.contracts.models import CanonicalRef, MetricBinding, Status
-from canon.contracts.resolver import ContractResolver
-from canon.semantic.models import SemanticSource
+from canonic.compiler.pipeline import compile
+from canonic.compiler.query import SemanticQuery
+from canonic.contracts.models import CanonicalRef, MetricBinding, Status
+from canonic.contracts.resolver import ContractResolver
+from canonic.semantic.models import SemanticSource
 
 
 @pytest.fixture
 def resolver_with_sibling(revenue_binding: MetricBinding) -> ContractResolver:
     """Resolver with both 'revenue' and 'order_count' bound to orders — enables AC2 checks."""
-    from canon.contracts.models import AppliesTo, Guardrail, GuardrailKind, Severity
+    from canonic.contracts.models import AppliesTo, Guardrail, GuardrailKind, Severity
 
     order_count = MetricBinding(
         metric="order_count",
@@ -83,7 +83,7 @@ def test_ac4_empty_lists_when_no_related(
         canonical=CanonicalRef(source="order_items", measure="distinct_orders"),
         status=Status.ACTIVE,
     )
-    from canon.semantic.models import Column, Measure
+    from canonic.semantic.models import Column, Measure
 
     isolated_source = SemanticSource(
         name="order_items",
@@ -153,7 +153,7 @@ def test_related_capped_at_five(
     sources: list[SemanticSource],
 ) -> None:
     """unused_dimensions is capped at 5 even when more are available."""
-    from canon.semantic.models import Column, Dimension, Measure
+    from canonic.semantic.models import Column, Dimension, Measure
 
     many_dims_source = SemanticSource(
         name="wide",

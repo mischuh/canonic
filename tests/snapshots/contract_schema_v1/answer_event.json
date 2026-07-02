@@ -1,5 +1,5 @@
 {
-  "description": "One served-answer record appended to ``.canon/events.jsonl`` (SPEC-E16 §3).\n\nReserved fields (``trust_score``, ``cache_hit``, ``over_limit_blocked``) are\npresent in the v1 shape as ``null`` so E13/E14 can populate them later without\na schema migration (S3-AC1).",
+  "description": "One served-answer record appended to ``.canonic/events.jsonl`` (SPEC-E16 §3).\n\nReserved fields (``trust_score``, ``cache_hit``, ``over_limit_blocked``) are\npresent in the v1 shape as ``null`` so E13/E14 can populate them later without\na schema migration (S3-AC1).",
   "properties": {
     "bytes_scanned": {
       "anyOf": [

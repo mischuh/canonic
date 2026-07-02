@@ -1,4 +1,4 @@
-"""Unit tests for canon/ingestion/examples.py — collect_examples and ExampleEnricher.
+"""Unit tests for canonic/ingestion/examples.py — collect_examples and ExampleEnricher.
 
 Acceptance criteria from GH-156:
 AC1 (S13.1): binding with ≥1 observed query includes examples sourced only from evidence / assertions.
@@ -12,13 +12,13 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
-from canon.connectors.base import (
+from canonic.connectors.base import (
     AcquisitionTier,
     UsageDefinition,
     UsageEvidence,
     UsageRole,
 )
-from canon.contracts.models import (
+from canonic.contracts.models import (
     Assertion,
     AssertionExpect,
     CanonicalRef,
@@ -26,8 +26,8 @@ from canon.contracts.models import (
     ExampleOriginKind,
     MetricBinding,
 )
-from canon.ingestion.examples import ExampleEnricher, collect_examples
-from canon.ingestion.models import (
+from canonic.ingestion.examples import ExampleEnricher, collect_examples
+from canonic.ingestion.models import (
     EvidenceItem,
     EvidenceKind,
     ReconciliationDecision,
@@ -349,7 +349,7 @@ class TestCollectExamplesAC3:
 
 
 def _write_binding(tmp_path: Path, binding: MetricBinding) -> None:
-    from canon.contracts.loader import dump_metric_binding
+    from canonic.contracts.loader import dump_metric_binding
 
     slug = binding.metric.replace(" ", "_").lower()
     metrics_dir = tmp_path / "contracts" / "metrics"

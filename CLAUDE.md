@@ -1,4 +1,4 @@
-# Project: Canon The Open Context Layer for Data Agents
+# Project: Canonic The Open Context Layer for Data Agents
 
 ## Commands
 - Run tests: `pytest tests/ -x --tb=short`
@@ -11,12 +11,12 @@
 Run all three checks and fix any issues before committing — CI enforces all of them:
 ```
 ruff check . && ruff format --check .
-mypy canon/
+mypy canonic/
 pytest tests/ -x --tb=short
 ```
 
 ## Project structure
-- `canon/` — main package code
+- `canonic/` — main package code
 - `tests/` — pytest tests (mirrors src/ structure)
 - `scripts/` — one-off scripts, not production code
 
@@ -28,7 +28,7 @@ pytest tests/ -x --tb=short
 - Docstrings on public classes and non-obvious functions
 - Tests use fixtures from conftest.py — check there before creating new ones
 - No bare `except:` — always catch specific exceptions
-- Custom exceptions live in `canon/exc.py` (package root), not inline in the raising module
+- Custom exceptions live in `canonic/exc.py` (package root), not inline in the raising module
 - Enum members (including `StrEnum`) use UPPER_CASE names; string values stay lowercase if needed for serialization
 
 ## Don't touch

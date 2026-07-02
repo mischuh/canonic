@@ -1,4 +1,4 @@
-"""Tests for canon/contracts/resolver.py — the contract↔compiler seam (SPEC-E5-E15 §6).
+"""Tests for canonic/contracts/resolver.py — the contract↔compiler seam (SPEC-E5-E15 §6).
 
 Covers the issue acceptance criteria: unknown→Unresolved, two active bindings→Ambiguous,
 mandatory_filter returned for a matching source/measure, and determinism.
@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from canon.contracts.models import (
+from canonic.contracts.models import (
     AppliesTo,
     Assertion,
     AssertionExpect,
@@ -19,7 +19,7 @@ from canon.contracts.models import (
     RestrictTo,
     Status,
 )
-from canon.contracts.resolver import (
+from canonic.contracts.resolver import (
     Ambiguous,
     Binding,
     ContractResolver,

@@ -7,27 +7,27 @@ from typing import TYPE_CHECKING, Any
 
 import pytest
 
-from canon.connectors.base import AcquisitionTier, ColumnInfo, RelationSchema, compute_fingerprint
-from canon.ingestion.builder import (
+from canonic.connectors.base import AcquisitionTier, ColumnInfo, RelationSchema, compute_fingerprint
+from canonic.ingestion.builder import (
     LLM_GRAIN_CONFIDENCE,
     LLM_GRAIN_CONFIDENCE_CEILING,
     ContextBuilder,
 )
-from canon.ingestion.models import DraftedBy, EvidenceItem
-from canon.runtime.drafter import RuntimeLLMDrafter
-from canon.runtime.generation import GenerationRuntime
+from canonic.ingestion.models import DraftedBy, EvidenceItem
+from canonic.runtime.drafter import RuntimeLLMDrafter
+from canonic.runtime.generation import GenerationRuntime
 
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from canon.config import LLMConfig
+    from canonic.config import LLMConfig
 
 _NOW = datetime(2026, 6, 15, 12, 0, 0, tzinfo=UTC)
 
 
 @pytest.fixture(autouse=True)
 def _key(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("CANON_LLM_KEY", "secret-token")
+    monkeypatch.setenv("CANONIC_LLM_KEY", "secret-token")
 
 
 def _schema_without_pk() -> RelationSchema:
@@ -193,7 +193,7 @@ async def test_draft_dimension_labels_empty_dimensions_list(
 
 
 def test_dimension_label_prompt_lists_table_and_dimensions() -> None:
-    from canon.runtime.drafter import _dimension_label_prompt
+    from canonic.runtime.drafter import _dimension_label_prompt
 
     prompt = _dimension_label_prompt(_schema_without_pk(), _status_dimension())
 
@@ -259,7 +259,7 @@ async def test_draft_schema_joins_empty_joins_list(
 
 
 def test_schema_join_prompt_lists_candidates_and_other_tables() -> None:
-    from canon.runtime.drafter import _schema_join_prompt
+    from canonic.runtime.drafter import _schema_join_prompt
 
     prompt = _schema_join_prompt(
         _schema_without_pk(), ["category_key"], {"dim_categories": _dim_categories()}

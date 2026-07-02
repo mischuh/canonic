@@ -1,10 +1,10 @@
-"""Tests for the golden path first-answer steps in ``canon setup`` (OB-S1)."""
+"""Tests for the golden path first-answer steps in ``canonic setup`` (OB-S1)."""
 
 from __future__ import annotations
 
 from unittest.mock import AsyncMock
 
-from canon.cli.commands.setup import (
+from canonic.cli.commands.setup import (
     ReviewTier,
     _best_dimension,
     _classify_withheld,
@@ -17,8 +17,8 @@ from canon.cli.commands.setup import (
     _surface_demo_error,
     _write_bootstrap_contracts,
 )
-from canon.ingestion.emitter import DiffFormat, EmissionResult, EmittedDiff
-from canon.ingestion.models import (
+from canonic.ingestion.emitter import DiffFormat, EmissionResult, EmittedDiff
+from canonic.ingestion.models import (
     DraftedBy,
     Proposal,
     ProposalOp,
@@ -26,8 +26,8 @@ from canon.ingestion.models import (
     ReconciliationEntry,
     ReconciliationReport,
 )
-from canon.ingestion.pipeline import PipelineResult
-from canon.semantic.models import (
+from canonic.ingestion.pipeline import PipelineResult
+from canonic.semantic.models import (
     Column,
     Dimension,
     Measure,
@@ -186,9 +186,9 @@ def test_render_source_listing_truncates_at_five(capsys):
 
 
 def test_render_setup_complete_smoke(capsys, tmp_path):
-    from canon.config import CanonConfig
+    from canonic.config import CanonicConfig
 
-    config = CanonConfig.model_validate(
+    config = CanonicConfig.model_validate(
         {
             "version": 1,
             "project": {"name": "my-project"},
@@ -199,15 +199,15 @@ def test_render_setup_complete_smoke(capsys, tmp_path):
     _render_setup_complete(config, [tmp_path / "semantics"], demo_ok=True)
     out = capsys.readouterr().out
     assert "my-project" in out
-    assert "canon ingest" in out
-    assert "canon query" in out
-    assert "canon mcp start" in out
+    assert "canonic ingest" in out
+    assert "canonic query" in out
+    assert "canonic mcp start" in out
 
 
 def test_render_setup_complete_no_demo_shows_tip(capsys, tmp_path):
-    from canon.config import CanonConfig
+    from canonic.config import CanonicConfig
 
-    config = CanonConfig.model_validate(
+    config = CanonicConfig.model_validate(
         {
             "version": 1,
             "project": {"name": "p"},
@@ -227,9 +227,9 @@ def test_render_setup_complete_no_demo_shows_tip(capsys, tmp_path):
 
 def test_run_golden_path_bootstrap_failure_still_completes(tmp_path, capsys):
     """Setup completes even when bootstrap raises (no connection available)."""
-    from canon.config import CanonConfig
+    from canonic.config import CanonicConfig
 
-    config = CanonConfig.model_validate(
+    config = CanonicConfig.model_validate(
         {
             "version": 1,
             "project": {"name": "demo", "default_connection": "wh"},
@@ -252,9 +252,9 @@ def test_run_golden_path_bootstrap_failure_still_completes(tmp_path, capsys):
 
 def test_run_golden_path_no_sources_after_bootstrap(tmp_path, capsys):
     """When bootstrap finds nothing queryable, the completion panel still shows."""
-    from canon.config import CanonConfig
+    from canonic.config import CanonicConfig
 
-    config = CanonConfig.model_validate(
+    config = CanonicConfig.model_validate(
         {
             "version": 1,
             "project": {"name": "demo"},
@@ -269,10 +269,10 @@ def test_run_golden_path_no_sources_after_bootstrap(tmp_path, capsys):
 
 def test_run_golden_path_sources_no_compilable_measure(tmp_path, monkeypatch, capsys):
     """Sources with no p0-compilable measures fall back to the source listing."""
-    import canon.cli.commands.setup as setup_mod
-    from canon.config import CanonConfig
+    import canonic.cli.commands.setup as setup_mod
+    from canonic.config import CanonicConfig
 
-    config = CanonConfig.model_validate(
+    config = CanonicConfig.model_validate(
         {
             "version": 1,
             "project": {"name": "demo"},
@@ -291,10 +291,10 @@ def test_run_golden_path_sources_no_compilable_measure(tmp_path, monkeypatch, ca
 
 def test_run_golden_path_demo_query_error_falls_back(tmp_path, monkeypatch, capsys):
     """A failing demo query shows the source listing and still completes setup."""
-    import canon.cli.commands.setup as setup_mod
-    from canon.config import CanonConfig
+    import canonic.cli.commands.setup as setup_mod
+    from canonic.config import CanonicConfig
 
-    config = CanonConfig.model_validate(
+    config = CanonicConfig.model_validate(
         {
             "version": 1,
             "project": {"name": "demo"},
@@ -522,7 +522,7 @@ def test_render_curated_review_no_withheld_returns_zero(capsys):
 
 
 def test_render_curated_review_caps_and_shows_deferred_count(capsys):
-    from canon.cli.commands.setup import _REVIEW_CAP
+    from canonic.cli.commands.setup import _REVIEW_CAP
 
     diffs = [
         _withheld_diff(f"semantics/c/t{i}.yaml", drafted_by=DraftedBy.LLM)
@@ -538,7 +538,7 @@ def test_render_curated_review_caps_and_shows_deferred_count(capsys):
 
     assert total == _REVIEW_CAP + 3
     assert "… and 3 more" in out
-    assert "canon ingest" in out
+    assert "canonic ingest" in out
 
 
 def test_render_curated_review_grain_teachable_unit(capsys):
@@ -589,9 +589,9 @@ def test_render_curated_review_long_tail_why_line(capsys):
 
 
 def _config_no_llm():
-    from canon.config import CanonConfig
+    from canonic.config import CanonicConfig
 
-    return CanonConfig.model_validate(
+    return CanonicConfig.model_validate(
         {
             "version": 1,
             "project": {"name": "demo"},
@@ -602,9 +602,9 @@ def _config_no_llm():
 
 
 def _config_with_llm():
-    from canon.config import CanonConfig
+    from canonic.config import CanonicConfig
 
-    return CanonConfig.model_validate(
+    return CanonicConfig.model_validate(
         {
             "version": 1,
             "project": {"name": "demo"},
@@ -616,10 +616,10 @@ def _config_with_llm():
 
 def test_ob_s5_ac1_empty_schema_says_so_no_fabricated_demo(tmp_path, monkeypatch, capsys):
     """AC1: empty/queryless schema → says so plainly, does not fabricate a demo."""
-    import canon.cli.commands.setup as setup_mod
-    from canon.ingestion.emitter import EmissionResult
-    from canon.ingestion.models import ReconciliationReport
-    from canon.ingestion.pipeline import PipelineResult
+    import canonic.cli.commands.setup as setup_mod
+    from canonic.ingestion.emitter import EmissionResult
+    from canonic.ingestion.models import ReconciliationReport
+    from canonic.ingestion.pipeline import PipelineResult
 
     empty_result = PipelineResult(
         emission=EmissionResult(diffs=[], report=ReconciliationReport(entries=[])),
@@ -635,11 +635,11 @@ def test_ob_s5_ac1_empty_schema_says_so_no_fabricated_demo(tmp_path, monkeypatch
     assert "step 6 — running first answer" not in out  # demo path never entered
 
 
-def test_ob_s5_ac2_canon_error_surfaces_registry_code(capsys):
-    """AC2: a CanonError from the demo query exposes its registry code — never swallowed."""
-    from canon.exc import ConnectionError as CanonConnectionError
+def test_ob_s5_ac2_canonic_error_surfaces_registry_code(capsys):
+    """AC2: a CanonicError from the demo query exposes its registry code — never swallowed."""
+    from canonic.exc import ConnectionError as CanonicConnectionError
 
-    exc = CanonConnectionError("permission denied")
+    exc = CanonicConnectionError("permission denied")
     _surface_demo_error(exc)
     out = capsys.readouterr().out
 
@@ -647,10 +647,10 @@ def test_ob_s5_ac2_canon_error_surfaces_registry_code(capsys):
     assert "permission denied" in out
 
 
-def test_ob_s5_ac2_demo_canon_error_falls_back_to_describe(tmp_path, monkeypatch, capsys):
-    """AC2: CanonError during demo → code surfaced, describe-level fallback rendered, setup completes."""
-    import canon.cli.commands.setup as setup_mod
-    from canon.exc import ConnectionError as CanonConnectionError
+def test_ob_s5_ac2_demo_canonic_error_falls_back_to_describe(tmp_path, monkeypatch, capsys):
+    """AC2: CanonicError during demo → code surfaced, describe-level fallback rendered, setup completes."""
+    import canonic.cli.commands.setup as setup_mod
+    from canonic.exc import ConnectionError as CanonicConnectionError
 
     source = _source(measures=[_additive()], dimensions=[_dim("d", "created_at")])
     monkeypatch.setattr(setup_mod, "_bootstrap_connection", lambda *_: None)
@@ -658,7 +658,7 @@ def test_ob_s5_ac2_demo_canon_error_falls_back_to_describe(tmp_path, monkeypatch
     monkeypatch.setattr(
         setup_mod,
         "_run_demo_query",
-        AsyncMock(side_effect=CanonConnectionError("permission denied")),
+        AsyncMock(side_effect=CanonicConnectionError("permission denied")),
     )
 
     _run_golden_path(tmp_path, _config_with_llm(), [])
@@ -717,12 +717,12 @@ def test_render_setup_complete_with_llm_no_enrichment_note(capsys, tmp_path):
 
 def test_ob_s6_bootstrap_completed_emitted_when_pipeline_result_present(tmp_path, monkeypatch):
     """bootstrap_completed fires when _bootstrap_connection returns a real result."""
-    import canon.cli.commands.setup as setup_mod
-    from canon.ingestion.emitter import EmissionResult
-    from canon.ingestion.models import ReconciliationReport
-    from canon.ingestion.pipeline import PipelineResult
-    from canon.instrumentation.models import FunnelMilestone
-    from canon.instrumentation.report import read_events
+    import canonic.cli.commands.setup as setup_mod
+    from canonic.ingestion.emitter import EmissionResult
+    from canonic.ingestion.models import ReconciliationReport
+    from canonic.ingestion.pipeline import PipelineResult
+    from canonic.instrumentation.models import FunnelMilestone
+    from canonic.instrumentation.report import read_events
 
     pipeline_result = PipelineResult(
         emission=EmissionResult(diffs=[], report=ReconciliationReport(entries=[])),
@@ -740,9 +740,9 @@ def test_ob_s6_bootstrap_completed_emitted_when_pipeline_result_present(tmp_path
 
 def test_ob_s6_bootstrap_completed_not_emitted_when_bootstrap_fails(tmp_path, monkeypatch):
     """bootstrap_completed is NOT emitted when bootstrap returns None (e.g. credential error)."""
-    import canon.cli.commands.setup as setup_mod
-    from canon.instrumentation.models import FunnelMilestone
-    from canon.instrumentation.report import read_events
+    import canonic.cli.commands.setup as setup_mod
+    from canonic.instrumentation.models import FunnelMilestone
+    from canonic.instrumentation.report import read_events
 
     monkeypatch.setattr(setup_mod, "_bootstrap_connection", lambda *_: None)
     monkeypatch.setattr(setup_mod, "list_semantic_sources", lambda _: [])
@@ -756,14 +756,14 @@ def test_ob_s6_bootstrap_completed_not_emitted_when_bootstrap_fails(tmp_path, mo
 
 def test_ob_s6_first_answer_served_emitted_on_success(tmp_path, monkeypatch):
     """first_answer_served fires when the demo query completes successfully."""
-    import canon.cli.commands.setup as setup_mod
-    from canon.connectors.base import ResultSet
-    from canon.core.models import QueryMetadata, QueryResult
-    from canon.ingestion.emitter import EmissionResult
-    from canon.ingestion.models import ReconciliationReport
-    from canon.ingestion.pipeline import PipelineResult
-    from canon.instrumentation.models import FunnelMilestone
-    from canon.instrumentation.report import read_events
+    import canonic.cli.commands.setup as setup_mod
+    from canonic.connectors.base import ResultSet
+    from canonic.core.models import QueryMetadata, QueryResult
+    from canonic.ingestion.emitter import EmissionResult
+    from canonic.ingestion.models import ReconciliationReport
+    from canonic.ingestion.pipeline import PipelineResult
+    from canonic.instrumentation.models import FunnelMilestone
+    from canonic.instrumentation.report import read_events
 
     pipeline_result = PipelineResult(
         emission=EmissionResult(diffs=[], report=ReconciliationReport(entries=[])),
@@ -773,7 +773,7 @@ def test_ob_s6_first_answer_served_emitted_on_success(tmp_path, monkeypatch):
         measures=[_additive()],
         dimensions=[_dim("order_date", "created_at")],
     )
-    from canon.core.models import Compiled
+    from canonic.core.models import Compiled
 
     fake_rs = ResultSet(columns=[], rows=[], truncated=False)
     fake_result = QueryResult(
@@ -785,7 +785,7 @@ def test_ob_s6_first_answer_served_emitted_on_success(tmp_path, monkeypatch):
             freshness=[],
         ),
     )
-    from canon.compiler.query import SemanticQuery
+    from canonic.compiler.query import SemanticQuery
 
     fake_sq = SemanticQuery(metrics=["revenue"])
 
@@ -806,9 +806,9 @@ def test_ob_s6_first_answer_served_emitted_on_success(tmp_path, monkeypatch):
 
 def test_ob_s6_first_answer_served_not_emitted_on_demo_error(tmp_path, monkeypatch):
     """first_answer_served is NOT emitted when the demo query fails."""
-    import canon.cli.commands.setup as setup_mod
-    from canon.instrumentation.models import FunnelMilestone
-    from canon.instrumentation.report import read_events
+    import canonic.cli.commands.setup as setup_mod
+    from canonic.instrumentation.models import FunnelMilestone
+    from canonic.instrumentation.report import read_events
 
     source = _source(measures=[_additive()], dimensions=[_dim("d", "created_at")])
     monkeypatch.setattr(setup_mod, "_bootstrap_connection", lambda *_: None)

@@ -1,9 +1,9 @@
 ---
 # Notion page properties:
-#   "Canon Type"   (select):       definition
-#   "Canon Topics" (multi-select): units_sold, metrics, definitions, order_items
-canon_type: definition
-canon_topics: [units_sold, metrics, definitions, order_items]
+#   "Canonic Type"   (select):       definition
+#   "Canonic Topics" (multi-select): units_sold, metrics, definitions, order_items
+canonic_type: definition
+canonic_topics: [units_sold, metrics, definitions, order_items]
 ---
 
 # Units Sold Definition
@@ -39,7 +39,7 @@ through the join chain.
 number of items purchased across all orders. A single order with 5 line items contributes
 **1** to `order_count` and **5+** to `units_sold`.
 
-## How this becomes a Canon knowledge page
+## How this becomes a Canonic knowledge page
 
-Canon ingests this page as `DocEvidence` with `usage_hint: definition`. E6 writes it as a
+Canonic ingests this page as `DocEvidence` with `usage_hint: definition`. E6 writes it as a
 `definition`-mode knowledge page and surfaces it in `search_knowledge("units sold")`.
