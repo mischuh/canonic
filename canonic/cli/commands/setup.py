@@ -59,6 +59,7 @@ from canonic.exc import CanonicError, ConnectionError, CredentialError
 from canonic.ingestion.models import DraftedBy
 from canonic.instrumentation.events import DiskAnswerEventLog, emit_milestone
 from canonic.instrumentation.models import FunnelMilestone
+from canonic.llm_providers import PROVIDERS, CredentialMode
 from canonic.semantic.loader import list_semantic_sources
 from canonic.semantic.models import NormalizedType
 
@@ -781,11 +782,38 @@ async def _probe(conn: Connection) -> Health:
 
 def _prompt_llm() -> LLMConfig:
     _console.print(Panel.fit("Configure the language model.", title="llm"))
-    provider = typer.prompt("Provider", default="openai_compatible")
-    base_url = typer.prompt("Base URL", default="http://localhost:11434/v1")
+    provider_list = ", ".join(sorted(PROVIDERS))
+    while True:
+        provider = typer.prompt(f"Provider ({provider_list})", default="openai_compatible")
+        spec = PROVIDERS.get(provider)
+        if spec is not None:
+            break
+        _console.print(f"[red]unknown provider {provider!r} — choose one of: {provider_list}[/red]")
+
+    base_url = None
+    if spec.requires_base_url:
+        base_url = typer.prompt("Base URL", default="http://localhost:11434/v1")
+
     model = typer.prompt("Model")
-    api_key_env = typer.prompt("Env var holding the API key (optional)", default="")
-    api_key_ref = f"env:{api_key_env}" if api_key_env else None
+
+    api_key_ref = None
+    if spec.credential_mode is CredentialMode.FORBIDDEN:
+        _console.print(
+            "[yellow]This provider authenticates itself outside canonic.yaml — no API key "
+            "needed here. The first generation call walks you through it (e.g. a "
+            "device-code flow in the browser); the resulting credential is then cached "
+            "on disk and reused for later runs.[/yellow]"
+        )
+    else:
+        required = spec.credential_mode is CredentialMode.REQUIRED
+        label = f"Env var holding the API key{'' if required else ' (optional)'}"
+        while True:
+            api_key_env = typer.prompt(label, default="")
+            if api_key_env or not required:
+                break
+            _console.print(f"[red]llm.api_key_ref is required for provider {provider!r}[/red]")
+        api_key_ref = f"env:{api_key_env}" if api_key_env else None
+
     return LLMConfig(provider=provider, base_url=base_url, model=model, api_key_ref=api_key_ref)
 
 

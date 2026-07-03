@@ -138,6 +138,56 @@ canonic status        # always tells you the best next step
 
 ---
 
+## Configuring an LLM
+
+An LLM is **optional** — canonic's answer path is fully deterministic and never calls one. It's only used to *draft* semantics/knowledge during setup and reconciliation. The `llm:` block in `canonic.yaml` supports four providers, all behind the same interface:
+
+**`openai_compatible`** — local runtimes (Ollama, vLLM, LM Studio, llama.cpp, TGI) or any hosted OpenAI-compatible endpoint. `base_url` is required; a key is optional (local servers typically need none):
+```yaml
+llm:
+  provider: openai_compatible
+  base_url: http://127.0.0.1:11434/v1   # Ollama; swap for any OpenAI-compatible endpoint
+  model: gemma-4-e2b-it-4bit
+  api_key_ref: env:CANONIC_LLM_API_KEY   # optional
+```
+
+**`anthropic`** — Claude, called directly. No `base_url` needed; `api_key_ref` is required:
+```yaml
+llm:
+  provider: anthropic
+  model: claude-opus-4-8
+  api_key_ref: env:ANTHROPIC_API_KEY
+```
+
+**`openai`** — OpenAI's hosted API directly (not a self-hosted/compatible endpoint). No `base_url` needed; `api_key_ref` is required:
+```yaml
+llm:
+  provider: openai
+  model: gpt-4o
+  api_key_ref: env:OPENAI_API_KEY
+```
+
+**`github_copilot`** — routed through your GitHub Copilot subscription. No `base_url`, and **no `api_key_ref`** — authentication is a one-time device-code flow (a browser prompt on first use); the resulting credential is cached on disk and reused after that:
+```yaml
+llm:
+  provider: github_copilot
+  model: gpt-4o
+```
+
+All four are reached through [litellm](https://github.com/BerriAI/litellm) behind one interface — no per-provider branching anywhere else in canonic. `tasks:` optionally overrides the model per task (`draft`, `reconcile`):
+```yaml
+llm:
+  provider: anthropic
+  model: claude-haiku-4-5
+  api_key_ref: env:ANTHROPIC_API_KEY
+  tasks:
+    reconcile: claude-opus-4-8   # a harder task gets a stronger model
+```
+
+Under `runtime.air_gapped: true`, only a local endpoint (loopback, or an allowlisted host via `runtime.allow_cidrs`) is accepted — `openai`, `anthropic`, and `github_copilot` all call a fixed public endpoint and are rejected outright in that mode.
+
+---
+
 ## Connect your agent (MCP)
 
 canonic exposes its capabilities to agent clients through a **local, on-demand MCP server** — no always-on hosted service. Verified with **Claude Code, Cursor, and Codex**.

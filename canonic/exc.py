@@ -234,11 +234,12 @@ class ContradictionsFound(CanonicError):
 
 
 class GenerationError(CanonicError):
-    """A generation call failed (provider error, transport, or non-OpenAI-compatible provider).
+    """A generation call failed (a deterministic provider or transport error).
 
     The catch-all for the E10 generation runtime (SPEC-E10 §8). No silent model
     substitution: a failed call surfaces this structured error rather than quietly
-    falling back to a different model.
+    falling back to a different model. An unknown ``llm.provider`` is rejected earlier,
+    at config validation (see :class:`~canonic.config.LLMConfig`), not here.
     """
 
     code = ErrorCode.GENERATION_FAILED

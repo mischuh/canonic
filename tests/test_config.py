@@ -155,6 +155,83 @@ class TestLoadConfig:
         assert cfg.project.default_connection == "warehouse_pg"
 
 
+class TestLLMProviders:
+    """Multi-provider ``llm.provider`` validation (SPEC-E10 §2)."""
+
+    def test_unknown_provider_rejected(self, tmp_path: Path) -> None:
+        content = _VALID.replace("provider: openai_compatible", "provider: made-up")
+        with pytest.raises(ConfigError) as exc_info:
+            load_config(_canonic_yaml(tmp_path, content))
+        assert "unknown llm.provider" in str(exc_info.value)
+
+    def test_openai_compatible_without_base_url_rejected(self, tmp_path: Path) -> None:
+        content = _VALID.replace("  base_url: http://localhost:11434/v1\n", "")
+        with pytest.raises(ConfigError) as exc_info:
+            load_config(_canonic_yaml(tmp_path, content))
+        assert "llm.base_url is required" in str(exc_info.value)
+
+    def test_anthropic_provider_with_key_accepted(self, tmp_path: Path) -> None:
+        content = (
+            _VALID.replace("provider: openai_compatible", "provider: anthropic")
+            .replace("  base_url: http://localhost:11434/v1\n", "")
+            .replace("model: llama3", "model: claude-opus-4-8")
+        )
+        cfg = load_config(_canonic_yaml(tmp_path, content))
+        assert cfg.llm.provider == "anthropic"
+        assert cfg.llm.base_url is None
+
+    def test_anthropic_provider_without_key_rejected(self, tmp_path: Path) -> None:
+        content = (
+            _VALID.replace("provider: openai_compatible", "provider: anthropic")
+            .replace("  base_url: http://localhost:11434/v1\n", "")
+            .replace("  api_key_ref: env:CANONIC_LLM_KEY\n", "")
+        )
+        with pytest.raises(ConfigError) as exc_info:
+            load_config(_canonic_yaml(tmp_path, content))
+        assert "llm.api_key_ref is required" in str(exc_info.value)
+
+    def test_openai_provider_without_key_rejected(self, tmp_path: Path) -> None:
+        content = (
+            _VALID.replace("provider: openai_compatible", "provider: openai")
+            .replace("  base_url: http://localhost:11434/v1\n", "")
+            .replace("  api_key_ref: env:CANONIC_LLM_KEY\n", "")
+        )
+        with pytest.raises(ConfigError) as exc_info:
+            load_config(_canonic_yaml(tmp_path, content))
+        assert "llm.api_key_ref is required" in str(exc_info.value)
+
+    def test_github_copilot_without_key_accepted(self, tmp_path: Path) -> None:
+        content = (
+            _VALID.replace("provider: openai_compatible", "provider: github_copilot")
+            .replace("  base_url: http://localhost:11434/v1\n", "")
+            .replace("  api_key_ref: env:CANONIC_LLM_KEY\n", "")
+        )
+        cfg = load_config(_canonic_yaml(tmp_path, content))
+        assert cfg.llm.provider == "github_copilot"
+        assert cfg.llm.api_key_ref is None
+
+    def test_github_copilot_with_key_rejected(self, tmp_path: Path) -> None:
+        content = _VALID.replace("provider: openai_compatible", "provider: github_copilot").replace(
+            "  base_url: http://localhost:11434/v1\n", ""
+        )
+        with pytest.raises(ConfigError) as exc_info:
+            load_config(_canonic_yaml(tmp_path, content))
+        assert "llm.api_key_ref is not used" in str(exc_info.value)
+
+    def test_air_gapped_blocks_hosted_provider_default_endpoint(self, tmp_path: Path) -> None:
+        # No base_url configured for a hosted provider — the air-gapped check must still
+        # fall back to its known public host rather than skip the check entirely.
+        content = (
+            _VALID.replace("provider: openai_compatible", "provider: anthropic").replace(
+                "  base_url: http://localhost:11434/v1\n", ""
+            )
+            + "runtime:\n  air_gapped: true\n"
+        )
+        with pytest.raises(AirGappedViolation) as exc:
+            load_config(_canonic_yaml(tmp_path, content))
+        assert "llm.base_url" in str(exc.value)
+
+
 class TestAirGapped:
     """Load-time air-gapped enforcement (SPEC-E10 §4, GH-63, S3/AC1+AC3)."""
 
