@@ -212,6 +212,20 @@ class GenerationRuntime:
         if response_model is None:
             return Completion(text=content, model=model_str, usage=usage)
 
+        if not content.strip():
+            # Some endpoints accept `response_format` without complaint (no
+            # UnsupportedParamsError/BadRequestError) yet silently ignore the schema
+            # constraint and return nothing — observed with litellm's github_copilot
+            # provider proxying non-OpenAI backend models. Empty content on a
+            # schema-constrained request is a strong, distinct signal from "tried and got
+            # the shape wrong", so it gets its own error rather than a confusing
+            # "Invalid JSON: expected value at line 1 column 1".
+            raise StructuredOutputUnsupported(
+                f"model {model_str!r} returned empty content for a schema-constrained "
+                f"request — it likely does not honor structured output even though the "
+                f"call was accepted; try a different model for this provider"
+            )
+
         try:
             parsed = response_model.model_validate_json(content)
         except ValidationError as exc:

@@ -171,8 +171,9 @@ llm:
 ```yaml
 llm:
   provider: github_copilot
-  model: gpt-4o
+  model: gpt-4.1
 ```
+> Structured/schema-constrained output (used for drafting) isn't honored by every model Copilot proxies — Claude and most GPT models silently return prose instead of JSON. Stick to a model litellm marks as schema-capable for this provider (`gpt-4.1`, `gpt-5`, `gpt-5.1`, `gpt-5.2`) if you hit `structured_output_unsupported`.
 
 All four are reached through [litellm](https://github.com/BerriAI/litellm) behind one interface — no per-provider branching anywhere else in canonic. `tasks:` optionally overrides the model per task (`draft`, `reconcile`):
 ```yaml

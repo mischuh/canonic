@@ -189,6 +189,19 @@ async def test_unsupported_structured_output_raises(
     assert err.value.exit_code == 17
 
 
+async def test_empty_content_on_structured_request_raises_unsupported_not_invalid(
+    llm_config: LLMConfig, set_fake: Callable[..., None]
+) -> None:
+    # Some endpoints accept response_format without raising, then silently ignore the
+    # schema and return nothing (observed with litellm's github_copilot provider on
+    # non-OpenAI backend models). That must surface as "unsupported", not a confusing
+    # JSON-parse failure.
+    set_fake(content="")
+    runtime = GenerationRuntime(llm_config)
+    with pytest.raises(StructuredOutputUnsupported, match="empty content"):
+        await runtime.generate("draft", response_model=_Grain)
+
+
 def _api_error() -> litellm.APIError:
     return litellm.APIError(status_code=500, message="boom", llm_provider="openai", model="m")
 
