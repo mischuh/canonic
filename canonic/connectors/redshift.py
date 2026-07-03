@@ -65,6 +65,7 @@ class _RedshiftAsyncpgDialect(PGDialect_asyncpg):
     """
 
     name = "redshift"
+    supports_statement_cache = True
 
     def _set_backslash_escapes(self, _connection: Any) -> None:
         self._backslash_escapes = False
