@@ -78,11 +78,31 @@ def load_semantic_source(path: Path) -> SemanticSource:
 
 
 def list_semantic_sources(project_root: Path) -> list[SemanticSource]:
-    """Load every semantics/**/*.yaml under project_root, sorted for determinism."""
+    """Load every semantics/**/*.yaml under project_root, sorted for determinism.
+
+    Raises ``SemanticSourceError`` if two sources share the same ``name``. Names must be
+    unique across the whole project, not merely per connection: joins (``to:``) and
+    contract bindings (``canonical.source:``) both reference sources by bare name with no
+    connection qualifier, so a name reused across connections is unreachable/ambiguous
+    rather than usably scoped.
+    """
     base = project_root / _SEMANTICS_DIR
     if not base.is_dir():
         return []
-    return [load_semantic_source(p) for p in sorted(base.rglob("*.yaml"))]
+
+    sources: list[SemanticSource] = []
+    seen_at: dict[str, Path] = {}
+    for path in sorted(base.rglob("*.yaml")):
+        source = load_semantic_source(path)
+        if source.name in seen_at:
+            raise SemanticSourceError(
+                f"{path}: duplicate source name {source.name!r} "
+                f"(already defined at {seen_at[source.name]}); "
+                "source names must be unique across the whole project, not just per connection"
+            )
+        seen_at[source.name] = path
+        sources.append(source)
+    return sources
 
 
 def dump_semantic_source(source: SemanticSource) -> str:
