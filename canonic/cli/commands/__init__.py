@@ -53,8 +53,10 @@ def load_service(ctx: typer.Context) -> CanonicService:
         from canonic.log import _effective_log_params, configure_logging
 
         cfg = load_config(root / "canonic.yaml")
-        level, file = _effective_log_params(cfg.logging.level, cfg.logging.file)
-        configure_logging(level=level, file=file)
+        level, file, format = _effective_log_params(
+            cfg.logging.level, cfg.logging.file, cfg.logging.format
+        )
+        configure_logging(level=level, file=file, format=format)
     except Exception:
         pass  # CanonicService.from_project below will fail with a clearer error if config is broken
 

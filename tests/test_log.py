@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 
 import pytest
@@ -68,39 +69,82 @@ class TestConfigureLogging:
         content = log_file.read_text()
         assert "written to file" in content
 
+    def test_json_format_emits_valid_json_to_stderr(self, capsys):
+        configure_logging(level="DEBUG", format="json")
+        logging.getLogger("canonic.test_json").info("hello json")
+        captured = capsys.readouterr()
+        assert captured.out == ""
+        record = json.loads(captured.err)
+        assert record["message"] == "hello json"
+        assert record["level"] == "INFO"
+        assert record["logger"] == "canonic.test_json"
+        assert "timestamp" in record
+
+    def test_json_format_one_object_per_line(self, capsys):
+        configure_logging(level="DEBUG", format="json")
+        logger = logging.getLogger("canonic.test_json_lines")
+        logger.info("first")
+        logger.info("second")
+        lines = capsys.readouterr().err.strip().splitlines()
+        assert len(lines) == 2
+        assert json.loads(lines[0])["message"] == "first"
+        assert json.loads(lines[1])["message"] == "second"
+
+    def test_text_format_is_default(self, capsys):
+        configure_logging(level="DEBUG")
+        logging.getLogger("canonic.test_default").info("plain text")
+        captured = capsys.readouterr()
+        with pytest.raises(json.JSONDecodeError):
+            json.loads(captured.err)
+
 
 class TestEffectiveLogParams:
     def test_returns_config_values_when_no_env(self, monkeypatch):
         monkeypatch.delenv("CANONIC_LOG_LEVEL", raising=False)
         monkeypatch.delenv("CANONIC_LOG_FILE", raising=False)
-        level, file = _effective_log_params("INFO", "/tmp/canonic.log")
+        monkeypatch.delenv("CANONIC_LOG_FORMAT", raising=False)
+        level, file, format = _effective_log_params("INFO", "/tmp/canonic.log", "json")
         assert level == "INFO"
         assert file == "/tmp/canonic.log"
+        assert format == "json"
 
     def test_env_level_overrides_config(self, monkeypatch):
         monkeypatch.setenv("CANONIC_LOG_LEVEL", "DEBUG")
         monkeypatch.delenv("CANONIC_LOG_FILE", raising=False)
-        level, file = _effective_log_params("WARNING", None)
+        monkeypatch.delenv("CANONIC_LOG_FORMAT", raising=False)
+        level, file, format = _effective_log_params("WARNING", None)
         assert level == "DEBUG"
         assert file is None
+        assert format == "text"
 
     def test_env_file_overrides_config(self, monkeypatch):
         monkeypatch.delenv("CANONIC_LOG_LEVEL", raising=False)
         monkeypatch.setenv("CANONIC_LOG_FILE", "/tmp/override.log")
-        level, file = _effective_log_params("WARNING", "/tmp/config.log")
+        monkeypatch.delenv("CANONIC_LOG_FORMAT", raising=False)
+        level, file, format = _effective_log_params("WARNING", "/tmp/config.log")
         assert level == "WARNING"
         assert file == "/tmp/override.log"
+
+    def test_env_format_overrides_config(self, monkeypatch):
+        monkeypatch.delenv("CANONIC_LOG_LEVEL", raising=False)
+        monkeypatch.delenv("CANONIC_LOG_FILE", raising=False)
+        monkeypatch.setenv("CANONIC_LOG_FORMAT", "json")
+        level, file, format = _effective_log_params("WARNING", None, "text")
+        assert format == "json"
 
     def test_both_env_vars_override(self, monkeypatch):
         monkeypatch.setenv("CANONIC_LOG_LEVEL", "ERROR")
         monkeypatch.setenv("CANONIC_LOG_FILE", "/tmp/env.log")
-        level, file = _effective_log_params("INFO", "/tmp/config.log")
+        monkeypatch.delenv("CANONIC_LOG_FORMAT", raising=False)
+        level, file, format = _effective_log_params("INFO", "/tmp/config.log")
         assert level == "ERROR"
         assert file == "/tmp/env.log"
 
     def test_defaults_when_no_env_and_no_config(self, monkeypatch):
         monkeypatch.delenv("CANONIC_LOG_LEVEL", raising=False)
         monkeypatch.delenv("CANONIC_LOG_FILE", raising=False)
-        level, file = _effective_log_params("WARNING", None)
+        monkeypatch.delenv("CANONIC_LOG_FORMAT", raising=False)
+        level, file, format = _effective_log_params("WARNING", None)
         assert level == "WARNING"
         assert file is None
+        assert format == "text"

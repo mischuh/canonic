@@ -31,6 +31,7 @@ embeddings = [
 
 [project.scripts]
 canonic = "canonic.cli.app:app"
+can = "canonic.cli.app:app"
 
 [dependency-groups]
 dev = [

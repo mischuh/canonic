@@ -70,8 +70,8 @@ def main(
 
     from canonic.log import _effective_log_params, configure_logging
 
-    level, file = _effective_log_params("WARNING", None)
-    configure_logging(level=level, file=file)
+    level, file, format = _effective_log_params("WARNING", None)
+    configure_logging(level=level, file=file, format=format)
 
     if ctx.invoked_subcommand is None:
         if json_output:

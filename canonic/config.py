@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import re
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal
 
 from pydantic import BaseModel, Field, ValidationError, field_validator, model_validator
 from pydantic_settings import BaseSettings, PydanticBaseSettingsSource, SettingsConfigDict
@@ -136,6 +136,10 @@ class LoggingConfig(BaseModel):
 
     level: str = "WARNING"
     file: str | None = None
+    # "json" emits one JSON object per line — safe for stdio-transport MCP servers,
+    # where stdout carries the JSON-RPC stream and logs must stay on stderr/file
+    # but still be machine-parseable by whatever tails them.
+    format: Literal["text", "json"] = "text"
 
 
 class YamlConfigSource(PydanticBaseSettingsSource):

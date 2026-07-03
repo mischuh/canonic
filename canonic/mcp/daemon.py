@@ -167,10 +167,12 @@ def start_stdio(service: object, project_root: Path, *, suggestions: bool = Fals
 
     try:
         cfg = load_config(project_root / "canonic.yaml")
-        level, file = _effective_log_params(cfg.logging.level, cfg.logging.file)
+        level, file, format = _effective_log_params(
+            cfg.logging.level, cfg.logging.file, cfg.logging.format
+        )
     except Exception:
-        level, file = _effective_log_params("WARNING", None)
-    configure_logging(level=level, file=file)
+        level, file, format = _effective_log_params("WARNING", None)
+    configure_logging(level=level, file=file, format=format)
 
     _check_version_on_start(project_root)
     mcp = build_server(service, suggestions=suggestions)  # type: ignore[arg-type]
@@ -240,10 +242,12 @@ def start_http(
 
     try:
         cfg = load_config(project_root / "canonic.yaml")
-        level, file = _effective_log_params(cfg.logging.level, cfg.logging.file)
+        level, file, format = _effective_log_params(
+            cfg.logging.level, cfg.logging.file, cfg.logging.format
+        )
     except Exception:
-        level, file = _effective_log_params("WARNING", None)
-    configure_logging(level=level, file=file)
+        level, file, format = _effective_log_params("WARNING", None)
+    configure_logging(level=level, file=file, format=format)
 
     mcp = build_server(service, suggestions=suggestions)  # type: ignore[arg-type]
     import asyncio

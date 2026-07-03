@@ -26,4 +26,4 @@ telemetry:
 
 logging:
   level: INFO
-  file: ./.canonic/canonic.log
+  format: json
