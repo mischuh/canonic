@@ -14,6 +14,9 @@ deterministic, structured parsing and is not built from these pieces.
 
 from __future__ import annotations
 
+import hashlib
+import json
+import logging
 from datetime import UTC, datetime
 from typing import Any, Protocol, runtime_checkable
 
@@ -28,13 +31,59 @@ from canonic.connectors.base import (
     UsageHint,
 )
 
+logger = logging.getLogger(__name__)
+
 __all__ = [
     "ExtractionSkill",
     "FetchAdapter",
     "GenericEvidenceConnector",
     "NullExtractionSkill",
     "RawDoc",
+    "compute_doc_fingerprint",
+    "parse_usage_hint",
 ]
+
+# Map from a raw classification string (case-insensitive) → UsageHint. Shared by every
+# ExtractionSkill — deterministic property-readers and LLM-backed skills alike — so an
+# unfamiliar vendor value or a stray model classification degrades identically everywhere.
+_USAGE_HINT_MAP: dict[str, UsageHint] = {
+    "reference": UsageHint.REFERENCE,
+    "caveat": UsageHint.CAVEAT,
+    "policy": UsageHint.POLICY,
+    "definition": UsageHint.DEFINITION,
+}
+
+
+def parse_usage_hint(raw: str | None, context: str) -> UsageHint:
+    """Map a raw classification string to UsageHint, defaulting gracefully.
+
+    Defaults to ``REFERENCE`` and logs a WARNING for unrecognized values — never drops
+    the doc (SPEC-E3 §4 AC2-style graceful handling). ``context`` identifies the doc in
+    the warning (e.g. a page id or source_ref) and carries no other meaning.
+    """
+    if not raw:
+        return UsageHint.REFERENCE
+    mapped = _USAGE_HINT_MAP.get(raw.strip().lower())
+    if mapped is None:
+        logger.warning("unrecognized usage_hint %r for %s; recorded as reference", raw, context)
+        return UsageHint.REFERENCE
+    return mapped
+
+
+def compute_doc_fingerprint(title: str, body: str, usage_hint: str, topic_refs: list[str]) -> str:
+    """Stable sha256 over doc content fields, for drift detection (SPEC-E3 §3.2).
+
+    Shared by every ExtractionSkill so the same content fingerprints identically
+    regardless of which skill (deterministic or LLM-backed) produced the classification.
+    """
+    payload = {
+        "title": title,
+        "body": body,
+        "usage_hint": usage_hint,
+        "topic_refs": sorted(topic_refs),
+    }
+    digest = hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()
+    return f"sha256:{digest}"
 
 
 class RawDoc(BaseModel):
@@ -116,6 +165,23 @@ class GenericEvidenceConnector(ConnectorBase):
         self._fetch_adapter = fetch_adapter
         self._source = source
         self._extraction_skill = extraction_skill or NullExtractionSkill()
+
+    @property
+    def extraction_skill(self) -> ExtractionSkill:
+        """The currently active extraction skill (read-only; use ``set_extraction_skill`` to replace)."""
+        return self._extraction_skill
+
+    def set_extraction_skill(self, extraction_skill: ExtractionSkill) -> None:
+        """Replace the extraction skill after construction.
+
+        The connector factory only threads a bare ``Connection`` into connector
+        builders (SPEC-E2 §2.2a) — it has no access to ``LLMConfig`` — so a real,
+        LLM-backed skill (:class:`~canonic.runtime.extraction.RuntimeExtractionSkill`)
+        is built separately from ``config.llm``/``config.runtime`` and wired in here by
+        the caller, exactly like ``LLMDrafter`` is wired into ``ContextBuilder`` rather
+        than into a connector at factory-build time.
+        """
+        self._extraction_skill = extraction_skill
 
     def capabilities(self) -> list[Capability]:
         return [Capability.CAPABILITIES, Capability.TEST_CONNECTION, Capability.EXTRACT_EVIDENCE]

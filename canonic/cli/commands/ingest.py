@@ -24,6 +24,7 @@ import typer
 from canonic.cli._errors import get_cli_context, handle_errors
 from canonic.cli.commands import _console
 from canonic.config import find_project_root, load_config
+from canonic.connectors.evidence import GenericEvidenceConnector, NullExtractionSkill
 from canonic.connectors.factory import default_factory
 from canonic.exc import CanonicError, ConnectionError, ContradictionsFound
 from canonic.ingestion.autopr import AutoPRPublisher, PullRequestPublisher, SubprocessPublisher
@@ -33,6 +34,7 @@ from canonic.ingestion.source import gather_evidence
 from canonic.instrumentation.events import emit_milestone_once
 from canonic.instrumentation.models import FunnelMilestone
 from canonic.runtime.drafter import make_drafter, make_reconcile_drafter
+from canonic.runtime.extraction import make_extraction_skill
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable
@@ -205,6 +207,8 @@ async def _ingest(
                 if Capability.EXTRACT_DEFINITIONS in extra.capabilities():
                     connectors[conn.id] = extra
 
+    _wire_extraction_skills(connectors, config, headless=headless)
+
     drafter = make_drafter(config.llm, config.runtime, headless=headless)
     reconcile_drafter = make_reconcile_drafter(config.llm, config.runtime, headless=headless)
     pipeline = IngestionPipeline(
@@ -231,6 +235,27 @@ async def _ingest(
         logger.debug("closing %d connector(s)", len(connectors))
         for connector in connectors.values():
             await connector.aclose()
+
+
+def _wire_extraction_skills(
+    connectors: dict[str, ConnectorBase], config: CanonicConfig, *, headless: bool
+) -> None:
+    """Backfill a real ExtractionSkill into GenericEvidenceConnectors that default to Null.
+
+    The connector factory only threads a bare ``Connection`` into connector builders
+    (SPEC-E2 §2.2a) — it has no access to ``LLMConfig`` — so a ``GenericEvidenceConnector``
+    without its own vendor-specific skill (e.g. Notion's deterministic
+    ``NotionExtractionSkill``) defaults to ``NullExtractionSkill`` at factory-build time.
+    Backfill the config-driven skill only for those; never override a connector's
+    deliberate choice. Same seam as ``drafter``/``reconcile_drafter``, applied directly to
+    the connector since ``extract_evidence()`` runs before any drafter exists.
+    """
+    extraction_skill = make_extraction_skill(config.llm, config.runtime, headless=headless)
+    for connector in connectors.values():
+        if isinstance(connector, GenericEvidenceConnector) and isinstance(
+            connector.extraction_skill, NullExtractionSkill
+        ):
+            connector.set_extraction_skill(extraction_skill)
 
 
 async def _gather_evidence(connector: ConnectorBase, conn_id: str) -> list[EvidenceItem]:

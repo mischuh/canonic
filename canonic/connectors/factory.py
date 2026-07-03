@@ -11,7 +11,6 @@ from typing import TYPE_CHECKING
 
 from canonic.connectors.dbt import DbtConnector
 from canonic.connectors.duckdb import DuckDBConnector
-from canonic.connectors.evidence import GenericEvidenceConnector
 from canonic.connectors.looker import LookerConnector
 from canonic.connectors.metabase import MetabaseConnector
 from canonic.connectors.notion import DEFAULT_API_VERSION as _NOTION_DEFAULT_API_VERSION
@@ -26,6 +25,7 @@ if TYPE_CHECKING:
 
     from canonic.config import CanonicConfig, Connection
     from canonic.connectors.base import ConnectorBase
+    from canonic.connectors.evidence import GenericEvidenceConnector
 
 __all__ = ["ConnectorFactory", "default_factory"]
 

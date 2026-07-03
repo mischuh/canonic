@@ -12,13 +12,16 @@ if TYPE_CHECKING:
 class Task(StrEnum):
     """A named generation task that routes to a model (SPEC-E10 §3).
 
-    The v1 task set: ``draft`` (E4 builder) and ``reconcile`` (E4 reconciliation). A
-    ``StrEnum`` member *is* its lowercase string, so it indexes ``llm.tasks`` (keyed by the
-    YAML strings) directly and serializes without conversion.
+    The v1 task set: ``draft`` (E4 builder), ``reconcile`` (E4 reconciliation), and
+    ``extract`` (E3 generic evidence-connector classification, see
+    docs/AMENDMENT-generic-evidence-connector.md). A ``StrEnum`` member *is* its lowercase
+    string, so it indexes ``llm.tasks`` (keyed by the YAML strings) directly and
+    serializes without conversion.
     """
 
     DRAFT = "draft"
     RECONCILE = "reconcile"
+    EXTRACT = "extract"
 
 
 def resolve_model(config: LLMConfig, task: Task | None) -> str:

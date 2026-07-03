@@ -13,7 +13,6 @@ from canonic.connectors.base import (
     DocEvidence,
     UsageHint,
 )
-from canonic.connectors.evidence import GenericEvidenceConnector
 from canonic.connectors.notion import (
     SUPPORTED_API_VERSIONS,
     _usage_hint_for,
@@ -24,6 +23,8 @@ from canonic.ingestion.source import evidence_from_docs
 
 if TYPE_CHECKING:
     from pathlib import Path
+
+    from canonic.connectors.evidence import GenericEvidenceConnector
 
 
 class FixtureNotionPageSource:

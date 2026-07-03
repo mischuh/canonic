@@ -22,17 +22,19 @@ to project dependencies to use live API access.
 
 from __future__ import annotations
 
-import hashlib
-import json
-import logging
 from datetime import UTC, datetime
 from typing import Any, Protocol, runtime_checkable
 
 from canonic.connectors.base import DocEvidence, UsageHint
-from canonic.connectors.evidence import GenericEvidenceConnector, RawDoc
+from canonic.connectors.evidence import (
+    GenericEvidenceConnector,
+    RawDoc,
+    compute_doc_fingerprint,
+)
+from canonic.connectors.evidence import (
+    parse_usage_hint as _usage_hint_for,
+)
 from canonic.exc import UnsupportedSourceVersionError
-
-logger = logging.getLogger(__name__)
 
 __all__ = [
     "HttpNotionPageSource",
@@ -53,45 +55,6 @@ _USAGE_HINT_PROPERTY = "Canonic Type"
 
 # Notion page property name that carries topic refs (a multi-select property).
 _TOPIC_REFS_PROPERTY = "Canonic Topics"
-
-# Map from Notion select option values (case-insensitive) → UsageHint.
-_USAGE_HINT_MAP: dict[str, UsageHint] = {
-    "reference": UsageHint.REFERENCE,
-    "caveat": UsageHint.CAVEAT,
-    "policy": UsageHint.POLICY,
-    "definition": UsageHint.DEFINITION,
-}
-
-
-def _doc_fingerprint(title: str, body: str, usage_hint: str, topic_refs: list[str]) -> str:
-    """Stable sha256 over doc content fields, for drift detection (SPEC-E3 §3.2)."""
-    payload = {
-        "title": title,
-        "body": body,
-        "usage_hint": usage_hint,
-        "topic_refs": sorted(topic_refs),
-    }
-    digest = hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()
-    return f"sha256:{digest}"
-
-
-def _usage_hint_for(raw: str | None, page_id: str) -> UsageHint:
-    """Map a raw Notion select value to UsageHint.
-
-    Defaults to ``REFERENCE`` and emits a WARNING for unrecognized values —
-    never drops the page (SPEC-E3 §4 AC2-style graceful handling).
-    """
-    if not raw:
-        return UsageHint.REFERENCE
-    mapped = _USAGE_HINT_MAP.get(raw.strip().lower())
-    if mapped is None:
-        logger.warning(
-            "unrecognized Canonic Type %r on Notion page %s; usage_hint recorded as reference",
-            raw,
-            page_id,
-        )
-        return UsageHint.REFERENCE
-    return mapped
 
 
 def _extract_title(page: dict[str, Any]) -> str:
@@ -288,7 +251,7 @@ class NotionExtractionSkill:
         page = doc.metadata
         usage_hint = _extract_usage_hint(page)
         topic_refs = _extract_topic_refs(page)
-        fingerprint = _doc_fingerprint(doc.title, doc.body, usage_hint.value, topic_refs)
+        fingerprint = compute_doc_fingerprint(doc.title, doc.body, usage_hint.value, topic_refs)
         return DocEvidence(
             source=source,
             title=doc.title,
