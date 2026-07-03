@@ -260,7 +260,7 @@ def any_offline_connector(
     from canonic.connectors.dbt import DbtConnector
     from canonic.connectors.looker import LookerConnector
     from canonic.connectors.metabase import MetabaseConnector
-    from canonic.connectors.notion import NotionConnector
+    from canonic.connectors.notion import make_notion_connector
 
     match request.param:
         case "postgres":
@@ -270,7 +270,7 @@ def any_offline_connector(
         case "dbt":
             return DbtConnector(dbt_manifest_path)
         case "notion":
-            return NotionConnector(page_source=_FixtureNotionPageSource(notion_pages_path))
+            return make_notion_connector(page_source=_FixtureNotionPageSource(notion_pages_path))
         case "metabase":
             conn = Connection(
                 id="metabase_prod",
@@ -463,7 +463,7 @@ def _out_of_range_connector(
     from canonic.connectors.dbt import DbtConnector
     from canonic.connectors.looker import LookerConnector
     from canonic.connectors.metabase import MetabaseConnector
-    from canonic.connectors.notion import NotionConnector
+    from canonic.connectors.notion import make_notion_connector
 
     match param:
         case "dbt":
@@ -483,7 +483,7 @@ def _out_of_range_connector(
             )
             return DbtConnector(manifest)
         case "notion":
-            return NotionConnector(
+            return make_notion_connector(
                 page_source=_FixtureNotionPageSource(notion_pages_path),
                 api_version="2020-01-01",
             )
