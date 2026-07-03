@@ -7,6 +7,7 @@ re-invocation after a quit or crash resumes at the first still-``pending`` item.
 
 from __future__ import annotations
 
+import logging
 from typing import TYPE_CHECKING, Annotated
 
 if TYPE_CHECKING:
@@ -25,6 +26,8 @@ from canonic.ingestion.pending import (
     latest_run_id,
     update_status,
 )
+
+logger = logging.getLogger(__name__)
 
 _PENDING_DIFFS_DIR = "pending-diffs"
 
@@ -81,6 +84,13 @@ def review(
 
     total = len(run.proposals)
     resolved_before = total - len(pending)
+    logger.info(
+        "review: run=%s pending=%d resolved=%d total=%d",
+        run_dir.name,
+        len(pending),
+        resolved_before,
+        total,
+    )
 
     _console.print(
         f"[bold]Reviewing run:[/bold] {run_dir.name}  "
@@ -112,6 +122,7 @@ def review(
 
         if raw == "q":
             _console.print("[yellow]quit — remaining proposals left pending[/yellow]")
+            logger.info("review: quit at proposal %d/%d", idx, total)
             break
 
         new_status: ProposalStatus
@@ -129,6 +140,9 @@ def review(
         else:
             new_status = ProposalStatus.PENDING
             _console.print(f"[dim]skipped[/dim] → {proposal.target}")
+        logger.debug(
+            "review: proposal=%s target=%s -> %s", proposal.id, proposal.target, new_status.value
+        )
 
         if raw != "s":
             i = next(j for j, p in enumerate(updated) if p.id == proposal.id)

@@ -7,6 +7,7 @@ state (accepted / rejected / frozen), are silently skipped.  No git interaction 
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 from typing import Annotated
 
@@ -22,6 +23,8 @@ from canonic.ingestion.pending import (
     apply_entry,
     update_status,
 )
+
+logger = logging.getLogger(__name__)
 
 
 @handle_errors
@@ -49,6 +52,7 @@ def apply(
         raise typer.Exit(1)
 
     run = PendingRun.load(run_dir)
+    logger.info("apply: run_dir=%s proposals=%d", run_dir.name, len(run.proposals))
 
     applied = 0
     skipped = 0
@@ -56,16 +60,29 @@ def apply(
 
     for proposal in run.proposals:
         if proposal.status is not ProposalStatus.PENDING:
+            logger.debug(
+                "apply: skipping proposal=%s target=%s (status=%s)",
+                proposal.id,
+                proposal.target,
+                proposal.status.value,
+            )
             skipped += 1
             continue
         if not Path(proposal.diff_file).exists():
+            logger.debug(
+                "apply: skipping proposal=%s target=%s (diff file missing)",
+                proposal.id,
+                proposal.target,
+            )
             skipped += 1
             continue
 
         apply_entry(root, run, proposal)
+        logger.debug("apply: applied proposal=%s target=%s", proposal.id, proposal.target)
         i = next(j for j, p in enumerate(updated) if p.id == proposal.id)
         updated[i] = proposal.model_copy(update={"status": ProposalStatus.ACCEPTED})
         applied += 1
 
     update_status(run_dir, updated)
+    logger.info("apply complete: applied=%d skipped=%d", applied, skipped)
     _console.print(f"[green]applied {applied}[/green], skipped {skipped}")

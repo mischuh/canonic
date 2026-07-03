@@ -70,6 +70,7 @@ async def evidence_from_introspection(
     so the builder can map it deterministically and reconciliation can detect drift (§7). The
     payload is the schema's JSON dump — no vendor-specific shape crosses the boundary.
     """
+    logger.info("introspecting schema: source=%r", source)
     observed_at = datetime.now(UTC)
     schemas = await connector.introspect_schema()
     result: list[EvidenceItem] = []
@@ -87,6 +88,12 @@ async def evidence_from_introspection(
                 observed_at=observed_at,
             )
         )
+    logger.info(
+        "introspection complete: source=%r relations=%d evidence=%d",
+        source,
+        len(schemas),
+        len(result),
+    )
     return result
 
 
@@ -100,6 +107,7 @@ async def evidence_from_definitions(
     item — no vendor-specific shape crosses into E4.  The builder records ``definition``
     items in its skip ledger until the E4 handler is implemented.
     """
+    logger.info("extracting definitions: source=%r", source)
     observed_at = datetime.now(UTC)
     extract = await connector.extract_definitions()
     items: list[EvidenceItem] = []
@@ -131,6 +139,12 @@ async def evidence_from_definitions(
                 observed_at=observed_at,
             )
         )
+    logger.info(
+        "definition extraction complete: source=%r relations=%d definitions=%d",
+        source,
+        len(extract.relations),
+        len(extract.definitions),
+    )
     return items
 
 
@@ -143,6 +157,7 @@ async def evidence_from_docs(connector: EvidenceExtractable, source: str) -> lis
     Looker) — it is observed BI usage, a reconciliation signal, not hand-authored prose.
     No vendor-specific shape crosses into E4.
     """
+    logger.info("extracting evidence: source=%r", source)
     items = await connector.extract_evidence()
     result: list[EvidenceItem] = []
     for item in items:
@@ -181,6 +196,7 @@ async def evidence_from_docs(connector: EvidenceExtractable, source: str) -> lis
                 type(item).__name__,
                 getattr(item, "native_ref", "?"),
             )
+    logger.info("evidence extraction complete: source=%r items=%d", source, len(result))
     return result
 
 
@@ -202,8 +218,10 @@ async def gather_evidence(connector: ConnectorBase, source: str) -> list[Evidenc
     has both seams called — multi-capability, zero vendor-name branches.
     Capabilities with no mapped seam (e.g. ``test_connection``) are silently skipped.
     """
+    capabilities = connector.capabilities()
+    logger.debug("gathering evidence: source=%r capabilities=%s", source, capabilities)
     items: list[EvidenceItem] = []
-    for cap in connector.capabilities():
+    for cap in capabilities:
         seam = _SEAM_BY_CAPABILITY.get(cap)
         if seam is not None:
             items.extend(await seam(connector, source))

@@ -17,6 +17,7 @@ from __future__ import annotations
 import asyncio
 import dataclasses
 import json
+import logging
 import os
 from collections import Counter
 from enum import IntEnum
@@ -70,6 +71,8 @@ if TYPE_CHECKING:
     from canonic.ingestion.emitter import EmittedDiff
     from canonic.ingestion.pipeline import PipelineResult
     from canonic.semantic.models import Dimension, Measure, SemanticSource
+
+logger = logging.getLogger(__name__)
 
 _DEFAULT_TYPE = "postgres"
 _DEMO_LIMIT = 10
@@ -186,29 +189,39 @@ def _run_wizard(root: Path) -> None:
     state = load_state(root) or SetupState()
     if state.completed_steps:
         _console.print("[dim]resuming interrupted setup…[/dim]")
+        logger.info("setup: resuming interrupted run, completed_steps=%s", state.completed_steps)
     else:
+        logger.info("setup: starting wizard at %s", root)
         emit_milestone(DiskAnswerEventLog(root), FunnelMilestone.SETUP_STARTED)
 
     if not state.done(STEP_NAME):
         state.project_name = typer.prompt("Project name", default=root.name)
         state.mark(STEP_NAME)
         save_state(root, state)
+        logger.debug("setup: step name complete: %s", state.project_name)
 
     if not state.done(STEP_CONNECTION):
         state.connection = _prompt_connection(root)
         state.mark(STEP_CONNECTION)
         save_state(root, state)
+        logger.debug(
+            "setup: step connection complete: id=%s type=%s",
+            state.connection.id,
+            state.connection.type,
+        )
         emit_milestone(DiskAnswerEventLog(root), FunnelMilestone.CONNECTION_ADDED)
 
     if not state.done(STEP_LLM):
         state.llm = _prompt_llm()
         state.mark(STEP_LLM)
         save_state(root, state)
+        logger.debug("setup: step llm complete")
 
     if not state.done(STEP_SCHEMA):
         state.schema_previewed = _maybe_preview_schema(state.connection)
         state.mark(STEP_SCHEMA)
         save_state(root, state)
+        logger.debug("setup: step schema preview complete: previewed=%s", state.schema_previewed)
 
     assert state.project_name and state.connection and state.llm  # guarded by steps
     config = CanonicConfig(
@@ -222,6 +235,7 @@ def _run_wizard(root: Path) -> None:
     dump_config(config, root / "canonic.yaml")
     load_config(root / "canonic.yaml")  # assert the written file round-trips
     clear_state(root)
+    logger.info("setup: wrote canonic.yaml, scaffolded %d path(s)", len(created))
     _run_golden_path(root, config, created)
 
 
@@ -231,6 +245,7 @@ def _run_wizard(root: Path) -> None:
 def _run_golden_path(root: Path, config: CanonicConfig, scaffolded: list[Path]) -> None:
     """Steps 5–7: bootstrap → first answer → handoff + completion panel."""
     _console.print("\n[dim]step 5 — bootstrapping connection…[/dim]")
+    logger.info("setup: golden path step 5 — bootstrapping connection")
     pipeline_result = _bootstrap_connection(root, config)
     if pipeline_result is not None:
         emit_milestone(DiskAnswerEventLog(root), FunnelMilestone.BOOTSTRAP_COMPLETED)
@@ -239,11 +254,12 @@ def _run_golden_path(root: Path, config: CanonicConfig, scaffolded: list[Path]) 
     try:  # noqa: SIM105 — need to assign to sources, contextlib.suppress cannot do that
         sources = list_semantic_sources(root)
     except Exception:  # noqa: BLE001 — loading errors must not abort setup
-        pass
+        logger.warning("setup: failed to load semantic sources after bootstrap", exc_info=True)
 
     if sources:
         contract_count = _write_bootstrap_contracts(root, sources)
         if contract_count:
+            logger.info("setup: wrote %d inferred metric contract(s)", contract_count)
             _console.print(
                 f"[green]✓[/green] wrote {contract_count} inferred metric contract(s) "
                 "— MCP server will list them immediately"
@@ -253,12 +269,14 @@ def _run_golden_path(root: Path, config: CanonicConfig, scaffolded: list[Path]) 
     if sources:
         demo_ok = _try_first_answer(root, config, sources)
     elif pipeline_result is not None:
+        logger.info("setup: no queryable tables found after bootstrap")
         _console.print(
             "[yellow]no queryable tables found[/yellow] — "
             "add a doc source or richer connection to unlock the first answer"
         )
 
     withheld_count = _render_curated_review(pipeline_result)
+    logger.info("setup: complete demo_ok=%s withheld=%d", demo_ok, withheld_count)
     _render_setup_complete(config, scaffolded, demo_ok=demo_ok, withheld_count=withheld_count)
 
 
@@ -273,6 +291,7 @@ def _bootstrap_connection(root: Path, config: CanonicConfig) -> PipelineResult |
     try:
         return asyncio.run(_bootstrap_async(root, config, conn, default_id))
     except Exception as exc:  # noqa: BLE001 — bootstrap failures must not abort setup
+        logger.warning("setup: bootstrap skipped: %s", exc, exc_info=True)
         _console.print(f"[yellow]bootstrap skipped:[/yellow] {exc}")
         return None
 
@@ -298,6 +317,7 @@ async def _bootstrap_async(
 
     accepted = sum(1 for d in result.emission.diffs if first_run_auto_acceptable(d))
     withheld = sum(1 for d in result.emission.diffs if not first_run_auto_acceptable(d))
+    logger.info("setup: bootstrap accepted=%d withheld=%d", accepted, withheld)
     msg = f"[green]✓[/green] bootstrapped {accepted} semantic source(s)"
     if withheld:
         msg += f", [yellow]{withheld} held for review[/yellow] (no primary key — grain needs confirmation)"
@@ -360,13 +380,16 @@ def _try_first_answer(root: Path, config: CanonicConfig, sources: list[SemanticS
         return False
 
     _console.print("\n[dim]step 6 — running first answer…[/dim]")
+    logger.info("setup: golden path step 6 — running demo query on source=%s", source.name)
     try:
         result, sq = asyncio.run(_run_demo_query(root, config, sources, source, measure, dim))
     except CanonicError as exc:  # structured registry-coded failure — surface it (OB-S5 AC2)
+        logger.warning("setup: demo query failed: %s", exc)
         _surface_demo_error(exc)
         _render_describe_fallback(config, sources)
         return False
     except Exception as exc:  # noqa: BLE001 — unexpected demo errors must not abort setup
+        logger.warning("setup: demo query failed: %s", exc, exc_info=True)
         _console.print(f"[yellow]demo query failed:[/yellow] {exc}")
         _render_describe_fallback(config, sources)
         return False
@@ -601,6 +624,7 @@ def _generate_contracts_for_existing(root: Path) -> None:
     try:
         sources = list_semantic_sources(root)
     except Exception as exc:  # noqa: BLE001
+        logger.warning("setup: failed to load semantic sources: %s", exc, exc_info=True)
         _console.print(f"[red]error loading sources:[/red] {exc}")
         return
     if not sources:
@@ -608,6 +632,7 @@ def _generate_contracts_for_existing(root: Path) -> None:
         return
     count = _write_bootstrap_contracts(root, sources)
     if count:
+        logger.info("setup: wrote %d inferred metric contract(s) for existing project", count)
         _console.print(
             f"[green]✓[/green] wrote {count} inferred metric contract(s) "
             "— restart the MCP server to pick them up"
@@ -640,6 +665,7 @@ def _add_connection_to_existing(root: Path) -> None:
         return
     config.connections = [c for c in config.connections if c.id != conn.id] + [conn]
     dump_config(config, root / "canonic.yaml")
+    logger.info("setup: connection %s (%s) added to canonic.yaml", conn.id, conn.type)
     _console.print(f"[green]✓[/green] connection [bold]{conn.id}[/bold] added to canonic.yaml")
 
 
@@ -756,9 +782,13 @@ def _prompt_redshift_params() -> Connection:
 
 def _test_connection(conn: Connection) -> Health | None:
     """Run the async connection test; return None when the test could not run."""
+    logger.info("setup: testing connection id=%s type=%s", conn.id, conn.type)
     try:
-        return asyncio.run(_probe(conn))
+        health = asyncio.run(_probe(conn))
+        logger.info("setup: connection test result: id=%s status=%s", conn.id, health.status)
+        return health
     except CredentialError as exc:
+        logger.warning("setup: connection test credential error: id=%s: %s", conn.id, exc)
         _console.print(f"[red]credential error:[/red] {exc}")
         if conn.credentials_ref and conn.credentials_ref.startswith("env:"):
             env_var = conn.credentials_ref[4:]
@@ -768,6 +798,7 @@ def _test_connection(conn: Connection) -> Health | None:
             )
         return None
     except ConnectionError as exc:
+        logger.warning("setup: cannot build connector: id=%s: %s", conn.id, exc)
         _console.print(f"[red]cannot build connector:[/red] {exc}")
         return None
 
