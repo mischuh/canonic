@@ -89,6 +89,23 @@ def test_list_propagates_invalid_file(tmp_semantics_dir: Path) -> None:
         list_semantic_sources(tmp_semantics_dir)
 
 
+def test_list_rejects_duplicate_name_across_connections(tmp_semantics_dir: Path) -> None:
+    """A source name reused in a different connection's directory must be rejected.
+
+    Joins and contract bindings reference sources by bare name with no connection
+    qualifier, so a project-wide collision would otherwise silently shadow one source
+    with another (last-loaded-wins) instead of erroring.
+    """
+    dupe = tmp_semantics_dir / "semantics" / "crm_mysql" / "orders.yaml"
+    dupe.parent.mkdir(parents=True)
+    dupe.write_text(
+        "name: orders\nconnection: crm_mysql\ntable: legacy_orders\ngrain: [order_id]\n"
+        "columns:\n  - { name: order_id, type: string, nullable: false }\n"
+    )
+    with pytest.raises(SemanticSourceError, match="duplicate source name 'orders'"):
+        list_semantic_sources(tmp_semantics_dir)
+
+
 def test_round_trip_load_dump_load(write_source, valid_source_yaml: str) -> None:
     original = load_semantic_source(write_source(valid_source_yaml))
     dumped = dump_semantic_source(original)

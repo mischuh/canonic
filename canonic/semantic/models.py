@@ -218,7 +218,7 @@ class SemanticSource(BaseModel):
 
     model_config = ConfigDict(frozen=True)
 
-    name: str  # [P0] unique within connection
+    name: str  # [P0] unique across the whole project (enforced by list_semantic_sources)
     connection: str  # [P0]
     table: str  # [P0] physical relation
     grain: list[str]  # [P0] row uniqueness; drives fanout safety
