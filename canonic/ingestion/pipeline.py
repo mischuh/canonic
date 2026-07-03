@@ -14,6 +14,7 @@ carved out by §5.2/§7; it touches no proposal and no decision.
 
 from __future__ import annotations
 
+import logging
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, cast
 
@@ -44,6 +45,8 @@ if TYPE_CHECKING:
     from canonic.config import ReconcileConfig
     from canonic.connectors.base import ConnectorBase, SchemaIntrospectable
     from canonic.ingestion.models import EvidenceItem
+
+logger = logging.getLogger(__name__)
 
 __all__ = [
     "AUTO_ACCEPT_MIN_CONFIDENCE",
@@ -168,9 +171,16 @@ class IngestionPipeline:
         (§10) runs before emission and raises ``SchemaMismatch`` / ``ValidationFailed`` so an
         invalid proposed state never reaches a diff (S8). ``dry_run`` suppresses every write.
         """
+        logger.info("ingest run: evidence=%d dry_run=%s", len(evidence), dry_run)
         emission, skipped = await self._emit(evidence)
         if not dry_run:
             self._persist(evidence, emission)
+        logger.info(
+            "ingest run complete: diffs=%d skipped=%d decisions=%s",
+            len(emission.diffs),
+            len(skipped),
+            emission.report.summary,
+        )
         return PipelineResult(emission=emission, skipped=skipped)
 
     async def bootstrap(self, connection: str) -> PipelineResult:
@@ -195,6 +205,7 @@ class IngestionPipeline:
         from canonic.ingestion.source import evidence_from_definitions, evidence_from_introspection
 
         first_run = not _has_accepted_context(self._project_root)
+        logger.info("bootstrap: connection=%s first_run=%s", connection, first_run)
         connector = self._connectors[connection]
         evidence = await evidence_from_introspection(
             cast("SchemaIntrospectable", connector), connection
@@ -211,7 +222,15 @@ class IngestionPipeline:
         emission, skipped = await self._emit(evidence)
         self._persist(evidence, emission)
         if first_run:
-            self._write_diffs(d for d in emission.diffs if first_run_auto_acceptable(d))
+            auto_accepted = [d for d in emission.diffs if first_run_auto_acceptable(d)]
+            logger.info("bootstrap: auto-accepting %d diff(s) on empty project", len(auto_accepted))
+            self._write_diffs(auto_accepted)
+        logger.info(
+            "bootstrap complete: connection=%s diffs=%d skipped=%d",
+            connection,
+            len(emission.diffs),
+            len(skipped),
+        )
         return PipelineResult(emission=emission, skipped=skipped, first_run=first_run)
 
     async def _emit(
@@ -220,23 +239,50 @@ class IngestionPipeline:
         """Stages 1–4: build → reconcile → refine → enrich-examples → validate → emit."""
         from canonic.ingestion.examples import ExampleEnricher
 
+        logger.debug("stage 1: building proposals from %d evidence item(s)", len(evidence))
         build = await self._builder.build(evidence)
+        logger.debug(
+            "stage 1 complete: proposals=%d skipped=%d", len(build.proposals), len(build.skipped)
+        )
+
         store = DiskAcceptedStore(self._project_root)
+        logger.debug(
+            "stage 2: reconciling %d proposal(s) against accepted state", len(build.proposals)
+        )
         report = self._engine.reconcile(build.proposals, store)
+        logger.debug("stage 2 complete: decisions=%s", report.summary)
+
+        logger.debug("stage 3: refining reconciliation report")
         report = await self._engine.refine(report, store)
+
+        logger.debug("stage 4: enriching examples")
         report = ExampleEnricher(self._project_root, evidence).enrich(report)
+
+        logger.debug("stage 5: validating %d proposal(s)", len(build.proposals))
         gate = ValidationGate(self._project_root, self._connectors, evidence)
         await gate.validate(build.proposals)  # raises before emit (S8)
+        logger.debug("stage 5 complete: validation passed")
+
+        logger.debug("stage 6: emitting diffs")
         emission = self._emitter.emit(report)
+        logger.debug(
+            "stage 6 complete: diffs=%d contradiction_notes=%d",
+            len(emission.diffs),
+            len(emission.notes),
+        )
         return emission, build.skipped
 
     def _persist(self, evidence: list[EvidenceItem], emission: EmissionResult) -> None:
         """Side effects of a non-dry run: audit trail, no-op refresh, bounded auto-apply (§6/§7)."""
         run_id = generate_run_id()
+        logger.info("persisting run %s: writing audit trail and pending diffs", run_id)
         AuditTrailWriter.for_project(self._project_root).write(evidence, emission.report, run_id)
         PendingDiffStore(self._project_root).write(run_id, emission)
         self._refresh_no_ops(emission.report)
-        self._write_diffs(d for d in emission.diffs if d.auto_apply)
+        auto_apply = [d for d in emission.diffs if d.auto_apply]
+        if auto_apply:
+            logger.info("auto-applying %d diff(s)", len(auto_apply))
+        self._write_diffs(auto_apply)
 
     def _refresh_no_ops(self, report: ReconciliationReport) -> None:
         """Refresh ``last_validated_at`` on unchanged targets (SPEC-E4 §5.2 / §7, S6-AC1).

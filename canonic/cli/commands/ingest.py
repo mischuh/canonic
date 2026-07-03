@@ -15,6 +15,7 @@ canonical exit codes — the safe, repeatable scheduled-ingest role (PRD §5.6).
 from __future__ import annotations
 
 import asyncio
+import logging
 import os
 from typing import TYPE_CHECKING, Annotated
 
@@ -41,6 +42,8 @@ if TYPE_CHECKING:
     from canonic.connectors.base import ConnectorBase
     from canonic.ingestion.models import EvidenceItem
     from canonic.ingestion.pipeline import PipelineResult
+
+logger = logging.getLogger(__name__)
 
 
 @handle_errors
@@ -87,6 +90,13 @@ def ingest(
     is_headless = _is_headless(headless)
     config = load_config(root / "canonic.yaml")
     targets = _select_connections(config, bootstrap=bootstrap, connection=connection)
+    logger.info(
+        "ingest: connections=%s bootstrap=%s dry_run=%s headless=%s",
+        [conn.id for conn in targets],
+        bootstrap,
+        dry_run,
+        is_headless,
+    )
     result = asyncio.run(
         _ingest(root, config, targets, bootstrap=bootstrap, dry_run=dry_run, headless=is_headless)
     )
@@ -108,13 +118,17 @@ def ingest(
     # Auto-PR before the strict gate so the PR still carries the contradiction notes, then CI
     # fails the run on the gate (SPEC-E4 §6/§5.4).
     if _should_open_pr(open_pr, headless=is_headless) and not dry_run and not bootstrap:
+        logger.info("opening auto-PR")
         pr_ref = asyncio.run(_open_auto_pr(root, result))
-        if pr_ref and not get_cli_context(ctx).json_output:
-            typer.echo(f"opened auto-PR: {pr_ref}")
+        if pr_ref:
+            logger.info("auto-PR opened: %s", pr_ref)
+            if not get_cli_context(ctx).json_output:
+                typer.echo(f"opened auto-PR: {pr_ref}")
 
     if strict or config.reconcile.strict_contradictions:
         contradictions = result.report.summary[ReconciliationDecision.CONTRADICTION.value]
         if contradictions > 0:
+            logger.info("strict mode: gating run on %d contradiction(s)", contradictions)
             raise ContradictionsFound(
                 f"{contradictions} contradiction(s) flagged; strict mode gates the run (E4 §5.4)"
             )
@@ -172,6 +186,7 @@ async def _ingest(
     headless: bool,
 ) -> PipelineResult:
     """Build connectors, gather evidence, and drive the pipeline; always closes connectors."""
+    logger.debug("creating connector(s) for: %s", [conn.id for conn in targets])
     connectors: dict[str, ConnectorBase] = {
         conn.id: default_factory.create(conn) for conn in targets
     }
@@ -208,8 +223,12 @@ async def _ingest(
             for conn in targets
             for item in await _gather_evidence(connectors[conn.id], conn.id)
         ]
+        logger.info(
+            "gathered %d evidence item(s) across %d connection(s)", len(evidence), len(targets)
+        )
         return await pipeline.run(evidence, dry_run=dry_run)
     finally:
+        logger.debug("closing %d connector(s)", len(connectors))
         for connector in connectors.values():
             await connector.aclose()
 
