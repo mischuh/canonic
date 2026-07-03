@@ -11,6 +11,7 @@ without engine-specific code" (PRD FR-8) holds structurally.
 
 from __future__ import annotations
 
+import re
 from time import perf_counter
 from typing import TYPE_CHECKING, Any
 
@@ -66,6 +67,17 @@ def _read_usage(response: Any, *, calls: int, latency_ms: float) -> Usage:
 _NO_KEY_PLACEHOLDER = "not-needed"
 #: Default retry budget for transient provider failures (SPEC-E10 §3, S6).
 _DEFAULT_MAX_RETRIES = 2
+
+#: Some endpoints honor `response_format` but still wrap the JSON payload in a markdown
+#: code fence (observed with litellm's github_copilot provider proxying Claude backend
+#: models) despite the system prompt asking for "no prose outside it". Stripped before
+#: parsing so a compliant-but-decorated response isn't mistaken for an invalid one.
+_CODE_FENCE_RE = re.compile(r"^```(?:json)?\s*\n?(.*?)\n?```$", re.DOTALL)
+
+
+def _strip_code_fence(content: str) -> str:
+    match = _CODE_FENCE_RE.match(content.strip())
+    return match.group(1).strip() if match else content
 
 
 class GenerationRuntime:
@@ -227,7 +239,7 @@ class GenerationRuntime:
             )
 
         try:
-            parsed = response_model.model_validate_json(content)
+            parsed = response_model.model_validate_json(_strip_code_fence(content))
         except ValidationError as exc:
             detail = exc.errors()[0]["msg"] if exc.errors() else str(exc)
             raise StructuredOutputError(

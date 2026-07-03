@@ -348,7 +348,7 @@ class RedshiftConnector(ConnectorBase):
                 relations[(schema, name)] = kind
         # Redshift materialized views are not in information_schema.tables.
         try:
-            mv_result = await conn.execute(text("SELECT schema_name, mv_name FROM SVV_MV_INFO"))
+            mv_result = await conn.execute(text("SELECT schema_name, name FROM SVV_MV_INFO"))
             for schema, name in mv_result:
                 relations[(schema, name)] = "materialized_view"
         except Exception as exc:

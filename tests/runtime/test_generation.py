@@ -155,6 +155,17 @@ async def test_structured_output_is_parsed(
     assert fake_litellm["response_format"] is _Grain
 
 
+async def test_structured_output_wrapped_in_markdown_fence_is_parsed(
+    llm_config: LLMConfig, set_fake: Callable[..., None]
+) -> None:
+    # Observed with litellm's github_copilot provider proxying Claude backend models: the
+    # endpoint honors response_format but still wraps the JSON in a ```json fence despite
+    # the system prompt asking for no prose outside it.
+    set_fake(content='```json\n{"grain": ["order_id"]}\n```')
+    completion = await GenerationRuntime(llm_config).generate("draft", response_model=_Grain)
+    assert completion.parsed == {"grain": ["order_id"]}
+
+
 async def test_plain_completion_has_no_parsed_payload(
     llm_config: LLMConfig, set_fake: Callable[..., None]
 ) -> None:
