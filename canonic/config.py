@@ -11,6 +11,7 @@ from pydantic_settings import BaseSettings, PydanticBaseSettingsSource, Settings
 from ruamel.yaml import YAML
 
 from canonic.airgap import EgressPolicy, guard_telemetry
+from canonic.llm_providers import PROVIDERS, CredentialMode
 from canonic.semantic.models import Provenance
 
 if TYPE_CHECKING:
@@ -65,8 +66,19 @@ class Connection(BaseModel):
 
 
 class LLMConfig(BaseModel):
+    """An ``llm`` block from ``canonic.yaml`` (SPEC-E1 §3, SPEC-E10 §2).
+
+    ``provider`` selects how :class:`~canonic.runtime.generation.GenerationRuntime` routes
+    the call through litellm (see :data:`canonic.llm_providers.PROVIDERS`).
+    ``openai_compatible`` is the local/self-hosted path and always requires ``base_url``;
+    hosted providers (``openai``, ``anthropic``, ``github_copilot``) reach litellm's own
+    default endpoint unless ``base_url`` overrides it, and each has its own credential
+    requirement — a bearer-token key, or none at all for a provider whose client manages
+    its own auth (see :class:`~canonic.llm_providers.CredentialMode`).
+    """
+
     provider: str
-    base_url: str
+    base_url: str | None = None
     model: str
     api_key_ref: str | None = None
     tasks: dict[str, str] = {}
@@ -77,6 +89,39 @@ class LLMConfig(BaseModel):
         if v is not None and not _REF_PATTERN.match(v):
             raise ValueError("must be a reference (env:…, keyring:…, file:…), not a literal secret")
         return v
+
+    @model_validator(mode="after")
+    def _validate_provider(self) -> LLMConfig:
+        spec = PROVIDERS.get(self.provider)
+        if spec is None:
+            raise ValueError(
+                f"unknown llm.provider {self.provider!r}: must be one of "
+                f"{', '.join(sorted(PROVIDERS))}"
+            )
+        if spec.requires_base_url and not self.base_url:
+            raise ValueError(f"llm.base_url is required for provider {self.provider!r}")
+        if spec.credential_mode is CredentialMode.REQUIRED and not self.api_key_ref:
+            raise ValueError(f"llm.api_key_ref is required for provider {self.provider!r}")
+        if spec.credential_mode is CredentialMode.FORBIDDEN and self.api_key_ref is not None:
+            raise ValueError(
+                f"llm.api_key_ref is not used for provider {self.provider!r} — remove it "
+                "(this provider's client authenticates itself, outside canonic.yaml)"
+            )
+        return self
+
+    @property
+    def egress_check_url(self) -> str:
+        """URL checked for air-gapped egress (SPEC-E10 §4).
+
+        ``base_url`` when configured; otherwise the provider's known public endpoint —
+        hosted providers always call a fixed host, so there is still something to
+        allowlist-check even without an explicit override.
+        """
+        if self.base_url:
+            return self.base_url
+        host = PROVIDERS[self.provider].default_host
+        assert host is not None  # every provider without a required base_url has one
+        return f"https://{host}"
 
 
 class EmbeddingConfig(BaseModel):
@@ -198,7 +243,7 @@ class CanonicConfig(BaseSettings):
         # there is no endpoint to validate under air-gapped. A future hosted embeddings
         # provider (#67) would validate its ``base_url`` here, mirroring ``llm.base_url``.
         if self.llm is not None:
-            policy.check_url(self.llm.base_url, what="llm.base_url")
+            policy.check_url(self.llm.egress_check_url, what="llm.base_url")
             if self.llm.api_key_ref is not None:
                 policy.check_ref_local(self.llm.api_key_ref, what="llm.api_key_ref")
         guard_telemetry(

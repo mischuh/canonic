@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING, Any
 
 import litellm
 import pytest
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 
 from canonic.airgap import EgressPolicy
 from canonic.config import LLMConfig
@@ -231,10 +231,70 @@ async def test_bad_request_is_not_retried(
     assert len(fake_litellm["_calls"]) == 1
 
 
-def test_non_openai_compatible_provider_rejected() -> None:
-    config = LLMConfig(provider="anthropic", base_url="http://x/v1", model="m")
-    with pytest.raises(GenerationError):
-        GenerationRuntime(config)
+def test_unknown_provider_rejected() -> None:
+    with pytest.raises(ValidationError, match="unknown llm.provider"):
+        LLMConfig(provider="not-a-real-provider", model="m")
+
+
+async def test_anthropic_request_construction(fake_litellm: dict[str, Any]) -> None:
+    config = LLMConfig(
+        provider="anthropic", model="claude-opus-4-8", api_key_ref="env:CANONIC_LLM_KEY"
+    )
+    completion = await GenerationRuntime(config).generate("hi")
+
+    assert fake_litellm["model"] == "anthropic/claude-opus-4-8"
+    assert fake_litellm["api_key"] == "secret-token"
+    assert "api_base" not in fake_litellm  # no override configured — litellm's own endpoint
+    assert completion.model == "anthropic/claude-opus-4-8"
+
+
+async def test_openai_request_construction(fake_litellm: dict[str, Any]) -> None:
+    config = LLMConfig(provider="openai", model="gpt-4o", api_key_ref="env:CANONIC_LLM_KEY")
+    await GenerationRuntime(config).generate("hi")
+
+    assert fake_litellm["model"] == "openai/gpt-4o"
+    assert fake_litellm["api_key"] == "secret-token"
+    assert "api_base" not in fake_litellm
+
+
+async def test_hosted_provider_honors_explicit_base_url_override(
+    fake_litellm: dict[str, Any],
+) -> None:
+    # A user may still point a hosted provider at a proxy/gateway.
+    config = LLMConfig(
+        provider="anthropic",
+        base_url="https://llm-gateway.internal/v1",
+        model="claude-opus-4-8",
+        api_key_ref="env:CANONIC_LLM_KEY",
+    )
+    await GenerationRuntime(config).generate("hi")
+    assert fake_litellm["api_base"] == "https://llm-gateway.internal/v1"
+
+
+def test_hosted_provider_without_api_key_ref_rejected() -> None:
+    with pytest.raises(ValidationError, match="llm.api_key_ref is required"):
+        LLMConfig(provider="anthropic", model="claude-opus-4-8")
+    with pytest.raises(ValidationError, match="llm.api_key_ref is required"):
+        LLMConfig(provider="openai", model="gpt-4o")
+
+
+async def test_github_copilot_request_construction_has_no_key_or_base(
+    fake_litellm: dict[str, Any],
+) -> None:
+    config = LLMConfig(provider="github_copilot", model="gpt-4o")
+    completion = await GenerationRuntime(config).generate("hi")
+
+    assert fake_litellm["model"] == "github_copilot/gpt-4o"
+    # Auth is handled by litellm's own device-code flow — Canonic resolves and sends
+    # nothing for this provider.
+    assert "api_key" not in fake_litellm
+    assert "api_base" not in fake_litellm
+    assert completion.model == "github_copilot/gpt-4o"
+
+
+def test_github_copilot_forbids_api_key_ref() -> None:
+    with pytest.raises(ValidationError, match="llm.api_key_ref is not used"):
+        LLMConfig(provider="github_copilot", model="gpt-4o", api_key_ref="env:CANONIC_LLM_KEY")
 
 
 # --- repoint property: AC2 ----------------------------------------------------
@@ -289,6 +349,17 @@ def test_air_gapped_policy_blocks_public_endpoint_at_construction(
     with pytest.raises(AirGappedViolation):
         GenerationRuntime(hosted, policy=EgressPolicy())
     # Blocked before any model call leaves the process.
+    assert len(fake_litellm["_calls"]) == 0
+
+
+def test_air_gapped_policy_blocks_hosted_provider_default_endpoint(
+    fake_litellm: dict[str, Any],
+) -> None:
+    # No base_url configured — the check must still fall back to the provider's known
+    # public host (api.anthropic.com), not skip the check because base_url is unset.
+    hosted = LLMConfig(provider="anthropic", model="m", api_key_ref="env:CANONIC_LLM_KEY")
+    with pytest.raises(AirGappedViolation):
+        GenerationRuntime(hosted, policy=EgressPolicy())
     assert len(fake_litellm["_calls"]) == 0
 
 

@@ -1,11 +1,12 @@
 """litellm-backed generation runtime (SPEC-E10 §2).
 
-Turns the configured ``llm`` block into actual model calls behind one interface. The
-``openai_compatible`` provider is the first-class path: local runtimes (Ollama, vLLM,
-LM Studio, llama.cpp, TGI) and hosted OpenAI-compatible endpoints differ only in
-``base_url`` and whether a key is needed — there is no per-engine branch in core logic.
-litellm routes purely on the model-string prefix, so "docks in without engine-specific
-code" (PRD FR-8) holds structurally.
+Turns the configured ``llm`` block into actual model calls behind one interface. Every
+provider in :data:`canonic.llm_providers.PROVIDERS` is a first-class path: local runtimes
+(Ollama, vLLM, LM Studio, llama.cpp, TGI) and hosted OpenAI-compatible endpoints
+(``openai_compatible``) differ from native hosted APIs (``openai``, ``anthropic``,
+``github_copilot``) only in ``base_url``/credential handling — there is no per-engine
+branch in core logic. litellm routes purely on the model-string prefix, so "docks in
+without engine-specific code" (PRD FR-8) holds structurally.
 """
 
 from __future__ import annotations
@@ -24,6 +25,7 @@ from canonic.exc import (
     StructuredOutputError,
     StructuredOutputUnsupported,
 )
+from canonic.llm_providers import PROVIDERS, CredentialMode
 from canonic.runtime.models import Completion, Usage
 from canonic.runtime.resolver import Task, resolve_model
 
@@ -60,8 +62,6 @@ def _read_usage(response: Any, *, calls: int, latency_ms: float) -> Usage:
     )
 
 
-#: The one provider E10 #61 tests as first-class; the OpenAI-compatible `/v1` surface.
-_OPENAI_COMPATIBLE = "openai_compatible"
 #: Placeholder passed to litellm when no key is configured — local servers need none.
 _NO_KEY_PLACEHOLDER = "not-needed"
 #: Default retry budget for transient provider failures (SPEC-E10 §3, S6).
@@ -73,7 +73,9 @@ class GenerationRuntime:
 
     Constructed from an :class:`~canonic.config.LLMConfig`; ``generate`` resolves a task to a
     model and executes a single litellm call. Schema-constrained structured output is
-    supported, with a clear error when an endpoint cannot honor it.
+    supported, with a clear error when an endpoint cannot honor it. ``config.provider`` is
+    already validated against :data:`canonic.llm_providers.PROVIDERS` by ``LLMConfig``
+    itself, so construction never needs to re-check it.
     """
 
     def __init__(
@@ -83,13 +85,6 @@ class GenerationRuntime:
         max_retries: int = _DEFAULT_MAX_RETRIES,
         policy: EgressPolicy | None = None,
     ) -> None:
-        if config.provider != _OPENAI_COMPATIBLE:
-            # NOTE (#62/#67): other litellm providers are reachable through the same
-            # interface; #61 tests only openai_compatible as the first-class path.
-            raise GenerationError(
-                f"unsupported llm provider {config.provider!r}: "
-                f"{_OPENAI_COMPATIBLE!r} is the supported path"
-            )
         # Air-gapped egress guard (SPEC-E10 §4). When set, the same EgressPolicy that
         # validated config at load time blocks any call to a non-allowlisted host before
         # egress. Construction-time check fails fast even before the first generate().
@@ -97,7 +92,7 @@ class GenerationRuntime:
         # ingest wiring threads a policy when runtime.air_gapped is set.
         self._policy = policy
         if policy is not None:
-            policy.check_url(config.base_url, what="llm.base_url")
+            policy.check_url(config.egress_check_url, what="llm.base_url")
         self._config = config
         # Bounded retries on transient provider failures; total attempts = max_retries + 1.
         # Injected here (not on LLMConfig, whose shape E1 owns) so it stays testable.
@@ -112,7 +107,8 @@ class GenerationRuntime:
         Returns the resolved secret, or the local-server placeholder when no ref is
         configured. Raises :class:`~canonic.exc.CredentialError` when a required ref
         resolves to nothing — a clear, structured failure, never silent. The returned
-        value is used immediately and never retained on the instance.
+        value is used immediately and never retained on the instance. Never called for a
+        :class:`~canonic.llm_providers.CredentialMode.FORBIDDEN` provider (see ``generate``).
         """
         if self._config.api_key_ref:
             return resolve_credential(self._config.api_key_ref)
@@ -153,7 +149,8 @@ class GenerationRuntime:
             GenerationError: A deterministic provider failure or unsupported-provider error
                 (not retried).
         """
-        model_str = f"openai/{resolve_model(self._config, task)}"
+        spec = PROVIDERS[self._config.provider]
+        model_str = f"{spec.litellm_prefix}/{resolve_model(self._config, task)}"
         messages: list[dict[str, str]] = []
         if system is not None:
             messages.append({"role": "system", "content": system})
@@ -163,12 +160,20 @@ class GenerationRuntime:
         # (SPEC-E10 §4, S3/AC2). Re-checked here, not only at construction, so a guard is
         # in place at the exact point of egress.
         if self._policy is not None:
-            self._policy.check_url(self._config.base_url, what="llm.base_url")
+            self._policy.check_url(self._config.egress_check_url, what="llm.base_url")
 
-        # Resolve the key here, at the point of egress (#65): a required ref that resolves
-        # to nothing fails now with a clear CredentialError. The secret lives only in this
-        # local for the duration of the call — never on the instance, never logged.
-        api_key = self._resolve_api_key()
+        # `api_base` is only meaningful when the operator set one — hosted providers
+        # otherwise use litellm's own default endpoint for that provider. `api_key` is
+        # resolved here, at the point of egress (#65): a required ref that resolves to
+        # nothing fails now with a clear CredentialError. The secret lives only in this
+        # local for the duration of the call — never on the instance, never logged. A
+        # FORBIDDEN-credential provider (e.g. github_copilot) authenticates itself —
+        # nothing is resolved or sent for it.
+        call_kwargs: dict[str, Any] = {}
+        if self._config.base_url:
+            call_kwargs["api_base"] = self._config.base_url
+        if spec.credential_mode is not CredentialMode.FORBIDDEN:
+            call_kwargs["api_key"] = self._resolve_api_key()
 
         last_exc: APIError | None = None
         calls = 0
@@ -179,18 +184,17 @@ class GenerationRuntime:
                 response = await litellm.acompletion(
                     model=model_str,
                     messages=messages,
-                    api_base=self._config.base_url,
-                    api_key=api_key,
                     temperature=temperature,
                     response_format=response_model,
+                    **call_kwargs,
                 )
                 break
             except (UnsupportedParamsError, BadRequestError) as exc:
                 # Deterministic rejections — retrying the same request cannot help.
                 if response_model is not None:
                     raise StructuredOutputUnsupported(
-                        f"endpoint {self._config.base_url!r} (model {model_str!r}) cannot honor "
-                        f"JSON-schema-constrained output: {exc}"
+                        f"endpoint {self._config.egress_check_url!r} (model {model_str!r}) "
+                        f"cannot honor JSON-schema-constrained output: {exc}"
                     ) from exc
                 raise GenerationError(f"generation call to {model_str!r} failed: {exc}") from exc
             except APIError as exc:

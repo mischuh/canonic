@@ -172,7 +172,7 @@ def test_ambiguous(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
                     "credentials_ref": "env:UNUSED",
                 }
             ],
-            "llm": {"provider": "stub", "base_url": "http://x", "model": "m"},
+            "llm": {"provider": "openai_compatible", "base_url": "http://x", "model": "m"},
         }
     )
     ref = CanonicalRef(source="orders", measure="total_revenue")
