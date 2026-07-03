@@ -14,7 +14,7 @@ from canonic.connectors.duckdb import DuckDBConnector
 from canonic.connectors.looker import LookerConnector
 from canonic.connectors.metabase import MetabaseConnector
 from canonic.connectors.notion import DEFAULT_API_VERSION as _NOTION_DEFAULT_API_VERSION
-from canonic.connectors.notion import NotionConnector
+from canonic.connectors.notion import make_notion_connector
 from canonic.connectors.postgres import PostgresConnector
 from canonic.connectors.redshift import RedshiftConnector
 from canonic.connectors.sqlite import SQLiteConnector
@@ -25,6 +25,7 @@ if TYPE_CHECKING:
 
     from canonic.config import CanonicConfig, Connection
     from canonic.connectors.base import ConnectorBase
+    from canonic.connectors.evidence import GenericEvidenceConnector
 
 __all__ = ["ConnectorFactory", "default_factory"]
 
@@ -34,12 +35,12 @@ def _make_dbt(conn: Connection) -> DbtConnector:
     return DbtConnector(manifest_path, source=conn.id)
 
 
-def _make_notion(conn: Connection) -> NotionConnector:
+def _make_notion(conn: Connection) -> GenericEvidenceConnector:
     from canonic.credentials import resolve_credential
 
     token = resolve_credential(conn.credentials_ref)
     api_version = conn.params.get("api_version", _NOTION_DEFAULT_API_VERSION)
-    return NotionConnector(token, source=conn.id, api_version=api_version)
+    return make_notion_connector(token, source=conn.id, api_version=api_version)
 
 
 class ConnectorFactory:

@@ -1,14 +1,18 @@
 """Notion evidence connector — pages → normalized DocEvidence (SPEC-E3 §5, §9 S2).
 
-Fetches Notion pages via the Notion API and emits one :class:`DocEvidence` per page.
-``usage_hint`` is read from an explicit page select property (deterministic, no LLM —
-SPEC-E3 §10); ``topic_refs`` come from a multi-select/relation property and are
-*candidates* only (resolution is E4/E6's job on write, §5).
+Composed from the generic fetch/extract split (:mod:`canonic.connectors.evidence`,
+docs/AMENDMENT-generic-evidence-connector.md): :class:`NotionFetchAdapter` fetches
+Notion pages via the Notion API (auth, pagination, no classification), and
+:class:`NotionExtractionSkill` maps each :class:`~canonic.connectors.evidence.RawDoc`
+to :class:`DocEvidence`. ``usage_hint`` is read from an explicit page select property
+(deterministic, no LLM — SPEC-E3 §10); ``topic_refs`` come from a multi-select/relation
+property and are *candidates* only (resolution is E4/E6's job on write, §5).
+:func:`make_notion_connector` wires both into a :class:`GenericEvidenceConnector`.
 
 Version pinning: the ``Notion-Version`` header is pinned to a specific API version per
-the compatibility matrix (§6).  On an unsupported or unknown API version the connector
-fails with a clear error at ``test_connection``/extract time and ingests nothing from
-that source — partial ingest is never silently accepted (PRD FR-2).
+the compatibility matrix (§6).  On an unsupported or unknown API version the fetch
+adapter fails with a clear error at ``test_connection``/extract time and ingests
+nothing from that source — partial ingest is never silently accepted (PRD FR-2).
 
 HTTP fetching uses a dependency-injection seam (:class:`NotionPageSource`) so the
 connector can be tested without network access.  The default implementation
@@ -18,25 +22,27 @@ to project dependencies to use live API access.
 
 from __future__ import annotations
 
-import hashlib
-import json
-import logging
 from datetime import UTC, datetime
 from typing import Any, Protocol, runtime_checkable
 
-from canonic.connectors.base import (
-    Capability,
-    ConnectorBase,
-    DocEvidence,
-    Health,
-    UsageEvidence,
-    UsageHint,
+from canonic.connectors.base import DocEvidence, UsageHint
+from canonic.connectors.evidence import (
+    GenericEvidenceConnector,
+    RawDoc,
+    compute_doc_fingerprint,
+)
+from canonic.connectors.evidence import (
+    parse_usage_hint as _usage_hint_for,
 )
 from canonic.exc import UnsupportedSourceVersionError
 
-logger = logging.getLogger(__name__)
-
-__all__ = ["NotionConnector", "NotionPageSource", "HttpNotionPageSource"]
+__all__ = [
+    "HttpNotionPageSource",
+    "NotionExtractionSkill",
+    "NotionFetchAdapter",
+    "NotionPageSource",
+    "make_notion_connector",
+]
 
 # Pinned API version per SPEC-E3 §6 compatibility matrix.
 DEFAULT_API_VERSION = "2022-06-28"
@@ -49,45 +55,6 @@ _USAGE_HINT_PROPERTY = "Canonic Type"
 
 # Notion page property name that carries topic refs (a multi-select property).
 _TOPIC_REFS_PROPERTY = "Canonic Topics"
-
-# Map from Notion select option values (case-insensitive) → UsageHint.
-_USAGE_HINT_MAP: dict[str, UsageHint] = {
-    "reference": UsageHint.REFERENCE,
-    "caveat": UsageHint.CAVEAT,
-    "policy": UsageHint.POLICY,
-    "definition": UsageHint.DEFINITION,
-}
-
-
-def _doc_fingerprint(title: str, body: str, usage_hint: str, topic_refs: list[str]) -> str:
-    """Stable sha256 over doc content fields, for drift detection (SPEC-E3 §3.2)."""
-    payload = {
-        "title": title,
-        "body": body,
-        "usage_hint": usage_hint,
-        "topic_refs": sorted(topic_refs),
-    }
-    digest = hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()
-    return f"sha256:{digest}"
-
-
-def _usage_hint_for(raw: str | None, page_id: str) -> UsageHint:
-    """Map a raw Notion select value to UsageHint.
-
-    Defaults to ``REFERENCE`` and emits a WARNING for unrecognized values —
-    never drops the page (SPEC-E3 §4 AC2-style graceful handling).
-    """
-    if not raw:
-        return UsageHint.REFERENCE
-    mapped = _USAGE_HINT_MAP.get(raw.strip().lower())
-    if mapped is None:
-        logger.warning(
-            "unrecognized Canonic Type %r on Notion page %s; usage_hint recorded as reference",
-            raw,
-            page_id,
-        )
-        return UsageHint.REFERENCE
-    return mapped
 
 
 def _extract_title(page: dict[str, Any]) -> str:
@@ -212,17 +179,11 @@ def _block_text(block: dict[str, Any]) -> str:
     return "".join(t.get("plain_text", "") for t in rich_text)
 
 
-class NotionConnector(ConnectorBase):
-    """Evidence connector for Notion pages → normalized DocEvidence (SPEC-E3 §5, §9 S2).
-
-    ``usage_hint`` is read from the ``Canonic Type`` select property on each page
-    (deterministic — no LLM).  ``topic_refs`` come from the ``Canonic Topics``
-    multi-select property and are candidates only; E6 resolves them against live
-    semantic entities on write (§5, §3.1).
+class NotionFetchAdapter:
+    """Fetch adapter for Notion pages — auth, pagination, version pinning (no classification).
 
     Args:
         token: Notion integration token (required when ``page_source`` is None).
-        source: Connection id used to stamp evidence items (default ``"notion_wiki"``).
         api_version: Notion API version header.  Must be in ``SUPPORTED_API_VERSIONS``.
         page_source: Injectable page-source for testing.  When ``None`` an
             :class:`HttpNotionPageSource` is built from ``token``/``api_version``.
@@ -232,11 +193,9 @@ class NotionConnector(ConnectorBase):
         self,
         token: str | None = None,
         *,
-        source: str = "notion_wiki",
         api_version: str = DEFAULT_API_VERSION,
         page_source: NotionPageSource | None = None,
     ) -> None:
-        self._source = source
         self._api_version = api_version
         if page_source is not None:
             self._page_source: NotionPageSource = page_source
@@ -244,9 +203,6 @@ class NotionConnector(ConnectorBase):
             if not token:
                 raise ValueError("token is required when page_source is not provided")
             self._page_source = HttpNotionPageSource(token, api_version)
-
-    def capabilities(self) -> list[Capability]:
-        return [Capability.CAPABILITIES, Capability.TEST_CONNECTION, Capability.EXTRACT_EVIDENCE]
 
     def _assert_supported_version(self) -> None:
         """Enforce the pinned API-version allowlist; raise if out of range."""
@@ -257,49 +213,72 @@ class NotionConnector(ConnectorBase):
                 supported=", ".join(sorted(SUPPORTED_API_VERSIONS)),
             )
 
-    async def test_connection(self) -> Health:
-        """Verify the configured API version is supported and the page source is reachable."""
-        try:
-            self._assert_supported_version()
-        except UnsupportedSourceVersionError as exc:
-            return Health(status="error", message=str(exc))
-        try:
-            await self._page_source.list_pages()
-        except Exception as exc:
-            return Health(status="error", message=f"Notion API unreachable: {exc}")
-        return Health(status="ok", message=f"Notion API {self._api_version}")
+    async def fetch(self) -> list[RawDoc]:
+        """Fetch Notion pages and return one RawDoc per page.
 
-    async def extract_evidence(self) -> list[DocEvidence | UsageEvidence]:
-        """Fetch Notion pages and return one DocEvidence per page.
-
-        Fails with :exc:`UnsupportedSourceVersionError` on an unsupported API version
-        so no partial ingest occurs (SPEC-E3 §6, PRD FR-2).
+        Fails with :exc:`UnsupportedSourceVersionError` on an unsupported API version,
+        before any network call, so no partial ingest occurs (SPEC-E3 §6, PRD FR-2).
+        Each page's native properties/body are passed through as ``metadata`` for the
+        extraction skill to classify (structured select/multi-select properties, in
+        Notion's case, rather than free text).
         """
         self._assert_supported_version()
-
-        observed_at = datetime.now(UTC)
         pages = await self._page_source.list_pages()
-        evidence: list[DocEvidence | UsageEvidence] = []
-
-        for page in pages:
-            page_id: str = page.get("id", "")
-            title = _extract_title(page)
-            body = _extract_body(page)
-            usage_hint = _extract_usage_hint(page)
-            topic_refs = _extract_topic_refs(page)
-            fingerprint = _doc_fingerprint(title, body, usage_hint.value, topic_refs)
-
-            evidence.append(
-                DocEvidence(
-                    source=self._source,
-                    title=title,
-                    body=body,
-                    topic_refs=topic_refs,
-                    usage_hint=usage_hint,
-                    native_ref=f"notion:page:{page_id}",
-                    source_fingerprint=fingerprint,
-                    observed_at=observed_at,
-                )
+        return [
+            RawDoc(
+                source_ref=f"notion:page:{page.get('id', '')}",
+                title=_extract_title(page),
+                body=_extract_body(page),
+                metadata=page,
             )
+            for page in pages
+        ]
 
-        return evidence
+
+class NotionExtractionSkill:
+    """Deterministic extraction: reads the ``Canonic Type``/``Canonic Topics`` select properties.
+
+    Notion pages already carry an explicit classification (unlike free-text prose
+    sources), so no LLM call is needed here — this reproduces the connector's
+    pre-split behavior exactly, now expressed as an
+    :class:`~canonic.connectors.evidence.ExtractionSkill` (SPEC-E3 §10).  ``usage_hint``
+    comes from the ``Canonic Type`` select property; ``topic_refs`` come from the
+    ``Canonic Topics`` multi-select property and are candidates only — E6 resolves them
+    against live semantic entities on write (§5, §3.1).
+    """
+
+    async def extract(self, doc: RawDoc, *, source: str) -> DocEvidence:
+        page = doc.metadata
+        usage_hint = _extract_usage_hint(page)
+        topic_refs = _extract_topic_refs(page)
+        fingerprint = compute_doc_fingerprint(doc.title, doc.body, usage_hint.value, topic_refs)
+        return DocEvidence(
+            source=source,
+            title=doc.title,
+            body=doc.body,
+            topic_refs=topic_refs,
+            usage_hint=usage_hint,
+            native_ref=doc.source_ref,
+            source_fingerprint=fingerprint,
+            observed_at=datetime.now(UTC),
+        )
+
+
+def make_notion_connector(
+    token: str | None = None,
+    *,
+    source: str = "notion_wiki",
+    api_version: str = DEFAULT_API_VERSION,
+    page_source: NotionPageSource | None = None,
+) -> GenericEvidenceConnector:
+    """Build the Notion evidence connector: ``NotionFetchAdapter`` + deterministic extraction.
+
+    Replaces the pre-split monolithic ``NotionConnector`` with no change to the
+    registered factory type name (``"notion"``) or external behavior (SPEC-E3 §5
+    fetch/extract-split amendment).
+    """
+    return GenericEvidenceConnector(
+        NotionFetchAdapter(token, api_version=api_version, page_source=page_source),
+        source=source,
+        extraction_skill=NotionExtractionSkill(),
+    )

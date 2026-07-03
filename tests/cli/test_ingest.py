@@ -9,6 +9,7 @@ import pytest
 from typer.testing import CliRunner
 
 from canonic.cli.app import app
+from canonic.config import CanonicConfig, LLMConfig, ProjectConfig
 from canonic.connectors.base import (
     Capability,
     ColumnInfo,
@@ -283,3 +284,74 @@ def test_ob_s6_dry_run_does_not_emit_first_curated_review_completed(project: Pat
     events = read_events(project, kind="funnel_milestone")
     milestones = [e.milestone for e in events]
     assert FunnelMilestone.FIRST_CURATED_REVIEW_COMPLETED not in milestones
+
+
+# ---------------------------------------------------------------------------
+# _wire_extraction_skills — backfills GenericEvidenceConnector's default Null skill
+# with the real, config-driven ExtractionSkill without overriding a deliberate choice
+# (e.g. Notion's deterministic NotionExtractionSkill) (E3 §5 amendment).
+# ---------------------------------------------------------------------------
+
+
+class _FakeFetchAdapter:
+    async def fetch(self) -> list:  # pragma: no cover - never invoked by these tests
+        return []
+
+
+class _StubExtractionSkill:
+    async def extract(self, doc, *, source):  # pragma: no cover - never invoked
+        raise NotImplementedError
+
+
+def _config_with_llm() -> CanonicConfig:
+    return CanonicConfig(
+        version=1,
+        project=ProjectConfig(name="t"),
+        llm=LLMConfig(
+            provider="openai_compatible", base_url="http://localhost:11434/v1", model="small-local"
+        ),
+    )
+
+
+def test_wire_extraction_skills_backfills_default_null_skill() -> None:
+    from canonic.cli.commands.ingest import _wire_extraction_skills
+    from canonic.connectors.evidence import GenericEvidenceConnector, NullExtractionSkill
+
+    connector = GenericEvidenceConnector(_FakeFetchAdapter(), source="confluence_space")
+
+    _wire_extraction_skills({"confluence_space": connector}, _config_with_llm(), headless=False)
+
+    assert not isinstance(connector.extraction_skill, NullExtractionSkill)
+
+
+def test_wire_extraction_skills_headless_keeps_null_skill() -> None:
+    from canonic.cli.commands.ingest import _wire_extraction_skills
+    from canonic.connectors.evidence import GenericEvidenceConnector, NullExtractionSkill
+
+    connector = GenericEvidenceConnector(_FakeFetchAdapter(), source="confluence_space")
+
+    _wire_extraction_skills({"confluence_space": connector}, _config_with_llm(), headless=True)
+
+    assert isinstance(connector.extraction_skill, NullExtractionSkill)
+
+
+def test_wire_extraction_skills_never_overrides_explicit_skill() -> None:
+    """Notion's deterministic NotionExtractionSkill (or any explicit skill) is never replaced."""
+    from canonic.cli.commands.ingest import _wire_extraction_skills
+    from canonic.connectors.evidence import GenericEvidenceConnector
+
+    explicit_skill = _StubExtractionSkill()
+    connector = GenericEvidenceConnector(
+        _FakeFetchAdapter(), source="notion_wiki", extraction_skill=explicit_skill
+    )
+
+    _wire_extraction_skills({"notion_wiki": connector}, _config_with_llm(), headless=False)
+
+    assert connector.extraction_skill is explicit_skill
+
+
+def test_wire_extraction_skills_ignores_non_evidence_connectors() -> None:
+    from canonic.cli.commands.ingest import _wire_extraction_skills
+
+    # Must not raise even though _FakeConnector has no extraction_skill concept at all.
+    _wire_extraction_skills({"warehouse_pg": _FakeConnector()}, _config_with_llm(), headless=False)

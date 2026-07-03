@@ -15,14 +15,16 @@ from canonic.connectors.base import (
 )
 from canonic.connectors.notion import (
     SUPPORTED_API_VERSIONS,
-    NotionConnector,
     _usage_hint_for,
+    make_notion_connector,
 )
 from canonic.ingestion.models import EvidenceKind
 from canonic.ingestion.source import evidence_from_docs
 
 if TYPE_CHECKING:
     from pathlib import Path
+
+    from canonic.connectors.evidence import GenericEvidenceConnector
 
 
 class FixtureNotionPageSource:
@@ -45,32 +47,34 @@ def page_source(notion_pages_path: Path) -> FixtureNotionPageSource:
 
 
 @pytest.fixture
-def connector(page_source: FixtureNotionPageSource) -> NotionConnector:
-    return NotionConnector(page_source=page_source)
+def connector(page_source: FixtureNotionPageSource) -> GenericEvidenceConnector:
+    return make_notion_connector(page_source=page_source)
 
 
 class TestCapabilities:
-    def test_declares_extract_evidence(self, connector: NotionConnector) -> None:
+    def test_declares_extract_evidence(self, connector: GenericEvidenceConnector) -> None:
         assert Capability.EXTRACT_EVIDENCE in connector.capabilities()
 
-    def test_declares_test_connection(self, connector: NotionConnector) -> None:
+    def test_declares_test_connection(self, connector: GenericEvidenceConnector) -> None:
         assert Capability.TEST_CONNECTION in connector.capabilities()
 
-    def test_does_not_declare_extract_definitions(self, connector: NotionConnector) -> None:
+    def test_does_not_declare_extract_definitions(
+        self, connector: GenericEvidenceConnector
+    ) -> None:
         assert Capability.EXTRACT_DEFINITIONS not in connector.capabilities()
 
-    def test_does_not_declare_introspect_schema(self, connector: NotionConnector) -> None:
+    def test_does_not_declare_introspect_schema(self, connector: GenericEvidenceConnector) -> None:
         assert Capability.INTROSPECT_SCHEMA not in connector.capabilities()
 
 
 class TestTestConnection:
-    async def test_ok_on_supported_version(self, connector: NotionConnector) -> None:
+    async def test_ok_on_supported_version(self, connector: GenericEvidenceConnector) -> None:
         health = await connector.test_connection()
         assert health.status == "ok"
         assert health.message is not None
 
     async def test_error_on_unsupported_version(self, page_source: FixtureNotionPageSource) -> None:
-        bad = NotionConnector(page_source=page_source, api_version="2020-01-01")
+        bad = make_notion_connector(page_source=page_source, api_version="2020-01-01")
         health = await bad.test_connection()
         assert health.status == "error"
         assert "unsupported" in (health.message or "").lower()
@@ -79,7 +83,7 @@ class TestTestConnection:
     async def test_error_message_lists_supported_versions(
         self, page_source: FixtureNotionPageSource
     ) -> None:
-        bad = NotionConnector(page_source=page_source, api_version="2020-01-01")
+        bad = make_notion_connector(page_source=page_source, api_version="2020-01-01")
         health = await bad.test_connection()
         for v in SUPPORTED_API_VERSIONS:
             assert v in (health.message or "")
@@ -117,7 +121,7 @@ class TestUsageHintMapping:
 
 class TestExtractEvidence:
     async def test_ac1_policy_page_produces_doc_evidence_with_usage_hint_policy(
-        self, connector: NotionConnector
+        self, connector: GenericEvidenceConnector
     ) -> None:
         docs = await connector.extract_evidence()
         policy_docs = [d for d in docs if d.usage_hint == UsageHint.POLICY]
@@ -131,26 +135,28 @@ class TestExtractEvidence:
         assert doc.kind == "doc_evidence"
         assert doc.source == "notion_wiki"
 
-    async def test_topic_refs_are_candidates_only(self, connector: NotionConnector) -> None:
+    async def test_topic_refs_are_candidates_only(
+        self, connector: GenericEvidenceConnector
+    ) -> None:
         docs = await connector.extract_evidence()
         policy_doc = next(d for d in docs if d.usage_hint == UsageHint.POLICY)
         assert set(policy_doc.topic_refs) == {"customers", "test_accounts"}
 
-    async def test_caveat_page_usage_hint(self, connector: NotionConnector) -> None:
+    async def test_caveat_page_usage_hint(self, connector: GenericEvidenceConnector) -> None:
         docs = await connector.extract_evidence()
         caveat_docs = [d for d in docs if d.usage_hint == UsageHint.CAVEAT]
         assert len(caveat_docs) == 1
         assert caveat_docs[0].native_ref == "notion:page:def456"
 
     async def test_missing_canonic_type_defaults_to_reference(
-        self, connector: NotionConnector
+        self, connector: GenericEvidenceConnector
     ) -> None:
         docs = await connector.extract_evidence()
         glossary = next(d for d in docs if "glossary" in d.title.lower())
         assert glossary.usage_hint == UsageHint.REFERENCE
 
     async def test_unrecognized_canonic_type_defaults_to_reference_with_warning(
-        self, connector: NotionConnector, caplog: pytest.LogCaptureFixture
+        self, connector: GenericEvidenceConnector, caplog: pytest.LogCaptureFixture
     ) -> None:
         with caplog.at_level(logging.WARNING):
             docs = await connector.extract_evidence()
@@ -159,12 +165,12 @@ class TestExtractEvidence:
         assert unknown_docs[0].usage_hint == UsageHint.REFERENCE
         assert "unknown_kind" in caplog.text
 
-    async def test_native_ref_format(self, connector: NotionConnector) -> None:
+    async def test_native_ref_format(self, connector: GenericEvidenceConnector) -> None:
         docs = await connector.extract_evidence()
         for doc in docs:
             assert doc.native_ref.startswith("notion:page:")
 
-    async def test_source_fingerprint_present(self, connector: NotionConnector) -> None:
+    async def test_source_fingerprint_present(self, connector: GenericEvidenceConnector) -> None:
         docs = await connector.extract_evidence()
         for doc in docs:
             assert doc.source_fingerprint is not None
@@ -173,8 +179,8 @@ class TestExtractEvidence:
     async def test_fingerprints_are_stable_across_calls(
         self, page_source: FixtureNotionPageSource
     ) -> None:
-        c1 = NotionConnector(page_source=page_source)
-        c2 = NotionConnector(page_source=page_source)
+        c1 = make_notion_connector(page_source=page_source)
+        c2 = make_notion_connector(page_source=page_source)
         docs1 = await c1.extract_evidence()
         docs2 = await c2.extract_evidence()
         fps1 = {d.native_ref: d.source_fingerprint for d in docs1}
@@ -187,7 +193,7 @@ class TestExtractEvidence:
         from canonic.exc import ConnectionError as CanonicConnectionError
         from canonic.exc import UnsupportedSourceVersionError
 
-        bad = NotionConnector(page_source=page_source, api_version="2020-01-01")
+        bad = make_notion_connector(page_source=page_source, api_version="2020-01-01")
         with pytest.raises(UnsupportedSourceVersionError, match="unsupported") as excinfo:
             await bad.extract_evidence()
         exc = excinfo.value
@@ -195,39 +201,41 @@ class TestExtractEvidence:
         assert exc.exit_code == 13
         assert isinstance(exc, CanonicConnectionError)
 
-    async def test_doc_evidence_round_trips(self, connector: NotionConnector) -> None:
+    async def test_doc_evidence_round_trips(self, connector: GenericEvidenceConnector) -> None:
         docs = await connector.extract_evidence()
         for doc in docs:
             round_tripped = DocEvidence.model_validate(doc.model_dump(mode="json"))
             assert round_tripped == doc
 
-    async def test_no_notion_native_keys_in_dump(self, connector: NotionConnector) -> None:
+    async def test_no_notion_native_keys_in_dump(self, connector: GenericEvidenceConnector) -> None:
         docs = await connector.extract_evidence()
         notion_keys = {"object", "url", "properties", "_body"}
         for doc in docs:
             dumped = set(doc.model_dump(mode="json").keys())
             assert not dumped & notion_keys, f"Notion-native keys leaked: {dumped & notion_keys}"
 
-    async def test_all_pages_extracted(self, connector: NotionConnector) -> None:
+    async def test_all_pages_extracted(self, connector: GenericEvidenceConnector) -> None:
         docs = await connector.extract_evidence()
         assert len(docs) == 4
 
 
 class TestEvidenceFromDocsSeam:
-    async def test_emits_doc_evidence_items(self, connector: NotionConnector) -> None:
+    async def test_emits_doc_evidence_items(self, connector: GenericEvidenceConnector) -> None:
         items = await evidence_from_docs(connector, "notion_wiki")
         assert all(item.kind == EvidenceKind.DOC_EVIDENCE for item in items)
 
-    async def test_source_stamped_correctly(self, connector: NotionConnector) -> None:
+    async def test_source_stamped_correctly(self, connector: GenericEvidenceConnector) -> None:
         items = await evidence_from_docs(connector, "notion_wiki")
         assert all(item.source == "notion_wiki" for item in items)
 
     async def test_source_override(self, page_source: FixtureNotionPageSource) -> None:
-        c = NotionConnector(page_source=page_source, source="my_notion")
+        c = make_notion_connector(page_source=page_source, source="my_notion")
         items = await evidence_from_docs(c, "my_notion")
         assert all(item.source == "my_notion" for item in items)
 
-    async def test_payload_contains_doc_evidence_fields(self, connector: NotionConnector) -> None:
+    async def test_payload_contains_doc_evidence_fields(
+        self, connector: GenericEvidenceConnector
+    ) -> None:
         items = await evidence_from_docs(connector, "notion_wiki")
         for item in items:
             assert "title" in item.payload
