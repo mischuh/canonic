@@ -57,6 +57,27 @@ def test_instantiate_postgres(
     assert isinstance(connector, PostgresConnector)
 
 
+def test_create_url_wraps_url_fetch_adapter() -> None:
+    """The recurring-ingest path for URLs shares UrlFetchAdapter with `knowledge add`."""
+    from canonic.connectors.evidence import GenericEvidenceConnector, NullExtractionSkill
+    from canonic.connectors.web import UrlFetchAdapter
+
+    conn = Connection(
+        id="saas_kpi_glossary", type="url", params={"urls": ["https://example.com/kpis"]}
+    )
+    connector = default_factory.create(conn)
+
+    assert isinstance(connector, GenericEvidenceConnector)
+    assert isinstance(connector.extraction_skill, NullExtractionSkill)  # backfilled by ingest.py
+    assert isinstance(connector._fetch_adapter, UrlFetchAdapter)  # noqa: SLF001 - white-box wiring check
+
+
+def test_create_url_missing_urls_param_raises() -> None:
+    conn = Connection(id="bad_url_conn", type="url", params={})
+    with pytest.raises(ConnectionError, match="requires params.urls"):
+        default_factory.create(conn)
+
+
 # --- AC2: unknown type raises UnknownConnectorType with list of registered types --
 
 
@@ -159,4 +180,5 @@ def test_registered_types_includes_builtins() -> None:
     assert "postgres" in types
     assert "dbt" in types
     assert "notion" in types
+    assert "url" in types
     assert types == sorted(types)

@@ -12,11 +12,12 @@ if TYPE_CHECKING:
 
 from canonic.exc import KnowledgePageError
 from canonic.knowledge.loader import (
+    dump_knowledge_page,
     load_knowledge_page,
     scope_from_path,
     slug_from_path,
 )
-from canonic.knowledge.models import KnowledgeScope, UsageMode
+from canonic.knowledge.models import KnowledgePageMeta, KnowledgeScope, UsageMode
 from canonic.semantic.models import Provenance
 
 
@@ -133,3 +134,50 @@ def test_invalid_usage_mode_reports_file(write_page) -> None:
     with pytest.raises(KnowledgePageError) as exc:
         load_knowledge_page(path)
     assert str(path) in str(exc.value)
+
+
+# ---------------------------------------------------------------------------
+# dump_knowledge_page — the write-side counterpart to load_knowledge_page,
+# added for `canonic knowledge add` (SPEC-E3 §5 fetch/extract-split amendment).
+# ---------------------------------------------------------------------------
+
+
+def test_dump_then_load_round_trips(write_page, make_page) -> None:
+    page = make_page(
+        "kpi-glossary",
+        sl_refs=["warehouse_pg.orders.total_revenue"],
+        body="Some prose body.\n",
+        meta=KnowledgePageMeta(
+            provenance=Provenance.INFERRED, bound_fingerprints={"a": "sha256:x"}
+        ),
+    )
+
+    dumped = dump_knowledge_page(page)
+    path = write_page(dumped, rel_path=f"{page.scope.value}/{page.id}.md")
+    reloaded = load_knowledge_page(path)
+
+    assert reloaded.id == page.id
+    assert reloaded.path == path
+    assert reloaded.scope == page.scope
+    assert reloaded.sl_refs == page.sl_refs
+    assert reloaded.body == page.body
+    assert reloaded.meta.provenance is Provenance.INFERRED
+    assert reloaded.meta.bound_fingerprints == {"a": "sha256:x"}
+
+
+def test_dump_excludes_derived_keys(make_page) -> None:
+    """The frontmatter block must never contain id/path/scope — the loader rejects them."""
+    page = make_page("kpi-glossary")
+
+    dumped = dump_knowledge_page(page)
+    frontmatter = dumped.split("---")[1]
+
+    assert "id:" not in frontmatter
+    assert "path:" not in frontmatter
+    assert "scope:" not in frontmatter
+
+
+def test_dump_places_body_after_closing_fence(make_page) -> None:
+    page = make_page("kpi-glossary", body="Body text here.\n")
+    dumped = dump_knowledge_page(page)
+    assert dumped.endswith("Body text here.\n")

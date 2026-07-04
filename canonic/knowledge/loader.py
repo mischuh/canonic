@@ -7,6 +7,7 @@ that hand-sets either is rejected.
 
 from __future__ import annotations
 
+import io
 from typing import TYPE_CHECKING, Any
 
 from pydantic import ValidationError
@@ -20,6 +21,7 @@ if TYPE_CHECKING:
     from pathlib import Path
 
 __all__ = [
+    "dump_knowledge_page",
     "load_knowledge_page",
     "scope_from_path",
     "slug_from_path",
@@ -176,3 +178,19 @@ def load_knowledge_page(path: Path) -> KnowledgePage:
         message = f"{suffix}: {msg}" if suffix else msg
         _raise_located(path, raw, loc, message)
         raise AssertionError("unreachable") from exc  # _raise_located always raises
+
+
+def dump_knowledge_page(page: KnowledgePage) -> str:
+    """Serialize a page to its on-disk form: YAML frontmatter + body (SPEC-E6 §2).
+
+    Excludes ``id``/``path``/``scope`` (derived from the file path by the loader, never
+    hand-set in frontmatter — see ``_DERIVED_KEYS``) and ``body`` (written verbatim after
+    the closing fence) from the frontmatter block, so writing the result to
+    ``page.path`` and reloading it via :func:`load_knowledge_page` round-trips.
+    """
+    data = page.model_dump(mode="json", exclude={"id", "path", "scope", "body"})
+    yaml = YAML()
+    yaml.default_flow_style = False
+    buffer = io.StringIO()
+    yaml.dump(data, buffer)
+    return f"{_FENCE}\n{buffer.getvalue()}{_FENCE}\n{page.body}"
