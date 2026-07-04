@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import logging
 import time
+import uuid
 from datetime import UTC, datetime
 from pathlib import Path  # noqa: TC003 — used in function bodies, not just annotations
 from typing import TYPE_CHECKING, Any, cast
@@ -36,6 +37,7 @@ from canonic.core.overview import questions_for_group
 from canonic.exc import Ambiguous, CanonicError, Unresolved, UnsupportedMeasure
 from canonic.instrumentation.events import AnswerEventLog, DiskAnswerEventLog, NullAnswerEventLog
 from canonic.instrumentation.models import AnswerEvent, _age_days, _sha256_json
+from canonic.log import query_id_var
 from canonic.semantic.loader import list_semantic_sources
 
 if TYPE_CHECKING:
@@ -425,6 +427,7 @@ class CanonicService:
         connection_id: str | None = None
         result: ResultSet | None = None
         error_code: str | None = None
+        qid_token = query_id_var.set(uuid.uuid4().hex[:8])
         logger.info(
             "query received: metrics=%s dimensions=%d",
             query.metrics,
@@ -435,7 +438,13 @@ class CanonicService:
                 query, self._resolver, self._sources, connection_dialects=self._connection_dialects
             )
             connection_id = self._connection_for_sql(compiled)
-            logger.info("connection selected: id=%s", connection_id)
+            if connection_id is not None:
+                logger.info("connection selected: id=%s", connection_id)
+            else:
+                logger.info(
+                    "connection selected: id=%s (project default; no source-level match)",
+                    self._config.project.default_connection,
+                )
             result = await self._execute(compiled.sql, connection_id)
             query_result = QueryResult.from_parts(compiled, result)
             await self._check_query_assertions(query, harness=harness)
@@ -448,6 +457,7 @@ class CanonicService:
             if result is not None:
                 logger.info("query completed: latency_ms=%d rows=%d", latency_ms, len(result.rows))
             self._emit_answer_event(query, compiled, connection_id, result, latency_ms, error_code)
+            query_id_var.reset(qid_token)
 
     async def _execute(self, sql: str, connection_id: str | None) -> ResultSet:
         """Run read-only SQL on the resolved connection, always closing the connector."""
@@ -720,7 +730,8 @@ class CanonicService:
             if source is not None:
                 return source.connection
         logger.warning(
-            "no connection found: no loaded source matched resolved=%s",
+            "no source-level connection match: resolved=%s"
+            " — falling back to project default_connection",
             list(compiled.resolved.values()),
         )
         return None

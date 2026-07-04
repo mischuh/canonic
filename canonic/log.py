@@ -2,25 +2,38 @@
 
 from __future__ import annotations
 
+import contextvars
 import json
 import logging
 import os
 import sys
+import time
+
+#: Set by callers (e.g. ``CanonicService.query``) to a short per-call id so every
+#: log record emitted while it's in flight — across service/resolver/pipeline
+#: loggers — can be correlated back to the same call via ``_QueryIdFilter``.
+query_id_var: contextvars.ContextVar[str | None] = contextvars.ContextVar("query_id", default=None)
 
 _TEXT_FORMATTER = logging.Formatter(
-    fmt="%(asctime)s %(levelname)-8s %(name)s: %(message)s",
-    datefmt="%Y-%m-%dT%H:%M:%S",
+    fmt="%(asctime)s %(levelname)-8s %(name)s [qid=%(qid)s]: %(message)s",
+    datefmt="%Y-%m-%dT%H:%M:%SZ",
 )
+_TEXT_FORMATTER.converter = time.gmtime
 
 
 class _JsonFormatter(logging.Formatter):
     """One JSON object per record — machine-parseable, still a single line."""
 
+    def __init__(self) -> None:
+        super().__init__()
+        self.converter = time.gmtime
+
     def format(self, record: logging.LogRecord) -> str:
         payload: dict[str, object] = {
-            "timestamp": self.formatTime(record, "%Y-%m-%dT%H:%M:%S"),
+            "timestamp": self.formatTime(record, "%Y-%m-%dT%H:%M:%SZ"),
             "level": record.levelname,
             "logger": record.name,
+            "qid": getattr(record, "qid", "-"),
             "message": record.getMessage(),
         }
         if record.exc_info:
@@ -29,6 +42,14 @@ class _JsonFormatter(logging.Formatter):
 
 
 _JSON_FORMATTER = _JsonFormatter()
+
+
+class _QueryIdFilter(logging.Filter):
+    """Stamp each record with the current call's id from ``query_id_var``."""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        record.qid = query_id_var.get() or "-"
+        return True
 
 
 def configure_logging(
@@ -62,6 +83,7 @@ def configure_logging(
         handler = logging.StreamHandler(sys.stderr)
 
     handler.setFormatter(_JSON_FORMATTER if format == "json" else _TEXT_FORMATTER)
+    handler.addFilter(_QueryIdFilter())
     canonic_logger.addHandler(handler)
     canonic_logger.propagate = False  # prevent double-emission to root logger
 
