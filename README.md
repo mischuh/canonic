@@ -54,6 +54,28 @@ The key idea: a knowledge page *explains* why "amount includes refunds unless fi
 
 ---
 
+## Adding knowledge: recurring vs. one-shot
+
+`knowledge/**/*.md` pages can come from two paths, depending on whether a source should stay in sync automatically or you're just adding one thing right now.
+
+**Recurring** — register it as a connection, and it refreshes alongside everything else on every `canonic ingest`, with drift tracked via content fingerprints:
+```yaml
+connections:
+  - id: saas_kpi_glossary
+    type: url
+    params:
+      urls: ["https://example.com/saas-metrics-glossary"]
+```
+
+**One-shot** — no `canonic.yaml` entry needed. Fetches once, shows you the rendered page, and writes only after you confirm:
+```bash
+canonic knowledge add https://example.com/saas-metrics-glossary
+```
+
+Both paths classify the fetched content the same way: usage (`reference` / `caveat` / `policy` / `definition`) and candidate topic references are inferred, then matched against your live semantics — an unmatched candidate is surfaced for review, never silently linked as a broken reference.
+
+---
+
 ## Out of the box vs. a bit more effort
 
 **Works immediately, zero modeling:**
@@ -67,7 +89,7 @@ The key idea: a knowledge page *explains* why "amount includes refunds unless fi
 - **Knowledge prose** — the business "why" behind a definition; canonic drafts it, you refine it.
 - **Guardrails & contracts** — mandatory filters, required dimensions, final-vs-provisional rules. Added when a number needs protecting.
 - **Non-additive metrics** — ratios, averages, distinct counts, balances. Declared as composable definitions so they stay correct at any grain.
-- **More sources** — dbt / LookML / Metabase / Notion / docs, layered on as context evidence.
+- **More sources** — dbt / LookML / Metabase / Notion / web pages, layered on as context evidence.
 
 The design principle throughout: **canonic proposes, you approve.** It never silently edits your context — every change is a reviewable diff.
 
