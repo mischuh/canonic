@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING
 
 from canonic.connectors.dbt import DbtConnector
 from canonic.connectors.duckdb import DuckDBConnector
+from canonic.connectors.evidence import GenericEvidenceConnector
 from canonic.connectors.looker import LookerConnector
 from canonic.connectors.metabase import MetabaseConnector
 from canonic.connectors.notion import DEFAULT_API_VERSION as _NOTION_DEFAULT_API_VERSION
@@ -25,7 +26,6 @@ if TYPE_CHECKING:
 
     from canonic.config import CanonicConfig, Connection
     from canonic.connectors.base import ConnectorBase
-    from canonic.connectors.evidence import GenericEvidenceConnector
 
 __all__ = ["ConnectorFactory", "default_factory"]
 
@@ -41,6 +41,17 @@ def _make_notion(conn: Connection) -> GenericEvidenceConnector:
     token = resolve_credential(conn.credentials_ref)
     api_version = conn.params.get("api_version", _NOTION_DEFAULT_API_VERSION)
     return make_notion_connector(token, source=conn.id, api_version=api_version)
+
+
+def _make_url(conn: Connection) -> GenericEvidenceConnector:
+    from canonic.connectors.web import UrlFetchAdapter
+
+    urls = conn.params.get("urls")
+    if not urls:
+        raise ConnectionError(
+            f"connection {conn.id!r} (type=url) requires params.urls: [<url>, ...]"
+        )
+    return GenericEvidenceConnector(UrlFetchAdapter(urls), source=conn.id)
 
 
 class ConnectorFactory:
@@ -118,6 +129,7 @@ def _build_default_factory() -> ConnectorFactory:
     factory.register("postgres", PostgresConnector)
     factory.register("redshift", RedshiftConnector)
     factory.register("sqlite", SQLiteConnector)
+    factory.register("url", _make_url)
     return factory
 
 
