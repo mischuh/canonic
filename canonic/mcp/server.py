@@ -48,7 +48,16 @@ _INSTRUCTIONS = (
     "base your answer strictly on that page's content — do not substitute a generic or "
     "invented formula. Relay any 'caveats' the same way you relay 'suggestions'. Only fall "
     "back to general knowledge if search_knowledge() returns no hits, and say so explicitly "
-    "when you do."
+    "when you do.\n\n"
+    "RAW SQL (run_sql) — only use this when no metric/dimension in list_metrics() covers the "
+    "question. Prefer query()/compile_query() whenever a metric exists: they route joins "
+    "through the resolved join graph and apply guardrails (e.g. against fan-out from "
+    "one-to-many joins), which a hand-written JOIN across fact tables will not get and can "
+    "silently multiply values such as revenue.\n\n"
+    "NEVER return a result you have identified as suspicious — inconsistent with a prior "
+    "answer, an implausible magnitude, or produced by a join/aggregation you are unsure is "
+    "correct. Do not present it as the final answer. Instead say explicitly that the number "
+    "looks wrong and why, then re-derive it via query() or ask the user before answering."
 )
 
 
