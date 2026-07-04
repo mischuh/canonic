@@ -39,7 +39,16 @@ _INSTRUCTIONS = (
     "as a natural-language follow-up after presenting the results. "
     "Skip this step only when 'suggestions' is absent.\n\n"
     "Do NOT ask the user for clarification before calling list_metrics — the tool "
-    "response provides everything you need."
+    "response provides everything you need.\n\n"
+    "DEFINITIONAL / METHODOLOGY QUESTIONS — e.g. 'how is X calculated', 'what does X mean', "
+    "'why is X computed this way':\n"
+    "Always call search_knowledge() first, even if you already believe you know the answer "
+    "from general knowledge. This project defines its own metrics and policies, which often "
+    "diverge from textbook definitions. If a hit is returned, call read_knowledge_page() and "
+    "base your answer strictly on that page's content — do not substitute a generic or "
+    "invented formula. Relay any 'caveats' the same way you relay 'suggestions'. Only fall "
+    "back to general knowledge if search_knowledge() returns no hits, and say so explicitly "
+    "when you do."
 )
 
 
@@ -253,7 +262,9 @@ def build_server(service: CanonicService, *, suggestions: bool = False) -> FastM
             "Search the project's knowledge pages for business context: definitions, "
             "caveats, and policies. Returns ranked hits plus any caveats auto-surfaced "
             "because a hit references their bound semantic entity. "
-            "Call alongside query() to get executable SQL and business meaning together. "
+            "Call this BEFORE answering any question about what a metric means or how it is "
+            "calculated — this project's definitions may differ from general/textbook ones. "
+            "Also call alongside query() to get executable SQL and business meaning together. "
             "Returns empty hits when the project has no knowledge pages."
         )
     )
