@@ -29,11 +29,14 @@ _INSTRUCTIONS = (
     "You are working with Canonic, a semantic query layer over structured data.\n\n"
     "WORKFLOW — always follow these steps in order:\n"
     "1. Call list_metrics(). "
-    "The response includes every metric AND its queryable dimensions with canonical names "
-    "and human-readable labels. Use the 'name' field of each dimension in query() calls.\n"
-    "2. Match the user's question to a metric ('metric' field) and a dimension ('name' in "
-    "'dimensions'). Labels help map natural-language terms (e.g. 'Kundentyp' → "
-    "label 'Customer Type' → name 'customer_type').\n"
+    "The response has two top-level keys: 'metrics' (each with a 'dimensions' list of "
+    "canonical names queryable against it) and 'dimensions' (a deduplicated catalog mapping "
+    "each canonical name to its 'label' and 'source' — look names up there for the "
+    "human-readable label). Use the canonical name in query() calls.\n"
+    "2. Match the user's question to a metric ('metric' field) and a dimension name from its "
+    "'dimensions' list. Look that name up in the top-level 'dimensions' catalog for its label "
+    "to map natural-language terms (e.g. 'Kundentyp' → label 'Customer Type' → "
+    "name 'customer_type').\n"
     "3. Call query() with the canonical metric name and dimension name.\n"
     "4. If the response contains a 'suggestions' key, relay that text verbatim to the user "
     "as a natural-language follow-up after presenting the results. "
@@ -48,7 +51,16 @@ _INSTRUCTIONS = (
     "base your answer strictly on that page's content — do not substitute a generic or "
     "invented formula. Relay any 'caveats' the same way you relay 'suggestions'. Only fall "
     "back to general knowledge if search_knowledge() returns no hits, and say so explicitly "
-    "when you do."
+    "when you do.\n\n"
+    "RAW SQL (run_sql) — only use this when no metric/dimension in list_metrics() covers the "
+    "question. Prefer query()/compile_query() whenever a metric exists: they route joins "
+    "through the resolved join graph and apply guardrails (e.g. against fan-out from "
+    "one-to-many joins), which a hand-written JOIN across fact tables will not get and can "
+    "silently multiply values such as revenue.\n\n"
+    "NEVER return a result you have identified as suspicious — inconsistent with a prior "
+    "answer, an implausible magnitude, or produced by a join/aggregation you are unsure is "
+    "correct. Do not present it as the final answer. Instead say explicitly that the number "
+    "looks wrong and why, then re-derive it via query() or ask the user before answering."
 )
 
 
@@ -130,15 +142,28 @@ def build_server(service: CanonicService, *, suggestions: bool = False) -> FastM
 
     @mcp.tool(
         description=(
-            "List all active canonical metrics this project defines. "
-            "Each metric includes its queryable dimensions with canonical names and labels — "
-            "use these canonical 'name' values directly in query() calls."
+            "List all active canonical metrics this project defines, plus a deduplicated "
+            "catalog of every dimension queryable against them. Each metric's 'dimensions' "
+            "list holds canonical names only — look those names up in the top-level "
+            "'dimensions' catalog for the label/source. Use canonical names directly in "
+            "query() calls."
         )
     )
     @canonic_error_response
-    async def list_metrics() -> list[dict[str, Any]]:
+    async def list_metrics() -> dict[str, Any]:
         summaries = service.list_metrics()
-        return [s.model_dump() for s in summaries]
+        dim_catalog: dict[str, dict[str, Any]] = {}
+        metrics_out: list[dict[str, Any]] = []
+        for s in summaries:
+            metric = s.model_dump(exclude={"dimensions"})
+            metric["dimensions"] = [d.name for d in s.dimensions]
+            metrics_out.append(metric)
+            for d in s.dimensions:
+                dim_catalog.setdefault(d.name, d.model_dump())
+        return {
+            "metrics": metrics_out,
+            "dimensions": [dim_catalog[name] for name in sorted(dim_catalog)],
+        }
 
     # ------------------------------------------------------------------
     # Tool: describe_metric

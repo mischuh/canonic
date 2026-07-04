@@ -79,7 +79,7 @@ async def test_contract_info_returns_schema(canonic_service: CanonicService) -> 
 async def test_negotiate_contract_accepts_matching_major(canonic_service: CanonicService) -> None:
     mcp = build_server(canonic_service)
     async with Client(mcp) as client:
-        result = await client.call_tool("negotiate_contract", {"contract_major": 1})
+        result = await client.call_tool("negotiate_contract", {"contract_major": 2})
     assert result.data["accepted"] is True
     assert result.data["contract_schema"] == CONTRACT_SCHEMA
 

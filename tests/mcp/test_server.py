@@ -131,9 +131,16 @@ async def test_list_metrics(canonic_service: CanonicService) -> None:
     mcp = build_server(canonic_service)
     async with Client(mcp) as client:
         result = await client.call_tool("list_metrics", {})
-    metrics = result.data
-    assert isinstance(metrics, list)
-    assert any(m["metric"] == "revenue" for m in metrics)
+    data = result.data
+    assert isinstance(data["metrics"], list)
+    assert any(m["metric"] == "revenue" for m in data["metrics"])
+    revenue = next(m for m in data["metrics"] if m["metric"] == "revenue")
+    assert all(isinstance(name, str) for name in revenue["dimensions"])
+    assert isinstance(data["dimensions"], list)
+    catalog_names = {d["name"] for d in data["dimensions"]}
+    assert set(revenue["dimensions"]) <= catalog_names
+    order_date = next(d for d in data["dimensions"] if d["name"] == "order_date")
+    assert set(order_date) == {"name", "source", "label", "description"}
 
 
 @pytest.mark.asyncio
@@ -186,7 +193,7 @@ async def test_compile_query(canonic_service: CanonicService) -> None:
     assert "SELECT" in data["compiled"]["sql"].upper()
     assert data["metadata"]["resolved"]["metrics"]["revenue"] == "orders.total_revenue"
     assert any(g["id"] == "revenue-excludes-refunds" for g in data["metadata"]["guardrails_fired"])
-    assert data["metadata"]["contract_schema"] == "1.7"
+    assert data["metadata"]["contract_schema"] == "2.0"
     # S12: related block is always present
     assert "related" in data["metadata"]
     assert isinstance(data["metadata"]["related"]["unused_dimensions"], list)
