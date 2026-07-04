@@ -1822,13 +1822,21 @@ def _build_finality_union(
 
     Each branch selects from one realization source, gated by the watermark on the time
     dimension column, and projects an ``is_final`` boolean marker.  All WHERE conditions
-    from the original owner (user filters + guardrails) are re-qualified to each branch
-    source — this is valid because both sources share the same column/dimension schema.
+    from the original owner (user filters, guardrails, population filters) are re-qualified
+    to each branch source — this is valid because both sources share the same column/
+    dimension schema.
 
     ``measure_alias`` overrides the column alias for each metric's measure projection; used
     when building a leaf sub-query for a composite metric (e.g. alias ``"n"``/``"d"``).
     """
     from canonic.contracts.finality import watermark_to_iso
+
+    # Any table alias referenced by the incoming WHERE conditions (filters, guardrails,
+    # population filters) must also be joined in each branch — they get re-qualified onto
+    # the branch below but not re-planned, so their source tables need to already be there.
+    where_source_aliases = {
+        col.table for cond in where_conditions for col in cond.find_all(exp.Column) if col.table
+    }
 
     watermark_iso = watermark_to_iso(watermark_dt)
     watermark_lit = cast(
@@ -1873,10 +1881,17 @@ def _build_finality_union(
                 )
             branch_dims.append(resolved)
 
-        # Plan joins needed for non-owner dimensions in this branch.
+        # Plan joins needed for non-owner dimensions, plus non-owner filter/guardrail
+        # sources (WHERE conditions are re-qualified onto this branch below, so any
+        # table they reference must be joined here too).
         needed_targets = {
             branch_alias_to_source[alias]
             for alias, _ in branch_dims
+            if alias != src_name and alias in branch_alias_to_source
+        }
+        needed_targets |= {
+            branch_alias_to_source[alias]
+            for alias in where_source_aliases
             if alias != src_name and alias in branch_alias_to_source
         }
         branch_join_edges: list[JoinEdge] = (
