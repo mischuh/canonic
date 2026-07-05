@@ -5,6 +5,10 @@ description: "Your first answer in minutes."
 
 The fastest path uses **local connectors** — no server, no network. Pick either SQLite or DuckDB.
 
+<Note>
+  Don't have a database handy? The [Guides](/guides/jaffle-shop) section ships 5 ready-to-run sample projects (dbt Jaffle Shop, e-commerce, rental, SaaS analytics, Dutch railway) — a good way to try the wizard before pointing it at your own data.
+</Note>
+
 <Tabs>
   <Tab title="SQLite">
     Point at a local `.db` file:
@@ -23,6 +27,17 @@ The fastest path uses **local connectors** — no server, no network. Pick eithe
     ```
   </Tab>
 </Tabs>
+
+<Warning>
+  If your source needs a password (Postgres) or your LLM provider needs an API key, set the corresponding environment variable **before** running `canonic setup` — canonic never stores secrets in `canonic.yaml` directly, only a `credentials_ref` like `env:WAREHOUSE_PASSWORD` pointing at it:
+
+  ```bash
+  export WAREHOUSE_PASSWORD=...      # for a Postgres/Redshift connection
+  export ANTHROPIC_API_KEY=...       # or OPENAI_API_KEY / CANONIC_LLM_API_KEY, if configuring an LLM
+  ```
+
+  See [Configuring an LLM](/configuring-an-llm) and [`canonic connection`](/cli-reference/connection) for the full credential reference formats (`env:`, `keyring:`, `file:`).
+</Warning>
 
 ## What the wizard does
 
@@ -78,6 +93,6 @@ canonic status        # always tells you the best next step
 - **Knowledge prose** — the business "why" behind a definition; canonic drafts it, you refine it.
 - **Guardrails & contracts** — mandatory filters, required dimensions, final-vs-provisional rules. Added when a number needs protecting.
 - **Non-additive metrics** — ratios, averages, distinct counts, balances. Declared as composable definitions so they stay correct at any grain.
-- **More sources** — dbt / LookML / Metabase / Notion / web pages, layered on as context evidence.
+- **More sources** — dbt / Metabase / Notion / web pages, layered on as context evidence. The connector contract is extensible, so a Confluence, Jira, or other wiki/knowledge-base connector can be added the same way.
 
 The design principle throughout: **canonic proposes, you approve.** It never silently edits your context — every change is a reviewable diff.

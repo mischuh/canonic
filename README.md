@@ -28,7 +28,7 @@ When canonic isn't sure, it **refuses and asks** instead of guessing. A confiden
 | --- | --- | --- |
 | Giving the agent raw schema/SQL access | Fluency without correctness — it guesses definitions and picks wrong tables | Resolved canonical definitions, enforced guardrails, never a silent wrong number |
 | Hand-building a semantic layer from scratch | Months of modeling before any value | Context auto-drafted from your live schema on day one; you review, not author from zero |
-| Migrating onto a new metrics platform | Lock-in and a rebuild | canonic **ingests** your dbt / LookML / docs — it feeds your existing stack, it doesn't replace it |
+| Migrating onto a new metrics platform | Lock-in and a rebuild | canonic **ingests** your dbt / BI tools / docs — it feeds your existing stack, it doesn't replace it |
 | A hosted "AI analytics" SaaS | Your data and definitions leaving your environment | Local-first, fully **air-gapped-capable** — nothing has to leave your machine |
 
 What makes it different in one line: **canonic builds the context for you, keeps it honest, and refuses to lie when it isn't sure.**
@@ -89,7 +89,7 @@ Both paths classify the fetched content the same way: usage (`reference` / `cave
 - **Knowledge prose** — the business "why" behind a definition; canonic drafts it, you refine it.
 - **Guardrails & contracts** — mandatory filters, required dimensions, final-vs-provisional rules. Added when a number needs protecting.
 - **Non-additive metrics** — ratios, averages, distinct counts, balances. Declared as composable definitions so they stay correct at any grain.
-- **More sources** — dbt / LookML / Metabase / Notion / web pages, layered on as context evidence.
+- **More sources** — dbt / Metabase / Notion / web pages, layered on as context evidence. The connector contract is extensible, so a Confluence, Jira, or other wiki/knowledge-base connector can be added the same way.
 
 The design principle throughout: **canonic proposes, you approve.** It never silently edits your context — every change is a reviewable diff.
 
@@ -238,15 +238,17 @@ canonic mcp status
 
 | Tool | What the agent does with it |
 | --- | --- |
+| `contract_info` | check the serving contract version at session start |
+| `negotiate_contract` | declare the contract-schema major version the client expects |
+| `get_overview` | recommended first call — active metrics grouped by domain with sample questions |
 | `list_metrics` | discover what it can ask for |
 | `describe_metric` | grain, dimensions, owning source, freshness |
 | `resolve_metric` | check a name resolves; surface ambiguity instead of guessing |
 | `compile_query` | get the SQL + metadata without running it |
 | `query` | the main path — answer a question, with caveats attached |
 | `run_sql` | read-only SQL escape hatch |
-| `search_context` | find knowledge and definitions by text |
+| `search_knowledge` | find knowledge and definitions by text |
 | `read_knowledge_page` | read a full knowledge page to relay its explanation |
-| `propose_change` | stage a reviewable context change (never writes to your warehouse) |
 
 Every answer comes back with the **metadata band** — resolved definition, guardrails fired, freshness, final/provisional — so the agent can caveat honestly. On ambiguity or a blocked guardrail, the tool returns the candidates or the rationale, and the agent **asks** rather than fabricates.
 
@@ -268,7 +270,7 @@ Every answer comes back with the **metadata band** — resolved definition, guar
 - **Concepts** — the three layers and the split rule (the one mental model worth learning first).
 - **Canonical bindings** — resolving "which definition wins."
 - **Guardrails & contracts** — turning documented caveats into enforced rules.
-- **Connectors** — adding dbt, LookML, BI tools, and docs as context sources.
+- **Connectors** — adding dbt, BI tools, wikis (Confluence, Jira, etc.), and docs as context sources.
 - **Air-gapped operation** — running fully offline with local models.
 
 canonic is local-first, git-native, and read-only by design. Start with a SQLite file and one question; grow into the full context layer as your needs do.

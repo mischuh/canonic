@@ -54,6 +54,8 @@ Implement `extract_evidence` — feed [knowledge pages](/concepts/knowledge-laye
   A BI question's SQL is only ever evidence — never executed. If a Metabase/Looker-encoded metric is adopted, it's recompiled through the deterministic compiler like any other definition, never run as-is.
 </Note>
 
+This list isn't closed — any wiki or knowledge base (Confluence, Jira, internal docs tools, etc.) fits the same `extract_evidence` capability as `notion` and `url` today, and can be added as a new registered type without touching core logic.
+
 ## Normalized evidence, one shape per kind
 
 Every connector translates its native output into one of a few normalized shapes, so the [ingestion engine](/concepts/ingestion-and-reconciliation) and compiler never see vendor-specific structures:
