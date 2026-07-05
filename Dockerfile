@@ -4,7 +4,7 @@ WORKDIR /app
 
 RUN pip install uv
 
-COPY pyproject.toml uv.lock ./
+COPY pyproject.toml uv.lock README.md ./
 RUN uv sync --frozen --no-dev
 
 COPY canonic/ ./canonic/
