@@ -1,0 +1,35 @@
+---
+title: "Error codes"
+description: "The canonical error registry and its headless exit-code mapping."
+---
+
+Every canonic error carries a stable, wire-safe `code` string plus a headless process exit code — never free text alone, so a caller (script, CI job, agent) can act on it programmatically. The registry lives in `canonic/exc.py` and is guarded by the [release gate](/ci-cd/release-gate)'s conformance tests, so this mapping can't silently drift.
+
+| Exit code | `code` | Meaning |
+| --- | --- | --- |
+| 2 | `unresolved` | A metric name matches no active canonical binding. |
+| 3 | `ambiguous` | A name matches more than one active binding — candidates are returned. |
+| 4 | `unreachable` | A dimension/filter has no declared join path to the metric's source. |
+| 5 | `ambiguous_join_path` | More than one valid join path exists; the query must name an explicit `via`. |
+| 6 | `unsupported_measure` | A non-additive/semi-additive measure was requested at a grain no strategy can safely serve. |
+| 7 | `fanout_unsafe` | A join would corrupt a non-additive measure. |
+| 8 | `guardrail_block` | A `severity: error` guardrail blocked the query. |
+| 9 | `validation_failed` | A semantic/contract/knowledge file failed validation. |
+| 10 | `assertion_failed` | An assertion diverged from its expected value beyond tolerance (also used by `canonic assert`'s `--min-accuracy` gate). |
+| 11 | `read_only_violation` | A non-`SELECT` statement was submitted to a read-only execution path. |
+| 12 | `schema_mismatch` | Declared schema doesn't match the live source during probe validation. |
+| 13 | `connection_error` | A connector couldn't establish or maintain a connection (also raised for an unregistered connector `type`, or an out-of-range connector version). |
+| 14 | `contradiction` | Headless `--strict` ingest found a run with any flagged contradiction. |
+| 15 | `generation_failed` | An LLM generation call failed (deterministic provider/transport error). |
+| 16 | `structured_output_invalid` | The model's output doesn't satisfy the requested JSON schema. |
+| 17 | `structured_output_unsupported` | The model/endpoint can't honor schema-constrained output at all. |
+| 18 | `air_gapped_violation` | Air-gapped mode would let context leave the machine (public endpoint, remote secret ref, or telemetry). |
+| 19 | `retries_exhausted` | A transient provider/transport failure persisted past the bounded retry budget. |
+
+## Errors without a registry code
+
+A few internal/caller-contract errors carry no wire `ErrorCode` and use the default exit code **1**: `CapabilityNotSupportedError` (a connector was asked to honor a capability it doesn't declare), `EmbeddingUnavailable` (embed called without gating on `is_available()`), `CredentialError`, `SemanticSourceError`, `ContractError`, and `KnowledgePageError`. These signal a caller/config mistake rather than a documented, structured failure mode.
+
+<Note>
+  `EvalDatasetError` (a malformed `canonic eval baseline` dataset/candidates file) and `KnowledgeReferenceError` (a broken `sl_ref`/page link) both reuse `validation_failed` (exit 9) rather than defining new codes — they're the same class of failure as any other invalid input file.
+</Note>
