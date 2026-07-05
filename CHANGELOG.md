@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.2.2](https://github.com/mischuh/canonic/compare/v0.2.1...v0.2.2) (2026-07-05)
+
+
+### Bug Fixes
+
+* **docker,publish:** fix Dockerfile build and disable broken npm-publish job ([6122649](https://github.com/mischuh/canonic/commit/6122649881a32d4c6fc3b943774aebd5c0e76001))
+* **docker,publish:** fix Dockerfile build and disable broken npm-publish job ([33b106b](https://github.com/mischuh/canonic/commit/33b106b1aac33c664bd74ae827c8a1528c802339))
+
 ## [0.2.1](https://github.com/mischuh/canonic/compare/v0.2.0...v0.2.1) (2026-07-05)
 
 
