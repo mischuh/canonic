@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.2.3](https://github.com/mischuh/canonic/compare/v0.2.2...v0.2.3) (2026-07-05)
+
+
+### Documentation
+
+* remove LookML, correct MCP tool count, extend quickstart ([7f2d64d](https://github.com/mischuh/canonic/commit/7f2d64d13283f6fb00135fc0353fa4322bde6b1a))
+* update connector and semantic documentation for clarity and extensibility ([b3ce4b3](https://github.com/mischuh/canonic/commit/b3ce4b3658bf8e05ec87666357c45ca7a93fd6a7))
+
 ## [0.2.2](https://github.com/mischuh/canonic/compare/v0.2.1...v0.2.2) (2026-07-05)
 
 
