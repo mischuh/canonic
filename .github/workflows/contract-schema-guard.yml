@@ -1,0 +1,22 @@
+name: contract-schema-guard
+
+on:
+  pull_request:
+
+jobs:
+  guard:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Check CONTRACT_CHANGELOG.md is updated with contract_schema changes
+        run: |
+          git fetch origin "${{ github.base_ref }}"
+          python scripts/check_contract_changelog.py "origin/${{ github.base_ref }}"

@@ -1,0 +1,22 @@
+name: release-please
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  release-please:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: googleapis/release-please-action@v4
+        with:
+          # A PAT/App token, not the default GITHUB_TOKEN: tags pushed with GITHUB_TOKEN
+          # don't trigger other workflows (GitHub's anti-recursion rule), so publish.yml
+          # would never fire on the version tag this action creates.
+          token: ${{ secrets.CANONIC_GH_ACTIONS }}
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
