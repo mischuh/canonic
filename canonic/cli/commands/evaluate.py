@@ -54,7 +54,7 @@ def baseline(
     out: Annotated[
         Path,
         typer.Option("--out", "-o", help="Where to write the markdown baseline doc."),
-    ] = Path("docs/baseline-models.md"),
+    ] = Path("reports/baseline-models.md"),
     task: Annotated[
         str,
         typer.Option("--task", help="Task to evaluate (only 'draft' has a live call site in v1)."),

@@ -6,7 +6,7 @@ pagination, native API shape — no classification judgment) and one shared
 :class:`~canonic.connectors.base.DocEvidence` via a pluggable :class:`ExtractionSkill`.
 Adding a new prose source (Confluence, Google Docs, ...) is: write a ``FetchAdapter``,
 register it with the connector factory — no new extraction or ``DocEvidence``-mapping
-code (docs/AMENDMENT-generic-evidence-connector.md).
+code (specs/AMENDMENT-generic-evidence-connector.md).
 
 Definition connectors (dbt, LookML/MetricFlow) are out of scope: their extraction stays
 deterministic, structured parsing and is not built from these pieces.

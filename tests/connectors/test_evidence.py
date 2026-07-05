@@ -1,6 +1,6 @@
 """Tests for the generic fetch/extract evidence connector split.
 
-Covers docs/AMENDMENT-generic-evidence-connector.md: RawDoc, FetchAdapter,
+Covers specs/AMENDMENT-generic-evidence-connector.md: RawDoc, FetchAdapter,
 ExtractionSkill, GenericEvidenceConnector, and NullExtractionSkill in isolation from
 any vendor (Notion has its own tests in test_notion.py).
 """

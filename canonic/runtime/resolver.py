@@ -14,7 +14,7 @@ class Task(StrEnum):
 
     The v1 task set: ``draft`` (E4 builder), ``reconcile`` (E4 reconciliation), and
     ``extract`` (E3 generic evidence-connector classification, see
-    docs/AMENDMENT-generic-evidence-connector.md). A ``StrEnum`` member *is* its lowercase
+    specs/AMENDMENT-generic-evidence-connector.md). A ``StrEnum`` member *is* its lowercase
     string, so it indexes ``llm.tasks`` (keyed by the YAML strings) directly and
     serializes without conversion.
     """

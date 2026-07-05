@@ -1,7 +1,7 @@
 """Notion evidence connector — pages → normalized DocEvidence (SPEC-E3 §5, §9 S2).
 
 Composed from the generic fetch/extract split (:mod:`canonic.connectors.evidence`,
-docs/AMENDMENT-generic-evidence-connector.md): :class:`NotionFetchAdapter` fetches
+specs/AMENDMENT-generic-evidence-connector.md): :class:`NotionFetchAdapter` fetches
 Notion pages via the Notion API (auth, pagination, no classification), and
 :class:`NotionExtractionSkill` maps each :class:`~canonic.connectors.evidence.RawDoc`
 to :class:`DocEvidence`. ``usage_hint`` is read from an explicit page select property

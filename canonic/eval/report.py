@@ -110,7 +110,7 @@ def render_markdown(
         "Regenerate before tagging a release so the baseline tracks reality as models churn:",
         "",
         "```bash",
-        "canonic eval baseline --candidates candidates.yaml --out docs/baseline-models.md",
+        "canonic eval baseline --candidates candidates.yaml --out reports/baseline-models.md",
         "```",
         "",
         "`--candidates` is a YAML list of `openai_compatible` models (see",
