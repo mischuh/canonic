@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.2.1](https://github.com/mischuh/canonic/compare/v0.2.0...v0.2.1) (2026-07-05)
+
+
+### Bug Fixes
+
+* **ci:** reference the actual secret name for release-please's token ([780a606](https://github.com/mischuh/canonic/commit/780a606631b859da11a5a7adb721e682f4b64aaa))
+* **ci:** reference the actual secret name for release-please's token ([1a5bd6b](https://github.com/mischuh/canonic/commit/1a5bd6bafe006647fd74e6943ce4d6d6822745ff))
+* **ci:** use a PAT for release-please, and gitignore specs/*.md ([5ebb368](https://github.com/mischuh/canonic/commit/5ebb36856e17c5f31a08cb3cf130071d5569b730))
+* **ci:** use a PAT for release-please, and gitignore specs/*.md on this branch ([3ce2839](https://github.com/mischuh/canonic/commit/3ce2839cf21e3f886f2e0072ee80b439b820b27c))
+
 ## [0.2.0](https://github.com/mischuh/canonic/compare/v0.1.0...v0.2.0) (2026-07-05)
 
 
