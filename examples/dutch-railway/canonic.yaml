@@ -20,8 +20,8 @@ connections:
 
 llm:
   provider: openai_compatible
-  base_url: http://127.0.0.1:876511434/v1  # Ollama; swap for OpenAI/Anthropic in Phase 1
-  model: gemma-4-e2b-it-4bit
+  base_url: http://127.0.0.1:11434/v1  # Ollama; swap for OpenAI/Anthropic in Phase 1
+  model: gemma-4-12B-it-qat-4bit
   api_key_ref: env:CANONIC_LLM_API_KEY
 
 reconcile:
