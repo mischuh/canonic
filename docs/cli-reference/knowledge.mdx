@@ -1,0 +1,35 @@
+---
+title: "canonic knowledge"
+description: "Search and author knowledge pages."
+---
+
+`canonic knowledge` operates on `knowledge/**/*.md` pages directly — independent of connectors and `canonic ingest`.
+
+## `knowledge search`
+
+<Warning>
+  Not implemented yet — the command currently returns a `not implemented` notice and exits `0`. Hybrid search over knowledge + semantics is planned but not wired up in the CLI on `main` today.
+</Warning>
+
+```bash
+canonic knowledge search "active customer"
+```
+
+## `knowledge add`
+
+Fetch one external document and write it as a knowledge page — the one-shot counterpart to registering a recurring `connections:` entry and running `canonic ingest`.
+
+```bash
+canonic knowledge add https://example.com/saas-metrics-glossary
+canonic knowledge add https://example.com/internal-glossary --user alice --yes
+```
+
+| Argument / Flag | Description |
+| --- | --- |
+| `ref` | Source reference to fetch, e.g. a URL (positional). |
+| `--type` | Ad-hoc fetch adapter type (default `url`). |
+| `--user` | Write to `knowledge/user/<id>/` instead of `knowledge/global/`. |
+| `--slug` | Override the derived filename slug. |
+| `--yes`, `-y` | Write without a confirmation prompt. |
+
+The fetched content is classified the same way `canonic ingest` classifies evidence: usage mode (`reference` / `caveat` / `policy` / `definition`) and candidate topic references are inferred and matched against your live semantics. The rendered page is shown before writing; an unmatched candidate reference is surfaced as a note, never silently linked. Every page written this way has `meta.provenance: inferred`, so it's clear it hasn't been hand-reviewed yet.

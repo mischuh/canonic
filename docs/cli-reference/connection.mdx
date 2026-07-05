@@ -1,0 +1,59 @@
+---
+title: "canonic connection"
+description: "Manage source connections in canonic.yaml."
+---
+
+`canonic connection` manages the entries under `connections:` in `canonic.yaml` — the same file `canonic setup` writes to during onboarding.
+
+## `connection list`
+
+List configured connections.
+
+```bash
+canonic connection list
+```
+
+Shows each connection's `id`, `type`, whether it's the project default, and its params. With `--json`, returns `{"connections": [...]}` including full param dicts.
+
+## `connection test`
+
+Test connectivity for one or all connections.
+
+```bash
+canonic connection test
+canonic connection test --connection warehouse
+```
+
+| Flag | Description |
+| --- | --- |
+| `--connection`, `-c` | Connection id to test (default: all). |
+
+Exits non-zero if any tested connection fails to connect.
+
+## `connection add`
+
+Add a new source connection to `canonic.yaml`.
+
+```bash
+canonic connection add --id warehouse --type postgres \
+  --param host=localhost --param database=analytics \
+  --credentials-ref env:WAREHOUSE_PASSWORD --set-default
+```
+
+| Flag | Description |
+| --- | --- |
+| `--id` | Unique connection identifier. |
+| `--type` | Connector type (`sqlite`, `postgres`, …). |
+| `--param`, `-p` | Connector param as `KEY=VALUE` (repeatable). |
+| `--credentials-ref` | Credential reference (`env:VAR`, `keyring:service`, `file:path`). |
+| `--set-default` | Make this the project default connection. |
+
+## `connection remove`
+
+Remove a configured connection from `canonic.yaml`.
+
+```bash
+canonic connection remove warehouse
+```
+
+Takes the connection id as a positional argument. If it was the project default, the default is cleared.

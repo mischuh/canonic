@@ -1,0 +1,54 @@
+---
+title: "canonic sl"
+description: "Semantic layer: resolve, compile, and describe."
+---
+
+`canonic sl` exposes the semantic-layer capabilities directly — useful for debugging what a metric resolves to or what SQL a query compiles down to, without executing anything.
+
+<Note>
+  With `--json`, each of these commands' output matches its corresponding MCP tool payload byte-for-byte (`resolve_metric`, `compile_query`, `describe_metric`).
+</Note>
+
+## `sl resolve`
+
+Resolve a name to its canonical binding.
+
+```bash
+canonic sl resolve revenue
+canonic sl resolve revenue --context finance_review
+```
+
+| Argument / Flag | Description |
+| --- | --- |
+| `name` | Metric/dimension name (positional). |
+| `--context` | Tag for context-scoped guardrail resolution. |
+
+Prints the resolved metric, owning source, measure, and binding kind.
+
+## `sl compile`
+
+Compile a semantic query to SQL + metadata without executing it.
+
+```bash
+canonic sl compile --file query.json
+```
+
+| Flag | Description |
+| --- | --- |
+| `--file`, `-f` | Semantic query JSON file. |
+
+The file is JSON with the `SemanticQuery` shape: `{"metrics": [...], "dimensions": [...], "filters": [...], "limit": null}`. Output includes the target dialect, the compiled SQL, resolved bindings, and any guardrails that fired.
+
+## `sl describe`
+
+Return grain, dimensions, measures, and freshness for one metric.
+
+```bash
+canonic sl describe revenue
+```
+
+| Argument | Description |
+| --- | --- |
+| `name` | Metric name or alias (positional). |
+
+Prints the metric's source, grain, dimensions, freshness (`last_validated_at`), and any worked examples on file.

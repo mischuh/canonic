@@ -1,0 +1,50 @@
+---
+title: "canonic query / sql / assert"
+description: "Execute queries, run raw read-only SQL, and gate on accuracy."
+---
+
+## `canonic query`
+
+Resolve, compile, and execute a semantic query read-only.
+
+```bash
+canonic query --file query.json
+canonic query --file query.json --harness
+```
+
+| Flag | Description |
+| --- | --- |
+| `--file`, `-f` | Semantic query JSON file. |
+| `--harness` | Benchmark/CI mode: run matching assertions and exit `10` (`ASSERTION_FAILED`) on a mismatch. |
+
+The query file is JSON with the `SemanticQuery` shape: `{"metrics": [...], "dimensions": [...], "filters": [...], "limit": null}`. Without `--harness`, any matching assertions are informational only and never block. With `--json`, the output matches the MCP `query` tool's payload byte-for-byte.
+
+## `canonic sql`
+
+Execute a read-only SQL string on a named connection — the escape hatch for when no metric/dimension covers the question.
+
+```bash
+canonic sql "SELECT customer_id, SUM(amount) FROM orders GROUP BY 1" --connection warehouse
+```
+
+| Argument / Flag | Description |
+| --- | --- |
+| `statement` | A read-only `SELECT` statement (positional). |
+| `--connection`, `-c` | Connection id (defaults to `project.default_connection`). |
+
+Non-`SELECT` statements are rejected with `READ_ONLY_VIOLATION` (exit `11`).
+
+## `canonic assert`
+
+Run the accuracy harness over all loaded assertions and gate on the result — this is the CI integration that turns "&gt;90% accuracy" from aspirational into measured.
+
+```bash
+canonic assert
+canonic assert --min-accuracy 0.95
+```
+
+| Flag | Description |
+| --- | --- |
+| `--min-accuracy` | Accuracy floor for the CI gate (default `1.0` — every assertion must hold). Below it, exits `10` (`ASSERTION_FAILED`). |
+
+Every executable assertion in `contracts/assertions/` is compiled, executed read-only, and compared to its expected value within tolerance. The harness reports `accuracy = passed / total` and prints any diverging checks.

@@ -19,6 +19,30 @@
           "quickstart",
           "configuring-an-llm"
         ]
+      },
+      {
+        "group": "CLI Reference",
+        "pages": [
+          "cli-reference/overview",
+          "cli-reference/connection",
+          "cli-reference/sl",
+          "cli-reference/mcp",
+          "cli-reference/knowledge",
+          "cli-reference/eval",
+          "cli-reference/setup",
+          "cli-reference/ingest",
+          "cli-reference/review-apply",
+          "cli-reference/query-sql-assert",
+          "cli-reference/status-report",
+          "cli-reference/completion"
+        ]
+      },
+      {
+        "group": "MCP / Agent Integration",
+        "pages": [
+          "mcp-integration/connecting-your-agent",
+          "mcp-integration/tools-reference"
+        ]
       }
     ]
   },

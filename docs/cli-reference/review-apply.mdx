@@ -1,0 +1,41 @@
+---
+title: "canonic review / apply"
+description: "Review and apply pending proposals from an ingest run."
+---
+
+After [`canonic ingest`](/cli-reference/ingest) writes reviewable diffs, use `review` for an interactive, item-by-item pass, or `apply` to batch-apply everything still pending — for example after editing diffs by hand.
+
+## `canonic review`
+
+Interactively review pending proposals one by one, in numeric order.
+
+```bash
+canonic review
+canonic review --run-id 2024-05-01T12-00-00
+```
+
+| Flag | Description |
+| --- | --- |
+| `--run-id` | Explicit run-id to review (defaults to the most recent). |
+
+For each pending proposal you're shown the diff and prompted:
+
+```
+[a]ccept / [r]eject / [s]kip / [f]reeze / [q]uit
+```
+
+Resumable — quitting or crashing mid-review picks back up at the first still-pending item on the next invocation.
+
+## `canonic apply`
+
+Batch-apply all pending proposals from a run directory.
+
+```bash
+canonic apply .canonic/pending-diffs/2024-05-01T12-00-00
+```
+
+| Argument | Description |
+| --- | --- |
+| `run_dir` | Path to the pending-diff run directory to apply (positional). |
+
+Proposals already in a terminal state (accepted / rejected / frozen), or whose diff file was deleted, are silently skipped. No git interaction — applied files appear as unstaged changes in your working tree.

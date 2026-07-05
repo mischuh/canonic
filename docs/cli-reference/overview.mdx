@@ -1,0 +1,56 @@
+---
+title: "CLI Overview"
+description: "Global flags and how the canonic CLI is organized."
+---
+
+The `canonic` CLI (alias: `can`) is a thin transport adapter: it parses options, selects the output format, and dispatches to the same protocol-neutral core service that also backs the MCP server. No business logic lives in the CLI layer itself.
+
+## Global flags
+
+| Flag | Description |
+| --- | --- |
+| `--json` / `-j` | Emit raw structured JSON instead of formatted text. Every capability command's JSON output matches its MCP tool payload byte-for-byte. |
+| `--version` | Show the canonic version and exit. |
+
+## Bare `canonic`
+
+Running `canonic` with no subcommand (and without `--json`) launches the interactive [setup wizard](/cli-reference/setup). With `--json` and no subcommand, it exits with an error instead — interactive mode requires a terminal.
+
+## `canonic overview`
+
+Show active metrics grouped by domain with plain-language sample questions — the recommended first command for a new user or agent, giving a scannable map of what's askable before drilling into `sl describe` or `query`.
+
+```bash
+canonic overview
+canonic overview --domain warehouse
+```
+
+| Flag | Description |
+| --- | --- |
+| `--domain` | Filter to a single domain (owning-source name). |
+
+## Command groups
+
+| Group | Purpose |
+| --- | --- |
+| [`connection`](/cli-reference/connection) | Manage source connections in `canonic.yaml`. |
+| [`sl`](/cli-reference/sl) | Semantic layer: resolve, compile, describe. |
+| [`mcp`](/cli-reference/mcp) | Control the local MCP daemon. |
+| [`knowledge`](/cli-reference/knowledge) | Search and author knowledge pages. |
+| [`eval`](/cli-reference/eval) | Run the local-model accuracy baseline harness. |
+
+## Top-level commands
+
+| Command | Purpose |
+| --- | --- |
+| `overview` | Show active metrics grouped by domain with sample questions (documented above). |
+| [`setup`](/cli-reference/setup) | Interactive project setup wizard. |
+| [`ingest`](/cli-reference/ingest) | Reconcile configured sources into reviewable context diffs. |
+| [`review`](/cli-reference/review-apply) | Interactively review pending proposals. |
+| [`apply`](/cli-reference/review-apply) | Batch-apply pending proposals from a run directory. |
+| [`query`](/cli-reference/query-sql-assert) | Resolve, compile, and execute a semantic query read-only. |
+| [`sql`](/cli-reference/query-sql-assert) | Execute a read-only SQL string on a named connection. |
+| [`assert`](/cli-reference/query-sql-assert) | Run the accuracy harness over all loaded assertions (CI gate). |
+| [`status`](/cli-reference/status-report) | Show the current project root, config version, and local state. |
+| [`report`](/cli-reference/status-report) | Show event-log figures: counts, errors, latency, freshness. |
+| [`completion`](/cli-reference/completion) | Generate a shell completion script. |

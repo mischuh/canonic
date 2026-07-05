@@ -1,0 +1,40 @@
+---
+title: "Connecting your agent"
+description: "Expose canonic's capabilities to an agent client over MCP."
+---
+
+canonic exposes its capabilities to agent clients through a **local, on-demand MCP server** — no always-on hosted service. Verified with **Claude Code, Cursor, and Codex**.
+
+## 1. Start the daemon
+
+The daemon binds locally and reads your committed context (semantics, knowledge, contracts):
+
+```bash
+canonic mcp start
+canonic mcp status
+```
+
+See [`canonic mcp`](/cli-reference/mcp) for the full flag reference, including `--http` for a background daemon on a fixed host/port.
+
+## 2. Register canonic in your client's MCP config
+
+A standard MCP server entry, for example:
+
+```json
+{
+  "mcpServers": {
+    "canonic": {
+      "command": "canonic",
+      "args": ["mcp", "start"]
+    }
+  }
+}
+```
+
+See your client's own docs for the exact config file location — Claude Code, Cursor, and Codex each load standard MCP configuration.
+
+## 3. Your agent now has these tools
+
+See [Tools reference](/mcp-integration/tools-reference) for the full list and payload shapes.
+
+Every answer-producing tool returns the **metadata band** alongside the result — resolved definition, guardrails fired, freshness, final/provisional — so the agent can caveat honestly. On ambiguity or a blocked guardrail, the tool returns the candidates or the rationale instead of a guess, and the agent is expected to relay that rather than fabricate an answer.
