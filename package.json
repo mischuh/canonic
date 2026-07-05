@@ -1,0 +1,19 @@
+{
+  "name": "@mischuh/canon",
+  "version": "0.1.0",
+  "description": "Placeholder npm distribution for canonic (The Open Context Layer for Data Agents). Not a functional install path yet — see SPEC-E1-foundation-config-distribution.md §5.",
+  "bin": {
+    "canon": "bin/canon.js"
+  },
+  "files": [
+    "bin/"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/mischuh/canonic.git"
+  },
+  "license": "UNLICENSED",
+  "publishConfig": {
+    "access": "public"
+  }
+}
