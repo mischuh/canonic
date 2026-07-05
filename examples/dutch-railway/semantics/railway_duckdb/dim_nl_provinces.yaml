@@ -1,0 +1,19 @@
+name: dim_nl_provinces
+connection: railway_duckdb
+table: dim_nl_provinces
+grain: [province_sk]
+description: "One row per NL province, plus a synthetic 'unknown' fallback row (SCD2-style dim)."
+
+columns:
+  - { name: province_sk,           type: string,    nullable: false }
+  - { name: province_id,           type: int,       nullable: true }
+  - { name: province_name,         type: string,    nullable: false }
+  - { name: province_centroid_wkt, type: string,     nullable: true }
+  - { name: last_updated_dt,       type: timestamp, nullable: false }
+  - { name: invocation_id,         type: string,    nullable: false }
+
+dimensions:
+  - { name: province_name, column: province_name }
+
+meta:
+  provenance: human_curated

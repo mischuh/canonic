@@ -1,0 +1,29 @@
+name: dim_nl_train_stations
+connection: railway_duckdb
+table: dim_nl_train_stations
+grain: [station_sk]
+description: "One row per NL train station (country = 'NL' only)."
+
+columns:
+  - { name: station_sk,           type: string, nullable: false }
+  - { name: station_id,           type: int,    nullable: true }
+  - { name: station_code,         type: string, nullable: false }
+  - { name: station_name,         type: string, nullable: false }
+  - { name: station_type,         type: string, nullable: true }
+  - { name: station_location_wkt, type: string, nullable: true }
+  - { name: municipality_sk,      type: string, nullable: false }
+  - { name: last_updated_dt,      type: timestamp, nullable: false }
+  - { name: invocation_id,        type: string, nullable: false }
+
+dimensions:
+  - { name: station_code, column: station_code }
+  - { name: station_name, column: station_name }
+  - { name: station_type, column: station_type }
+
+joins:
+  - to: dim_nl_municipalities
+    on: "dim_nl_train_stations.municipality_sk = dim_nl_municipalities.municipality_sk"
+    relationship: many_to_one
+
+meta:
+  provenance: human_curated

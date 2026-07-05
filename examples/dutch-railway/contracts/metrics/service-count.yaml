@@ -1,0 +1,8 @@
+metric: service_count
+canonical:
+  kind: single
+  source: fact_services
+  measure: service_count
+provenance: human_curated
+aliases: ["services", "number of services", "train services"]
+status: active

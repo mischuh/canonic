@@ -1,0 +1,8 @@
+metric: cancelled_departures
+canonical:
+  kind: single
+  source: fact_services
+  measure: cancelled_departure_count
+provenance: human_curated
+aliases: ["cancelled departures", "departure cancellations"]
+status: active
