@@ -256,7 +256,7 @@ def build_server(service: CanonicService, *, suggestions: bool = False) -> FastM
     async def query(query: dict[str, Any]) -> dict[str, Any]:
         sq = SemanticQuery.model_validate(query)
         result = await service.query(sq)
-        response = result.model_dump()
+        response = result.model_dump(mode="json")
         if suggestions:
             s = _format_suggestions(response.get("metadata", {}).get("related", {}))
             if s:
@@ -276,7 +276,7 @@ def build_server(service: CanonicService, *, suggestions: bool = False) -> FastM
     @canonic_error_response
     async def run_sql(sql: str, connection: str | None = None) -> dict[str, Any]:
         result = await service.run_sql(sql, connection=connection)
-        return result.model_dump()
+        return result.model_dump(mode="json")
 
     # ------------------------------------------------------------------
     # Tool: search_knowledge  (E6, P1)

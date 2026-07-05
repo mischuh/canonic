@@ -87,6 +87,7 @@ async def test_query_revenue(e2e_service: CanonicService) -> None:
 # ----------------------------------------------------------------------------
 
 
+@pytest.mark.release_gate
 def test_parity(e2e_project: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """CLI ``--json query`` and the MCP ``query`` tool emit identical payloads."""
     import asyncio
@@ -106,11 +107,31 @@ def test_parity(e2e_project: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     assert str(cli_payload["result"]["rows"][0][0]) == EXPECTED_REVENUE
 
 
+@pytest.mark.release_gate
+def test_run_sql_parity(e2e_project: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """CLI ``--json sql`` and the MCP ``run_sql`` tool emit identical payloads for a SELECT."""
+    import asyncio
+
+    monkeypatch.chdir(e2e_project)
+    statement = "SELECT order_id, amount FROM analytics.fct_orders ORDER BY order_id"
+
+    cli = CliRunner().invoke(app, ["--json", "sql", statement])
+    assert cli.exit_code == 0, cli.stdout
+    cli_payload = json.loads(cli.stdout)
+
+    service = CanonicService.from_project(e2e_project)
+    mcp_payload = asyncio.run(_mcp_call(service, "run_sql", {"sql": statement}))
+
+    assert _canonical(cli_payload) == _canonical(mcp_payload)
+    assert cli_payload["rows"], "expected at least one row"
+
+
 # ----------------------------------------------------------------------------
 # Read-only enforcement
 # ----------------------------------------------------------------------------
 
 
+@pytest.mark.release_gate
 def test_read_only_violation(e2e_project: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """A non-SELECT is rejected with READ_ONLY_VIOLATION on both surfaces."""
     import asyncio

@@ -52,6 +52,7 @@ asyncio_mode = "auto"
 testpaths = ["tests"]
 markers = [
     "integration: tests that require a live database (skipped if Docker is unavailable)",
+    "release_gate: conformance-gate tests — must pass (not skip) before beta invites",
 ]
 
 [tool.mypy]

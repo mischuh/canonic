@@ -11,6 +11,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
 from canonic.compiler.query import SemanticQuery
 from canonic.contract import CONTRACT_SCHEMA
 from canonic.core.models import CompileOutput, QueryResult
@@ -23,24 +25,28 @@ def _load(name: str) -> object:
     return json.loads((_SNAPSHOTS / name).read_text())
 
 
+@pytest.mark.release_gate
 def test_semantic_query_schema_unchanged() -> None:
     assert SemanticQuery.model_json_schema() == _load("semantic_query.json"), (
         "SemanticQuery schema changed — update the snapshot and bump contract_schema per §4"
     )
 
 
+@pytest.mark.release_gate
 def test_query_result_schema_unchanged() -> None:
     assert QueryResult.model_json_schema() == _load("query_result.json"), (
         "QueryResult schema changed — update the snapshot and bump contract_schema per §4"
     )
 
 
+@pytest.mark.release_gate
 def test_compile_output_schema_unchanged() -> None:
     assert CompileOutput.model_json_schema() == _load("compile_output.json"), (
         "CompileOutput schema changed — update the snapshot and bump contract_schema per §4"
     )
 
 
+@pytest.mark.release_gate
 def test_error_registry_unchanged() -> None:
     registry = {code.value: EXIT_CODES[code] for code in ErrorCode}
     assert registry == _load("error_registry.json"), (
@@ -48,6 +54,7 @@ def test_error_registry_unchanged() -> None:
     )
 
 
+@pytest.mark.release_gate
 def test_contract_schema_stamped_in_snapshots() -> None:
     qr_schema = _load("query_result.json")
     co_schema = _load("compile_output.json")

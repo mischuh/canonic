@@ -7,6 +7,8 @@ import pytest
 from canonic import exc
 from canonic.exc import EXIT_CODES, CanonicError, ErrorCode
 
+pytestmark = pytest.mark.release_gate
+
 # (exception class, expected exit code) for every registry entry.
 _REGISTRY: list[tuple[type[CanonicError], int]] = [
     (exc.Unresolved, 2),
