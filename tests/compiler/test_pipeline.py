@@ -453,6 +453,7 @@ def test_s4_ac2_via_no_matching_path_raises_unreachable(sources: list[SemanticSo
 # --- S5: deterministic output -----------------------------------------------
 
 
+@pytest.mark.release_gate
 def test_s5_byte_identical_on_repeat(
     resolver: ContractResolver, sources: list[SemanticSource]
 ) -> None:

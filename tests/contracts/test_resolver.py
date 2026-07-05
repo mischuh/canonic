@@ -8,6 +8,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+import pytest
+
 from canonic.contracts.models import (
     AppliesTo,
     Assertion,
@@ -97,6 +99,7 @@ class TestResolveMetric:
         )
         assert resolver.resolve_metric("revenue") == Unresolved(name="revenue")
 
+    @pytest.mark.release_gate
     def test_determinism_identical_results(self) -> None:
         resolver = ContractResolver(bindings=[_binding("revenue")], guardrails=[])
         assert resolver.resolve_metric("revenue") == resolver.resolve_metric("revenue")
@@ -132,6 +135,7 @@ class TestGuardrailsFor:
         )
         assert resolver.guardrails_for("orders", "total_revenue") == []
 
+    @pytest.mark.release_gate
     def test_stable_sort_by_id(self) -> None:
         gs = [
             _guardrail("zzz", source="orders"),
@@ -142,6 +146,7 @@ class TestGuardrailsFor:
         ids = [g.id for g in resolver.guardrails_for("orders", "total_revenue")]
         assert ids == ["aaa", "mmm", "zzz"]
 
+    @pytest.mark.release_gate
     def test_determinism_identical_order(self) -> None:
         gs = [_guardrail("b", source="orders"), _guardrail("a", source="orders")]
         resolver = ContractResolver(bindings=[_binding("revenue")], guardrails=gs)
@@ -190,6 +195,7 @@ class TestRestrictSourceFor:
         result = resolver.restrict_source_for("orders", "total_revenue", "board_reporting")
         assert result == []
 
+    @pytest.mark.release_gate
     def test_stable_sort_by_id(self) -> None:
         revenue = _binding("revenue")
         g1 = _restrict_guardrail("z-guard", metric="revenue", context="board_reporting")

@@ -22,6 +22,27 @@ if TYPE_CHECKING:
     from canonic.core.service import CanonicService
 
 
+@pytest.mark.release_gate
+@pytest.mark.asyncio
+async def test_resolve_metric_parity(canonic_service: CanonicService) -> None:
+    """MCP resolve_metric and direct service path return identical payloads."""
+    mcp = build_server(canonic_service)
+
+    async with Client(mcp) as client:
+        result = await client.call_tool("resolve_metric", {"name": "revenue"})
+    mcp_payload = result.data
+
+    binding = canonic_service.resolve_metric("revenue")
+    service_payload = {
+        "metric": binding.metric,
+        "source": binding.source,
+        "measure": binding.measure,
+    }
+
+    assert mcp_payload == service_payload
+
+
+@pytest.mark.release_gate
 @pytest.mark.asyncio
 async def test_compile_query_parity(canonic_service: CanonicService) -> None:
     """MCP compile_query and direct service path return identical payloads."""

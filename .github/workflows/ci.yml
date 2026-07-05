@@ -35,3 +35,30 @@ jobs:
 
       - name: Tests
         run: uv run pytest
+
+  release-gate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+        with:
+          enable-cache: true
+
+      - name: Install dependencies
+        run: uv sync --frozen --group dev
+
+      - name: Release gate
+        run: |
+          uv run pytest -m release_gate --strict-markers -rs --junitxml=release-gate.xml
+          if grep -q '<skipped' release-gate.xml; then
+            echo "::error::Release-gate test(s) were skipped (e.g. Docker unavailable) — gate cannot pass silently."
+            grep -B2 '<skipped' release-gate.xml
+            exit 1
+          fi
