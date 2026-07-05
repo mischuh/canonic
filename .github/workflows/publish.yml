@@ -9,6 +9,11 @@ on:
 
 jobs:
   npm-publish:
+    # Disabled: no NPM_TOKEN secret exists yet, so this job fails every release
+    # (ENEEDAUTH). The npm channel is still a scaffold — see the NOTE below and
+    # SPEC-E1-foundation-config-distribution.md §5. Re-enable once NPM_TOKEN is
+    # set and the binary-distribution design lands.
+    if: false
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
