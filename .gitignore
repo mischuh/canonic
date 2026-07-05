@@ -222,4 +222,5 @@ __marimo__/
 .DS_Store
 
 docs/*.md
+specs/*.md
 .vscode/settings.json
