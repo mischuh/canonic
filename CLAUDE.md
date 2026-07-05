@@ -35,3 +35,7 @@ pytest tests/ -x --tb=short
 - `migrations/` — hands off unless explicitly asked
 - `.env` files — never read or modify
 - `pyproject.toml` dependency versions — propose changes, don't apply
+
+
+## Considerations
+- If I come up with errors from examples please check first if the semantics are correct (especially joins) before changing code base

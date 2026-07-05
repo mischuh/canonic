@@ -1,0 +1,8 @@
+id: exclude-cancelled-arrivals
+applies_to:
+  source: fact_services
+  measure: service_count
+kind: mandatory_filter
+filter: "service_arrival_cancelled = false"
+severity: error
+rationale: "A cancelled arrival never actually happened at the station. service_count is a count of realized stops, so cancelled arrivals are excluded automatically."

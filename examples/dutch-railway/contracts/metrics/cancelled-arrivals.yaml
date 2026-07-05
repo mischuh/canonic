@@ -1,0 +1,8 @@
+metric: cancelled_arrivals
+canonical:
+  kind: single
+  source: fact_services
+  measure: cancelled_arrival_count
+provenance: human_curated
+aliases: ["cancelled arrivals", "arrival cancellations"]
+status: active

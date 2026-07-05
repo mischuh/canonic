@@ -1,0 +1,8 @@
+# Helper metric: unguarded denominator for cancelled_arrival_rate / cancelled_departure_rate.
+metric: scheduled_stops
+canonical:
+  kind: single
+  source: fact_services
+  measure: scheduled_stop_count
+provenance: human_curated
+status: active

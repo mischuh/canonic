@@ -1,0 +1,25 @@
+name: dim_nl_municipalities
+connection: railway_duckdb
+table: dim_nl_municipalities
+grain: [municipality_sk]
+description: "One row per NL municipality. province_sk is 'unknown' when no province polygon covers it."
+
+columns:
+  - { name: municipality_sk,           type: string,    nullable: false }
+  - { name: municipality_id,           type: int,       nullable: true }
+  - { name: municipality_name,         type: string,    nullable: false }
+  - { name: municipality_centroid_wkt, type: string,     nullable: true }
+  - { name: province_sk,               type: string,    nullable: false }
+  - { name: last_updated_dt,           type: timestamp, nullable: false }
+  - { name: invocation_id,             type: string,    nullable: false }
+
+dimensions:
+  - { name: municipality_name, column: municipality_name }
+
+joins:
+  - to: dim_nl_provinces
+    on: "dim_nl_municipalities.province_sk = dim_nl_provinces.province_sk"
+    relationship: many_to_one
+
+meta:
+  provenance: human_curated

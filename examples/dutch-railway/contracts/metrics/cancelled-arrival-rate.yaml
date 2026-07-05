@@ -1,0 +1,9 @@
+metric: cancelled_arrival_rate
+canonical:
+  kind: ratio
+  numerator: cancelled_arrivals
+  denominator: scheduled_stops
+  on_zero_denominator: null
+provenance: human_curated
+aliases: ["arrival cancellation rate", "% cancelled arrivals"]
+status: active

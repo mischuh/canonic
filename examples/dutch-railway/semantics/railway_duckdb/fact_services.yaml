@@ -1,0 +1,50 @@
+name: fact_services
+connection: railway_duckdb
+table: fact_services
+grain: [service_sk]
+description: "One row per train service stop at a station, for a single demo service date (2024-08-01)."
+
+columns:
+  - { name: service_sk,                  type: string,    nullable: false }
+  - { name: service_date,                type: date,      nullable: false }
+  - { name: service_type,                type: string,    nullable: true }
+  - { name: service_company,             type: string,    nullable: true }
+  - { name: station_sk,                  type: string,    nullable: false }
+  - { name: station_arrival_time,        type: timestamp, nullable: true }
+  - { name: station_departure_time,      type: timestamp, nullable: true }
+  - { name: service_arrival_cancelled,   type: bool,      nullable: false }
+  - { name: service_train_number,        type: int,       nullable: true }
+  - { name: service_departure_cancelled, type: bool,      nullable: false }
+  - { name: last_updated_dt,             type: timestamp, nullable: false }
+  - { name: invocation_id,               type: string,    nullable: false }
+
+measures:
+  - name: service_count
+    expr: "count(service_sk)"
+    additivity: additive
+  # Same expr as service_count, under a different name — the exclude-cancelled-arrivals
+  # guardrail matches on measure name, so this one is deliberately left unguarded to serve
+  # as the ratio denominator (total scheduled stops, cancelled or not).
+  - name: scheduled_stop_count
+    expr: "count(service_sk)"
+    additivity: additive
+  - name: cancelled_arrival_count
+    expr: "count(service_sk) filter (where service_arrival_cancelled)"
+    additivity: additive
+  - name: cancelled_departure_count
+    expr: "count(service_sk) filter (where service_departure_cancelled)"
+    additivity: additive
+
+dimensions:
+  - { name: service_date,    column: service_date }
+  - { name: service_type,    column: service_type }
+  - { name: service_company, column: service_company }
+  - { name: station_sk,      column: station_sk }
+
+joins:
+  - to: dim_nl_train_stations
+    on: "fact_services.station_sk = dim_nl_train_stations.station_sk"
+    relationship: many_to_one
+
+meta:
+  provenance: human_curated
