@@ -57,6 +57,16 @@
           "mcp-integration/connecting-your-agent",
           "mcp-integration/tools-reference"
         ]
+      },
+      {
+        "group": "Guides",
+        "pages": [
+          "guides/dutch-railway",
+          "guides/ecommerce",
+          "guides/jaffle-shop",
+          "guides/rental",
+          "guides/saas-analytics"
+        ]
       }
     ]
   },

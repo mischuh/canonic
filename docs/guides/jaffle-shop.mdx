@@ -1,0 +1,54 @@
+---
+title: "Guide: Jaffle Shop (dbt + MetricFlow)"
+description: "The classic dbt Jaffle Shop dataset, with MetricFlow semantic models as modeling-tier evidence."
+---
+
+A canonic project backed by the classic [dbt Jaffle Shop](https://github.com/dbt-labs/jaffle-shop) dataset, demonstrating canonic's full Phase 1 feature set with a dbt manifest that includes **MetricFlow semantic models and metrics** — not just table/column evidence.
+
+<Info>Full source: [`examples/jaffle-shop/`](https://github.com/mischuh/canonic/tree/main/examples/jaffle-shop)</Info>
+
+## Schema
+
+```
+customers ──< orders ──< order_items >── products
+                 │
+               stores
+```
+
+| Table | Rows | Description |
+| --- | --- | --- |
+| `customers` | 20 | Individual and business accounts |
+| `stores` | 5 | Physical Jaffle Shop locations |
+| `products` | 10 | Jaffles and beverages |
+| `orders` | 25 | One row per order with payment breakdown |
+| `order_items` | 37 | One row per line item |
+
+## Quickstart
+
+```bash
+cd examples/jaffle-shop
+
+canonic ingest --bootstrap    # introspects DuckDB + loads dbt manifest as modeling-tier evidence
+canonic query -f q.json       # revenue by store
+canonic mcp start             # expose metrics to any MCP-compatible agent
+```
+
+No LLM is required for the deterministic bootstrap. Set `CANONIC_LLM_API_KEY` and configure `llm:` in `canonic.yaml` to enable grain-drafting for low-confidence proposals.
+
+## What canonic extracts from the dbt manifest
+
+The `jaffle_dbt` connection parses `manifest.json` (schema v11, dbt 1.7, MetricFlow) as modeling-tier evidence, which ranks higher than live DuckDB introspection during reconciliation. From it, canonic extracts:
+
+- **5 model nodes** → `RelationSchema` with named columns, types, primary keys, and foreign-key paths.
+- **2 semantic models** → entity (grain), foreign-join paths, named measure and dimension definitions.
+- **3 metrics** → `revenue`, `order_count`, `units_sold`.
+
+Because MetricFlow's semantic models name measures explicitly, the resulting semantic sources in `semantics/jaffle_duckdb/` carry business-meaningful measure names (`revenue`, `order_count`) rather than generic inferred ones (`total_amount`, `row_count`) — the clearest illustration in these examples of why [modeling-tier evidence outranks raw introspection](/concepts/connectors#schema-acquisition-ladder).
+
+## Regenerating the artifacts
+
+```bash
+bash scripts/build.sh
+```
+
+Clones the upstream `dbt-labs/jaffle-shop`, runs `dbt build` with `dbt-duckdb`, and copies the resulting database and manifest back into the example directory.

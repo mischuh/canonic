@@ -1,0 +1,227 @@
+---
+title: "Guide: Ecommerce (Postgres)"
+description: "A small but complete Postgres project covering the full Phase 1 loop, evidence connectors, and observability."
+---
+
+A small but end-to-end canonic project: a Postgres connection, a four-source star schema (two facts, three dimensions), three canonical metrics, one enforced guardrail, and a companion dbt manifest demonstrating the definition-connector class. This is the broadest walkthrough of the full loop — bootstrap, serve, evidence connectors, accuracy tracking, and observability all in one place.
+
+<Info>Full source: [`examples/ecommerce/`](https://github.com/mischuh/canonic/tree/main/examples/ecommerce)</Info>
+
+## The full loop
+
+```bash
+canonic ingest --bootstrap          # 1. bootstrap: introspect Postgres → write semantics/*.yaml
+canonic mcp start                   # 2. serve: agents call query() + search_knowledge() together
+canonic eval baseline \             # 3. track: measure grain-inference accuracy on the live schema
+  --candidates candidates.yaml \
+  --dataset eval/grain_cases.jsonl
+```
+
+## Setup
+
+```bash
+export CANONIC_PG_PASSWORD=postgres
+psql "postgres://postgres:${CANONIC_PG_PASSWORD}@localhost:5432/postgres" < setup.sql
+
+cd examples/ecommerce   # canonic commands must run from here
+canonic status
+```
+
+`setup.sql` is idempotent — re-running it drops and recreates all tables in the correct order.
+
+## Metrics
+
+| Metric | Source · measure | Aliases |
+| --- | --- | --- |
+| `revenue` | `orders.total_revenue` | "net revenue", "rev" |
+| `order_count` | `orders.order_count` | "orders", "number of orders" |
+| `units_sold` | `order_items.units_sold` | "units", "quantity sold" |
+
+The `revenue-excludes-refunds` guardrail (`mandatory_filter`) AND-s `status != 'refunded'` into every query touching `orders.total_revenue`. Expected revenue after the guardrail: **3790.50** (7 completed + 1 pending order; the seed data's two refunded orders, totaling 260.00, never appear).
+
+## Example queries
+
+```json
+query({"metrics": ["revenue"], "dimensions": ["order_date"]})
+→ {
+    "result": { "columns": [...], "rows": [["2025-01-10T00:00:00", 500.0], ...] },
+    "compiled": { "sql": "SELECT … WHERE \"orders\".\"status\" <> 'refunded' …", "dialect": "postgres" },
+    "metadata": {
+      "resolved": {"metrics": {"revenue": "orders.total_revenue"}},
+      "guardrails_fired": [{"id": "revenue-excludes-refunds", "kind": "mandatory_filter"}]
+    }
+  }
+```
+
+```json
+// revenue joined to customers, order_count in the same call
+query({"metrics": ["revenue", "order_count"], "dimensions": ["country"]})
+
+// business meaning alongside the executable SQL
+search_knowledge("revenue reporting policy")
+→ {
+    "hits": [{"page": "revenue-reporting-policy", "usage_mode": "policy", ...}],
+    "caveats": [{"page": "revenue-excludes-refunds-caveat", "triggered_by": [...]}]
+  }
+```
+
+A typical agent pattern is `query()` for executable SQL + `search_knowledge()` for business context — both calls together, one decision. See [Knowledge](/concepts/knowledge-layer) for how caveats auto-surface.
+
+## MCP server — stdio vs. HTTP
+
+**Stdio** (the MCP client owns the process — Claude Code, Cursor):
+
+```bash
+canonic mcp start
+```
+
+```json
+{ "mcpServers": { "canonic": { "command": "canonic", "args": ["mcp", "start"], "cwd": "/absolute/path/to/examples/ecommerce" } } }
+```
+
+**HTTP daemon** (background process, multiple clients):
+
+```bash
+canonic mcp start --http --port 7474
+canonic mcp status
+canonic mcp stop
+```
+
+```json
+{ "mcpServers": { "canonic": { "transport": "streamable-http", "url": "http://127.0.0.1:7474/mcp" } } }
+```
+
+The server uses FastMCP's Streamable HTTP transport at `/mcp` (SSE at `/sse` for clients that only support that). Only `--http` mode writes `.canonic/mcp.json` — in stdio mode the MCP client owns the process and no state file is created.
+
+## Ingestion — keep semantics current
+
+```bash
+canonic ingest --dry-run     # see what would change, write nothing
+canonic ingest --bootstrap   # fresh project: introspect and draft from scratch
+canonic ingest               # full run: propose diffs for review
+```
+
+**Headless / CI** — deterministic pipeline + auto-PR:
+
+```bash
+canonic --json ingest --headless --strict
+# exit 0  → clean run (PR opened if diffs, or no-op)
+# exit 13 → CONNECTION_ERROR  — Postgres unreachable
+# exit 14 → CONTRADICTION     — --strict flagged a drift that conflicts with a curated fact
+```
+
+Example CI job:
+
+```yaml
+- name: canonic ingest
+  run: canonic --json ingest --headless --strict
+  working-directory: examples/ecommerce
+  env:
+    CI: "true"
+    CANONIC_PG_PASSWORD: ${{ secrets.CANONIC_PG_PASSWORD }}
+```
+
+If the live schema drifts from a `human_curated` file (e.g. a column type changes), ingest flags a contradiction but keeps the curated file untouched — see [Ingestion & reconciliation](/concepts/ingestion-and-reconciliation).
+
+## Evidence connectors beyond Postgres
+
+Postgres introspection tells canonic what tables *exist*; [connectors](/concepts/connectors) tell it what those tables *mean*:
+
+```yaml
+connections:
+  - id: warehouse_dbt
+    type: dbt
+    params:
+      manifest_path: dbt/manifest.json   # no credentials — a manifest is a local file
+
+  - id: handbook_notion
+    type: notion
+    credentials_ref: env:NOTION_TOKEN
+
+  - id: bi_metabase
+    type: metabase
+    params: { base_url: https://metabase.internal }
+    credentials_ref: env:METABASE_API_KEY
+```
+
+This demo ships a compiled dbt manifest modeling the same star schema. `canonic ingest --connection warehouse_dbt --dry-run` reconciles it into semantic proposals with **no Postgres and no LLM** — modeling-tier evidence outranks raw introspection where they overlap, and a genuine disagreement (e.g. conflicting column types) surfaces as a contradiction, never a silent merge.
+
+To make the Notion evidence flow concrete without a live workspace, the demo ships five sample page sources at [`docs/notion-pages/`](https://github.com/mischuh/canonic/tree/main/examples/ecommerce/docs/notion-pages) — the format the Notion connector expects, including the two page properties it reads (`Canonic Type` → `usage_mode`, `Canonic Topics` → candidate topic refs).
+
+## Accuracy tracking
+
+```bash
+canonic eval baseline \
+  --candidates candidates.yaml \
+  --dataset eval/grain_cases.jsonl
+# gemma-4-e2b-it-4bit: accuracy 80%, structured-output 100%, p50 310 ms ✓ recommended
+```
+
+The five cases in `eval/grain_cases.jsonl` exercise the shape of the live schema: a single surrogate key, a descriptive surrogate key, and a line-item fact where the grain is a single column rather than a composite key. See [Instrumentation & evaluation](/concepts/instrumentation-and-eval#model-baseline-harness-canonic-eval-baseline).
+
+## CLI usage
+
+```bash
+cat > q.json <<'EOF'
+{"metrics": ["revenue"], "dimensions": ["order_date"]}
+EOF
+canonic query -f q.json
+canonic --json query -f q.json    # byte-identical to the MCP query tool
+
+canonic sql "SELECT status, sum(amount) FROM analytics.fct_orders GROUP BY status"
+canonic sql "DROP TABLE analytics.fct_orders"
+# error: read_only_violation …
+# echo $? → 11
+```
+
+## Observability
+
+```bash
+canonic report
+# canonic report  (telemetry: off)
+# answers:        42  (2026-06-01T08:00:00Z → 2026-06-19T16:45:12Z)
+# latency:        p50 310ms  p95 1240ms  ...
+```
+
+Every query served appends a `served_answer` event to the local, git-ignored event log; every `canonic ingest` run appends `reconcile_decision` events to the same log. See [Instrumentation & evaluation](/concepts/instrumentation-and-eval#the-event-log) for exactly what is (and isn't) recorded.
+
+## Air-gapped mode
+
+```yaml
+runtime:
+  air_gapped: true   # blocks telemetry.enabled: true at load time
+  allow_cidrs:
+    - 10.0.0.0/8      # optional: an on-prem inference host outside loopback
+```
+
+The daemon never starts misconfigured — a public LLM endpoint or a remote secret ref under `air_gapped: true` is a hard error at load. See [LLM & embeddings runtime](/concepts/llm-runtime#air-gapped-mode--enforced-not-advisory).
+
+## Knowledge pages
+
+`knowledge/global/` adds searchable business context on top of the semantic layer:
+
+| Page | `usage_mode` | Effect |
+| --- | --- | --- |
+| `revenue-definition` | `definition` | Canonical prose definition, surfaced by search |
+| `revenue-excludes-refunds-caveat` | `caveat` | Auto-surfaced whenever a result references `total_revenue` |
+| `revenue-reporting-policy` | `policy` | Month-end cutoff rules |
+| `order-items-fanout-caveat` | `caveat` | Auto-surfaced whenever a result references `units_sold`/`line_revenue` |
+
+```python
+from pathlib import Path
+from canonic.knowledge import KnowledgeSearch, EntityIndex, load_knowledge_page
+from canonic.semantic.loader import list_semantic_sources
+
+root = Path(".")
+sources = list_semantic_sources(root)
+entity_index = EntityIndex.from_sources(sources)
+pages = [load_knowledge_page(p) for p in (root / "knowledge" / "global").glob("*.md")]
+
+engine = KnowledgeSearch(pages)
+result = engine.search("month-end cutoff", requesting_user="alice")
+print([h.page for h in result.hits])       # ['revenue-reporting-policy']
+print([(c.page, c.triggered_by) for c in result.caveats])
+# [('revenue-excludes-refunds-caveat', ['warehouse_pg.orders.total_revenue'])]
+```
+
+See [Knowledge](/concepts/knowledge-layer) for the full retrieval and drift-detection model.

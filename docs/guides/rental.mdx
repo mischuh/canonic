@@ -1,0 +1,78 @@
+---
+title: "Guide: Vehicle Rental (SQLite)"
+description: "A SQLite-only project with cross-fact fanout and a NULL-handling guardrail."
+---
+
+An end-to-end canonic project on a vehicle rental service: one SQLite connection, five dimensions, three fact tables, three canonical metrics, and one enforced guardrail. No external database required — the entire dataset lives in a single `rental.db` file.
+
+<Info>Full source: [`examples/rental/`](https://github.com/mischuh/canonic/tree/main/examples/rental)</Info>
+
+## Schema
+
+```
+DIMENSIONS
+  vehicle_categories   category_id · name · daily_rate
+  locations            location_id · code · city · country · airport_code
+  employees             employee_id · name · title · location_id
+  customers             customer_id · name · email · country · membership_tier
+  vehicles              vehicle_id · make · model · year · category_id
+
+FACTS
+  rentals    rental_id · customer_id · vehicle_id · pickup/dropoff_location
+             employee_id · dates · planned_days · actual_days
+             rate_per_day · total_amount · status
+  payments   payment_id · rental_id · payment_date · amount · method · status
+  damages    damage_id · rental_id · vehicle_id · severity · repair_cost
+```
+
+Seed data: 40 rentals (32 completed, 3 active, 2 confirmed, 2 cancelled, 1 no-show), 32 settled payments, 8 damage claims, across 20 customers, 15 vehicles, 5 locations.
+
+## Quickstart
+
+```bash
+sqlite3 rental.db < setup.sql              # 1. create the database
+export CANONIC_LLM_API_KEY=<your-key>      # 2. set your LLM key
+canonic status                             # 3. verify the project is recognised
+canonic ingest --bootstrap                 # 4. bootstrap the semantic layer
+canonic mcp start                          # 5. start the MCP server
+canonic eval baseline \                    # 6. (optional) grain-inference accuracy
+  --candidates candidates.yaml \
+  --dataset eval/grain_cases.jsonl
+```
+
+## Metrics
+
+| Metric | Source · measure | Canonical for |
+| --- | --- | --- |
+| `rental_revenue` | `payments.total_paid` | Settled revenue across all payment methods |
+| `rental_count` | `rentals.completed_rental_count` | Number of completed agreements |
+| `avg_rental_duration` | `rentals.avg_rental_days` | Mean actual days held per completed rental |
+
+## Guardrail
+
+**`completed-rentals-only`** — `rentals.total_base_revenue` must never be summed without a `status = 'completed'` filter: active and cancelled rows have `NULL` in `total_amount`. Use `payments.total_paid` for financial reporting instead.
+
+<Note>
+  **Cross-fact fanout** (documented in a knowledge caveat, not a guardrail — `required_dimension`/cross-fact fanout guarding isn't an enforced guardrail kind yet, see [Contracts & guardrails](/concepts/contracts-and-guardrails#guardrails)): joining `damages` to `payments` in a single query fans out both facts. Always bridge each independently through `rentals`.
+</Note>
+
+## Files
+
+```
+canonic.yaml                    ← SQLite connection, LLM, reconcile settings
+setup.sql                       ← DDL + seed data
+semantics/rental_db/            ← 5 dimensions + 3 facts
+contracts/metrics/              ← rental-revenue, rental-count, avg-rental-duration
+contracts/guardrails/           ← completed-rentals-only.yaml
+knowledge/global/                ← rental-revenue-definition.md, rental-duration-note.md
+eval/grain_cases.jsonl          ← 8 labeled grain-inference cases (PK omitted)
+```
+
+## Try a query
+
+```bash
+cat > q.json <<'EOF'
+{"dimensions": ["status"], "metrics": ["rental_count"]}
+EOF
+canonic query -f q.json
+```
