@@ -1,0 +1,80 @@
+---
+title: "Quickstart"
+description: "Your first answer in minutes."
+---
+
+The fastest path uses **local connectors** — no server, no network. Pick either SQLite or DuckDB.
+
+<Tabs>
+  <Tab title="SQLite">
+    Point at a local `.db` file:
+
+    ```bash
+    canonic setup
+    # Point at a .db file when prompted
+    ```
+  </Tab>
+  <Tab title="DuckDB">
+    Point at a local `.duckdb` file, or let it read CSV/Parquet/JSON directly:
+
+    ```bash
+    canonic setup
+    # Point at a .duckdb file, or let it read a CSV/Parquet directly
+    ```
+  </Tab>
+</Tabs>
+
+## What the wizard does
+
+<Steps>
+  <Step title="Name your project">
+    Give your canonic project a name.
+  </Step>
+  <Step title="Connect a source">
+    SQLite/DuckDB file, or Postgres if you have a server.
+  </Step>
+  <Step title="Configure an LLM (optional)">
+    Skippable — the core works without one. See [Configuring an LLM](/configuring-an-llm).
+  </Step>
+  <Step title="Bootstrap">
+    canonic introspects the schema and drafts your semantics.
+  </Step>
+  <Step title="First answer">
+    The wizard runs a real query against your data and shows the result, plus how fresh it is and which definition it used.
+  </Step>
+</Steps>
+
+## Ask your own questions
+
+You now have a working context layer committed to your repo:
+
+```bash
+canonic query --metrics revenue --dimensions order_date
+canonic knowledge search "active customer"
+```
+
+## Review what canonic drafted
+
+It's all an ordinary git diff:
+
+```bash
+canonic review
+canonic status        # always tells you the best next step
+```
+
+## Out of the box vs. a bit more effort
+
+**Works immediately, zero modeling:**
+- Connect a database (SQLite or Postgres) and canonic introspects the live schema.
+- It auto-drafts semantics — typed columns, primary-key grains, foreign-key joins, and additive measures (sums, counts).
+- The setup wizard ends by **answering a real question from your data**, so you see the payoff in minutes.
+- Connect your agent over MCP and start asking.
+
+**A bit more manual effort (when you need it):**
+- **Canonical bindings** — when two sources define "revenue" differently, you pick the authoritative one. canonic surfaces the ambiguity; you resolve it once.
+- **Knowledge prose** — the business "why" behind a definition; canonic drafts it, you refine it.
+- **Guardrails & contracts** — mandatory filters, required dimensions, final-vs-provisional rules. Added when a number needs protecting.
+- **Non-additive metrics** — ratios, averages, distinct counts, balances. Declared as composable definitions so they stay correct at any grain.
+- **More sources** — dbt / LookML / Metabase / Notion / web pages, layered on as context evidence.
+
+The design principle throughout: **canonic proposes, you approve.** It never silently edits your context — every change is a reviewable diff.
