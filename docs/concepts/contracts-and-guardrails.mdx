@@ -1,0 +1,104 @@
+---
+title: "Contracts & guardrails"
+description: "What's canonical, what's mandatory, and what the compiler must obey."
+---
+
+Contracts are the one layer that's **human-owned**, not auto-maintained. They declare which definition is authoritative and what a compiled answer must satisfy — governance decisions canonic surfaces but never makes for you.
+
+## Canonical metric bindings
+
+A binding (`contracts/metrics/<metric>.yaml`) resolves a logical metric *name* to exactly one owning definition:
+
+```yaml
+metric: revenue
+owner: "@data-platform"
+canonical:
+  kind: single           # default — a single (source, measure) pair
+  source: orders
+  measure: total_revenue
+provenance: human_curated
+aliases: ["net revenue", "rev"]
+status: active
+```
+
+**Ambiguity rule:** if a requested name matches zero or more than one active binding, the compiler doesn't guess — it returns a structured `AMBIGUOUS`/`UNRESOLVED` error listing candidates, so the caller can refuse-and-ask instead of picking wrong.
+
+### Beyond `single`: composable metrics
+
+Not every metric is one measure on one table. The binding's `kind` selects a compilation strategy for metrics built from parts:
+
+| `kind` | Compiles as | Example |
+| --- | --- | --- |
+| `single` (default) | Resolve to one `(source, measure)`. | `revenue` |
+| `ratio` | Aggregate numerator & denominator independently, divide after. | `avg_repair_costs = total_repair_cost / damage_count` |
+| `weighted_avg` | Same as `ratio`, structured as weighted-sum ÷ weight. | rating weighted by review count |
+| `semi_additive` | Sum over every dimension except one (typically time), which collapses via `last`/`first`/`avg`/`min`/`max`. | `ending_inventory` collapsing `snapshot_date` |
+| `distinct_count` | Recompute `count(distinct …)` at the requested grain — never summed from partial counts. | `active_customers` |
+| `percentile` | Recompute the quantile at the requested grain from base rows. | `median_order_value` |
+| `opaque` | Serve only at its declared native grain; any other grain is rejected. | a pre-computed external score |
+
+Because `ratio`/`weighted_avg` components reference *other metric names*, each component keeps its own guardrails and provenance — a numerator's guardrails fire automatically wherever it's used. Every `kind` also accepts an optional `population_filter`, applied before aggregation on every leaf, for metrics that are only defined over a restricted population (e.g. excluding test accounts from `active_customers`). See [the compiler](/concepts/compiler#fanout--additivity) for how each strategy actually compiles to SQL.
+
+## Guardrails
+
+A guardrail declares a rule the compiler must enforce:
+
+```yaml
+id: revenue-excludes-refunds
+applies_to: { source: orders, measure: total_revenue }
+kind: mandatory_filter
+filter: "status != 'refunded'"
+severity: error
+rationale: "Refunds are reversals, not revenue."
+```
+
+| `kind` | Behavior | Status |
+| --- | --- | --- |
+| `mandatory_filter` | The predicate is always AND-ed into the compiled `WHERE`, even if the request already filters differently. | Enforced |
+| `restrict_source` | In a given `context` (e.g. board reporting), only a specific source is permitted. | Enforced |
+| `required_dimension` | The query must group by or filter on a given dimension or be rejected. | Declarable in the schema; not yet enforced by the compiler |
+
+`severity: error` blocks the query; `severity: warn` annotates the result without blocking it.
+
+## Finality
+
+Some metrics are served by two physical realizations along a freshness axis — a batch table that's final, and a real-time table that's provisional:
+
+```yaml
+metric: revenue
+realizations:
+  - { source: orders,    role: final,       watermark: "business_day - 1 day" }
+  - { source: orders_rt, role: provisional }
+coalescing: "window <= watermark ? final : provisional"
+result_flag: per_row
+board_only_final: true
+```
+
+The compiler selects the right source per time window and tags every result row `final` or `provisional`. `board_only_final` pairs with a `restrict_source` guardrail so a `board_reporting` context sees only the final source.
+
+## Assertions
+
+An assertion (`contracts/assertions/<id>.yaml`) is a trusted query → expected-result check:
+
+```yaml
+id: revenue-2025-q1
+query: { metrics: [revenue], filters: ["order_date in 2025-Q1"] }
+expect: { rows: 1, values: { revenue: 4218334.10 }, tolerance: 0.01 }
+source_of_truth: "Finance close, FY25 Q1"
+```
+
+[`canonic assert`](/cli-reference/query-sql-assert) runs every assertion through the compiler and gates on the result — the CI integration that turns ">90% accuracy" from aspirational into measured. `canonic query --harness` runs matching assertions inline against a single query.
+
+## The contract ↔ compiler seam
+
+The compiler never reads contract files directly — it asks a single resolver:
+
+```text
+ContractResolver exposes to the compiler:
+  resolve_metric(name, context)        -> Binding | Ambiguous | Unresolved
+  guardrails_for(source, measure, ctx) -> [Guardrail]      # ordered, deterministic
+  finality_for(metric)                 -> FinalityRule | None
+  assertions_for(query)                -> [Assertion]
+```
+
+The resolver is the only authority on "what is canonical / what must be obeyed" — the compiler trusts its results and never reimplements canonicality logic. Results are deterministic and stably ordered, so identical queries compile to identical SQL every time.

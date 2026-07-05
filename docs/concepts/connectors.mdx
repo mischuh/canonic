@@ -1,0 +1,87 @@
+---
+title: "Connectors"
+description: "How canonic reads a warehouse, a dbt project, a BI tool, or a doc — through one capability contract."
+---
+
+A connector declares **capabilities**, not identity. canonic's core dispatches on capability — `introspect_schema`, `run_read_only_sql`, `extract_definitions`, `extract_evidence` — never on vendor name, so adding a new source is a registration, not a core-code change.
+
+## The connector factory
+
+`canonic.yaml` stores a connection as a descriptor — `id` + `type` + `params` (+ optional `credentials_ref`) — not a live instance. At startup, the `ConnectorFactory` looks up `type` in its registry and builds the connector:
+
+```python
+default_factory.register("postgres", PostgresConnector)
+default_factory.register("dbt", _make_dbt)
+default_factory.register("metabase", MetabaseConnector)
+# … one register() call per type; no vendor branches in core logic
+```
+
+An unregistered `type` raises `UnknownConnectorType` (exit `13`) listing what *is* registered — never a silent fallback. Manage connections with [`canonic connection`](/cli-reference/connection).
+
+## Three classes of connector
+
+### Queryable (primary)
+
+Implement `introspect_schema` + `run_read_only_sql` — these feed the [semantic layer](/concepts/semantics) and are executed against directly by [`canonic query`](/cli-reference/query-sql-assert) / `canonic sql`.
+
+| Type | Notes |
+| --- | --- |
+| `postgres` | Catalog introspection via `information_schema`/`pg_catalog`. |
+| `sqlite` | Local `.db` file — no server, no network. |
+| `duckdb` | Local `.duckdb` file, or reads CSV/Parquet/JSON directly. |
+| `redshift` | Postgres-compatible catalog surface. |
+
+### Definition
+
+Implement `extract_definitions` — feed the semantic layer and canonical-binding candidates from *modeling code*, never the query path (no `run_read_only_sql`).
+
+| Type | Notes |
+| --- | --- |
+| `dbt` | Parses a compiled `manifest.json`: models → typed columns/grain, measures, joins, descriptions. |
+
+### Evidence
+
+Implement `extract_evidence` — feed [knowledge pages](/concepts/knowledge-layer) and reconciliation signal from docs and BI usage. Also never queryable.
+
+| Type | Notes |
+| --- | --- |
+| `looker` | Dashboards/explores/usage → usage evidence. |
+| `metabase` | Questions/dashboards → usage evidence: candidate metric definitions plus usage frequency. |
+| `notion` | Pages → doc evidence (policies, caveats, definitions). |
+| `url` | Arbitrary web pages/text → doc evidence — the generic, vendor-free path, also what [`canonic knowledge add`](/cli-reference/knowledge#knowledge-add) uses for one-shot fetches. |
+
+<Note>
+  A BI question's SQL is only ever evidence — never executed. If a Metabase/Looker-encoded metric is adopted, it's recompiled through the deterministic compiler like any other definition, never run as-is.
+</Note>
+
+## Normalized evidence, one shape per kind
+
+Every connector translates its native output into one of a few normalized shapes, so the [ingestion engine](/concepts/ingestion-and-reconciliation) and compiler never see vendor-specific structures:
+
+- **`RelationSchema`** — a table/view: columns (normalized types), primary key, foreign keys, row-count estimate. From queryable connectors' `introspect_schema`.
+- **`DefinitionEvidence`** — a named measure/dimension/join from modeling code, with its expression and additivity. From `extract_definitions`.
+- **`DocEvidence`** — a title + body + candidate topic references, with a `usage_hint` that maps to a knowledge page's `usage_mode`. From `extract_evidence` doc sources.
+- **`UsageEvidence`** — a BI artifact (question/dashboard), the metric it appears to define, and how often it's used — always a *candidate*, never auto-promoted to canonical.
+
+Unmappable native constructs are recorded with a warning, never silently dropped.
+
+## Read-only enforcement
+
+For queryable connectors, read-only is defense in depth, not a convention: a read-only role/credential where the engine supports it, a parse-level check on `run_read_only_sql` that rejects anything but a single `SELECT`/`WITH…SELECT`, and a hard row cap plus statement timeout on every execution. Any layer failing aborts with `READ_ONLY_VIOLATION` before the query runs.
+
+## Schema acquisition ladder
+
+When live introspection is unavailable or partial, canonic descends a priority order — every tier still emits the same `RelationSchema`, tagged with which tier produced it:
+
+1. **Live introspection** — catalog views.
+2. **Modeling code as schema** — via a `dbt`/definition connector.
+3. **Query-history inference** *(not yet implemented)*.
+4. **Declarative import** — user supplies DDL / a schema export.
+5. **Sample-based inference** *(not yet implemented)*.
+6. **Hand-authored `semantics/*.yaml`** — validated against the live source before being trusted (below).
+
+Partial capability is never silent — if only some relations are introspectable, the gap is reported rather than omitted.
+
+## Schema validation probe
+
+Whenever a schema is acquired declaratively or hand-authored (tiers 4–6), canonic issues a zero-data, read-only probe (`SELECT <declared columns> FROM <relation> WHERE false`) against the live source before trusting the evidence. A mismatch returns `SCHEMA_MISMATCH` with a diff of missing/extra columns and type conflicts — never a silent accept.

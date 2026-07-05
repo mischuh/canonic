@@ -21,6 +21,20 @@
         ]
       },
       {
+        "group": "Concepts",
+        "pages": [
+          "concepts/three-layers",
+          "concepts/semantics",
+          "concepts/contracts-and-guardrails",
+          "concepts/knowledge-layer",
+          "concepts/connectors",
+          "concepts/ingestion-and-reconciliation",
+          "concepts/compiler",
+          "concepts/llm-runtime",
+          "concepts/instrumentation-and-eval"
+        ]
+      },
+      {
         "group": "CLI Reference",
         "pages": [
           "cli-reference/overview",
