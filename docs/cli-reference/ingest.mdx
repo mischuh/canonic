@@ -1,0 +1,32 @@
+---
+title: "canonic ingest"
+description: "Reconcile configured sources into reviewable context diffs."
+---
+
+`canonic ingest` runs the four-stage ingestion pipeline: introspect each configured connection into normalized evidence, draft proposals, reconcile them against the accepted files, validate the proposed state, and emit reviewable diffs plus a reconciliation report.
+
+```bash
+canonic ingest
+canonic ingest --bootstrap
+canonic ingest --dry-run
+canonic ingest --connection warehouse --strict
+```
+
+Propose-only by default — it writes the audit trail and refreshes `last_validated_at` on unchanged files, but never edits committed semantics in place.
+
+| Flag | Description |
+| --- | --- |
+| `--bootstrap` | Fast initial path for a fresh connection: introspect and draft that one connection. |
+| `--dry-run` | Print proposed diffs and write nothing. |
+| `--connection` | Limit the run to a single connection id. |
+| `--headless` | Force headless mode (also auto-detected via `CI=true`). |
+| `--strict` | Fail the run (exit `14`) if any contradiction is flagged. |
+| `--open-pr` / `--no-pr` | Force or suppress the auto-PR (defaults to on in headless mode). |
+
+## Headless mode
+
+Headless mode (explicit `--headless`, or auto-detected when `CI=true`) pins the deterministic builder, opens an auto-PR carrying the diffs and any contradiction notes, and gates the run on the canonical exit codes — the safe, repeatable path for scheduled ingest in CI.
+
+## After a run
+
+Review what was drafted with [`canonic review`](/cli-reference/review-apply), or batch-apply with [`canonic apply`](/cli-reference/review-apply).

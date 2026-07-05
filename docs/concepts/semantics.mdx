@@ -1,0 +1,66 @@
+---
+title: "Semantics"
+description: "How canonic describes a table well enough to query it safely."
+---
+
+A **semantic source** describes one queryable table or relation the way an agent needs to reason about it: its grain, its typed columns, its measures, and how it joins to other sources. These files live under `semantics/<connection-id>/<name>.yaml` and are what [`canonic ingest`](/cli-reference/ingest) drafts from your live schema.
+
+## Shape of a semantic source
+
+```yaml
+name: orders                      # unique across the whole project
+connection: warehouse_pg          # which connection this comes from
+table: analytics.fct_orders       # physical relation
+grain: [order_id]                 # row uniqueness — drives fanout safety
+description: "One row per order."
+
+columns:
+  - { name: order_id,    type: string,  nullable: false }
+  - { name: customer_id, type: string,  nullable: false }
+  - { name: status,      type: string,  nullable: false }
+  - { name: amount,      type: decimal, nullable: false }
+  - { name: created_at,  type: timestamp, nullable: false }
+
+measures:
+  - name: total_revenue
+    expr: "sum(amount)"
+    additivity: additive           # additive | semi_additive | non_additive
+  - name: order_count
+    expr: "count(distinct order_id)"
+    additivity: non_additive
+
+dimensions:
+  - { name: status,     column: status }
+  - { name: order_date, column: created_at, granularity: day }
+
+joins:
+  - to: customers                  # another semantic source's `name`
+    on: "orders.customer_id = customers.customer_id"
+    relationship: many_to_one      # one_to_one | many_to_one | one_to_many | many_to_many
+
+filters:
+  - { name: completed, expr: "status = 'completed'" }
+
+meta:                              # system-managed, not hand-edited
+  provenance: inferred             # board_approved | human_curated | inferred
+  source_fingerprint: "sha256:…"
+  last_validated_at: "2026-06-13T00:00:00Z"
+```
+
+`type` uses a normalized internal type set (`string`, `int`, `decimal`, `float`, `bool`, `date`, `timestamp`, `json`) that the [compiler's dialect adapter](/concepts/compiler#dialect-adapter) maps to each connector's native types — never hard-coded per source.
+
+## Additivity
+
+Every measure declares whether it can be safely re-aggregated:
+
+- **`additive`** — plain `sum`/`count(*)`/`min`/`max`. Safe to re-aggregate at any coarser grain, and safe across a join fanout once deduplicated to the measure's own grain.
+- **`semi_additive`** — additive over every dimension except one (typically time): balances, inventory snapshots, headcount.
+- **`non_additive`** — cannot be derived from a partial sum: distinct counts, ratios, percentiles.
+
+The `additivity` flag on the measure is what lets the compiler's fanout analysis decide, per query, whether it's safe to just sum — see [the compiler](/concepts/compiler#fanout--additivity) for how each class actually compiles.
+
+## Where semantic sources come from
+
+You rarely hand-write these. [`canonic ingest`](/cli-reference/ingest) introspects each connection's live schema (or a dbt/LookML manifest, for [definition connectors](/concepts/connectors)) and drafts semantic sources deterministically: typed columns and a grain candidate from the primary key are mechanical, no LLM involved. An LLM only helps with the fuzzy parts — naming a measure, proposing a grain when no primary key is declared — and every LLM-drafted proposal is labelled and reviewed like any other diff (see [Ingestion & reconciliation](/concepts/ingestion-and-reconciliation)).
+
+`meta.provenance` records how a semantic source was born: `board_approved` and `human_curated` facts are never overwritten by new evidence — only `inferred` facts can be revised automatically, and even then only through a reviewable diff.

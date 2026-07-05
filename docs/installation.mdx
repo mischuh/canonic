@@ -1,0 +1,50 @@
+---
+title: "Installation"
+description: "Install the canonic CLI via npm, Homebrew, or Docker."
+---
+
+canonic ships as one distributable (CLI + local daemon). Local embeddings are an optional add-on.
+
+<Note>
+  Package and image names below show the shape of each install channel; exact names are confirmed per release.
+</Note>
+
+<Tabs>
+  <Tab title="npm">
+    For dev machines:
+
+    ```bash
+    npm install -g @canonic/cli
+    ```
+  </Tab>
+  <Tab title="Homebrew">
+    For macOS / Linux:
+
+    ```bash
+    brew install canonic
+    ```
+  </Tab>
+  <Tab title="Docker">
+    For CI, headless, or air-gapped environments:
+
+    ```bash
+    docker pull canonic:latest
+    ```
+  </Tab>
+</Tabs>
+
+## Air-gapped install
+
+An **offline / air-gapped install** path (Docker image or vendored tarball, no outbound calls during install) is available for restricted environments.
+
+## Verify
+
+```bash
+canonic --version
+```
+
+## Next steps
+
+<Card title="Quickstart" icon="rocket" href="/quickstart">
+  Point canonic at a local database and get your first answer in minutes.
+</Card>

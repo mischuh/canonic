@@ -1,0 +1,29 @@
+---
+title: "Running checks locally"
+description: "The exact commands CI runs, so nothing surprises you at push time."
+---
+
+Run the same checks locally before pushing — this is the exact sequence the `check` CI job runs (see [What CI checks](/ci-cd/what-ci-checks)):
+
+```bash
+ruff check . && ruff format --check .
+mypy canonic/
+pytest tests/ -x --tb=short
+```
+
+| Command | What it catches |
+| --- | --- |
+| `ruff check .` | Lint errors. |
+| `ruff format --check .` | Formatting drift (run `ruff format .` without `--check` to fix in place). |
+| `mypy canonic/` | Type errors (`strict = true` in `pyproject.toml`). |
+| `pytest tests/ -x --tb=short` | Test failures, stopping at the first one with a short traceback. |
+
+## Running a single test
+
+```bash
+pytest tests/test_foo.py::test_bar -v
+```
+
+## The release gate
+
+The `release_gate`-marked conformance suite (frozen-contract snapshots, CLI↔MCP parity, error-registry exit codes) is a separate, heavier check — see [The release gate](/ci-cd/release-gate) for what it covers and how to run it locally with Docker.

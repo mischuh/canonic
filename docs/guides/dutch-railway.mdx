@@ -1,0 +1,84 @@
+---
+title: "Guide: Dutch Railway Network (DuckDB)"
+description: "A DuckDB-native example with a geography dimension chain and ratio metrics."
+---
+
+A DuckDB-native example ported from [DuckDB's own blog example](https://github.com/duckdb/duckdb-blog-examples/tree/main/dbt_duckdb/dutch_railway_network). No live database, no credentials — a single committed `.duckdb` file plus a companion dbt manifest.
+
+Compared to the [ecommerce guide](/guides/ecommerce), this project exercises a different schema shape: a geography dimension chain (station → municipality → province) resolved by spatial joins at build time, a dimension with a synthetic `unknown` fallback row, and a fact table pinned to a single demo day.
+
+<Info>Full source: [`examples/dutch-railway/`](https://github.com/mischuh/canonic/tree/main/examples/dutch-railway)</Info>
+
+## Data
+
+The fact table is pinned to a single demo day (`service_date = 2024-08-01`): 63,946 service stops across 397 stations.
+
+| Table | Rows | Grain |
+| --- | --- | --- |
+| `dim_nl_provinces` | 13 (12 + `unknown`) | `province_sk` |
+| `dim_nl_municipalities` | 343 (342 + `unknown`) | `municipality_sk` |
+| `dim_nl_train_stations` | 397 | `station_sk` |
+| `fact_services` | 63,946 | `service_sk` |
+
+## Quickstart
+
+```bash
+cd examples/dutch-railway   # canonic commands must run from here
+canonic ingest --bootstrap  # introspect DuckDB → write semantics/*.yaml
+canonic mcp start           # serve: agents call query() + search_knowledge() together
+```
+
+## Metrics
+
+| Metric | Kind | Definition |
+| --- | --- | --- |
+| `service_count` | `single` | Realized service stops (guardrailed — excludes cancelled arrivals) |
+| `scheduled_stops` | `single` | Same expression as `service_count`, but **ungated** — the unguarded denominator for the rate metrics |
+| `cancelled_arrivals` / `cancelled_departures` | `single` | Sibling metrics, unaffected by the guardrail |
+| `cancelled_arrival_rate` / `cancelled_departure_rate` | `ratio` | `cancelled_* / scheduled_stops` |
+
+### Why `scheduled_stops` exists as a separate metric
+
+`exclude-cancelled-arrivals` is a `mandatory_filter` guardrail matched by **measure name**, scoped to `fact_services.service_count`. `scheduled_stops` has the *same underlying expression* (`count(service_sk)`) under a different measure name, so the guardrail doesn't touch it — deliberately. `cancelled_arrival_rate` needs an unguarded total in its denominator; reusing the guarded `service_count` there would silently exclude cancellations from both sides of the ratio and always yield the same value regardless of cancellations.
+
+## Example queries
+
+Three-hop join (`fact_services → dim_nl_train_stations → dim_nl_municipalities → dim_nl_provinces`):
+
+```json
+query({"metrics": ["service_count"], "dimensions": ["province_name"]})
+```
+
+A `ratio`-kind metric — ratio/weighted_avg metrics compile to a CTE per component and must be queried alone (no other metrics or dimensions in the same call):
+
+```json
+query({"metrics": ["cancelled_arrival_rate"]})
+→ {"result": {"columns": [{"name": "cancelled_arrival_rate", "type": "float"}], "rows": [[0.0883]]}}
+```
+
+## The dbt connector — a definition connector with no database
+
+Wired into `canonic.yaml` with no credentials at all:
+
+```yaml
+connections:
+  - id: railway_dbt
+    type: dbt
+    params:
+      manifest_path: dbt/manifest.json
+```
+
+```bash
+canonic ingest --connection railway_dbt --dry-run
+```
+
+Upstream's dbt project has no MetricFlow semantic-model/metric blocks (it's a dbt-duckdb engineering post, not a semantics one), so the manifest contributes `RelationSchema` + model evidence — descriptions, grain, FK-derived joins — rather than measure/dimension evidence. The real measures live in the hand-authored `semantics/railway_duckdb/*.yaml`. Modeling-tier evidence from dbt still outranks live DuckDB introspection wherever the two overlap.
+
+## What got adapted from upstream
+
+Two build-time fixups make the upstream project (which relies on DuckDB's `spatial` extension and Postgres cross-database attach) work as a pure, offline canonic example:
+
+1. **Geometry → WKT text.** canonic has no geometry type, and the joins already live in surrogate keys, so polygon/point geometry becomes plain WKT text at build time — a centroid point for the two polygon dimensions, the exact point for stations.
+2. **dbt manifest relation names.** dbt-duckdb's compiled manifest tags every model with a `database: <catalog>` field, but canonic's DuckDB connector introspects relations without a catalog prefix. The build nulls `database` on every model node so the two tiers reconcile correctly.
+
+See [`scripts/build.sh`](https://github.com/mischuh/canonic/tree/main/examples/dutch-railway/scripts/build.sh) for the full regeneration recipe (requires network access and `uv`).

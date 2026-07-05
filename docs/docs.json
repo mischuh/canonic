@@ -1,0 +1,96 @@
+{
+  "$schema": "https://mintlify.com/docs.json",
+  "theme": "mint",
+  "name": "canonic",
+  "description": "The Open Context Layer for Data Agents",
+  "colors": {
+    "primary": "#0F766E",
+    "light": "#14B8A6",
+    "dark": "#0F766E"
+  },
+  "favicon": "/favicon.png",
+  "navigation": {
+    "groups": [
+      {
+        "group": "Getting Started",
+        "pages": [
+          "introduction",
+          "installation",
+          "quickstart",
+          "configuring-an-llm"
+        ]
+      },
+      {
+        "group": "Concepts",
+        "pages": [
+          "concepts/three-layers",
+          "concepts/semantics",
+          "concepts/contracts-and-guardrails",
+          "concepts/knowledge-layer",
+          "concepts/connectors",
+          "concepts/ingestion-and-reconciliation",
+          "concepts/compiler",
+          "concepts/llm-runtime",
+          "concepts/instrumentation-and-eval"
+        ]
+      },
+      {
+        "group": "CLI Reference",
+        "pages": [
+          "cli-reference/overview",
+          "cli-reference/connection",
+          "cli-reference/sl",
+          "cli-reference/mcp",
+          "cli-reference/knowledge",
+          "cli-reference/eval",
+          "cli-reference/setup",
+          "cli-reference/ingest",
+          "cli-reference/review-apply",
+          "cli-reference/query-sql-assert",
+          "cli-reference/status-report",
+          "cli-reference/completion"
+        ]
+      },
+      {
+        "group": "MCP / Agent Integration",
+        "pages": [
+          "mcp-integration/connecting-your-agent",
+          "mcp-integration/tools-reference"
+        ]
+      },
+      {
+        "group": "Guides",
+        "pages": [
+          "guides/dutch-railway",
+          "guides/ecommerce",
+          "guides/jaffle-shop",
+          "guides/rental",
+          "guides/saas-analytics"
+        ]
+      },
+      {
+        "group": "CI/CD",
+        "pages": [
+          "ci-cd/what-ci-checks",
+          "ci-cd/release-gate",
+          "ci-cd/running-checks-locally"
+        ]
+      },
+      {
+        "group": "Reference",
+        "pages": [
+          "reference/error-codes",
+          "reference/config-schema"
+        ]
+      }
+    ]
+  },
+  "navbar": {
+    "links": [
+      {
+        "type": "github",
+        "href": "https://github.com/mischuh/canonic"
+      }
+    ]
+  }
+}

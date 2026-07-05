@@ -1,0 +1,77 @@
+---
+title: "Knowledge"
+description: "Free-form, searchable, auto-maintained pages that carry business meaning."
+---
+
+Knowledge pages answer "what does this mean to the business?" — definitions, caveats, and policies that a human needs to *trust* an answer, as opposed to semantics (how to query safely) or contracts (what's authoritative and mandatory). See [the split rule](/concepts/three-layers#the-split-rule).
+
+<Note>
+  Retrieval is implemented and reachable today through the MCP tools [`search_knowledge`](/mcp-integration/tools-reference#search-knowledge-query-str-user-str-none-none-limit-int-5) and [`read_knowledge_page`](/mcp-integration/tools-reference#read-knowledge-page-page-str-user-str-none-none) (and via `canonic query`'s underlying service). The CLI's own [`canonic knowledge search`](/cli-reference/knowledge#knowledge-search) command is a stub — see that page for status.
+</Note>
+
+## Page format
+
+A knowledge page is Markdown with YAML frontmatter. Its path determines scope and id.
+
+```yaml
+---
+summary: "Why test accounts are excluded from active-customer counts."
+tags: [customers, definitions]
+sl_refs:                         # → semantic entities, fully qualified
+  - warehouse_pg.customers
+  - warehouse_pg.orders.total_revenue
+refs: [test-account-policy]      # → other pages by id/slug
+usage_mode: caveat                # reference | caveat | policy | definition
+meta:                             # system-managed, not hand-edited
+  provenance: human_curated
+  last_validated_at: "2026-06-14T00:00:00Z"
+  bound_fingerprints:
+    "warehouse_pg.orders.total_revenue": "sha256:…"
+  frozen: false
+---
+
+Body in Markdown. Inline `[[test-account-policy]]` resolves to another page.
+A measure is **referenced, never restated** — `{{ sl:warehouse_pg.orders.total_revenue.expr }}`
+renders the current expr at read time, so it cannot drift out of sync.
+```
+
+## Scope
+
+Two scopes, defined by path, not by a field you set by hand:
+
+- `knowledge/global/` — shared, visible to everyone.
+- `knowledge/user/<id>/` — personal, additive only.
+
+**Strict-additive rule:** a user page can *add* context but can never override or shadow a global one. On a name/topic collision, the global page stays authoritative and the user page is surfaced as a personal annotation attached to it — never a replacement. A user's search sees `global` + their own `user/<id>`, never another user's pages.
+
+## Retrieval
+
+Search fuses two arms via Reciprocal Rank Fusion:
+
+- **Lexical** — a tantivy BM25 index over `body` + `summary` + `tags`. Always available, with `summary`/`tags` boosted so a concise-field match outranks a body-only one.
+- **Vector** (optional) — page embeddings from the [local embeddings runtime](/concepts/llm-runtime#local-embeddings), compared by cosine similarity. Present only when the `embeddings` extra is installed.
+
+When embeddings aren't installed, search runs lexical-only and degrades gracefully rather than failing — the same query returns sensible, if less semantically fuzzy, hits. Result ordering is deterministic: the lexical arm and tie-breaking (by page id) never vary run to run.
+
+## Graph traversal
+
+After a search returns seed hits, an agent can pull connected context by **traversing the reference graph without re-searching**: from each seed, `sl_refs` / `refs` / `[[links]]` are followed breadth-first up to a bounded depth, deduped, and returned as one connected subgraph — the pages reached plus the live semantic entities they bind. This is what lets one hit on "active customer" surface its bound caveats, the policy page it links to, and the semantic source it describes, in a single round trip.
+
+## `usage_mode`
+
+| Mode | Behavior |
+| --- | --- |
+| `reference` | Found by search/traversal only. The default. |
+| `caveat` | Auto-surfaced whenever a bound `sl_ref` entity appears in a result — a relevant warning rides along even if nobody searched for it. |
+| `policy` | A business rule/definition page; ranked like `reference` but tagged distinguishably. |
+| `definition` | The canonical prose definition for a term; collisions follow the strict-additive rule. |
+
+A `caveat` page *documents* a risk. If the risk must be *prevented*, not just disclosed, it's promoted to a contract [guardrail](/concepts/contracts-and-guardrails#guardrails) — knowledge explains, the contract enforces.
+
+## Drift & freshness
+
+A page never copies a measure's SQL — it references the measure by name, and `{{ sl:….expr }}` renders the **live** `expr` at read time, so the rendered definition can't fall out of sync. But the surrounding *prose* can still go stale: `meta.bound_fingerprints` records the measure-definition fingerprint each page depends on, and when that fingerprint changes, the page is flagged for review — a signal, not a silent edit. `meta.last_validated_at` similarly drives a staleness signal surfaced at query time, so an agent can caveat honestly about how recently a definition was checked.
+
+## Validation
+
+Every reference is checked on write, whether the page comes from ingestion or a human edit: each `sl_ref` must resolve to a live semantic entity, and each `ref`/`[[link]]` must point at an existing page in a visible scope. A broken reference blocks the write with a precise location — you cannot author a page that points at nothing. When ingestion later detects that a referenced entity disappeared, the stale `sl_ref` is proposed for removal as a normal reviewable diff, never a silent edit.

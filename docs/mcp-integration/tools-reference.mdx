@@ -1,0 +1,84 @@
+---
+title: "MCP tools reference"
+description: "The tools canonic's MCP server registers, grouped by purpose."
+---
+
+The MCP server (`canonic/mcp/server.py`) registers 11 tools. Each does transport translation only — parse arguments, call the same core service the CLI calls, serialize the result. No resolution, compilation, or execution logic lives in the MCP layer itself.
+
+| Tool | What it's for |
+| --- | --- |
+| `contract_info` | Return the serving contract version this daemon implements. |
+| `negotiate_contract` | Declare the contract schema major version your client was built against. |
+| `get_overview` | Agent entry point — active metrics grouped by domain with sample questions. |
+| `list_metrics` | List all active canonical metrics and their queryable dimensions. |
+| `describe_metric` | Grain, dimensions, measures, and freshness for one metric. |
+| `resolve_metric` | Resolve a name or alias to its canonical binding. |
+| `compile_query` | Compile a semantic query to SQL + metadata without executing it. |
+| `query` | Compile and execute a semantic query read-only. |
+| `run_sql` | Read-only SQL escape hatch. |
+| `search_knowledge` | Search knowledge pages for business context. |
+| `read_knowledge_page` | Read the full content of one knowledge page. |
+
+## Session / contract
+
+### `contract_info`
+
+Returns the serving contract version this daemon implements. Call at session start to confirm compatibility.
+
+```json
+{"contract_schema": "2.0"}
+```
+
+### `negotiate_contract(contract_major: int)`
+
+Declares the contract-schema major version your client was built against. The daemon accepts iff `contract_major == server major version`; otherwise it fails fast with a clear message rather than serving mismatched behavior.
+
+## Discovery
+
+### `get_overview(domain: str | None = None)`
+
+The recommended first call — active metrics grouped by domain with plain-language sample questions, so an agent (or a human) can see what's askable before drilling into `list_metrics` or `query`. Pass `domain` to narrow to one owning-source group.
+
+### `list_metrics()`
+
+Lists all active canonical metrics this project defines, plus a deduplicated catalog of every dimension queryable against them. Each metric's `dimensions` list holds canonical names only — look those up in the top-level `dimensions` catalog for the human-readable label and source. Use canonical names directly in `query()` calls.
+
+### `describe_metric(name: str)`
+
+Returns grain, dimensions, measures, and freshness for one metric.
+
+### `resolve_metric(name: str, context: str | None = None)`
+
+Resolves a metric name or alias to its canonical binding. Returns the binding on success, or a structured error when the name is ambiguous or unresolved.
+
+## Query execution
+
+### `compile_query(query: dict)`
+
+Compiles a semantic query to dialect-correct SQL + metadata without executing it. `query` accepts:
+
+- `metrics` (`list[str]`)
+- `dimensions` (`list[str]`) — canonical `name` values as returned by `describe_metric`, not natural-language terms
+- `filters` (`list[str]`) — SQL `WHERE` predicates, e.g. `["segment = 'smb'", "status = 'active'"]`
+- `via` (`list[str]`) — routes join paths through specific intermediate sources; required when multiple join paths exist between the metric source and a dimension source
+- `limit` (`int | null`)
+
+On an `ambiguous_join_path` error, inspect the returned candidates (each has a `via` list and a human-readable `route`) and re-issue with that `via` value. On an `unreachable` error for a dimension, check `candidates` for the correct canonical name and re-issue.
+
+### `query(query: dict)`
+
+Same `query` shape as `compile_query`, but compiles **and executes** read-only. Returns rows plus compiler metadata: resolved bindings, guardrails fired, freshness. This is the main path — with `--json`/over MCP, the payload is identical to `canonic query --json`.
+
+### `run_sql(sql: str, connection: str | None = None)`
+
+Executes a read-only SQL `SELECT` on a named connection (or the project default). Rejects non-`SELECT` statements with `READ_ONLY_VIOLATION`. Use only when no metric/dimension in `list_metrics()` covers the question — `query`/`compile_query` route joins through the resolved join graph and apply guardrails that a hand-written join across fact tables won't get, and can silently multiply values like revenue.
+
+## Knowledge
+
+### `search_knowledge(query: str, user: str | None = None, limit: int = 5)`
+
+Searches the project's knowledge pages for business context: definitions, caveats, and policies. Returns ranked hits plus any caveats auto-surfaced because a hit references their bound semantic entity. Call this **before** answering any question about what a metric means or how it's calculated — this project's definitions may differ from textbook ones. Returns empty hits when the project has no knowledge pages.
+
+### `read_knowledge_page(page: str, user: str | None = None)`
+
+Retrieves the full content of a knowledge page by its id (page slug). Use after `search_knowledge()` to read the complete definition, caveat, or policy — the rendered body has live `{{ sl:entity.expr }}` definitions substituted, plus metadata, drift review flags, staleness warnings, and linked references.

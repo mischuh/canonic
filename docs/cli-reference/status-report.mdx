@@ -1,0 +1,30 @@
+---
+title: "canonic status / report"
+description: "Inspect project state and local event-log figures."
+---
+
+## `canonic status`
+
+Show the current canonic project root, config version, and local state presence.
+
+```bash
+canonic status
+```
+
+Prints the project root, `canonic.yaml` config version (or a config error if invalid), whether `.canonic/` (local state) is present, the serving contract schema version, and a one-line summary of served-answer events (count, error count, p95 latency) if any exist. This is always a safe "what's my next step" command — run it whenever you're unsure of project state.
+
+## `canonic report`
+
+Show event-log figures from the local `.canonic/` store: counts, error distribution, latency, bytes scanned, and freshness.
+
+```bash
+canonic report
+canonic report --last 100 --recent 20
+```
+
+| Flag | Description |
+| --- | --- |
+| `--last` | Restrict to the final N events in the log. |
+| `--recent` | Number of recent answers to list (default `10`). |
+
+Output includes the onboarding funnel (setup started → connection added → bootstrap completed → first answer served → first curated review completed, each with a timestamp once reached), overall answer counts and latency percentiles, bytes scanned, stale-answer and guardrail-hit counts, an error distribution table, and a table of the most recent answers.

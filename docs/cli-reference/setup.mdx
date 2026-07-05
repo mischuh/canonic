@@ -1,0 +1,30 @@
+---
+title: "canonic setup"
+description: "Interactive project setup wizard."
+---
+
+```bash
+canonic setup
+```
+
+Bootstraps a new canonic project: name → first connection (connection-tested before proceeding) → LLM → optional schema preview → writes `canonic.yaml` plus scaffold directories and a `.gitignore`.
+
+Progress is checkpointed to `.canonic/setup-state.json`, so an interrupted run resumes where it left off. Run inside an already-set-up project, it offers a status/add-connection menu instead of overwriting committed files.
+
+## What happens after the config is written
+
+The wizard continues straight into the golden path:
+
+<Steps>
+  <Step title="Bootstrap the first connection">
+    Tier-1 schema introspection produces deterministic semantic sources.
+  </Step>
+  <Step title="Run a first answer">
+    A demo metric query returns result rows plus the metadata band (freshness, guardrails, final/provisional).
+  </Step>
+  <Step title="Hand off">
+    You're shown what to review, the exact query call that was just run, and how to connect an agent over MCP.
+  </Step>
+</Steps>
+
+This is also the command behind bare `canonic` with no subcommand and no `--json` — see [CLI Overview](/cli-reference/overview).

@@ -221,6 +221,5 @@ __marimo__/
 .streamlit/secrets.toml
 .DS_Store
 
-docs/*.md
 specs/*.md
 .vscode/settings.json

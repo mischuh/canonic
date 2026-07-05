@@ -2,7 +2,7 @@
 
 Mirrors tests/runtime/test_drafter.py's structure: RuntimeLLMDrafter over the fake litellm
 seam is the template for RuntimeExtractionSkill (SPEC-E10, E3 §5 fetch/extract-split
-amendment, docs/AMENDMENT-generic-evidence-connector.md).
+amendment, specs/AMENDMENT-generic-evidence-connector.md).
 """
 
 from __future__ import annotations
