@@ -61,6 +61,6 @@ The `additivity` flag on the measure is what lets the compiler's fanout analysis
 
 ## Where semantic sources come from
 
-You rarely hand-write these. [`canonic ingest`](/cli-reference/ingest) introspects each connection's live schema (or a dbt/LookML manifest, for [definition connectors](/concepts/connectors)) and drafts semantic sources deterministically: typed columns and a grain candidate from the primary key are mechanical, no LLM involved. An LLM only helps with the fuzzy parts — naming a measure, proposing a grain when no primary key is declared — and every LLM-drafted proposal is labelled and reviewed like any other diff (see [Ingestion & reconciliation](/concepts/ingestion-and-reconciliation)).
+You rarely hand-write these. [`canonic ingest`](/cli-reference/ingest) introspects each connection's live schema (or a dbt manifest, for [definition connectors](/concepts/connectors)) and drafts semantic sources deterministically: typed columns and a grain candidate from the primary key are mechanical, no LLM involved. An LLM only helps with the fuzzy parts — naming a measure, proposing a grain when no primary key is declared — and every LLM-drafted proposal is labelled and reviewed like any other diff (see [Ingestion & reconciliation](/concepts/ingestion-and-reconciliation)).
 
 `meta.provenance` records how a semantic source was born: `board_approved` and `human_curated` facts are never overwritten by new evidence — only `inferred` facts can be revised automatically, and even then only through a reviewable diff.
