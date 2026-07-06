@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.3.0](https://github.com/mischuh/canonic/compare/v0.2.3...v0.3.0) (2026-07-06)
+
+
+### Features
+
+* **cli:** add inline --metrics/--dimensions/--filter flags to query/sl compile ([abe2d4f](https://github.com/mischuh/canonic/commit/abe2d4f06845ee0b17e572b588e3be490869e1fa))
+* **cli:** add inline --metrics/--dimensions/--filter flags to query/sl compile ([7faafdf](https://github.com/mischuh/canonic/commit/7faafdf39ca697b4044ed84b6575ab2bbc407a1a))
+
 ## [0.2.3](https://github.com/mischuh/canonic/compare/v0.2.2...v0.2.3) (2026-07-05)
 
 
