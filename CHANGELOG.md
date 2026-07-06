@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.3.2](https://github.com/mischuh/canonic/compare/v0.3.1...v0.3.2) (2026-07-06)
+
+
+### Documentation
+
+* remove CI/CD section, add MCP HTTP config example ([3b542a4](https://github.com/mischuh/canonic/commit/3b542a48cf94b8d937c21d350036bc94f37256fb))
+* remove outdated CI/CD documentation and update error codes description ([4ba1d70](https://github.com/mischuh/canonic/commit/4ba1d703b736f054e1dc50e9d6cdaf38b7ecffea))
+
 ## [0.3.1](https://github.com/mischuh/canonic/compare/v0.3.0...v0.3.1) (2026-07-06)
 
 
