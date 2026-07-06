@@ -81,7 +81,7 @@ def ingest(
         ),
     ] = None,
 ) -> None:
-    """Reconcile configured sources into reviewable context diffs (SPEC-E4 §2)."""
+    """Reconcile configured sources into reviewable context diffs."""
     root = find_project_root()
     if root is None:
         _console.print(

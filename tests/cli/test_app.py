@@ -1,6 +1,7 @@
 """Tests for the root CLI app: help tree, version, bare invocation, and stubs."""
 
 from importlib.metadata import version
+from pathlib import Path
 
 import pytest
 from typer.testing import CliRunner
@@ -86,5 +87,25 @@ def test_query_missing_file_is_clean_error(runner: CliRunner) -> None:
 def test_sl_compile_missing_file_is_clean_error(runner: CliRunner) -> None:
     """A missing compile query file is a typer validation error, not a traceback."""
     result = runner.invoke(app, ["sl", "compile", "-f", "does-not-exist.json"])
+    assert result.exit_code != 0
+    assert result.exception is None or isinstance(result.exception, SystemExit)
+
+
+@pytest.mark.parametrize("group", [["query"], ["sl", "compile"]], ids=lambda a: " ".join(a))
+def test_file_and_flags_together_is_usage_error(
+    runner: CliRunner, tmp_path: Path, group: list[str]
+) -> None:
+    """-f and --metrics/--dimensions/--filter are mutually exclusive (AC4)."""
+    query_file = tmp_path / "q.json"
+    query_file.write_text('{"metrics": ["revenue"]}')
+    result = runner.invoke(app, [*group, "-f", str(query_file), "--metrics", "revenue"])
+    assert result.exit_code != 0
+    assert result.exception is None or isinstance(result.exception, SystemExit)
+
+
+@pytest.mark.parametrize("group", [["query"], ["sl", "compile"]], ids=lambda a: " ".join(a))
+def test_no_file_and_no_flags_is_usage_error(runner: CliRunner, group: list[str]) -> None:
+    """Neither -f nor --metrics given is an unambiguous usage error, not a silent no-op."""
+    result = runner.invoke(app, group)
     assert result.exit_code != 0
     assert result.exception is None or isinstance(result.exception, SystemExit)

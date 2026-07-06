@@ -33,7 +33,7 @@ from canonic.runtime.resolver import Task
 
 app = typer.Typer(
     name="eval",
-    help="Evaluate local models against the tested baseline (SPEC-E10 §7).",
+    help="Evaluate local models against the tested baseline.",
 )
 
 _console = Console(soft_wrap=True)

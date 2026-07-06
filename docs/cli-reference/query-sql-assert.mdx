@@ -8,16 +8,25 @@ description: "Execute queries, run raw read-only SQL, and gate on accuracy."
 Resolve, compile, and execute a semantic query read-only.
 
 ```bash
+canonic query --metrics revenue --dimensions order_date
+canonic query --metrics revenue --filter "status=paid"
 canonic query --file query.json
 canonic query --file query.json --harness
 ```
 
 | Flag | Description |
 | --- | --- |
+| `--metrics` | Metric name(s) — comma-separated and/or repeatable (`--metrics a,b` == `--metrics a --metrics b`). |
+| `--dimensions` | Dimension name(s) — same comma/repeat rules as `--metrics`. |
+| `--filter` | A filter as `field=value` or `field:op:value` (repeatable), e.g. `amount:>:100`, `status:!=:refunded`, `status:in:paid,refunded`. |
 | `--file`, `-f` | Semantic query JSON file. |
 | `--harness` | Benchmark/CI mode: run matching assertions and exit `10` (`ASSERTION_FAILED`) on a mismatch. |
 
-The query file is JSON with the `SemanticQuery` shape: `{"metrics": [...], "dimensions": [...], "filters": [...], "limit": null}`. Without `--harness`, any matching assertions are informational only and never block. With `--json`, the output matches the MCP `query` tool's payload byte-for-byte.
+`--metrics`/`--dimensions`/`--filter` and `-f` are mutually exclusive — pick one way to build the query per invocation; passing both is a usage error. The flags build the identical `SemanticQuery` a JSON file would deserialize: `{"metrics": [...], "dimensions": [...], "filters": [...], "limit": null}`. Use `-f` once a query grows more filters or joins than is comfortable inline. Without `--harness`, any matching assertions are informational only and never block. With `--json`, the output matches the MCP `query` tool's payload byte-for-byte.
+
+<Note>
+  If a `--dimensions` name exists on more than one join-reachable source, the query fails with `ambiguous` and a `candidates` list of `alias.dimension` values to qualify with — see [Resolving `ambiguous`](/reference/error-codes#resolving-ambiguous).
+</Note>
 
 ## `canonic sql`
 

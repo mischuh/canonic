@@ -12,7 +12,7 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, field_validator
 
-__all__ = ["SemanticQuery"]
+__all__ = ["SemanticQuery", "parse_filter_flag"]
 
 _OPERATOR_MAP: dict[str, str] = {
     "EQUALS": "=",
@@ -60,6 +60,52 @@ def _dict_to_predicate(d: dict[str, Any]) -> str:
         items = ", ".join(_quote_value(v) for v in value)
         return f"{field} IN ({items})"
     return f"{field} {sql_op} {_quote_value(value)}"
+
+
+def _coerce_scalar(text: str) -> Any:
+    """Coerce a raw CLI token to ``int``/``float`` when it looks numeric, else ``str``.
+
+    Mirrors what a hand-written JSON filter dict would carry (``{"value": 100}``,
+    not ``{"value": "100"}``) so a numeric comparison compiles to an unquoted SQL
+    literal, matching the JSON-file path (§ AC2).
+    """
+    try:
+        return int(text)
+    except ValueError:
+        pass
+    try:
+        return float(text)
+    except ValueError:
+        return text
+
+
+def parse_filter_flag(raw: str) -> str:
+    """Parse a CLI ``--filter`` value into a SQL predicate string.
+
+    Accepts ``field=value`` (operator ``=``) or ``field:op:value`` where ``op`` is
+    one of the keys in :data:`_OPERATOR_MAP` (e.g. ``amount:>:100``,
+    ``status:!=:refunded``, ``status:in:paid,refunded``). Both forms build the same
+    dict shape the JSON-file path already accepts and go through
+    :func:`_dict_to_predicate`, so there is exactly one filter grammar.
+    """
+    head, sep, tail = raw.partition(":")
+    if sep:
+        op_candidate, sep2, value_raw = tail.partition(":")
+        if sep2:
+            op = op_candidate.strip().upper()
+            value: Any = (
+                [_coerce_scalar(v.strip()) for v in value_raw.split(",")]
+                if op == "IN"
+                else _coerce_scalar(value_raw)
+            )
+            return _dict_to_predicate({"field": head.strip(), "operator": op, "value": value})
+
+    field, sep, value_str = raw.partition("=")
+    if not sep:
+        raise ValueError(f"filter must be field=value or field:op:value, got {raw!r}")
+    return _dict_to_predicate(
+        {"field": field.strip(), "operator": "=", "value": _coerce_scalar(value_str)}
+    )
 
 
 class SemanticQuery(BaseModel):

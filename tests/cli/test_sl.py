@@ -196,3 +196,75 @@ class TestSlCompileCommand:
     def test_missing_file_exits_nonzero(self, runner: CliRunner, project_dir: Path) -> None:
         result = runner.invoke(app, ["sl", "compile", "-f", "/nonexistent/q.json"])
         assert result.exit_code != 0
+
+    def test_metrics_dimensions_flags_match_file(
+        self, runner: CliRunner, project_dir: Path, query_file: Path
+    ) -> None:
+        """AC1: flags build the identical SemanticQuery a JSON file would deserialize."""
+        via_flags = runner.invoke(
+            app, ["--json", "sl", "compile", "--metrics", "revenue", "--dimensions", "order_date"]
+        )
+        via_file = runner.invoke(app, ["--json", "sl", "compile", "-f", str(query_file)])
+        assert via_flags.exit_code == 0, via_flags.output
+        assert json.loads(via_flags.output) == json.loads(via_file.output)
+
+    def test_filter_flag_matches_json_filter(
+        self, runner: CliRunner, project_dir: Path, tmp_path: Path
+    ) -> None:
+        """AC2: --filter produces the same filters entry as the equivalent JSON file."""
+        via_flag = runner.invoke(
+            app, ["--json", "sl", "compile", "--metrics", "revenue", "--filter", "status=active"]
+        )
+        json_file = tmp_path / "filtered.json"
+        json_file.write_text(json.dumps({"metrics": ["revenue"], "filters": ["status = 'active'"]}))
+        via_file = runner.invoke(app, ["--json", "sl", "compile", "-f", str(json_file)])
+        assert via_flag.exit_code == 0, via_flag.output
+        assert json.loads(via_flag.output) == json.loads(via_file.output)
+
+    def test_comma_and_repeated_dimensions_equivalent(
+        self, runner: CliRunner, project_dir: Path
+    ) -> None:
+        """AC3: --dimensions a,b == --dimensions a --dimensions b."""
+        comma = runner.invoke(
+            app,
+            [
+                "--json",
+                "sl",
+                "compile",
+                "--metrics",
+                "revenue",
+                "--dimensions",
+                "order_date,status",
+            ],
+        )
+        repeated = runner.invoke(
+            app,
+            [
+                "--json",
+                "sl",
+                "compile",
+                "--metrics",
+                "revenue",
+                "--dimensions",
+                "order_date",
+                "--dimensions",
+                "status",
+            ],
+        )
+        assert comma.exit_code == 0, comma.output
+        assert json.loads(comma.output) == json.loads(repeated.output)
+
+    def test_file_and_metrics_flag_together_is_usage_error(
+        self, runner: CliRunner, project_dir: Path, query_file: Path
+    ) -> None:
+        """AC4: -f plus any of --metrics/--dimensions/--filter is a usage error."""
+        result = runner.invoke(
+            app, ["sl", "compile", "-f", str(query_file), "--metrics", "revenue"]
+        )
+        assert result.exit_code != 0
+
+    def test_no_file_and_no_metrics_is_usage_error(
+        self, runner: CliRunner, project_dir: Path
+    ) -> None:
+        result = runner.invoke(app, ["sl", "compile"])
+        assert result.exit_code != 0

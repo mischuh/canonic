@@ -19,6 +19,7 @@ import typer
 from rich.console import Console
 
 from canonic.exc import CanonicError
+from canonic.mcp.errors import error_payload
 
 _err_console = Console(stderr=True)
 
@@ -38,38 +39,55 @@ def get_cli_context(ctx: typer.Context) -> CliContext:
 
 
 def emit_error(err: CanonicError, *, json_output: bool) -> None:
-    """Print a structured error to stderr in the requested format."""
-    code = err.code.value if err.code is not None else "internal_error"
-    message = str(err) or err.__class__.__name__
-    payload: dict[str, Any] = {"code": code, "message": message}
+    """Print a structured error to stderr in the requested format.
+
+    Reuses :func:`canonic.mcp.errors.error_payload` for the wire shape so the CLI's
+    ``--json`` output — including ``candidates`` — stays byte-for-byte consistent
+    with the MCP adapter (adapter parity, SPEC §2.1), rather than reimplementing a
+    second, looser candidate serialization.
+    """
+    payload = error_payload(err)
+    if not payload["message"]:
+        payload["message"] = err.__class__.__name__
     # ASSERTION_FAILED carries which check diverged (SPEC-Fuller-E15 §3.3).
     assertion_id = getattr(err, "assertion_id", None)
     if assertion_id is not None:
         payload["assertion_id"] = assertion_id
     if json_output:
         sys.stderr.write(json.dumps(payload) + "\n")
-    else:
-        _err_console.print(f"[red]error[/red] [bold]{code}[/bold]: {message}")
-        candidates = err.candidates
-        if candidates:
-            for i, c in enumerate(candidates, 1):
-                if hasattr(c, "route"):
-                    _err_console.print(f"  path {i}: {c.route}", markup=False)
-                    _err_console.print(f"    via: {c.via}", markup=False)
-                elif isinstance(c, (list, tuple)):
-                    owner = getattr(err, "owner", "")
-                    prefix = f"{owner} → " if owner else ""
-                    _err_console.print(f"  path {i}: {prefix}{' → '.join(c)}", markup=False)
-            if candidates and hasattr(candidates[0], "via"):
-                _err_console.print(
-                    '  hint: re-issue with "via": <chosen path\'s via list> to select a path',
-                    markup=False,
-                )
-            elif candidates and isinstance(candidates[0], (list, tuple)):
-                _err_console.print(
-                    '  hint: add "via": ["<first-hop>"] to your query to select a path',
-                    markup=False,
-                )
+        return
+
+    _err_console.print(f"[red]error[/red] [bold]{payload['code']}[/bold]: {payload['message']}")
+    candidates = err.candidates
+    if not candidates:
+        return
+    for i, c in enumerate(candidates, 1):
+        if hasattr(c, "route"):
+            _err_console.print(f"  path {i}: {c.route}", markup=False)
+            _err_console.print(f"    via: {c.via}", markup=False)
+        elif isinstance(c, (list, tuple)):
+            owner = getattr(err, "owner", "")
+            prefix = f"{owner} → " if owner else ""
+            _err_console.print(f"  path {i}: {prefix}{' → '.join(c)}", markup=False)
+        elif hasattr(c, "metric"):
+            _err_console.print(f"  candidate {i}: {c.metric}", markup=False)
+        else:
+            _err_console.print(f"  candidate {i}: {c}", markup=False)
+    if hasattr(candidates[0], "via"):
+        _err_console.print(
+            '  hint: re-issue with "via": <chosen path\'s via list> to select a path',
+            markup=False,
+        )
+    elif isinstance(candidates[0], (list, tuple)):
+        _err_console.print(
+            '  hint: add "via": ["<first-hop>"] to your query to select a path',
+            markup=False,
+        )
+    elif isinstance(candidates[0], str):
+        _err_console.print(
+            f"  hint: qualify with one of the candidates above, e.g. --dimensions {candidates[0]}",
+            markup=False,
+        )
 
 
 def handle_errors[F: Callable[..., Any]](func: F) -> F:

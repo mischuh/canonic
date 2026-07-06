@@ -44,7 +44,7 @@ def assert_(
     and compared to its expected value within ``tolerance``. The harness reports
     ``accuracy = correct / total``; when it drops below ``--min-accuracy`` (default ``1.0`` —
     every assertion must hold), the command exits 10 with the diverging checks, so a regression
-    fails CI (SPEC-Fuller-E15 §3.4 AC2).
+    fails CI.
     """
     service = load_service(ctx)
     report = asyncio.run(service.run_accuracy_harness())

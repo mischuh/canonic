@@ -12,8 +12,7 @@ from rich.console import Console
 from rich.table import Table
 
 from canonic.cli._errors import get_cli_context, handle_errors
-from canonic.cli.commands import load_service
-from canonic.compiler import SemanticQuery
+from canonic.cli.commands import build_semantic_query, load_service
 
 if TYPE_CHECKING:
     from canonic.core.models import QueryResult
@@ -25,9 +24,21 @@ _console = Console()
 def query(
     ctx: typer.Context,
     file: Annotated[
-        Path,
+        Path | None,
         typer.Option("-f", "--file", help="Semantic query JSON file.", exists=True, readable=True),
-    ],
+    ] = None,
+    metrics: Annotated[
+        list[str] | None,
+        typer.Option("--metrics", help="Metric name(s), comma-separated and/or repeatable."),
+    ] = None,
+    dimensions: Annotated[
+        list[str] | None,
+        typer.Option("--dimensions", help="Dimension name(s), comma-separated and/or repeatable."),
+    ] = None,
+    filter_: Annotated[
+        list[str] | None,
+        typer.Option("--filter", help="Filter as field=value or field:op:value (repeatable)."),
+    ] = None,
     harness: Annotated[
         bool,
         typer.Option(
@@ -36,16 +47,18 @@ def query(
         ),
     ] = False,
 ) -> None:
-    """Resolve, compile, and execute a semantic query read-only (core.query).
+    """Resolve, compile, and execute a semantic query read-only.
 
-    The query file is JSON with the :class:`~canonic.compiler.SemanticQuery` shape:
-    ``{"metrics": [...], "dimensions": [...], "filters": [...], "limit": null}``.
+    Either ``-f``/``--file`` (a JSON file with the
+    :class:`~canonic.compiler.SemanticQuery` shape:
+    ``{"metrics": [...], "dimensions": [...], "filters": [...], "limit": null}``) or
+    the inline ``--metrics``/``--dimensions``/``--filter`` flags — never both.
 
-    With ``--harness`` (benchmark/CI mode, SPEC-Fuller-E15 §3.2), every assertion matching
-    the query is executed and any divergence from its expected result exits 10
-    (``ASSERTION_FAILED``); without it, assertions are informational and never block.
+    With ``--harness`` (benchmark/CI mode), every assertion matching the query is executed
+    and any divergence from its expected result exits 10 (``ASSERTION_FAILED``); without it,
+    assertions are informational and never block.
     """
-    sq = SemanticQuery.model_validate_json(file.read_text())
+    sq = build_semantic_query(file, metrics, dimensions, filter_)
     service = load_service(ctx)
     result = asyncio.run(service.query(sq, harness=harness))
 

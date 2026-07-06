@@ -22,7 +22,7 @@ def overview(
         typer.Option("--domain", help="Filter to a single domain (owning-source name)."),
     ] = None,
 ) -> None:
-    """Show active metrics grouped by domain with sample questions (core.get_overview).
+    """Show active metrics grouped by domain with sample questions.
 
     This is the recommended first command for a new user or agent — it provides
     a scannable map of what is askable before drilling into list_metrics / query.

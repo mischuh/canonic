@@ -27,7 +27,7 @@ def sql(
         ),
     ] = None,
 ) -> None:
-    """Execute a read-only SQL string on a named connection (core.run_sql).
+    """Execute a read-only SQL string on a named connection.
 
     Non-SELECT statements are rejected with ``READ_ONLY_VIOLATION`` (exit 11).
     """
