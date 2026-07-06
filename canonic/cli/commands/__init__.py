@@ -45,7 +45,7 @@ def load_service(ctx: typer.Context) -> CanonicService:
 
     root = find_project_root()
     if root is None:
-        msg = "no canonic project found — run from inside a project directory"
+        msg = "no canonic project found; run from inside a project directory"
         if get_cli_context(ctx).json_output:
             typer.echo(json.dumps({"error": msg}))
         else:

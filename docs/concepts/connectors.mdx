@@ -1,13 +1,13 @@
 ---
 title: "Connectors"
-description: "How canonic reads a warehouse, a dbt project, a BI tool, or a doc — through one capability contract."
+description: "How canonic reads a warehouse, a dbt project, a BI tool, or a doc: through one capability contract."
 ---
 
-A connector declares **capabilities**, not identity. canonic's core dispatches on capability — `introspect_schema`, `run_read_only_sql`, `extract_definitions`, `extract_evidence` — never on vendor name, so adding a new source is a registration, not a core-code change.
+A connector declares **capabilities**, not identity. canonic's core dispatches on capability (`introspect_schema`, `run_read_only_sql`, `extract_definitions`, `extract_evidence`), never on vendor name, so adding a new source is a registration, not a core-code change.
 
 ## The connector factory
 
-`canonic.yaml` stores a connection as a descriptor — `id` + `type` + `params` (+ optional `credentials_ref`) — not a live instance. At startup, the `ConnectorFactory` looks up `type` in its registry and builds the connector:
+`canonic.yaml` stores a connection as a descriptor: `id` + `type` + `params` (+ optional `credentials_ref`), not a live instance. At startup, the `ConnectorFactory` looks up `type` in its registry and builds the connector:
 
 ```python
 default_factory.register("postgres", PostgresConnector)
@@ -16,24 +16,24 @@ default_factory.register("metabase", MetabaseConnector)
 # … one register() call per type; no vendor branches in core logic
 ```
 
-An unregistered `type` raises `UnknownConnectorType` (exit `13`) listing what *is* registered — never a silent fallback. Manage connections with [`canonic connection`](/cli-reference/connection).
+An unregistered `type` raises `UnknownConnectorType` (exit `13`) listing what *is* registered, never a silent fallback. Manage connections with [`canonic connection`](/cli-reference/connection).
 
 ## Three classes of connector
 
 ### Queryable (primary)
 
-Implement `introspect_schema` + `run_read_only_sql` — these feed the [semantic layer](/concepts/semantics) and are executed against directly by [`canonic query`](/cli-reference/query-sql-assert) / `canonic sql`.
+Implement `introspect_schema` + `run_read_only_sql`: these feed the [semantic layer](/concepts/semantics) and are executed against directly by [`canonic query`](/cli-reference/query-sql-assert) / `canonic sql`.
 
 | Type | Notes |
 | --- | --- |
 | `postgres` | Catalog introspection via `information_schema`/`pg_catalog`. |
-| `sqlite` | Local `.db` file — no server, no network. |
+| `sqlite` | Local `.db` file, no server, no network. |
 | `duckdb` | Local `.duckdb` file, or reads CSV/Parquet/JSON directly. |
 | `redshift` | Postgres-compatible catalog surface. |
 
 ### Definition
 
-Implement `extract_definitions` — feed the semantic layer and canonical-binding candidates from *modeling code*, never the query path (no `run_read_only_sql`).
+Implement `extract_definitions`: feed the semantic layer and canonical-binding candidates from *modeling code*, never the query path (no `run_read_only_sql`).
 
 | Type | Notes |
 | --- | --- |
@@ -41,29 +41,29 @@ Implement `extract_definitions` — feed the semantic layer and canonical-bindin
 
 ### Evidence
 
-Implement `extract_evidence` — feed [knowledge pages](/concepts/knowledge-layer) and reconciliation signal from docs and BI usage. Also never queryable.
+Implement `extract_evidence`: feed [knowledge pages](/concepts/knowledge-layer) and reconciliation signal from docs and BI usage. Also never queryable.
 
 | Type | Notes |
 | --- | --- |
 | `looker` | Dashboards/explores/usage → usage evidence. |
 | `metabase` | Questions/dashboards → usage evidence: candidate metric definitions plus usage frequency. |
 | `notion` | Pages → doc evidence (policies, caveats, definitions). |
-| `url` | Arbitrary web pages/text → doc evidence — the generic, vendor-free path, also what [`canonic knowledge add`](/cli-reference/knowledge#knowledge-add) uses for one-shot fetches. |
+| `url` | Arbitrary web pages/text → doc evidence, the generic, vendor-free path, also what [`canonic knowledge add`](/cli-reference/knowledge#knowledge-add) uses for one-shot fetches. |
 
 <Note>
-  A BI question's SQL is only ever evidence — never executed. If a Metabase/Looker-encoded metric is adopted, it's recompiled through the deterministic compiler like any other definition, never run as-is.
+  A BI question's SQL is only ever evidence, never executed. If a Metabase/Looker-encoded metric is adopted, it's recompiled through the deterministic compiler like any other definition, never run as-is.
 </Note>
 
-This list isn't closed — any wiki or knowledge base (Confluence, Jira, internal docs tools, etc.) fits the same `extract_evidence` capability as `notion` and `url` today, and can be added as a new registered type without touching core logic.
+This list isn't closed: any wiki or knowledge base (Confluence, Jira, internal docs tools, etc.) fits the same `extract_evidence` capability as `notion` and `url` today, and can be added as a new registered type without touching core logic.
 
 ## Normalized evidence, one shape per kind
 
 Every connector translates its native output into one of a few normalized shapes, so the [ingestion engine](/concepts/ingestion-and-reconciliation) and compiler never see vendor-specific structures:
 
-- **`RelationSchema`** — a table/view: columns (normalized types), primary key, foreign keys, row-count estimate. From queryable connectors' `introspect_schema`.
-- **`DefinitionEvidence`** — a named measure/dimension/join from modeling code, with its expression and additivity. From `extract_definitions`.
-- **`DocEvidence`** — a title + body + candidate topic references, with a `usage_hint` that maps to a knowledge page's `usage_mode`. From `extract_evidence` doc sources.
-- **`UsageEvidence`** — a BI artifact (question/dashboard), the metric it appears to define, and how often it's used — always a *candidate*, never auto-promoted to canonical.
+- **`RelationSchema`**, a table/view: columns (normalized types), primary key, foreign keys, row-count estimate. From queryable connectors' `introspect_schema`.
+- **`DefinitionEvidence`**, a named measure/dimension/join from modeling code, with its expression and additivity. From `extract_definitions`.
+- **`DocEvidence`**, a title + body + candidate topic references, with a `usage_hint` that maps to a knowledge page's `usage_mode`. From `extract_evidence` doc sources.
+- **`UsageEvidence`**, a BI artifact (question/dashboard), the metric it appears to define, and how often it's used; always a *candidate*, never auto-promoted to canonical.
 
 Unmappable native constructs are recorded with a warning, never silently dropped.
 
@@ -73,17 +73,17 @@ For queryable connectors, read-only is defense in depth, not a convention: a rea
 
 ## Schema acquisition ladder
 
-When live introspection is unavailable or partial, canonic descends a priority order — every tier still emits the same `RelationSchema`, tagged with which tier produced it:
+When live introspection is unavailable or partial, canonic descends a priority order; every tier still emits the same `RelationSchema`, tagged with which tier produced it:
 
-1. **Live introspection** — catalog views.
-2. **Modeling code as schema** — via a `dbt`/definition connector.
+1. **Live introspection**: catalog views.
+2. **Modeling code as schema**: via a `dbt`/definition connector.
 3. **Query-history inference** *(not yet implemented)*.
-4. **Declarative import** — user supplies DDL / a schema export.
+4. **Declarative import**: user supplies DDL / a schema export.
 5. **Sample-based inference** *(not yet implemented)*.
-6. **Hand-authored `semantics/*.yaml`** — validated against the live source before being trusted (below).
+6. **Hand-authored `semantics/*.yaml`**: validated against the live source before being trusted (below).
 
-Partial capability is never silent — if only some relations are introspectable, the gap is reported rather than omitted.
+Partial capability is never silent: if only some relations are introspectable, the gap is reported rather than omitted.
 
 ## Schema validation probe
 
-Whenever a schema is acquired declaratively or hand-authored (tiers 4–6), canonic issues a zero-data, read-only probe (`SELECT <declared columns> FROM <relation> WHERE false`) against the live source before trusting the evidence. A mismatch returns `SCHEMA_MISMATCH` with a diff of missing/extra columns and type conflicts — never a silent accept.
+Whenever a schema is acquired declaratively or hand-authored (tiers 4–6), canonic issues a zero-data, read-only probe (`SELECT <declared columns> FROM <relation> WHERE false`) against the live source before trusting the evidence. A mismatch returns `SCHEMA_MISMATCH` with a diff of missing/extra columns and type conflicts, never a silent accept.

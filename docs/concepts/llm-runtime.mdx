@@ -1,21 +1,21 @@
 ---
 title: "LLM & embeddings runtime"
-description: "One interface to generation and embeddings — and the enforced air-gapped guarantee."
+description: "One interface to generation and embeddings; the enforced air-gapped guarantee."
 ---
 
 The runtime turns the `llm`/`embeddings` blocks in `canonic.yaml` into actual model calls. It gives the rest of canonic one interface to generation and one to embeddings regardless of provider, and it owns the offline/air-gapped guarantee. See [Configuring an LLM](/configuring-an-llm) for the four providers and their config shapes.
 
 <Note>
-  The compiler is never on this path. Compile/query is fully deterministic and LLM-free by construction — generation is used only for drafting during setup/ingest, never for computing an answer.
+  The compiler is never on this path. Compile/query is fully deterministic and LLM-free by construction; generation is used only for drafting during setup/ingest, never for computing an answer.
 </Note>
 
 ## One interface, any backend
 
-Every provider is reached through [litellm](https://github.com/BerriAI/litellm) behind one interface — local runtimes and hosted OpenAI-compatible endpoints (`openai_compatible`) differ from native hosted APIs (`openai`, `anthropic`, `github_copilot`) only in `base_url`/credential handling. litellm routes purely on the model-string prefix, so there's no per-provider branch anywhere in canonic's core logic.
+Every provider is reached through [litellm](https://github.com/BerriAI/litellm) behind one interface; local runtimes and hosted OpenAI-compatible endpoints (`openai_compatible`) differ from native hosted APIs (`openai`, `anthropic`, `github_copilot`) only in `base_url`/credential handling. litellm routes purely on the model-string prefix, so there's no per-provider branch anywhere in canonic's core logic.
 
 ## Task-based model routing
 
-Different work wants different models — cheap/local for high-volume drafting, a stronger model for judgment-heavy work. Three named tasks route independently:
+Different work wants different models; cheap/local for high-volume drafting, a stronger model for judgment-heavy work. Three named tasks route independently:
 
 | Task | Used by |
 | --- | --- |
@@ -32,9 +32,9 @@ llm:
     reconcile: claude-opus-4-8   # a harder task gets a stronger model
 ```
 
-A task with no override resolves to the default `model`. Resolution is deterministic — no silent model substitution: a failed call surfaces a structured error after bounded retries rather than quietly falling back to a different model.
+A task with no override resolves to the default `model`. Resolution is deterministic; no silent model substitution: a failed call surfaces a structured error after bounded retries rather than quietly falling back to a different model.
 
-## Air-gapped mode — enforced, not advisory
+## Air-gapped mode: enforced, not advisory
 
 ```yaml
 runtime:
@@ -42,9 +42,9 @@ runtime:
   allow_cidrs: []   # opt in explicit private/LAN ranges for an on-prem inference host
 ```
 
-Default policy under `air_gapped: true` is **localhost-only** — the tightest guarantee. This is defense-in-depth, the same posture as read-only for the database:
+Default policy under `air_gapped: true` is **localhost-only**: the tightest guarantee. This is defense-in-depth, the same posture as read-only for the database:
 
-1. **Load-time validation.** Every configured endpoint must resolve to a local/private address. A public endpoint in config is a hard error at load — the daemon refuses to start misconfigured.
+1. **Load-time validation.** Every configured endpoint must resolve to a local/private address. A public endpoint in config is a hard error at load; the daemon refuses to start misconfigured.
 2. **Call-time enforcement.** Any attempted call to a non-allowlisted host is blocked before the request leaves the process, aborting with `AIR_GAPPED_VIOLATION`.
 3. **No telemetry, no remote secrets.** Opt-in telemetry is forced off under air-gapped, and a `*_ref` pointing at a remote secret service is rejected.
 
@@ -52,7 +52,7 @@ The same allowlist logic (`EgressPolicy`) backs both the load-time check and the
 
 ## Local embeddings
 
-Powers [knowledge search](/concepts/knowledge-layer#retrieval)'s vector arm — an optional `canonic[embeddings]` add-on backed by `sentence-transformers`, not bundled by default.
+Powers [knowledge search](/concepts/knowledge-layer#retrieval)'s vector arm: an optional `canonic[embeddings]` add-on backed by `sentence-transformers`, not bundled by default.
 
 ```yaml
 embeddings:
@@ -60,8 +60,8 @@ embeddings:
   model: <embedding-model>
 ```
 
-When the add-on isn't installed (or the configured model fails to load), the runtime reports itself unavailable cleanly and knowledge search degrades to lexical-only — never a hard failure. The runtime also exposes a model-identity fingerprint that changes whenever the model changes, so a model swap can trigger a reindex instead of silently mixing vectors from two different models. Embeddings run locally, so they're inherently air-gap-compatible.
+When the add-on isn't installed (or the configured model fails to load), the runtime reports itself unavailable cleanly and knowledge search degrades to lexical-only; never a hard failure. The runtime also exposes a model-identity fingerprint that changes whenever the model changes, so a model swap can trigger a reindex instead of silently mixing vectors from two different models. Embeddings run locally, so they're inherently air-gap-compatible.
 
 ## Keys are bring-your-own
 
-Keys are never literal in `canonic.yaml` — `api_key_ref` points at `env:`, `keyring:`, or a local file, resolved only at call time and never logged or written to the event log. Local endpoints typically need no key at all.
+Keys are never literal in `canonic.yaml`: `api_key_ref` points at `env:`, `keyring:`, or a local file, resolved only at call time and never logged or written to the event log. Local endpoints typically need no key at all.

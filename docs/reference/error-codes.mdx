@@ -3,12 +3,12 @@ title: "Error codes"
 description: "The canonical error registry and its headless exit-code mapping."
 ---
 
-Every canonic error carries a stable, wire-safe `code` string plus a headless process exit code — never free text alone, so a caller (script, CI job, agent) can act on it programmatically. The registry lives in `canonic/exc.py` and is guarded by the [release gate](/ci-cd/release-gate)'s conformance tests, so this mapping can't silently drift.
+Every canonic error carries a stable, wire-safe `code` string plus a headless process exit code; never free text alone, so a caller (script, CI job, agent) can act on it programmatically. The registry lives in `canonic/exc.py` and is guarded by the [release gate](/ci-cd/release-gate)'s conformance tests, so this mapping can't silently drift.
 
 | Exit code | `code` | Meaning |
 | --- | --- | --- |
 | 2 | `unresolved` | A metric name matches no active canonical binding. |
-| 3 | `ambiguous` | A name matches more than one active binding — candidates are returned. |
+| 3 | `ambiguous` | A name matches more than one active binding; candidates are returned. |
 | 4 | `unreachable` | A dimension/filter has no declared join path to the metric's source. |
 | 5 | `ambiguous_join_path` | More than one valid join path exists; the query must name an explicit `via`. |
 | 6 | `unsupported_measure` | A non-additive/semi-additive measure was requested at a grain no strategy can safely serve. |
@@ -28,9 +28,9 @@ Every canonic error carries a stable, wire-safe `code` string plus a headless pr
 
 ## Resolving `ambiguous`
 
-When a name matches more than one active binding, the error carries a `candidates` list — the exact, unambiguous values to re-issue the request with. Both `--json` and plain-text CLI output, and the MCP tool error payload, include it.
+When a name matches more than one active binding, the error carries a `candidates` list; the exact, unambiguous values to re-issue the request with. Both `--json` and plain-text CLI output, and the MCP tool error payload, include it.
 
-**Ambiguous dimension** — a dimension name is declared on more than one join-reachable source (e.g. `country` exists on both `customers` and a twice-joined `locations`, reached as `pickup`/`dropoff`):
+**Ambiguous dimension**: a dimension name is declared on more than one join-reachable source (e.g. `country` exists on both `customers` and a twice-joined `locations`, reached as `pickup`/`dropoff`):
 
 ```bash
 canonic query --metrics rental_revenue --dimensions country
@@ -44,18 +44,18 @@ error ambiguous: dimension 'country' is present on multiple join-reachable sourc
   hint: qualify with one of the candidates above, e.g. --dimensions customers.country
 ```
 
-Qualify with `alias.dimension` — the alias is the join's `name` (or the source name for an unnamed join) — to pick the one you mean:
+Qualify with `alias.dimension`: the alias is the join's `name` (or the source name for an unnamed join); to pick the one you mean:
 
 ```bash
 canonic query --metrics rental_revenue --dimensions customers.country
 ```
 
-**Ambiguous metric name** — two active bindings share a name/alias. The `candidates` list names each competing metric; re-issue with the specific canonical name (or fix the duplicate alias in `contracts/metrics/`) rather than the ambiguous shared one.
+**Ambiguous metric name**: two active bindings share a name/alias. The `candidates` list names each competing metric; re-issue with the specific canonical name (or fix the duplicate alias in `contracts/metrics/`) rather than the ambiguous shared one.
 
 ## Errors without a registry code
 
 A few internal/caller-contract errors carry no wire `ErrorCode` and use the default exit code **1**: `CapabilityNotSupportedError` (a connector was asked to honor a capability it doesn't declare), `EmbeddingUnavailable` (embed called without gating on `is_available()`), `CredentialError`, `SemanticSourceError`, `ContractError`, and `KnowledgePageError`. These signal a caller/config mistake rather than a documented, structured failure mode.
 
 <Note>
-  `EvalDatasetError` (a malformed `canonic eval baseline` dataset/candidates file) and `KnowledgeReferenceError` (a broken `sl_ref`/page link) both reuse `validation_failed` (exit 9) rather than defining new codes — they're the same class of failure as any other invalid input file.
+  `EvalDatasetError` (a malformed `canonic eval baseline` dataset/candidates file) and `KnowledgeReferenceError` (a broken `sl_ref`/page link) both reuse `validation_failed` (exit 9) rather than defining new codes; they're the same class of failure as any other invalid input file.
 </Note>

@@ -3,7 +3,7 @@ title: "canonic sl"
 description: "Semantic layer: resolve, compile, and describe."
 ---
 
-`canonic sl` exposes the semantic-layer capabilities directly — useful for debugging what a metric resolves to or what SQL a query compiles down to, without executing anything.
+`canonic sl` exposes the semantic-layer capabilities directly: useful for debugging what a metric resolves to or what SQL a query compiles down to, without executing anything.
 
 <Note>
   With `--json`, each of these commands' output matches its corresponding MCP tool payload byte-for-byte (`resolve_metric`, `compile_query`, `describe_metric`).
@@ -36,12 +36,12 @@ canonic sl compile --file query.json
 
 | Flag | Description |
 | --- | --- |
-| `--metrics` | Metric name(s) — comma-separated and/or repeatable. |
-| `--dimensions` | Dimension name(s) — same comma/repeat rules as `--metrics`. |
+| `--metrics` | Metric name(s): comma-separated and/or repeatable. |
+| `--dimensions` | Dimension name(s): same comma/repeat rules as `--metrics`. |
 | `--filter` | A filter as `field=value` or `field:op:value` (repeatable). |
 | `--file`, `-f` | Semantic query JSON file. |
 
-`--metrics`/`--dimensions`/`--filter` and `-f` are mutually exclusive, same as `canonic query` — see [`canonic query`](/cli-reference/query-sql-assert) for the full filter syntax. The flags build the identical `SemanticQuery` a JSON file would deserialize: `{"metrics": [...], "dimensions": [...], "filters": [...], "limit": null}`. Output includes the target dialect, the compiled SQL, resolved bindings, and any guardrails that fired.
+`--metrics`/`--dimensions`/`--filter` and `-f` are mutually exclusive, same as `canonic query`; see [`canonic query`](/cli-reference/query-sql-assert) for the full filter syntax. The flags build the identical `SemanticQuery` a JSON file would deserialize: `{"metrics": [...], "dimensions": [...], "filters": [...], "limit": null}`. Output includes the target dialect, the compiled SQL, resolved bindings, and any guardrails that fired.
 
 ## `sl describe`
 

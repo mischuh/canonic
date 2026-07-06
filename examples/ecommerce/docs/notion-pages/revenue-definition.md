@@ -1,5 +1,5 @@
 ---
-# Notion page properties — set these in the Notion sidebar before connecting Canonic.
+# Notion page properties: set these in the Notion sidebar before connecting Canonic.
 # The Notion connector reads them deterministically; no LLM is involved.
 #   "Canonic Type"   (select):       definition
 #   "Canonic Topics" (multi-select): revenue, metrics, definitions
@@ -15,7 +15,7 @@ canonic_topics: [revenue, metrics, definitions]
 
 - Orders with `status = 'completed'` or `status = 'pending'`.
 - Each order records a single `amount` in the transaction currency. No FX conversion is applied
-  in v1 — multi-currency orders are summed at face value.
+  in v1: multi-currency orders are summed at face value.
 
 ## What it excludes
 
@@ -29,7 +29,7 @@ The exclusion is automatically enforced: the `revenue-excludes-refunds` guardrai
 ## Grain
 
 One row per order. The metric is fully additive across all dimensions available on the `orders`
-source — customer country, sales channel, and order date.
+source: customer country, sales channel, and order date.
 
 ## How this becomes a Canonic knowledge page
 
@@ -37,7 +37,7 @@ When Canonic ingests this Notion page, it produces a `DocEvidence` record with:
 - `title`: "Revenue Definition"
 - `body`: the prose above
 - `usage_hint`: `definition` (from the *Canonic Type* property)
-- `topic_refs`: `["revenue", "metrics", "definitions"]` (from *Canonic Topics* — resolved as candidates)
+- `topic_refs`: `["revenue", "metrics", "definitions"]` (from *Canonic Topics*: resolved as candidates)
 - `acquisition_tier`: `hand_authored`
 
 E6 then writes this as a `definition`-mode knowledge page and surfaces it in `search_knowledge("revenue definition")`.

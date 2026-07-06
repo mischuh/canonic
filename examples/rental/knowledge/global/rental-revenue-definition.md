@@ -11,7 +11,7 @@ meta:
 
 **Rental revenue** is the total amount collected from customers across all settled payment transactions.
 
-The live expression — rendered directly from the semantic layer:
+The live expression: rendered directly from the semantic layer:
 
 > `{{ sl:rental_db.payments.total_paid.expr }}`
 
@@ -19,14 +19,14 @@ The live expression — rendered directly from the semantic layer:
 
 Each `payments` row records one payment transaction. `total_paid` sums only rows where
 `status = 'settled'`, excluding pending, failed, and refunded transactions. Because a single
-rental may have multiple payments, `total_paid` is defined on the `payments` fact — not on
+rental may have multiple payments, `total_paid` is defined on the `payments` fact: not on
 `rentals.total_amount`.
 
 ## What it excludes
 
 | Excluded | Reason |
 |---|---|
-| Pending payments | Not yet collected — outstanding charge |
+| Pending payments | Not yet collected: outstanding charge |
 | Failed payments | Payment attempt did not clear |
 | Refunded payments | Revenue already reversed |
 | Active / confirmed rentals | No payment settled yet |
@@ -37,8 +37,8 @@ rental may have multiple payments, `total_paid` is defined on the `payments` fac
 | Measure | Source | Counts |
 |---|---|---|
 | `rental_revenue` | payments | settled payment amounts only |
-| `rentals.total_base_revenue` | rentals | planned total for completed rentals — **do not use for financial reporting** |
-| `damages.total_repair_cost` | damages | vehicle repair costs — separate from rental revenue |
+| `rentals.total_base_revenue` | rentals | planned total for completed rentals: **do not use for financial reporting** |
+| `damages.total_repair_cost` | damages | vehicle repair costs: separate from rental revenue |
 
 ## Grain
 

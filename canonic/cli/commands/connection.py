@@ -37,7 +37,7 @@ def _project_or_exit(ctx: typer.Context) -> Any:
     """Return project root path or exit 1 with a clear message."""
     root = find_project_root()
     if root is None:
-        msg = "no canonic project found — run from inside a project directory"
+        msg = "no canonic project found; run from inside a project directory"
         json_output = get_cli_context(ctx).json_output
         if json_output:
             typer.echo(json.dumps({"error": msg}))

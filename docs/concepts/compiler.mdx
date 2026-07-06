@@ -3,11 +3,11 @@ title: "The semantic compiler"
 description: "Deterministic, LLM-free translation from a semantic query to dialect-correct SQL."
 ---
 
-The compiler turns a protocol-neutral **semantic query** into read-only, dialect-correct SQL. It is completely deterministic — no LLM, no wall-clock, no randomness. Given identical `semantics/`, `contracts/`, and query, it emits byte-identical SQL every time.
+The compiler turns a protocol-neutral **semantic query** into read-only, dialect-correct SQL. It is completely deterministic: no LLM, no wall-clock, no randomness. Given identical `semantics/`, `contracts/`, and query, it emits byte-identical SQL every time.
 
 ## The semantic query
 
-The input the compiler resolves — produced by adapters (CLI/MCP), never by plain language:
+The input the compiler resolves, produced by adapters (CLI/MCP), never by plain language:
 
 ```json
 {
@@ -19,13 +19,13 @@ The input the compiler resolves — produced by adapters (CLI/MCP), never by pla
 }
 ```
 
-The query references **names** — metrics, dimensions — never physical tables or columns. Those are resolved against [canonical bindings](/concepts/contracts-and-guardrails#canonical-metric-bindings) and [semantic sources](/concepts/semantics).
+The query references **names** (metrics, dimensions), never physical tables or columns. Those are resolved against [canonical bindings](/concepts/contracts-and-guardrails#canonical-metric-bindings) and [semantic sources](/concepts/semantics).
 
 ## Pipeline stages
 
 1. **Resolve metrics.** Map each metric name → canonical binding → source/measure (or composite components). Unknown/ambiguous → `UNRESOLVED`/`AMBIGUOUS` with candidates.
 2. **Resolve dimensions & filters.** Bind to columns on the owning source or a join-reachable source. Unreachable → `UNREACHABLE`.
-3. **Plan the join graph.** From the metric's source, find the minimal join path to every referenced source using only declared `joins`. No path → `UNREACHABLE`; more than one valid path → `AMBIGUOUS_JOIN_PATH` — the compiler never guesses a shortest path or invents a cross join.
+3. **Plan the join graph.** From the metric's source, find the minimal join path to every referenced source using only declared `joins`. No path → `UNREACHABLE`; more than one valid path → `AMBIGUOUS_JOIN_PATH`; the compiler never guesses a shortest path or invents a cross join.
 4. **Fanout & additivity analysis.** Detect when a join fans out the grain relative to a measure's source grain, and dispatch to the binding's compilation strategy (below).
 5. **Apply finality & coalescing.** If the metric has a [finality rule](/concepts/contracts-and-guardrails#finality), select the right source(s) for the requested time window and tag output rows `final`/`provisional`.
 6. **Enforce guardrails.** AND-in mandatory filters, apply `restrict_source` for the active `context`. `severity: error` blocks; `warn` annotates.
@@ -47,13 +47,13 @@ Output shape:
 }
 ```
 
-Errors are always structured (`code`, `message`, `candidates?`) — never free text — so a caller can act on them programmatically instead of parsing prose.
+Errors are always structured (`code`, `message`, `candidates?`), never free text, so a caller can act on them programmatically instead of parsing prose.
 
 ## No guessing
 
-Stage 2 and stage 3 share one rule: if there is more than one way to satisfy a query, the compiler refuses rather than picking one silently. It doesn't matter that a join *could* be inferred — if the semantic model doesn't say which one, the compiler asks instead of guessing.
+Stage 2 and stage 3 share one rule: if there is more than one way to satisfy a query, the compiler refuses rather than picking one silently. It doesn't matter that a join *could* be inferred; if the semantic model doesn't say which one, the compiler asks instead of guessing.
 
-A concrete case: a car-rental model where `rentals` joins `locations` twice — once as `pickup`, once as `dropoff` — and `country` is a declared dimension on both `locations` and `customers`. Asking for `country` without saying which one is ambiguous:
+A concrete case: a car-rental model where `rentals` joins `locations` twice (once as `pickup`, once as `dropoff`) and `country` is a declared dimension on both `locations` and `customers`. Asking for `country` without saying which one is ambiguous:
 
 ```bash
 canonic sl compile --metrics rental_revenue --dimensions country
@@ -67,7 +67,7 @@ error ambiguous: dimension 'country' is present on multiple join-reachable sourc
   hint: qualify with one of the candidates above, e.g. --dimensions customers.country
 ```
 
-The `candidates` list is exact and actionable — pass one back to disambiguate, and the compiler joins precisely that path, nothing more:
+The `candidates` list is exact and actionable: pass one back to disambiguate, and the compiler joins precisely that path, nothing more:
 
 ```bash
 canonic sl compile --metrics rental_revenue --dimensions pickup.country
@@ -83,7 +83,7 @@ resolved:
   rental_revenue → payments.total_paid
 ```
 
-Only the `pickup` join was added — `customers` and `dropoff` never appear in the SQL, because nothing in the query needed them. The same discipline applies one level up: when a *join path itself* has more than one valid route (`AMBIGUOUS_JOIN_PATH`), the compiler returns candidate routes and expects `via` to pick one — see [Resolving `ambiguous`](/reference/error-codes#resolving-ambiguous) for both cases end to end.
+Only the `pickup` join was added: `customers` and `dropoff` never appear in the SQL, because nothing in the query needed them. The same discipline applies one level up: when a *join path itself* has more than one valid route (`AMBIGUOUS_JOIN_PATH`), the compiler returns candidate routes and expects `via` to pick one; see [Resolving `ambiguous`](/reference/error-codes#resolving-ambiguous) for both cases end to end.
 
 ## Fanout & additivity
 
@@ -92,21 +92,21 @@ A join can multiply rows relative to a measure's grain (one-to-many, many-to-man
 | `kind` | How it compiles |
 | --- | --- |
 | `single` (additive) | Deduplicate to the measure's own grain before summing across a fanout join. |
-| `ratio` / `weighted_avg` | Each component (itself another metric) is planned as an independent sub-query through the full pipeline, then combined with a divide step on the shared grain — never divided row-by-row. |
+| `ratio` / `weighted_avg` | Each component (itself another metric) is planned as an independent sub-query through the full pipeline, then combined with a divide step on the shared grain, never divided row-by-row. |
 | `semi_additive` | Sums normally over dimensions the query groups by; collapses the non-additive dimension (e.g. `snapshot_date`) via a window function (`last`/`first`/`avg`/`min`/`max`) when the query doesn't group by it. |
-| `distinct_count` / `percentile` | Recomputed directly from base rows at the requested grain — never derived from a partial `count(distinct …)` or a combined quantile. |
+| `distinct_count` / `percentile` | Recomputed directly from base rows at the requested grain, never derived from a partial `count(distinct …)` or a combined quantile. |
 | `opaque` | Served only at its declared native grain; any other grain is rejected outright. |
 
-The unifying rule behind the composable strategies: **aggregate first, combine last** — division, weighting, and ratios happen on the aggregated result, never on raw rows. Where no strategy can guarantee correctness, the compiler refuses with `UNSUPPORTED_MEASURE` or `FANOUT_UNSAFE` and a rationale, rather than emit a silently wrong number.
+The unifying rule behind the composable strategies: **aggregate first, combine last**; division, weighting, and ratios happen on the aggregated result, never on raw rows. Where no strategy can guarantee correctness, the compiler refuses with `UNSUPPORTED_MEASURE` or `FANOUT_UNSAFE` and a rationale, rather than emit a silently wrong number.
 
 When a metric is composed from parts, the result inherits the **most conservative** signal across them: stale if any component is stale, provisional if any component is provisional, and `guardrails_fired` is the union across every leaf.
 
 ## Dialect adapter
 
-The compiler builds one dialect-neutral SQLGlot AST; a dialect adapter transpiles it to the target engine — type mapping, identifier quoting, `LIMIT` injection, and the read-only guarantee. Adding a database and supporting its SQL dialect are independent concerns.
+The compiler builds one dialect-neutral SQLGlot AST; a dialect adapter transpiles it to the target engine: type mapping, identifier quoting, `LIMIT` injection, and the read-only guarantee. Adding a database and supporting its SQL dialect are independent concerns.
 
-Dialects shipped today: **PostgreSQL**, **DuckDB**, **SQLite** — matching the [queryable connectors](/concepts/connectors#queryable-primary). An unrecognized dialect name that SQLGlot itself understands still works via a generic adapter; anything else falls back to the PostgreSQL adapter to preserve existing behavior.
+Dialects shipped today: **PostgreSQL**, **DuckDB**, **SQLite**, matching the [queryable connectors](/concepts/connectors#queryable-primary). An unrecognized dialect name that SQLGlot itself understands still works via a generic adapter; anything else falls back to the PostgreSQL adapter to preserve existing behavior.
 
 ## Determinism & headless
 
-No part of the compiler consults an LLM or the wall clock (beyond an explicit `as_of` on relative dates). In headless/CI invocation, each error class maps to a distinct process exit code (`UNRESOLVED`, `AMBIGUOUS`, `UNREACHABLE`, `AMBIGUOUS_JOIN_PATH`, `UNSUPPORTED_MEASURE`, `FANOUT_UNSAFE`, `GUARDRAIL_BLOCK`, `VALIDATION_FAILED`, `ASSERTION_FAILED`) — see [`canonic assert`](/cli-reference/query-sql-assert#canonic-assert) for how this backs the accuracy CI gate.
+No part of the compiler consults an LLM or the wall clock (beyond an explicit `as_of` on relative dates). In headless/CI invocation, each error class maps to a distinct process exit code (`UNRESOLVED`, `AMBIGUOUS`, `UNREACHABLE`, `AMBIGUOUS_JOIN_PATH`, `UNSUPPORTED_MEASURE`, `FANOUT_UNSAFE`, `GUARDRAIL_BLOCK`, `VALIDATION_FAILED`, `ASSERTION_FAILED`), see [`canonic assert`](/cli-reference/query-sql-assert#canonic-assert) for how this backs the accuracy CI gate.

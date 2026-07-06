@@ -8,7 +8,7 @@ canonic_topics: [revenue, refunds, guardrails]
 
 # Revenue Excludes Refunds
 
-Every revenue figure in this company excludes refunded orders. This is not a convention — it is
+Every revenue figure in this company excludes refunded orders. This is not a convention: it is
 enforced by the `revenue-excludes-refunds` guardrail, which automatically injects
 `status != 'refunded'` into every query that touches `total_revenue`. You cannot accidentally
 include refunds by forgetting a WHERE clause.
@@ -32,5 +32,5 @@ In the ecommerce demo data this gap is **260.00** (orders 2 and 8, both `status 
 
 Canonic ingests this page as `DocEvidence` with `usage_hint: caveat`. E6 writes it as a
 `caveat`-mode knowledge page and **auto-surfaces** it alongside any search result that touches
-`orders.total_revenue` — so the warning rides along even if the original query was about
+`orders.total_revenue`: so the warning rides along even if the original query was about
 reporting policy, not refunds.

@@ -14,7 +14,7 @@ meta:
 
 **Total revenue** is the sum of completed and pending order amounts, excluding refunded orders.
 
-The live expression — rendered directly from the semantic layer, so this definition can never drift:
+The live expression: rendered directly from the semantic layer, so this definition can never drift:
 
 > `{{ sl:warehouse_pg.orders.total_revenue.expr }}`
 
@@ -25,7 +25,7 @@ The live expression — rendered directly from the semantic layer, so this defin
 
 ## What it excludes
 
-Refunded orders are removed by the `revenue-excludes-refunds` guardrail on every query — the filter
+Refunded orders are removed by the `revenue-excludes-refunds` guardrail on every query: the filter
 is enforced by the compiler, not by convention. See the [[revenue-excludes-refunds-caveat]] page for
 the business rationale.
 

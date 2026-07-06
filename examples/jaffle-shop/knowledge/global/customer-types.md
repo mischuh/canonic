@@ -8,7 +8,7 @@ provenance: human_curated
 
 The `customer_type` field on the `customers` table has two values:
 
-- **`personal`** — individual consumer accounts
-- **`business`** — B2B accounts that often order in bulk or have negotiated pricing
+- **`personal`**: individual consumer accounts
+- **`business`**: B2B accounts that often order in bulk or have negotiated pricing
 
 When slicing revenue or order count by customer segment, use `customer_type` from the `orders` semantic model (which carries it as a categorical dimension from the join to `customers`).

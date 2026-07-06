@@ -244,8 +244,8 @@ def _run_wizard(root: Path) -> None:
 
 def _run_golden_path(root: Path, config: CanonicConfig, scaffolded: list[Path]) -> None:
     """Steps 5–7: bootstrap → first answer → handoff + completion panel."""
-    _console.print("\n[dim]step 5 — bootstrapping connection…[/dim]")
-    logger.info("setup: golden path step 5 — bootstrapping connection")
+    _console.print("\n[dim]step 5: bootstrapping connection…[/dim]")
+    logger.info("setup: golden path step 5: bootstrapping connection")
     pipeline_result = _bootstrap_connection(root, config)
     if pipeline_result is not None:
         emit_milestone(DiskAnswerEventLog(root), FunnelMilestone.BOOTSTRAP_COMPLETED)
@@ -354,7 +354,7 @@ def _render_curated_review(pipeline_result: PipelineResult | None) -> int:
     shown = items[:_REVIEW_CAP]
     deferred = len(items) - len(shown)
 
-    _console.print("\n[dim]curated review — sources held for human confirmation[/dim]")
+    _console.print("\n[dim]curated review: sources held for human confirmation[/dim]")
     for item in shown:
         anchor = item.anchors[0] if item.anchors else "—"
         _console.print(
@@ -365,7 +365,7 @@ def _render_curated_review(pipeline_result: PipelineResult | None) -> int:
         _console.print(f"    [dim]{item.why}[/dim]")
     if deferred:
         _console.print(
-            f"  [dim]… and {deferred} more — run [bold]canonic ingest[/bold] to review them[/dim]"
+            f"  [dim]… and {deferred} more; run [bold]canonic ingest[/bold] to review them[/dim]"
         )
 
     return len(items)
@@ -375,12 +375,12 @@ def _try_first_answer(root: Path, config: CanonicConfig, sources: list[SemanticS
     """Attempt the demo query; return True if result rows were shown."""
     source, measure, dim = _pick_demo_target(sources)
     if source is None or measure is None:
-        _console.print("\n[dim]step 6 — schema overview[/dim]")
+        _console.print("\n[dim]step 6: schema overview[/dim]")
         _render_describe_fallback(config, sources)
         return False
 
-    _console.print("\n[dim]step 6 — running first answer…[/dim]")
-    logger.info("setup: golden path step 6 — running demo query on source=%s", source.name)
+    _console.print("\n[dim]step 6: running first answer…[/dim]")
+    logger.info("setup: golden path step 6: running demo query on source=%s", source.name)
     try:
         result, sq = asyncio.run(_run_demo_query(root, config, sources, source, measure, dim))
     except CanonicError as exc:  # structured registry-coded failure — surface it (OB-S5 AC2)
@@ -462,7 +462,7 @@ async def _run_demo_query(
 def _render_first_answer(result: QueryResult, sq: SemanticQuery, source_name: str) -> None:
     """Render result rows, metadata band, and the exact query call."""
     rs = result.result
-    table = Table(show_header=True, header_style="bold cyan", title=f"first answer — {source_name}")
+    table = Table(show_header=True, header_style="bold cyan", title=f"first answer: {source_name}")
     for col in rs.columns:
         table.add_column(col.name)
     for row in rs.rows:
@@ -570,14 +570,14 @@ def _render_setup_complete(
     """Print the completion panel with three concrete next actions (step 7)."""
     files = ", ".join(p.name for p in scaffolded) if scaffolded else "no new paths"
     ingest_label = (
-        f"[bold]canonic ingest[/bold]                 — review {withheld_count} proposal(s) waiting"
+        f"[bold]canonic ingest[/bold]                 : review {withheld_count} proposal(s) waiting"
         if withheld_count
-        else "[bold]canonic ingest[/bold]                 — review and apply the proposed semantic context"
+        else "[bold]canonic ingest[/bold]                 : review and apply the proposed semantic context"
     )
     next_steps = (
         f"{ingest_label}\n"
-        "[bold]canonic query -f <query.json>[/bold]  — run your own query\n"
-        "[bold]canonic mcp start[/bold]              — connect an agent via MCP"
+        "[bold]canonic query --metrics <m> --dimensions <d>[/bold]  : run your own query\n"
+        "[bold]canonic mcp start[/bold]              : connect an agent via MCP"
     )
     if not demo_ok:
         next_steps += (
@@ -589,7 +589,7 @@ def _render_setup_complete(
         Panel.fit(
             f"[green]✓[/green] Project [bold]{config.project.name}[/bold] is ready.\n"
             f"Wrote canonic.yaml and scaffolded {files}.\n\n"
-            f"[bold]step 7 — what's next[/bold]\n{next_steps}",
+            f"[bold]step 7: what's next[/bold]\n{next_steps}",
             title="setup complete",
         )
     )
@@ -599,7 +599,7 @@ def _render_setup_complete(
 
 
 def _existing_project_menu(root: Path) -> None:
-    _console.print("[yellow]canonic.yaml already exists[/yellow] — entering project menu.")
+    _console.print("[yellow]canonic.yaml already exists[/yellow]; entering project menu.")
     _print_status(root)
     while True:
         choice = typer.prompt(
@@ -615,7 +615,7 @@ def _existing_project_menu(root: Path) -> None:
         elif choice == "4":
             return
         else:
-            _console.print("[red]invalid choice[/red] — enter 1, 2, 3 or 4")
+            _console.print("[red]invalid choice[/red]; enter 1, 2, 3 or 4")
 
 
 def _generate_contracts_for_existing(root: Path) -> None:
@@ -628,7 +628,7 @@ def _generate_contracts_for_existing(root: Path) -> None:
         _console.print(f"[red]error loading sources:[/red] {exc}")
         return
     if not sources:
-        _console.print("[yellow]no semantic sources found[/yellow] — run canonic ingest first")
+        _console.print("[yellow]no semantic sources found[/yellow]; run canonic ingest first")
         return
     count = _write_bootstrap_contracts(root, sources)
     if count:

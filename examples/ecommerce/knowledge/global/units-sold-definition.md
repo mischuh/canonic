@@ -15,20 +15,20 @@ meta:
 **Units sold** is the total number of product units shipped across all order line items, excluding
 refunded orders (the `revenue-excludes-refunds` guardrail propagates through joins).
 
-The live expression — rendered directly from the semantic layer:
+The live expression: rendered directly from the semantic layer:
 
 > `{{ sl:warehouse_pg.order_items.units_sold.expr }}`
 
 ## Grain
 
 One row per **order line item**, not per order. The measure is fully additive across all
-dimensions reachable from `order_items` — product category, sales channel (via the join
+dimensions reachable from `order_items`: product category, sales channel (via the join
 chain `order_items → orders → channels`), customer country (via `order_items → orders → customers`).
 
 ## What it counts
 
 Each line item records the `quantity` of a single product in a single order. `units_sold` sums
-that quantity. One order with two line items — 3 units of product A and 2 units of product B —
+that quantity. One order with two line items: 3 units of product A and 2 units of product B —
 contributes 5 to `units_sold`.
 
 ## What it excludes

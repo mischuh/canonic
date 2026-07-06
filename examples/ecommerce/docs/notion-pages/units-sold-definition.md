@@ -15,7 +15,7 @@ canonic_topics: [units_sold, metrics, definitions, order_items]
 Each order line item records the `quantity` of one product in one order. `units_sold` sums
 that quantity across all line items belonging to non-refunded orders.
 
-An order with two line items — 3 units of product A and 2 units of product B — contributes
+An order with two line items: 3 units of product A and 2 units of product B: contributes
 **5** to `units_sold`.
 
 ## Grain

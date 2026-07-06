@@ -12,7 +12,7 @@ canonic ingest --dry-run
 canonic ingest --connection warehouse --strict
 ```
 
-Propose-only by default — it writes the audit trail and refreshes `last_validated_at` on unchanged files, but never edits committed semantics in place.
+Propose-only by default; it writes the audit trail and refreshes `last_validated_at` on unchanged files, but never edits committed semantics in place.
 
 | Flag | Description |
 | --- | --- |
@@ -25,7 +25,7 @@ Propose-only by default — it writes the audit trail and refreshes `last_valida
 
 ## Headless mode
 
-Headless mode (explicit `--headless`, or auto-detected when `CI=true`) pins the deterministic builder, opens an auto-PR carrying the diffs and any contradiction notes, and gates the run on the canonical exit codes — the safe, repeatable path for scheduled ingest in CI.
+Headless mode (explicit `--headless`, or auto-detected when `CI=true`) pins the deterministic builder, opens an auto-PR carrying the diffs and any contradiction notes, and gates the run on the canonical exit codes; the safe, repeatable path for scheduled ingest in CI.
 
 ## After a run
 

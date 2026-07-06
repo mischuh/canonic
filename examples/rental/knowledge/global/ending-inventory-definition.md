@@ -13,14 +13,14 @@ meta:
 **Ending inventory** is the count of available vehicles at the last snapshot date of a reporting period,
 measured per location and vehicle category. It represents a point-in-time fleet size, not a flow.
 
-The live expression — rendered directly from the semantic layer:
+The live expression: rendered directly from the semantic layer:
 
 > `{{ sl:rental_db.vehicle_inventory.ending_inventory.expr }}`
 
 ## Grain
 
 One snapshot per unique combination of `vehicle_id`, `location_id`, and `snapshot_date`. The measure is
-fully additive **across vehicles and locations** within a single date, but **NOT additive over time** — it
+fully additive **across vehicles and locations** within a single date, but **NOT additive over time**; it
 is a stock, not a flow.
 
 ## What it counts

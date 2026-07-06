@@ -13,8 +13,8 @@ meta:
 Municipality and province boundaries are resolved by a spatial point-in-polygon join at build
 time (`st_contains` / `st_covers`), not a foreign key in the source data. A station whose
 coordinates fall outside every province polygon (e.g. right at the coast, or just over a border)
-has no match — it gets `municipality_sk = 'unknown'`, which cascades to `province_sk = 'unknown'`
+has no match: it gets `municipality_sk = 'unknown'`, which cascades to `province_sk = 'unknown'`
 on `dim_nl_provinces`.
 
 Grouping `service_count` by `province_name` therefore always has a small `unknown` bucket. This
-is expected, not a data-quality bug — treat it as "location not resolved", not "zero".
+is expected, not a data-quality bug: treat it as "location not resolved", not "zero".
