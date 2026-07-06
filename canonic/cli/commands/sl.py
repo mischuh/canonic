@@ -10,7 +10,7 @@ import typer
 from rich.console import Console
 
 from canonic.cli._errors import get_cli_context, handle_errors
-from canonic.cli.commands import load_service
+from canonic.cli.commands import build_semantic_query, load_service
 
 if TYPE_CHECKING:
     from canonic.compiler.result import CompileResult
@@ -30,7 +30,7 @@ def resolve(
         typer.Option("--context", help="Tag for context-scoped guardrail resolution."),
     ] = None,
 ) -> None:
-    """Resolve a name to its canonical binding (core.resolve).
+    """Resolve a name to its canonical binding.
 
     With ``--json`` the output matches the MCP ``resolve_metric`` tool payload byte-for-byte.
     """
@@ -54,18 +54,32 @@ def resolve(
 def compile_(
     ctx: typer.Context,
     file: Annotated[
-        Path,
+        Path | None,
         typer.Option("-f", "--file", help="Semantic query JSON file.", exists=True, readable=True),
-    ],
+    ] = None,
+    metrics: Annotated[
+        list[str] | None,
+        typer.Option("--metrics", help="Metric name(s), comma-separated and/or repeatable."),
+    ] = None,
+    dimensions: Annotated[
+        list[str] | None,
+        typer.Option("--dimensions", help="Dimension name(s), comma-separated and/or repeatable."),
+    ] = None,
+    filter_: Annotated[
+        list[str] | None,
+        typer.Option("--filter", help="Filter as field=value or field:op:value (repeatable)."),
+    ] = None,
 ) -> None:
-    """Compile a semantic query to SQL + metadata without executing (core.compile).
+    """Compile a semantic query to SQL + metadata without executing.
+
+    Either ``-f``/``--file`` or the inline ``--metrics``/``--dimensions``/``--filter``
+    flags — never both.
 
     With ``--json`` the output matches the MCP ``compile_query`` tool payload byte-for-byte.
     """
-    from canonic.compiler import SemanticQuery
     from canonic.core.models import CompileOutput
 
-    sq = SemanticQuery.model_validate_json(file.read_text())
+    sq = build_semantic_query(file, metrics, dimensions, filter_)
     result = load_service(ctx).compile_query(sq)
     payload = CompileOutput.from_compile_result(result).model_dump(mode="json")
 
@@ -97,7 +111,7 @@ def describe(
     ctx: typer.Context,
     name: Annotated[str, typer.Argument(help="Metric name or alias.")],
 ) -> None:
-    """Return grain, dimensions, measures, and freshness for one metric (core.describe_metric).
+    """Return grain, dimensions, measures, and freshness for one metric.
 
     With ``--json`` the output matches the MCP ``describe_metric`` tool payload byte-for-byte.
     """

@@ -2,7 +2,7 @@
 
 import pytest
 
-from canonic.compiler.query import SemanticQuery
+from canonic.compiler.query import SemanticQuery, parse_filter_flag
 
 
 def test_filters_string_passthrough() -> None:
@@ -94,3 +94,38 @@ def test_filters_dict_in_requires_list_raises() -> None:
             metrics=["revenue"],
             filters=[{"field": "plan", "operator": "IN", "value": "starter"}],
         )
+
+
+def test_parse_filter_flag_equals_shorthand() -> None:
+    assert parse_filter_flag("status=paid") == "status = 'paid'"
+
+
+def test_parse_filter_flag_equals_shorthand_matches_dict_form() -> None:
+    sq = SemanticQuery(metrics=["revenue"], filters=[parse_filter_flag("status=paid")])
+    assert sq.filters == ["status = 'paid'"]
+
+
+def test_parse_filter_flag_not_equals() -> None:
+    assert parse_filter_flag("status:!=:refunded") == "status != 'refunded'"
+
+
+def test_parse_filter_flag_greater_than() -> None:
+    assert parse_filter_flag("amount:>:100") == "amount > 100"
+
+
+def test_parse_filter_flag_in_operator() -> None:
+    assert parse_filter_flag("status:in:paid,refunded") == "status IN ('paid', 'refunded')"
+
+
+def test_parse_filter_flag_value_with_equals_sign() -> None:
+    assert parse_filter_flag("email=a=b@example.com") == "email = 'a=b@example.com'"
+
+
+def test_parse_filter_flag_no_separator_raises() -> None:
+    with pytest.raises(ValueError, match="field=value or field:op:value"):
+        parse_filter_flag("status")
+
+
+def test_parse_filter_flag_unknown_operator_raises() -> None:
+    with pytest.raises(ValueError, match="unknown filter operator"):
+        parse_filter_flag("status:contains:paid")

@@ -55,7 +55,7 @@ _ADHOC_ADAPTERS: dict[str, Callable[[str], FetchAdapter]] = {
 
 @app.command("search")
 def search(ctx: typer.Context, query: str = typer.Argument(..., help="Search text.")) -> None:
-    """Hybrid search over knowledge + semantics (core.search)."""
+    """Hybrid search over knowledge + semantics."""
     not_implemented(ctx, "knowledge search")
 
 

@@ -26,6 +26,32 @@ Every canonic error carries a stable, wire-safe `code` string plus a headless pr
 | 18 | `air_gapped_violation` | Air-gapped mode would let context leave the machine (public endpoint, remote secret ref, or telemetry). |
 | 19 | `retries_exhausted` | A transient provider/transport failure persisted past the bounded retry budget. |
 
+## Resolving `ambiguous`
+
+When a name matches more than one active binding, the error carries a `candidates` list — the exact, unambiguous values to re-issue the request with. Both `--json` and plain-text CLI output, and the MCP tool error payload, include it.
+
+**Ambiguous dimension** — a dimension name is declared on more than one join-reachable source (e.g. `country` exists on both `customers` and a twice-joined `locations`, reached as `pickup`/`dropoff`):
+
+```bash
+canonic query --metrics rental_revenue --dimensions country
+```
+```text
+error ambiguous: dimension 'country' is present on multiple join-reachable sources; qualify explicitly
+  candidate 1: customers.country
+  candidate 2: dropoff.country
+  candidate 3: locations.country
+  candidate 4: pickup.country
+  hint: qualify with one of the candidates above, e.g. --dimensions customers.country
+```
+
+Qualify with `alias.dimension` — the alias is the join's `name` (or the source name for an unnamed join) — to pick the one you mean:
+
+```bash
+canonic query --metrics rental_revenue --dimensions customers.country
+```
+
+**Ambiguous metric name** — two active bindings share a name/alias. The `candidates` list names each competing metric; re-issue with the specific canonical name (or fix the duplicate alias in `contracts/metrics/`) rather than the ambiguous shared one.
+
 ## Errors without a registry code
 
 A few internal/caller-contract errors carry no wire `ErrorCode` and use the default exit code **1**: `CapabilityNotSupportedError` (a connector was asked to honor a capability it doesn't declare), `EmbeddingUnavailable` (embed called without gating on `is_available()`), `CredentialError`, `SemanticSourceError`, `ContractError`, and `KnowledgePageError`. These signal a caller/config mistake rather than a documented, structured failure mode.

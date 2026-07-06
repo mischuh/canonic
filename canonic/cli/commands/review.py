@@ -54,7 +54,7 @@ def review(
         typer.Option("--run-id", help="Explicit run-id to review (defaults to most-recent)."),
     ] = None,
 ) -> None:
-    """Interactively review pending proposals one by one (GH-150, E7 §3).
+    """Interactively review pending proposals one by one.
 
     Accepts, rejects, skips, or freezes each proposal.  Resumable after quit or crash.
     """

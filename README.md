@@ -149,8 +149,11 @@ The wizard walks you through:
 You now have a working context layer committed to your repo. Ask your own questions:
 ```bash
 canonic query --metrics revenue --dimensions order_date
+canonic query --metrics revenue --filter "status=paid"
 canonic knowledge search "active customer"
 ```
+
+For a query with more filters or joins than is comfortable inline, write a `SemanticQuery` JSON file and pass it with `-f` instead.
 
 Review what canonic drafted when you're ready — it's all an ordinary git diff:
 ```bash

@@ -34,7 +34,7 @@ def apply(
         typer.Argument(help="Path to the pending-diff run directory to apply."),
     ],
 ) -> None:
-    """Batch-apply all pending proposals from a run directory (GH-150, E7 §3).
+    """Batch-apply all pending proposals from a run directory.
 
     Skips proposals already in a terminal state or whose diff file has been deleted.
     No git interaction — applied files appear as unstaged changes.

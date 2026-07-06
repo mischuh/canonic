@@ -30,14 +30,18 @@ Prints the resolved metric, owning source, measure, and binding kind.
 Compile a semantic query to SQL + metadata without executing it.
 
 ```bash
+canonic sl compile --metrics revenue --dimensions order_date
 canonic sl compile --file query.json
 ```
 
 | Flag | Description |
 | --- | --- |
+| `--metrics` | Metric name(s) — comma-separated and/or repeatable. |
+| `--dimensions` | Dimension name(s) — same comma/repeat rules as `--metrics`. |
+| `--filter` | A filter as `field=value` or `field:op:value` (repeatable). |
 | `--file`, `-f` | Semantic query JSON file. |
 
-The file is JSON with the `SemanticQuery` shape: `{"metrics": [...], "dimensions": [...], "filters": [...], "limit": null}`. Output includes the target dialect, the compiled SQL, resolved bindings, and any guardrails that fired.
+`--metrics`/`--dimensions`/`--filter` and `-f` are mutually exclusive, same as `canonic query` — see [`canonic query`](/cli-reference/query-sql-assert) for the full filter syntax. The flags build the identical `SemanticQuery` a JSON file would deserialize: `{"metrics": [...], "dimensions": [...], "filters": [...], "limit": null}`. Output includes the target dialect, the compiled SQL, resolved bindings, and any guardrails that fired.
 
 ## `sl describe`
 

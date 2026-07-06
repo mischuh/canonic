@@ -108,6 +108,23 @@ def test_parity(e2e_project: Path, monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 @pytest.mark.release_gate
+def test_query_flags_match_file_parity(e2e_project: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """AC5: ``--metrics`` flags and ``-f q.json`` (equivalent query) return byte-identical
+    ``QueryResult`` payloads.
+    """
+    monkeypatch.chdir(e2e_project)
+    query_file = e2e_project / "q.json"
+    query_file.write_text(json.dumps(_REVENUE_QUERY))
+
+    via_file = CliRunner().invoke(app, ["--json", "query", "-f", str(query_file)])
+    via_flags = CliRunner().invoke(app, ["--json", "query", "--metrics", "revenue"])
+
+    assert via_file.exit_code == 0, via_file.stdout
+    assert via_flags.exit_code == 0, via_flags.stdout
+    assert _canonical(json.loads(via_flags.stdout)) == _canonical(json.loads(via_file.stdout))
+
+
+@pytest.mark.release_gate
 def test_run_sql_parity(e2e_project: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """CLI ``--json sql`` and the MCP ``run_sql`` tool emit identical payloads for a SELECT."""
     import asyncio

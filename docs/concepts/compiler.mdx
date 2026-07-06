@@ -49,6 +49,42 @@ Output shape:
 
 Errors are always structured (`code`, `message`, `candidates?`) — never free text — so a caller can act on them programmatically instead of parsing prose.
 
+## No guessing
+
+Stage 2 and stage 3 share one rule: if there is more than one way to satisfy a query, the compiler refuses rather than picking one silently. It doesn't matter that a join *could* be inferred — if the semantic model doesn't say which one, the compiler asks instead of guessing.
+
+A concrete case: a car-rental model where `rentals` joins `locations` twice — once as `pickup`, once as `dropoff` — and `country` is a declared dimension on both `locations` and `customers`. Asking for `country` without saying which one is ambiguous:
+
+```bash
+canonic sl compile --metrics rental_revenue --dimensions country
+```
+```text
+error ambiguous: dimension 'country' is present on multiple join-reachable sources; qualify explicitly
+  candidate 1: customers.country
+  candidate 2: dropoff.country
+  candidate 3: locations.country
+  candidate 4: pickup.country
+  hint: qualify with one of the candidates above, e.g. --dimensions customers.country
+```
+
+The `candidates` list is exact and actionable — pass one back to disambiguate, and the compiler joins precisely that path, nothing more:
+
+```bash
+canonic sl compile --metrics rental_revenue --dimensions pickup.country
+```
+```text
+dialect: sqlite
+
+SELECT "pickup"."country" AS "country", SUM(CASE WHEN "payments"."status" = 'settled' THEN "payments"."amount" ELSE 0 END) AS "total_paid" FROM "payments" AS "payments"
+LEFT JOIN "rentals" AS "rentals" ON "payments"."rental_id" = "rentals"."rental_id" LEFT JOIN "locations" AS "pickup" ON "rentals"."pickup_location_id" =
+"pickup"."location_id" GROUP BY "pickup"."country"
+
+resolved:
+  rental_revenue → payments.total_paid
+```
+
+Only the `pickup` join was added — `customers` and `dropoff` never appear in the SQL, because nothing in the query needed them. The same discipline applies one level up: when a *join path itself* has more than one valid route (`AMBIGUOUS_JOIN_PATH`), the compiler returns candidate routes and expects `via` to pick one — see [Resolving `ambiguous`](/reference/error-codes#resolving-ambiguous) for both cases end to end.
+
 ## Fanout & additivity
 
 A join can multiply rows relative to a measure's grain (one-to-many, many-to-many). What's safe to do about that depends entirely on the measure's compilation strategy, driven by the binding's `kind` (see [Contracts & guardrails](/concepts/contracts-and-guardrails#beyond-single-composable-metrics)):

@@ -9,8 +9,12 @@ import typer
 from rich.console import Console
 
 from canonic.cli._errors import get_cli_context
+from canonic.compiler import SemanticQuery
+from canonic.compiler.query import parse_filter_flag
 
 if TYPE_CHECKING:
+    from pathlib import Path
+
     from canonic.core.service import CanonicService
 
 _console = Console()
@@ -61,3 +65,41 @@ def load_service(ctx: typer.Context) -> CanonicService:
         pass  # CanonicService.from_project below will fail with a clearer error if config is broken
 
     return CanonicService.from_project(root)
+
+
+def _expand_csv(values: list[str] | None) -> list[str]:
+    """Flatten repeated and/or comma-separated ``--flag`` occurrences into one list."""
+    return [v.strip() for item in values or [] for v in item.split(",") if v.strip()]
+
+
+def build_semantic_query(
+    file: Path | None,
+    metrics: list[str] | None,
+    dimensions: list[str] | None,
+    filters: list[str] | None,
+) -> SemanticQuery:
+    """Build a :class:`SemanticQuery` from ``-f``/``--file`` or the inline flag set.
+
+    Exactly one of the two input modes must be used — ``query``/``sl compile`` share
+    this so both commands resolve flags to the identical object the JSON-file path
+    would deserialize (SPEC-E7-E8 §3, S14).
+    """
+    flags_given = bool(metrics or dimensions or filters)
+    if file is not None and flags_given:
+        raise typer.BadParameter(
+            "-f/--file and --metrics/--dimensions/--filter are mutually exclusive"
+        )
+    if file is None and not flags_given:
+        raise typer.BadParameter("either -f/--file or --metrics is required")
+
+    if file is not None:
+        return SemanticQuery.model_validate_json(file.read_text())
+
+    try:
+        parsed_filters = [parse_filter_flag(f) for f in filters or []]
+    except ValueError as exc:
+        raise typer.BadParameter(str(exc)) from exc
+
+    return SemanticQuery(
+        metrics=_expand_csv(metrics), dimensions=_expand_csv(dimensions), filters=parsed_filters
+    )
