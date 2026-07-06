@@ -69,14 +69,6 @@
         ]
       },
       {
-        "group": "CI/CD",
-        "pages": [
-          "ci-cd/what-ci-checks",
-          "ci-cd/release-gate",
-          "ci-cd/running-checks-locally"
-        ]
-      },
-      {
         "group": "Reference",
         "pages": [
           "reference/error-codes",
