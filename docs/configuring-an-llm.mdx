@@ -1,9 +1,9 @@
 ---
 title: "Configuring an LLM"
-description: "canonic's answer path is fully deterministic — an LLM is optional and only used to draft context."
+description: "canonic's answer path is fully deterministic; an LLM is optional and only used to draft context."
 ---
 
-An LLM is **optional** — canonic's answer path is fully deterministic and never calls one. It's only used to *draft* semantics/knowledge during setup and reconciliation. The `llm:` block in `canonic.yaml` supports four providers, all behind the same interface.
+An LLM is **optional**; canonic's answer path is fully deterministic and never calls one. It's only used to *draft* semantics/knowledge during setup and reconciliation. The `llm:` block in `canonic.yaml` supports four providers, all behind the same interface.
 
 <Tabs>
   <Tab title="openai_compatible">
@@ -38,7 +38,7 @@ An LLM is **optional** — canonic's answer path is fully deterministic and neve
     ```
   </Tab>
   <Tab title="github_copilot">
-    Routed through your GitHub Copilot subscription. No `base_url`, and **no `api_key_ref`** — authentication is a one-time device-code flow (a browser prompt on first use); the resulting credential is cached on disk and reused after that:
+    Routed through your GitHub Copilot subscription. No `base_url`, and **no `api_key_ref`**: authentication is a one-time device-code flow (a browser prompt on first use); the resulting credential is cached on disk and reused after that:
 
     ```yaml
     llm:
@@ -47,14 +47,14 @@ An LLM is **optional** — canonic's answer path is fully deterministic and neve
     ```
 
     <Warning>
-      Structured/schema-constrained output (used for drafting) isn't honored by every model Copilot proxies — Claude and most GPT models silently return prose instead of JSON. Stick to a model litellm marks as schema-capable for this provider (`gpt-4.1`, `gpt-5`, `gpt-5.1`, `gpt-5.2`) if you hit `structured_output_unsupported`.
+      Structured/schema-constrained output (used for drafting) isn't honored by every model Copilot proxies; Claude and most GPT models silently return prose instead of JSON. Stick to a model litellm marks as schema-capable for this provider (`gpt-4.1`, `gpt-5`, `gpt-5.1`, `gpt-5.2`) if you hit `structured_output_unsupported`.
     </Warning>
   </Tab>
 </Tabs>
 
 ## One interface, any provider
 
-All four are reached through [litellm](https://github.com/BerriAI/litellm) behind one interface — no per-provider branching anywhere else in canonic. `tasks:` optionally overrides the model per task (`draft`, `reconcile`):
+All four are reached through [litellm](https://github.com/BerriAI/litellm) behind one interface; no per-provider branching anywhere else in canonic. `tasks:` optionally overrides the model per task (`draft`, `reconcile`):
 
 ```yaml
 llm:
@@ -67,4 +67,4 @@ llm:
 
 ## Air-gapped mode
 
-Under `runtime.air_gapped: true`, only a local endpoint (loopback, or an allowlisted host via `runtime.allow_cidrs`) is accepted — `openai`, `anthropic`, and `github_copilot` all call a fixed public endpoint and are rejected outright in that mode.
+Under `runtime.air_gapped: true`, only a local endpoint (loopback, or an allowlisted host via `runtime.allow_cidrs`) is accepted; `openai`, `anthropic`, and `github_copilot` all call a fixed public endpoint and are rejected outright in that mode.

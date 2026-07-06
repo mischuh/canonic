@@ -8,7 +8,7 @@ canonic_topics: [order_items, fanout, units_sold, line_revenue]
 
 # Order Items Fanout Trap
 
-`order_items` lives at a **finer grain** than `orders` — multiple line items share the same
+`order_items` lives at a **finer grain** than `orders`: multiple line items share the same
 `order_id`. If you join the two fact tables and then aggregate an order-level measure
 (`orders.amount`), each order's amount gets counted once per line item.
 

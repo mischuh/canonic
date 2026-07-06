@@ -75,7 +75,7 @@ def main(
 
     if ctx.invoked_subcommand is None:
         if json_output:
-            typer.echo("interactive mode is not available with --json — run `canonic --help`.")
+            typer.echo("interactive mode is not available with --json; run `canonic --help`.")
             raise typer.Exit(2)
         from canonic.cli.commands.setup import run_interactive
 

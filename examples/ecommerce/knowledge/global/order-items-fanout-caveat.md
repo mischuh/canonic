@@ -1,5 +1,5 @@
 ---
-summary: "Joining order_items back to orders inflates order-level metrics — the classic fanout trap."
+summary: "Joining order_items back to orders inflates order-level metrics: the classic fanout trap."
 tags: [order_items, caveats, fanout, line_revenue, units_sold]
 sl_refs:
   - warehouse_pg.order_items.units_sold
@@ -16,7 +16,7 @@ meta:
 
 ## The fanout problem
 
-`fct_order_items` is at a **finer grain** than `fct_orders` — multiple line items share the same
+`fct_order_items` is at a **finer grain** than `fct_orders`: multiple line items share the same
 `order_id`. If you join the two fact tables and then aggregate `orders.amount`, each order's amount
 gets duplicated once per line item. An order with 3 line items contributes its amount 3 times.
 
@@ -25,7 +25,7 @@ to `products` and `orders`). The compiler enforces the declared `many_to_one` gr
 aggregation correct.
 
 **Unsafe:** query `revenue` (from `orders`) and `units_sold` (from `order_items`) together in a
-single `query()` call — this crosses fact tables at different grains and is not supported in P0.
+single `query()` call: this crosses fact tables at different grains and is not supported in P0.
 Use two separate queries and join on `order_id` in your BI layer if you need both in one view.
 
 ## Reconciliation check

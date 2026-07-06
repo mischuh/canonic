@@ -2,7 +2,7 @@
 
 An end-to-end Canonic project built on a vehicle rental service: one SQLite connection,
 five dimensions, three fact tables, three canonical metrics, and two enforced guardrails.
-No external database required — the entire dataset lives in a single `rental.db` file.
+No external database required: the entire dataset lives in a single `rental.db` file.
 
 ## Schema
 
@@ -23,7 +23,7 @@ FACTS
 ```
 
 **Seed data**: 40 rentals (32 completed, 3 active, 2 confirmed, 2 cancelled, 1 no_show),
-32 settled payments, 8 damage claims — across 20 customers, 15 vehicles, 5 locations.
+32 settled payments, 8 damage claims: across 20 customers, 15 vehicles, 5 locations.
 
 ## Quick start
 
@@ -67,7 +67,7 @@ canonic eval baseline \
 
 ## Guardrails
 
-**`completed-rentals-only`** — `rentals.total_base_revenue` must never be summed without a
+**`completed-rentals-only`**: `rentals.total_base_revenue` must never be summed without a
 `status = 'completed'` filter. Active and cancelled rows have NULL in `total_amount`.
 Use `payments.total_paid` for financial reporting.
 
@@ -78,7 +78,7 @@ Use `payments.total_paid` for financial reporting.
 ## Files
 
 ```
-canonic.yaml                           ← project config — SQLite connection, LLM, reconcile settings
+canonic.yaml                           ← project config: SQLite connection, LLM, reconcile settings
 setup.sql                            ← DDL + seed data; creates the rental.db file
 semantics/rental_db/
   vehicle_categories.yaml            ← dim: category name, daily rate
@@ -102,8 +102,8 @@ eval/
   grain_cases.jsonl                  ← 8 labeled grain-inference cases (PK omitted)
 ```
 
+## CLI usage
 
-
-cat > q.json <<'EOF'
-{"dimensions": ["status"], "metrics": ["rental_count"]}
-EOF
+```sh
+canonic query --metrics rental_count --dimensions status
+```

@@ -1,16 +1,16 @@
-# Jaffle Shop — Canonic Example
+# Jaffle Shop: Canonic Example
 
 A Canonic project backed by the classic [dbt Jaffle Shop](https://github.com/dbt-labs/jaffle-shop)
 dataset. It demonstrates Canonic's full Phase 1 feature set:
 
 | Feature | How it's shown |
 |---------|---------------|
-| **DuckDB primary connector** | `jaffle_shop.duckdb` — zero server setup, fully local |
-| **dbt manifest knowledge** | `dbt/manifest.json` — MetricFlow semantic models + metrics as modeling-tier evidence |
+| **DuckDB primary connector** | `jaffle_shop.duckdb`: zero server setup, fully local |
+| **dbt manifest knowledge** | `dbt/manifest.json`: MetricFlow semantic models + metrics as modeling-tier evidence |
 | **Evidence reconciliation** | dbt definitions outrank live introspection; grain/joins/measures arrive pre-named |
-| **Knowledge pages** | `knowledge/global/` — business caveats and definitions (fanout, revenue, segmentation) |
-| **Metric contracts** | `contracts/metrics/` — revenue, order_count, units_sold |
-| **MCP serving** | `canonic mcp start` — expose metrics to any MCP-compatible agent |
+| **Knowledge pages** | `knowledge/global/`: business caveats and definitions (fanout, revenue, segmentation) |
+| **Metric contracts** | `contracts/metrics/`: revenue, order_count, units_sold |
+| **MCP serving** | `canonic mcp start`: expose metrics to any MCP-compatible agent |
 
 ## Schema
 
@@ -33,11 +33,11 @@ customers ──< orders ──< order_items >── products
 ```bash
 cd examples/jaffle-shop
 
-# Bootstrap — introspects DuckDB + loads dbt manifest as modeling-tier evidence
+# Bootstrap: introspects DuckDB + loads dbt manifest as modeling-tier evidence
 canonic ingest --bootstrap
 
 # Run a demo query (revenue by store)
-canonic query '{"metric": "revenue", "group_by": ["store_id"]}'
+canonic query --metrics revenue --dimensions store_id
 
 # Start the MCP server for agent access
 canonic mcp start
@@ -48,8 +48,8 @@ configure `llm:` in `canonic.yaml` to enable grain-drafting for low-confidence p
 
 ## Artifacts
 
-- **`jaffle_shop.duckdb`** — pre-built database (generated from Jaffle Shop seeds)
-- **`dbt/manifest.json`** — compiled manifest (schema v11, dbt 1.7, MetricFlow)
+- **`jaffle_shop.duckdb`**: pre-built database (generated from Jaffle Shop seeds)
+- **`dbt/manifest.json`**: compiled manifest (schema v11, dbt 1.7, MetricFlow)
 
 ### Regenerating artifacts
 
@@ -64,7 +64,7 @@ and copies the resulting database and manifest back into this directory.
 
 ## What Canonic extracts from the dbt manifest
 
-The `jaffle_dbt` connection parses `manifest.json` as **modeling-tier evidence** — it
+The `jaffle_dbt` connection parses `manifest.json` as **modeling-tier evidence**; it
 ranks higher than live DuckDB introspection during reconciliation. From this manifest,
 Canonic extracts:
 

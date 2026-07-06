@@ -3,20 +3,20 @@ title: "canonic.yaml config schema"
 description: "Every top-level field in the project config file, and what it governs."
 ---
 
-`canonic.yaml` is validated against `CanonicConfig` at load time. Unknown top-level fields are ignored rather than rejected. Only `version` and `project` are required — everything else defaults.
+`canonic.yaml` is validated against `CanonicConfig` at load time. Unknown top-level fields are ignored rather than rejected. Only `version` and `project` are required: everything else defaults.
 
 ## Top-level fields
 
 | Field | Type | Default | Governs |
 | --- | --- | --- | --- |
-| `version` | `int` | — (required) | Config schema version; currently only `1` is recognized. |
-| `project` | `ProjectConfig` | — (required) | Project `name` and optional `default_connection`. |
-| `connections` | `list[Connection]` | `[]` | Configured data sources — see [Connectors](/concepts/connectors). |
-| `llm` | `LLMConfig \| null` | `null` | LLM provider config — see [Configuring an LLM](/configuring-an-llm). |
+| `version` | `int` | n/a (required) | Config schema version; currently only `1` is recognized. |
+| `project` | `ProjectConfig` | n/a (required) | Project `name` and optional `default_connection`. |
+| `connections` | `list[Connection]` | `[]` | Configured data sources; see [Connectors](/concepts/connectors). |
+| `llm` | `LLMConfig \| null` | `null` | LLM provider config; see [Configuring an LLM](/configuring-an-llm). |
 | `embeddings` | `EmbeddingConfig` | `model: all-MiniLM-L6-v2` | Local embedding model for knowledge vector search. |
-| `telemetry` | `TelemetryConfig` | `enabled: false` | Opt-in telemetry flag — see [Instrumentation & evaluation](/concepts/instrumentation-and-eval#opt-in-telemetry). |
-| `reconcile` | `ReconcileConfig` | propose-only | Auto-apply policy for ingestion — see [Ingestion & reconciliation](/concepts/ingestion-and-reconciliation#propose-only-by-default). |
-| `runtime` | `RuntimeConfig` | `air_gapped: false` | Air-gapped enforcement — see [LLM & embeddings runtime](/concepts/llm-runtime#air-gapped-mode--enforced-not-advisory). |
+| `telemetry` | `TelemetryConfig` | `enabled: false` | Opt-in telemetry flag; see [Instrumentation & evaluation](/concepts/instrumentation-and-eval#opt-in-telemetry). |
+| `reconcile` | `ReconcileConfig` | propose-only | Auto-apply policy for ingestion; see [Ingestion & reconciliation](/concepts/ingestion-and-reconciliation#propose-only-by-default). |
+| `runtime` | `RuntimeConfig` | `air_gapped: false` | Air-gapped enforcement; see [LLM & embeddings runtime](/concepts/llm-runtime#air-gapped-mode--enforced-not-advisory). |
 | `logging` | `LoggingConfig` | `level: WARNING`, `format: text` | Log level, optional file, and text/json format. |
 
 ## `connections[]`
@@ -30,7 +30,7 @@ connections:
     read_only_role: null
 ```
 
-- `credentials_ref` (and `llm.api_key_ref`) must be a reference — `env:`, `keyring:`, or `file:` — never a literal secret; config validation rejects a literal outright.
+- `credentials_ref` (and `llm.api_key_ref`) must be a reference, one of `env:`, `keyring:`, or `file:`, never a literal secret; config validation rejects a literal outright.
 - Postgres/Redshift connections additionally recognize `schema`/`schemas` (search path) and `tables` (glob patterns narrowing introspection), plus `fetch_column_stats: true` to merge zero-scan cardinality/null-ratio stats into the returned schema (a no-op on SQLite/DuckDB).
 
 ## `llm`
@@ -70,4 +70,4 @@ When `air_gapped: true`, load-time validation additionally rejects: a public `ll
 
 ## Reserved directories
 
-Independent of `canonic.yaml` fields, every project scaffolds four committed context directories — `semantics/`, `knowledge/`, `contracts/`, `raw-sources/` — plus a git-ignored `.canonic/` local-state directory (created with `0o700` permissions).
+Independent of `canonic.yaml` fields, every project scaffolds four committed context directories (`semantics/`, `knowledge/`, `contracts/`, `raw-sources/`) plus a git-ignored `.canonic/` local-state directory (created with `0o700` permissions).

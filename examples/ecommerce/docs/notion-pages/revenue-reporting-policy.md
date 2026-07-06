@@ -32,7 +32,7 @@ The canonical source for revenue reconciliation is the `orders` table in the war
 discrepancy with a third-party payment processor or the ERP should be raised with the
 **Finance Data team** before the figure is published.
 
-Do not reconcile against a system that records gross amounts — see the *Revenue Excludes Refunds*
+Do not reconcile against a system that records gross amounts: see the *Revenue Excludes Refunds*
 page for why net and gross figures differ.
 
 ## How this becomes a Canonic knowledge page

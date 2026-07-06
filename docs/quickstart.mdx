@@ -3,10 +3,10 @@ title: "Quickstart"
 description: "Your first answer in minutes."
 ---
 
-The fastest path uses **local connectors** — no server, no network. Pick either SQLite or DuckDB.
+The fastest path uses **local connectors**: no server, no network. Pick either SQLite or DuckDB.
 
 <Note>
-  Don't have a database handy? The [Guides](/guides/jaffle-shop) section ships 5 ready-to-run sample projects (dbt Jaffle Shop, e-commerce, rental, SaaS analytics, Dutch railway) — a good way to try the wizard before pointing it at your own data.
+  Don't have a database handy? The [Guides](/guides/jaffle-shop) section ships 5 ready-to-run sample projects (dbt Jaffle Shop, e-commerce, rental, SaaS analytics, Dutch railway), a good way to try the wizard before pointing it at your own data.
 </Note>
 
 <Tabs>
@@ -29,7 +29,7 @@ The fastest path uses **local connectors** — no server, no network. Pick eithe
 </Tabs>
 
 <Warning>
-  If your source needs a password (Postgres) or your LLM provider needs an API key, set the corresponding environment variable **before** running `canonic setup` — canonic never stores secrets in `canonic.yaml` directly, only a `credentials_ref` like `env:WAREHOUSE_PASSWORD` pointing at it:
+  If your source needs a password (Postgres) or your LLM provider needs an API key, set the corresponding environment variable **before** running `canonic setup`: canonic never stores secrets in `canonic.yaml` directly, only a `credentials_ref` like `env:WAREHOUSE_PASSWORD` pointing at it:
 
   ```bash
   export WAREHOUSE_PASSWORD=...      # for a Postgres/Redshift connection
@@ -49,7 +49,7 @@ The fastest path uses **local connectors** — no server, no network. Pick eithe
     SQLite/DuckDB file, or Postgres if you have a server.
   </Step>
   <Step title="Configure an LLM (optional)">
-    Skippable — the core works without one. See [Configuring an LLM](/configuring-an-llm).
+    Skippable: the core works without one. See [Configuring an LLM](/configuring-an-llm).
   </Step>
   <Step title="Bootstrap">
     canonic introspects the schema and drafts your semantics.
@@ -68,10 +68,10 @@ canonic query --metrics revenue --dimensions order_date
 canonic query --metrics revenue --filter "status=paid"
 ```
 
-For a query with more filters or joins than is comfortable inline, write a `SemanticQuery` JSON file and pass it with `-f` instead — see [`canonic query`](/cli-reference/query-sql-assert) for the full flag reference.
+For a query with more filters or joins than is comfortable inline, write a `SemanticQuery` JSON file and pass it with `-f` instead; see [`canonic query`](/cli-reference/query-sql-assert) for the full flag reference.
 
 <Note>
-  `canonic knowledge search` is not implemented yet — see [CLI Reference: knowledge](/cli-reference/knowledge) for its current status.
+  `canonic knowledge search` is not implemented yet; see [CLI Reference: knowledge](/cli-reference/knowledge) for its current status.
 </Note>
 
 ## Review what canonic drafted
@@ -87,15 +87,15 @@ canonic status        # always tells you the best next step
 
 **Works immediately, zero modeling:**
 - Connect a database (SQLite or Postgres) and canonic introspects the live schema.
-- It auto-drafts semantics — typed columns, primary-key grains, foreign-key joins, and additive measures (sums, counts).
+- It auto-drafts semantics: typed columns, primary-key grains, foreign-key joins, and additive measures (sums, counts).
 - The setup wizard ends by **answering a real question from your data**, so you see the payoff in minutes.
 - Connect your agent over MCP and start asking.
 
 **A bit more manual effort (when you need it):**
-- **Canonical bindings** — when two sources define "revenue" differently, you pick the authoritative one. canonic surfaces the ambiguity; you resolve it once.
-- **Knowledge prose** — the business "why" behind a definition; canonic drafts it, you refine it.
-- **Guardrails & contracts** — mandatory filters, required dimensions, final-vs-provisional rules. Added when a number needs protecting.
-- **Non-additive metrics** — ratios, averages, distinct counts, balances. Declared as composable definitions so they stay correct at any grain.
-- **More sources** — dbt / Metabase / Notion / web pages, layered on as context evidence. The connector contract is extensible, so a Confluence, Jira, or other wiki/knowledge-base connector can be added the same way.
+- **Canonical bindings**: when two sources define "revenue" differently, you pick the authoritative one. canonic surfaces the ambiguity; you resolve it once.
+- **Knowledge prose**: the business "why" behind a definition; canonic drafts it, you refine it.
+- **Guardrails & contracts**: mandatory filters, required dimensions, final-vs-provisional rules. Added when a number needs protecting.
+- **Non-additive metrics**: ratios, averages, distinct counts, balances. Declared as composable definitions so they stay correct at any grain.
+- **More sources**: dbt / Metabase / Notion / web pages, layered on as context evidence. The connector contract is extensible, so a Confluence, Jira, or other wiki/knowledge-base connector can be added the same way.
 
-The design principle throughout: **canonic proposes, you approve.** It never silently edits your context — every change is a reviewable diff.
+The design principle throughout: **canonic proposes, you approve.** It never silently edits your context: every change is a reviewable diff.

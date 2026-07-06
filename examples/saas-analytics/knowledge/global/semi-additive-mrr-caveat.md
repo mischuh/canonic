@@ -1,5 +1,5 @@
 ---
-summary: "Never sum MRR across months — it is a snapshot measure. Use ending_mrr (collapse: last)."
+summary: "Never sum MRR across months: it is a snapshot measure. Use ending_mrr (collapse: last)."
 tags: [mrr, snapshot, semi-additive, caveat]
 sl_refs:
   - saas_duckdb.fct_mrr_snapshot.mrr_sum
@@ -11,7 +11,7 @@ meta:
 
 ## Why you cannot sum MRR over time
 
-`fct_mrr_snapshot` records one row **per customer per month** — it is a *snapshot* fact. The same
+`fct_mrr_snapshot` records one row **per customer per month**: it is a *snapshot* fact. The same
 recurring revenue is restated every month it stays on the books. Summing `mrr` across twelve monthly
 snapshots therefore counts the same subscription up to twelve times and overstates the figure by
 roughly an order of magnitude.

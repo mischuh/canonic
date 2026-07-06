@@ -12,14 +12,14 @@ meta:
 
 **Active customers** is the count of distinct customers who have at least one non-cancelled rental.
 
-The live expression — rendered directly from the semantic layer:
+The live expression: rendered directly from the semantic layer:
 
 > `{{ sl:rental_db.rentals.active_customers.expr }}`
 
 ## Grain
 
 One unique customer per distinct `customer_id`. The measure is fully additive across all
-dimensions reachable from `rentals` — vehicle category, pickup location, membership tier,
+dimensions reachable from `rentals`: vehicle category, pickup location, membership tier,
 and rental date.
 
 ## What it counts

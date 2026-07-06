@@ -79,7 +79,7 @@ def review(
     pending = [p for p in run.proposals if p.status is ProposalStatus.PENDING]
 
     if not pending:
-        _console.print("[green]nothing to review — all proposals are already resolved[/green]")
+        _console.print("[green]nothing to review; all proposals are already resolved[/green]")
         raise typer.Exit(0)
 
     total = len(run.proposals)
@@ -116,12 +116,12 @@ def review(
         while True:
             raw = typer.prompt(">", prompt_suffix=" ").strip().lower()
             if raw not in {"a", "r", "s", "f", "q"}:
-                _console.print(f"[red]unknown action {raw!r}[/red] — choose a/r/s/f/q")
+                _console.print(f"[red]unknown action {raw!r}[/red]; choose a/r/s/f/q")
                 continue
             break
 
         if raw == "q":
-            _console.print("[yellow]quit — remaining proposals left pending[/yellow]")
+            _console.print("[yellow]quit; remaining proposals left pending[/yellow]")
             logger.info("review: quit at proposal %d/%d", idx, total)
             break
 

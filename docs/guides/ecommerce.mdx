@@ -3,7 +3,7 @@ title: "Guide: Ecommerce (Postgres)"
 description: "A small but complete Postgres project covering the full Phase 1 loop, evidence connectors, and observability."
 ---
 
-A small but end-to-end canonic project: a Postgres connection, a four-source star schema (two facts, three dimensions), three canonical metrics, one enforced guardrail, and a companion dbt manifest demonstrating the definition-connector class. This is the broadest walkthrough of the full loop — bootstrap, serve, evidence connectors, accuracy tracking, and observability all in one place.
+A small but end-to-end canonic project: a Postgres connection, a four-source star schema (two facts, three dimensions), three canonical metrics, one enforced guardrail, and a companion dbt manifest demonstrating the definition-connector class. This is the broadest walkthrough of the full loop: bootstrap, serve, evidence connectors, accuracy tracking, and observability all in one place.
 
 <Info>Full source: [`examples/ecommerce/`](https://github.com/mischuh/canonic/tree/main/examples/ecommerce)</Info>
 
@@ -27,7 +27,7 @@ cd examples/ecommerce   # canonic commands must run from here
 canonic status
 ```
 
-`setup.sql` is idempotent — re-running it drops and recreates all tables in the correct order.
+`setup.sql` is idempotent; re-running it drops and recreates all tables in the correct order.
 
 ## Metrics
 
@@ -65,11 +65,11 @@ search_knowledge("revenue reporting policy")
   }
 ```
 
-A typical agent pattern is `query()` for executable SQL + `search_knowledge()` for business context — both calls together, one decision. See [Knowledge](/concepts/knowledge-layer) for how caveats auto-surface.
+A typical agent pattern is `query()` for executable SQL + `search_knowledge()` for business context: both calls together, one decision. See [Knowledge](/concepts/knowledge-layer) for how caveats auto-surface.
 
-## MCP server — stdio vs. HTTP
+## MCP server: stdio vs. HTTP
 
-**Stdio** (the MCP client owns the process — Claude Code, Cursor):
+**Stdio** (the MCP client owns the process: Claude Code, Cursor):
 
 ```bash
 canonic mcp start
@@ -91,9 +91,9 @@ canonic mcp stop
 { "mcpServers": { "canonic": { "transport": "streamable-http", "url": "http://127.0.0.1:7474/mcp" } } }
 ```
 
-The server uses FastMCP's Streamable HTTP transport at `/mcp` (SSE at `/sse` for clients that only support that). Only `--http` mode writes `.canonic/mcp.json` — in stdio mode the MCP client owns the process and no state file is created.
+The server uses FastMCP's Streamable HTTP transport at `/mcp` (SSE at `/sse` for clients that only support that). Only `--http` mode writes `.canonic/mcp.json`: in stdio mode the MCP client owns the process and no state file is created.
 
-## Ingestion — keep semantics current
+## Ingestion: keep semantics current
 
 ```bash
 canonic ingest --dry-run     # see what would change, write nothing
@@ -101,13 +101,13 @@ canonic ingest --bootstrap   # fresh project: introspect and draft from scratch
 canonic ingest               # full run: propose diffs for review
 ```
 
-**Headless / CI** — deterministic pipeline + auto-PR:
+**Headless / CI**: deterministic pipeline + auto-PR:
 
 ```bash
 canonic --json ingest --headless --strict
 # exit 0  → clean run (PR opened if diffs, or no-op)
-# exit 13 → CONNECTION_ERROR  — Postgres unreachable
-# exit 14 → CONTRADICTION     — --strict flagged a drift that conflicts with a curated fact
+# exit 13 → CONNECTION_ERROR, Postgres unreachable
+# exit 14 → CONTRADICTION, --strict flagged a drift that conflicts with a curated fact
 ```
 
 Example CI job:
@@ -121,7 +121,7 @@ Example CI job:
     CANONIC_PG_PASSWORD: ${{ secrets.CANONIC_PG_PASSWORD }}
 ```
 
-If the live schema drifts from a `human_curated` file (e.g. a column type changes), ingest flags a contradiction but keeps the curated file untouched — see [Ingestion & reconciliation](/concepts/ingestion-and-reconciliation).
+If the live schema drifts from a `human_curated` file (e.g. a column type changes), ingest flags a contradiction but keeps the curated file untouched; see [Ingestion & reconciliation](/concepts/ingestion-and-reconciliation).
 
 ## Evidence connectors beyond Postgres
 
@@ -132,7 +132,7 @@ connections:
   - id: warehouse_dbt
     type: dbt
     params:
-      manifest_path: dbt/manifest.json   # no credentials — a manifest is a local file
+      manifest_path: dbt/manifest.json   # no credentials: a manifest is a local file
 
   - id: handbook_notion
     type: notion
@@ -144,9 +144,9 @@ connections:
     credentials_ref: env:METABASE_API_KEY
 ```
 
-This demo ships a compiled dbt manifest modeling the same star schema. `canonic ingest --connection warehouse_dbt --dry-run` reconciles it into semantic proposals with **no Postgres and no LLM** — modeling-tier evidence outranks raw introspection where they overlap, and a genuine disagreement (e.g. conflicting column types) surfaces as a contradiction, never a silent merge.
+This demo ships a compiled dbt manifest modeling the same star schema. `canonic ingest --connection warehouse_dbt --dry-run` reconciles it into semantic proposals with **no Postgres and no LLM**: modeling-tier evidence outranks raw introspection where they overlap, and a genuine disagreement (e.g. conflicting column types) surfaces as a contradiction, never a silent merge.
 
-To make the Notion evidence flow concrete without a live workspace, the demo ships five sample page sources at [`docs/notion-pages/`](https://github.com/mischuh/canonic/tree/main/examples/ecommerce/docs/notion-pages) — the format the Notion connector expects, including the two page properties it reads (`Canonic Type` → `usage_mode`, `Canonic Topics` → candidate topic refs).
+To make the Notion evidence flow concrete without a live workspace, the demo ships five sample page sources at [`docs/notion-pages/`](https://github.com/mischuh/canonic/tree/main/examples/ecommerce/docs/notion-pages), the format the Notion connector expects, including the two page properties it reads (`Canonic Type` → `usage_mode`, `Canonic Topics` → candidate topic refs).
 
 ## Accuracy tracking
 
@@ -162,11 +162,8 @@ The five cases in `eval/grain_cases.jsonl` exercise the shape of the live schema
 ## CLI usage
 
 ```bash
-cat > q.json <<'EOF'
-{"metrics": ["revenue"], "dimensions": ["order_date"]}
-EOF
-canonic query -f q.json
-canonic --json query -f q.json    # byte-identical to the MCP query tool
+canonic query --metrics revenue --dimensions order_date
+canonic --json query --metrics revenue --dimensions order_date    # byte-identical to the MCP query tool
 
 canonic sql "SELECT status, sum(amount) FROM analytics.fct_orders GROUP BY status"
 canonic sql "DROP TABLE analytics.fct_orders"
@@ -194,7 +191,7 @@ runtime:
     - 10.0.0.0/8      # optional: an on-prem inference host outside loopback
 ```
 
-The daemon never starts misconfigured — a public LLM endpoint or a remote secret ref under `air_gapped: true` is a hard error at load. See [LLM & embeddings runtime](/concepts/llm-runtime#air-gapped-mode--enforced-not-advisory).
+The daemon never starts misconfigured: a public LLM endpoint or a remote secret ref under `air_gapped: true` is a hard error at load. See [LLM & embeddings runtime](/concepts/llm-runtime#air-gapped-mode--enforced-not-advisory).
 
 ## Knowledge pages
 

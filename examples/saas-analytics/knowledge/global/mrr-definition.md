@@ -13,7 +13,7 @@ meta:
 **Monthly Recurring Revenue (MRR)** is the recurring subscription revenue on the books at the
 end of a month. Canonic exposes it as the `ending_mrr` metric.
 
-The live expression — rendered directly from the semantic layer, so this definition can never drift:
+The live expression: rendered directly from the semantic layer, so this definition can never drift:
 
 > `{{ sl:saas_duckdb.fct_mrr_snapshot.mrr_sum.expr }}`
 
@@ -22,7 +22,7 @@ The live expression — rendered directly from the semantic layer, so this defin
 `ending_mrr` is a **semi-additive** metric bound to the `fct_mrr_snapshot` snapshot fact with
 `collapse_dimension: snapshot_month` and `collapse_agg: last`. Within a single month it sums the
 active MRR across all customers; across multiple months it takes the **last** month's position
-rather than summing — see [[semi-additive-mrr-caveat]].
+rather than summing: see [[semi-additive-mrr-caveat]].
 
 ## Grain
 
@@ -31,6 +31,6 @@ plans and geographies *within* a month. Churned customers carry `mrr = 0` and `i
 
 ## Related metrics
 
-- `mrr_total` — the plain additive sum (used as the numerator of `arpu`); query it grouped by month.
-- `active_subscribers` — distinct active customers in a month.
-- `arpu` — `mrr_total / active_accounts`.
+- `mrr_total`: the plain additive sum (used as the numerator of `arpu`); query it grouped by month.
+- `active_subscribers`: distinct active customers in a month.
+- `arpu`: `mrr_total / active_accounts`.

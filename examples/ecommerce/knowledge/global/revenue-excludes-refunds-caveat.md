@@ -1,5 +1,5 @@
 ---
-summary: "Refunded orders are silently excluded from every revenue query — here's why."
+summary: "Refunded orders are silently excluded from every revenue query: here's why."
 tags: [revenue, caveats, guardrails]
 sl_refs:
   - warehouse_pg.orders.total_revenue
@@ -18,7 +18,7 @@ both gross revenue and period-over-period growth, and would cause the revenue fi
 disagree with the finance team's reconciled P&L.
 
 The exclusion is **enforced by the `revenue-excludes-refunds` guardrail** (`severity: error`),
-not by convention — the compiler injects `status != 'refunded'` into every query that touches
+not by convention: the compiler injects `status != 'refunded'` into every query that touches
 `warehouse_pg.orders.total_revenue`. It cannot be accidentally omitted.
 
 ## Implication for analyses

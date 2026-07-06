@@ -1,21 +1,21 @@
 ---
 title: "Instrumentation & evaluation"
-description: "The local event log, the accuracy harness, and the model baseline — how canonic measures itself."
+description: "The local event log, the accuracy harness, and the model baseline: how canonic measures itself."
 ---
 
-canonic backs its trustworthiness claims with a local, inspectable log rather than asserting them — every served answer and every reconciliation decision is recorded, and two harnesses turn that record into tracked numbers.
+canonic backs its trustworthiness claims with a local, inspectable log rather than asserting them: every served answer and every reconciliation decision is recorded, and two harnesses turn that record into tracked numbers.
 
 ## The event log
 
 An append-only, structured log under `.canonic/` (local, git-ignored). It's the single substrate every producer writes to; [`canonic status`](/cli-reference/status-report#canonic-status) and [`canonic report`](/cli-reference/status-report#canonic-report) read from it.
 
-**No warehouse content, ever.** The semantic query and compiled SQL are recorded as `sha256` hashes, never as text — so filter literals (dates, ids) never land on disk. Resolved bindings, guardrail ids, and counts are metadata and are stored as-is. Events are immutable once written; corrections are new events, never edits.
+**No warehouse content, ever.** The semantic query and compiled SQL are recorded as `sha256` hashes, never as text, so filter literals (dates, ids) never land on disk. Resolved bindings, guardrail ids, and counts are metadata and are stored as-is. Events are immutable once written; corrections are new events, never edits.
 
 One record per served answer:
 
 ```yaml
 kind: served_answer
-query_hash: "sha256:…"              # the semantic query, hashed — never stored verbatim
+query_hash: "sha256:…"              # the semantic query, hashed, never stored verbatim
 compiled_sql_hash: "sha256:…"       # compiled SQL, hashed
 resolved: { metrics: { revenue: orders.total_revenue } }
 guardrails_fired: [revenue-excludes-refunds]
@@ -24,28 +24,28 @@ freshness: [{ source: orders, stale: false, age_days: 2 }]
 latency_ms: 142
 bytes_scanned: 10485760
 error: null
-# reserved — present now, populated once their producing feature lands:
+# reserved, present now, populated once their producing feature lands:
 trust_score: null
 cache_hit: null
 over_limit_blocked: null
 ```
 
-A `reconcile_decision` event (add/edit/prune/contradiction/no-op, with tier, confidence, and anchored evidence) shares the same substrate — one store backs both serving and ingest traceability.
+A `reconcile_decision` event (add/edit/prune/contradiction/no-op, with tier, confidence, and anchored evidence) shares the same substrate: one store backs both serving and ingest traceability.
 
 ## Local inspection, no telemetry required
 
-`canonic status` and `canonic report` read the log directly — counts, error-code distribution, latency percentiles, bytes scanned, freshness and guardrail-hit coverage, and the onboarding funnel (setup started → connection added → bootstrap completed → first answer served → first curated review completed). None of this requires telemetry to be enabled; the log is not a black box on day one.
+`canonic status` and `canonic report` read the log directly: counts, error-code distribution, latency percentiles, bytes scanned, freshness and guardrail-hit coverage, and the onboarding funnel (setup started → connection added → bootstrap completed → first answer served → first curated review completed). None of this requires telemetry to be enabled; the log is not a black box on day one.
 
 ## Opt-in telemetry
 
-`canonic.yaml`'s `telemetry.enabled` flag defaults to `false`, and is forced off whenever `runtime.air_gapped: true` is set. As of today, the flag only gates *whether local data could be sent* — no aggregate-telemetry transport is implemented yet, so nothing leaves the machine regardless of the setting.
+`canonic.yaml`'s `telemetry.enabled` flag defaults to `false`, and is forced off whenever `runtime.air_gapped: true` is set. As of today, the flag only gates *whether local data could be sent*: no aggregate-telemetry transport is implemented yet, so nothing leaves the machine regardless of the setting.
 
-## Accuracy harness — `canonic assert`
+## Accuracy harness: `canonic assert`
 
 The mechanism that turns ">90% accuracy" from aspirational into measured. Every executable assertion in `contracts/assertions/` is compiled, executed read-only, and compared to its expected value within tolerance; the harness reports `accuracy = passed / total` and gates on a floor (default `1.0`, every assertion must hold). See [`canonic assert`](/cli-reference/query-sql-assert#canonic-assert) for the CLI, and [Assertions](/concepts/contracts-and-guardrails#assertions) for how an assertion is declared.
 
-## Model baseline harness — `canonic eval baseline`
+## Model baseline harness: `canonic eval baseline`
 
-A separate harness for a separate question: not "is the compiled SQL correct" (that's `canonic assert`, and the compiler is deterministic regardless of model), but **which LLM is good enough to draft with**. `canonic eval baseline` drives the real production drafter — not a re-implemented prompt — over a labeled dataset of grain-inference and contradiction-resolution cases, for each candidate model in a supplied list. It scores structured-output adherence (does the model actually return parseable JSON), accuracy against the labeled answer, and latency, then recommends a candidate that clears the adherence floor. See [`canonic eval baseline`](/cli-reference/eval#eval-baseline).
+A separate harness for a separate question: not "is the compiled SQL correct" (that's `canonic assert`, and the compiler is deterministic regardless of model), but **which LLM is good enough to draft with**. `canonic eval baseline` drives the real production drafter (not a re-implemented prompt) over a labeled dataset of grain-inference and contradiction-resolution cases, for each candidate model in a supplied list. It scores structured-output adherence (does the model actually return parseable JSON), accuracy against the labeled answer, and latency, then recommends a candidate that clears the adherence floor. See [`canonic eval baseline`](/cli-reference/eval#eval-baseline).
 
 Re-run this before tagging a release so the recommended local model tracks reality as models churn, rather than being asserted once.

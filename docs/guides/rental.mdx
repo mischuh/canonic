@@ -3,7 +3,7 @@ title: "Guide: Vehicle Rental (SQLite)"
 description: "A SQLite-only project with cross-fact fanout and a NULL-handling guardrail."
 ---
 
-An end-to-end canonic project on a vehicle rental service: one SQLite connection, five dimensions, three fact tables, three canonical metrics, and one enforced guardrail. No external database required — the entire dataset lives in a single `rental.db` file.
+An end-to-end canonic project on a vehicle rental service: one SQLite connection, five dimensions, three fact tables, three canonical metrics, and one enforced guardrail. No external database required; the entire dataset lives in a single `rental.db` file.
 
 <Info>Full source: [`examples/rental/`](https://github.com/mischuh/canonic/tree/main/examples/rental)</Info>
 
@@ -50,10 +50,10 @@ canonic eval baseline \                    # 6. (optional) grain-inference accur
 
 ## Guardrail
 
-**`completed-rentals-only`** — `rentals.total_base_revenue` must never be summed without a `status = 'completed'` filter: active and cancelled rows have `NULL` in `total_amount`. Use `payments.total_paid` for financial reporting instead.
+**`completed-rentals-only`**: `rentals.total_base_revenue` must never be summed without a `status = 'completed'` filter: active and cancelled rows have `NULL` in `total_amount`. Use `payments.total_paid` for financial reporting instead.
 
 <Note>
-  **Cross-fact fanout** (documented in a knowledge caveat, not a guardrail — `required_dimension`/cross-fact fanout guarding isn't an enforced guardrail kind yet, see [Contracts & guardrails](/concepts/contracts-and-guardrails#guardrails)): joining `damages` to `payments` in a single query fans out both facts. Always bridge each independently through `rentals`.
+  **Cross-fact fanout** (documented in a knowledge caveat, not a guardrail; `required_dimension`/cross-fact fanout guarding isn't an enforced guardrail kind yet, see [Contracts & guardrails](/concepts/contracts-and-guardrails#guardrails)): joining `damages` to `payments` in a single query fans out both facts. Always bridge each independently through `rentals`.
 </Note>
 
 ## Files
@@ -71,8 +71,5 @@ eval/grain_cases.jsonl          ← 8 labeled grain-inference cases (PK omitted)
 ## Try a query
 
 ```bash
-cat > q.json <<'EOF'
-{"dimensions": ["status"], "metrics": ["rental_count"]}
-EOF
-canonic query -f q.json
+canonic query --metrics rental_count --dimensions status
 ```

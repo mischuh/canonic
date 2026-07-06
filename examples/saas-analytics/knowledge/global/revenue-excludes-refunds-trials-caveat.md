@@ -1,5 +1,5 @@
 ---
-summary: "gross_revenue silently excludes refunded and trial invoices — enforced by guardrails, not convention."
+summary: "gross_revenue silently excludes refunded and trial invoices: enforced by guardrails, not convention."
 tags: [revenue, refunds, trials, guardrails, caveat]
 sl_refs:
   - saas_duckdb.fct_invoices.total_amount
@@ -17,7 +17,7 @@ guardrails injected by the compiler, `severity: error`:
 - `revenue-excludes-refunds` → `status != 'refunded'`. Refunds are accounting reversals, not revenue.
 - `revenue-excludes-trials` → `is_trial = false`. Trial invoices are $0-value evaluations.
 
-These filters are enforced by the compiler, not by analyst convention — they cannot be accidentally
+These filters are enforced by the compiler, not by analyst convention; they cannot be accidentally
 omitted.
 
 ## Implication for analyses

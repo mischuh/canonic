@@ -3,7 +3,7 @@ title: "canonic eval"
 description: "Evaluate local models against the tested baseline."
 ---
 
-`canonic eval` is an operator command — it makes live model calls, so it is not run in CI (only the deterministic harness internals are unit-tested).
+`canonic eval` is an operator command; it makes live model calls, so it is not run in CI (only the deterministic harness internals are unit-tested).
 
 ## `eval baseline`
 
@@ -19,7 +19,7 @@ canonic eval baseline --candidates candidates.yaml --task reconcile --out report
 | `--candidates`, `-c` | YAML list of `openai_compatible` candidate models. |
 | `--dataset`, `-d` | Labeled JSONL set (defaults to the shipped set). |
 | `--out`, `-o` | Where to write the markdown baseline doc (default `reports/baseline-models.md`). |
-| `--task` | Task to evaluate — only `draft` has a live call site in v1; `reconcile` is also supported. |
+| `--task` | Task to evaluate; only `draft` has a live call site in v1; `reconcile` is also supported. |
 | `--adherence-floor` | Minimum structured-output adherence required to recommend a candidate. |
 
 For each candidate, the report includes accuracy, structured-output adherence, and p50 latency, plus which candidate (if any) is recommended. Re-run this before tagging a release so the baseline tracks reality as models churn.

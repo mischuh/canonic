@@ -1,9 +1,9 @@
 ---
 title: "Ingestion & reconciliation"
-description: "How normalized evidence turns into reviewable diffs — never a silent edit."
+description: "How normalized evidence turns into reviewable diffs, never a silent edit."
 ---
 
-[`canonic ingest`](/cli-reference/ingest) is the engine that turns normalized connector evidence into reviewable context. It never edits committed files in place — every change reaches `semantics/` or `knowledge/` only through a diff you (or a policy) approve.
+[`canonic ingest`](/cli-reference/ingest) is the engine that turns normalized connector evidence into reviewable context. It never edits committed files in place: every change reaches `semantics/` or `knowledge/` only through a diff you (or a policy) approve.
 
 ## The four-stage pipeline
 
@@ -29,10 +29,10 @@ Nothing in stages 2–4 mutates an accepted file. A change reaches a committed f
 
 Turns evidence into proposals, not files:
 
-- **Deterministic core (no LLM):** a `RelationSchema` maps directly to a semantic-source draft — table, typed columns, a grain candidate from the primary key, joins from discovered foreign keys. This path is reproducible and is the *only* builder path in headless mode.
-- **LLM-assisted drafting:** the fuzzy parts only — naming a measure, drafting a knowledge page's prose, proposing a grain when no primary key is declared. Every LLM-drafted proposal is labelled `drafted_by: llm` and carries a lower default confidence than a deterministic one.
+- **Deterministic core (no LLM):** a `RelationSchema` maps directly to a semantic-source draft: table, typed columns, a grain candidate from the primary key, joins from discovered foreign keys. This path is reproducible and is the *only* builder path in headless mode.
+- **LLM-assisted drafting:** the fuzzy parts only: naming a measure, drafting a knowledge page's prose, proposing a grain when no primary key is declared. Every LLM-drafted proposal is labelled `drafted_by: llm` and carries a lower default confidence than a deterministic one.
 
-Each proposal tracks two independent axes: **provenance** (where it came from: `board_approved` / `human_curated` / `inferred`) and **confidence** (how sure the builder is, 0–1). Provenance governs overwrite priority; confidence governs propose-vs-auto-apply and review ordering. New evidence always enters at `inferred` — the lowest tier.
+Each proposal tracks two independent axes: **provenance** (where it came from: `board_approved` / `human_curated` / `inferred`) and **confidence** (how sure the builder is, 0–1). Provenance governs overwrite priority; confidence governs propose-vs-auto-apply and review ordering. New evidence always enters at `inferred`, the lowest tier.
 
 ## Reconciliation
 
@@ -40,17 +40,17 @@ Merges each proposal against the currently accepted file with a deterministic de
 
 | Existing fact | Situation | Outcome |
 | --- | --- | --- |
-| none | — | propose **add** |
-| equal (fingerprint match) | — | no-op; refresh `last_validated_at` only |
-| conflicts, existing tier higher | — | **flag contradiction**, keep existing, never edit |
+| none | n/a | propose **add** |
+| equal (fingerprint match) | n/a | no-op; refresh `last_validated_at` only |
+| conflicts, existing tier higher | n/a | **flag contradiction**, keep existing, never edit |
 | conflicts, existing **frozen** | any tier | **flag contradiction**, never edit |
-| conflicts, tier ≤ proposal, confidence ≥ threshold | — | propose **edit** (auto-apply only if policy allows) |
-| conflicts, tier ≤ proposal, confidence < threshold | — | propose **edit**, marked low-confidence for review |
-| target evidence disappeared | — | propose **prune** / mark stale |
+| conflicts, tier ≤ proposal, confidence ≥ threshold | n/a | propose **edit** (auto-apply only if policy allows) |
+| conflicts, tier ≤ proposal, confidence < threshold | n/a | propose **edit**, marked low-confidence for review |
+| target evidence disappeared | n/a | propose **prune** / mark stale |
 
-**Provenance tiers:** `board_approved > human_curated > inferred`. Higher always wins — since new evidence is always `inferred`, it can never silently displace a curated or approved fact. A **frozen** fact is never edited by reconciliation regardless of the incoming tier or confidence; conflicting evidence is flagged, not applied.
+**Provenance tiers:** `board_approved > human_curated > inferred`. Higher always wins: since new evidence is always `inferred`, it can never silently displace a curated or approved fact. A **frozen** fact is never edited by reconciliation regardless of the incoming tier or confidence; conflicting evidence is flagged, not applied.
 
-A conflict is never resolved by silent overwrite. The worst case is a flagged contradiction a human resolves — contradictions ride into the review surface (a PR comment in headless mode) and don't fail a run by default.
+A conflict is never resolved by silent overwrite. The worst case is a flagged contradiction a human resolves: contradictions ride into the review surface (a PR comment in headless mode) and don't fail a run by default.
 
 ## Propose-only by default
 
@@ -68,11 +68,11 @@ Auto-apply is opt-in, bounded by confidence, capped at the lowest provenance, an
 
 ## Headless mode
 
-Headless mode (explicit `--headless`, or auto-detected via `CI=true`) pins the deterministic builder — no LLM in the loop — and, by default, opens an auto-PR carrying the diffs and contradiction notes. Because reconciliation's *decision* is always deterministic (only the optional LLM *drafting* is not), identical evidence and accepted state produce byte-identical proposals across runs — what makes scheduled ingest in CI a safe, repeatable job.
+Headless mode (explicit `--headless`, or auto-detected via `CI=true`) pins the deterministic builder (no LLM in the loop) and, by default, opens an auto-PR carrying the diffs and contradiction notes. Because reconciliation's *decision* is always deterministic (only the optional LLM *drafting* is not), identical evidence and accepted state produce byte-identical proposals across runs: what makes scheduled ingest in CI a safe, repeatable job.
 
 ## Idempotent re-runs
 
-Re-running `canonic ingest` refreshes from all configured sources, but a source whose `source_fingerprint` hasn't changed is a no-op — only `last_validated_at` refreshes. A run with no upstream change proposes no diffs at all; drift is detected purely as a fingerprint change, which becomes a normal `edit`/`prune` proposal through reconciliation.
+Re-running `canonic ingest` refreshes from all configured sources, but a source whose `source_fingerprint` hasn't changed is a no-op: only `last_validated_at` refreshes. A run with no upstream change proposes no diffs at all; drift is detected purely as a fingerprint change, which becomes a normal `edit`/`prune` proposal through reconciliation.
 
 ## After a run
 

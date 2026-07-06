@@ -21,7 +21,7 @@ The standard lint/type/test gate:
 - uv run pytest                 # full test suite
 ```
 
-This is the same sequence documented in the project's own contribution conventions — see [Running checks locally](/ci-cd/running-checks-locally) to run it yourself before pushing.
+This is the same sequence documented in the project's own contribution conventions; see [Running checks locally](/ci-cd/running-checks-locally) to run it yourself before pushing.
 
 ## `release-gate`
 
@@ -31,13 +31,13 @@ A second, separate job that runs the `release_gate`-marked test suite:
 - uv run pytest -m release_gate --strict-markers -rs --junitxml=release-gate.xml
 ```
 
-Tests marked `release_gate` are conformance-gate tests — they must **pass**, not just run, before beta invites go out. The job adds an explicit check on top of pytest's own result:
+Tests marked `release_gate` are conformance-gate tests: they must **pass**, not just run, before beta invites go out. The job adds an explicit check on top of pytest's own result:
 
 ```bash
 if grep -q '<skipped' release-gate.xml; then
-  echo "::error::Release-gate test(s) were skipped (e.g. Docker unavailable) — gate cannot pass silently."
+  echo "::error::Release-gate test(s) were skipped (e.g. Docker unavailable): gate cannot pass silently."
   exit 1
 fi
 ```
 
-This closes a gap plain pytest exit codes don't cover: a skipped test (for example because Docker wasn't available in the runner) normally doesn't fail the job. For this specific marker, that's treated as a hard failure — the gate is designed to never pass silently via skips. See [The release gate](/ci-cd/release-gate) for what these tests actually check.
+This closes a gap plain pytest exit codes don't cover: a skipped test (for example because Docker wasn't available in the runner) normally doesn't fail the job. For this specific marker, that's treated as a hard failure; the gate is designed to never pass silently via skips. See [The release gate](/ci-cd/release-gate) for what these tests actually check.

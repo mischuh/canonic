@@ -24,7 +24,7 @@ correspond to any real cohort calculation. To prevent silent misuse, `customer_l
 
 Canonic serves it as a direct lookup at customer grain and refuses any other grain:
 
-> Querying `customer_ltv` grouped by `segment` returns `UNSUPPORTED_MEASURE` — "opaque and can only
+> Querying `customer_ltv` grouped by `segment` returns `UNSUPPORTED_MEASURE`: "opaque and can only
 > be served at its native grain (customer_id)".
 
 To analyse LTV by segment, aggregate deliberately in a downstream model rather than asking the

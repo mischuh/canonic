@@ -1,14 +1,14 @@
 ---
 title: "The three layers"
-description: "Semantics, knowledge, and contracts — and the split rule for where new context belongs."
+description: "Semantics, knowledge, and contracts, and the split rule for where new context belongs."
 ---
 
-canonic's context lives in three committed surfaces — plain files in your git repo, reviewed like code. Each answers a different question.
+canonic's context lives in three committed surfaces: plain files in your git repo, reviewed like code. Each answers a different question.
 
 | Layer | File | Answers | Owned by |
 | --- | --- | --- | --- |
-| **Semantics** | `semantics/**/*.yaml` | "How do I query this safely?" — tables, types, grains, joins, measures | auto-maintained |
-| **Knowledge** | `knowledge/**/*.md` | "What does this mean to the business?" — definitions, caveats, policies | auto-maintained |
+| **Semantics** | `semantics/**/*.yaml` | "How do I query this safely?": tables, types, grains, joins, measures | auto-maintained |
+| **Knowledge** | `knowledge/**/*.md` | "What does this mean to the business?": definitions, caveats, policies | auto-maintained |
 | **Contracts** | `contracts/**/*.yaml` | "Which definition is canonical, and what must the answer obey?" | human-owned |
 
 ## The split rule
@@ -17,26 +17,26 @@ canonic's context lives in three committed surfaces — plain files in your git 
 - A human needs it to *trust* the answer → [**knowledge**](/concepts/knowledge-layer).
 - Governs *which* definition is authoritative or *what an answer must satisfy* → [**contracts**](/concepts/contracts-and-guardrails).
 
-The key idea: a knowledge page *explains* why "amount includes refunds unless filtered." A contract *makes the SQL obey* it. Documented caveats become enforced guardrails — so the warning can't be silently ignored.
+The key idea: a knowledge page *explains* why "amount includes refunds unless filtered." A contract *makes the SQL obey* it. Documented caveats become enforced guardrails, so the warning can't be silently ignored.
 
 ## Why three surfaces, not one
 
 Each layer has a different owner and a different update cadence:
 
-- **Semantics** is machine-derived from your live schema (tables, columns, grains, joins) and safe to auto-refresh on every [`canonic ingest`](/cli-reference/ingest) — it describes physical reality, so it should track physical reality.
-- **Knowledge** carries business prose that's also auto-drafted from evidence (dbt descriptions, Notion pages, BI usage), but is meant to be refined by a human over time — it's read-heavy context, not enforcement.
+- **Semantics** is machine-derived from your live schema (tables, columns, grains, joins) and safe to auto-refresh on every [`canonic ingest`](/cli-reference/ingest): it describes physical reality, so it should track physical reality.
+- **Knowledge** carries business prose that's also auto-drafted from evidence (dbt descriptions, Notion pages, BI usage), but is meant to be refined by a human over time: it's read-heavy context, not enforcement.
 - **Contracts** decide what's *authoritative* and *mandatory*. This is deliberately human-owned: which of two conflicting "revenue" definitions wins, and which guardrails are non-negotiable, are governance decisions canonic surfaces but never makes for you.
 
-This is also why ingestion is [propose-only](/concepts/ingestion-and-reconciliation): a `human_curated` or `board_approved` fact in any layer is never silently overwritten by new evidence — at most, a conflict is flagged for review.
+This is also why ingestion is [propose-only](/concepts/ingestion-and-reconciliation): a `human_curated` or `board_approved` fact in any layer is never silently overwritten by new evidence; at most, a conflict is flagged for review.
 
 <CardGroup cols={3}>
   <Card title="Semantics" icon="table" href="/concepts/semantics">
-    Tables, grains, joins, and measures — what the compiler queries against.
+    Tables, grains, joins, and measures: what the compiler queries against.
   </Card>
   <Card title="Knowledge" icon="book-open" href="/concepts/knowledge-layer">
-    Business meaning, caveats, and policies — searchable and graph-linked.
+    Business meaning, caveats, and policies: searchable and graph-linked.
   </Card>
   <Card title="Contracts" icon="shield-check" href="/concepts/contracts-and-guardrails">
-    Canonical bindings and guardrails — what the compiler must obey.
+    Canonical bindings and guardrails: what the compiler must obey.
   </Card>
 </CardGroup>

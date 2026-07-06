@@ -22,7 +22,7 @@ canonic mcp start --http --port 7474
 | `--host` | Host for the HTTP daemon (default `127.0.0.1`). |
 | `--suggestions` | Enable follow-up suggestions in query responses. |
 
-Without `--http`, the daemon runs in the foreground over stdio — the MCP client manages its process lifetime. With `--http`, it forks a background uvicorn daemon bound to the given host/port.
+Without `--http`, the daemon runs in the foreground over stdio; the MCP client manages its process lifetime. With `--http`, it forks a background uvicorn daemon bound to the given host/port.
 
 On first start in a project with no active metric contracts, canonic auto-generates inferred metric contracts from the loaded semantic sources before serving.
 
@@ -42,4 +42,4 @@ Report whether the MCP daemon is running.
 canonic mcp status
 ```
 
-Shows the PID, transport, address (for HTTP), version, and start time. Warns if the running daemon's version differs from the current CLI version — in which case, restart it with `canonic mcp stop && canonic mcp start`.
+Shows the PID, transport, address (for HTTP), version, and start time. Warns if the running daemon's version differs from the current CLI version; in which case, restart it with `canonic mcp stop && canonic mcp start`.

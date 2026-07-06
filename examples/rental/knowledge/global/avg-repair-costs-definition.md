@@ -14,7 +14,7 @@ meta:
 **Average repair costs** is the mean cost per vehicle damage incident, calculated as
 total repair cost divided by damage count, filtered to moderate and major severity damages only.
 
-The live expression — rendered directly from the semantic layer:
+The live expression: rendered directly from the semantic layer:
 
 > `{{ sl:rental_db.damages.avg_repair_costs.expr }}`
 
@@ -56,7 +56,7 @@ rather than 0, preventing misleading zero-cost interpretations.
 |---|---|---|
 | `avg_repair_costs` | damages | average cost per damage incident (major/moderate only) |
 | `total_repair_cost` | damages | sum of all repair costs (before severity filter) |
-| `rental_revenue` | payments | rental income — separate from repair/damage costs |
+| `rental_revenue` | payments | rental income: separate from repair/damage costs |
 
 ## Typical values
 
