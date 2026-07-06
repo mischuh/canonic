@@ -3,7 +3,7 @@ title: "Error codes"
 description: "The canonical error registry and its headless exit-code mapping."
 ---
 
-Every canonic error carries a stable, wire-safe `code` string plus a headless process exit code; never free text alone, so a caller (script, CI job, agent) can act on it programmatically. The registry lives in `canonic/exc.py` and is guarded by the [release gate](/ci-cd/release-gate)'s conformance tests, so this mapping can't silently drift.
+Every canonic error carries a stable, wire-safe `code` string plus a headless process exit code; never free text alone, so a caller (script, CI job, agent) can act on it programmatically. The registry lives in `canonic/exc.py` and is guarded by conformance tests, so this mapping can't silently drift.
 
 | Exit code | `code` | Meaning |
 | --- | --- | --- |

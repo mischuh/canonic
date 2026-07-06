@@ -33,6 +33,20 @@ A standard MCP server entry, for example:
 
 See your client's own docs for the exact config file location; Claude Code, Cursor, and Codex each load standard MCP configuration.
 
+If you started the daemon with `--http` (see [`canonic mcp`](/cli-reference/mcp)), point your client at the HTTP endpoint instead of spawning a process:
+
+```json
+{
+  "mcpServers": {
+    "canonic": {
+      "url": "http://127.0.0.1:7474/mcp"
+    }
+  }
+}
+```
+
+Adjust the host/port to match the `--host`/`--port` flags used to start the daemon.
+
 ## 3. Your agent now has these tools
 
 See [Tools reference](/mcp-integration/tools-reference) for the full list and payload shapes.
