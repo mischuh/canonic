@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.3.1](https://github.com/mischuh/canonic/compare/v0.3.0...v0.3.1) (2026-07-06)
+
+
+### Documentation
+
+* add demo setup GIF and script for quickstart guide ([8593bab](https://github.com/mischuh/canonic/commit/8593babb0a06f091940d0b50952685ada329fbc6))
+* **intro:** add concrete before/after example showing Canonic's value ([59ef6a4](https://github.com/mischuh/canonic/commit/59ef6a4027cf4d6dfbf3eb8c63a903da075f9bc8))
+
 ## [0.3.0](https://github.com/mischuh/canonic/compare/v0.2.3...v0.3.0) (2026-07-06)
 
 
