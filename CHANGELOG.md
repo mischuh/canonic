@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.3.3](https://github.com/mischuh/canonic/compare/v0.3.2...v0.3.3) (2026-07-07)
+
+
+### Bug Fixes
+
+* mark bootstrap-generated metric contracts as human_curated ([b01e622](https://github.com/mischuh/canonic/commit/b01e622409e5919cb33dd7c053369b06bd2faf35))
+
+
+### Documentation
+
+* add detailed schema references across contract, knowledge, and semantic documentation ([9a48b56](https://github.com/mischuh/canonic/commit/9a48b56553763046a03eaca15c032653ef2ac8e5))
+* add end-to-end example and update quickstart with reference ([c2e222a](https://github.com/mischuh/canonic/commit/c2e222ad6d7823ee26fc3d0c2a2e4f89f56d33bc))
+* enhance `canonic eval` documentation with detailed usage and examples ([706f43f](https://github.com/mischuh/canonic/commit/706f43f6721e1de37c372883dfde6fb0a60e3a73))
+* refactor readme files for jaffle shop, rental, and saas analytics examples ([99ae23b](https://github.com/mischuh/canonic/commit/99ae23b52f90ebc8404bef533d37e24511c82709))
+* update README with examples of canonic's impact on data accuracy ([8500a4f](https://github.com/mischuh/canonic/commit/8500a4f6e26b9fe3e42efb729bf79193a4ad2125))
+
 ## [0.3.2](https://github.com/mischuh/canonic/compare/v0.3.1...v0.3.2) (2026-07-06)
 
 
