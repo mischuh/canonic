@@ -1,5 +1,7 @@
 # canonic
 
+[![CI](https://github.com/mischuh/canonic/actions/workflows/ci.yml/badge.svg)](https://github.com/mischuh/canonic/actions/workflows/ci.yml)
+
 **The context layer that lets AI agents query your data correctly.**
 
 Point canonic at your database and it builds the context an agent needs to answer data questions accurately — definitions, relationships, business meaning, and the guardrails that stop confidently-wrong answers. It keeps that context up to date as your data changes, and it never touches your warehouse beyond reading it.
@@ -13,6 +15,28 @@ Point canonic at your database and it builds the context an agent needs to answe
 An AI agent connected straight to your warehouse sees **tables and columns** — not **meaning**. It doesn't know that `revenue` lives in `orders.amount` but excludes refunds, that "active customer" has a specific definition your finance team agreed on, or that summing a daily balance across a week is nonsense. So it guesses. The result is the worst kind of wrong: a confident, well-formatted, *incorrect* number that looks right.
 
 Schema access makes an agent *fluent*. It doesn't make it *correct*.
+
+**❌ Without canonic (the guess):**
+```
+Agent query: SELECT SUM(amount) FROM orders;
+Result: $1,450,320
+
+The sum includes refunded orders and sales tax, making the number wrong
+by 12%. The agent delivers a confident, well-formatted, and completely
+incorrect metric.
+```
+
+**✅ With canonic (the truth):**
+```
+Agent request: "Give me revenue"
+Canonic compiles: SELECT SUM(amount) FROM orders
+                  WHERE status = 'completed' AND type != 'tax';
+Result: $1,274,500 [certified fresh, excludes refunds and tax]
+
+The agent gets the exact right number, with the business logic and
+caveats baked in — and it knows the data freshness and which
+guardrails applied. Zero guessing.
+```
 
 ## What canonic does
 
@@ -51,28 +75,6 @@ canonic's context lives in three committed surfaces — plain files in your git 
 - Governs *which* definition is authoritative or *what an answer must satisfy* → **contracts**.
 
 The key idea: a knowledge page *explains* why "amount includes refunds unless filtered." A contract *makes the SQL obey* it. Documented caveats become enforced guardrails — so the warning can't be silently ignored.
-
----
-
-## Adding knowledge: recurring vs. one-shot
-
-`knowledge/**/*.md` pages can come from two paths, depending on whether a source should stay in sync automatically or you're just adding one thing right now.
-
-**Recurring** — register it as a connection, and it refreshes alongside everything else on every `canonic ingest`, with drift tracked via content fingerprints:
-```yaml
-connections:
-  - id: saas_kpi_glossary
-    type: url
-    params:
-      urls: ["https://example.com/saas-metrics-glossary"]
-```
-
-**One-shot** — no `canonic.yaml` entry needed. Fetches once, shows you the rendered page, and writes only after you confirm:
-```bash
-canonic knowledge add https://example.com/saas-metrics-glossary
-```
-
-Both paths classify the fetched content the same way: usage (`reference` / `caveat` / `policy` / `definition`) and candidate topic references are inferred, then matched against your live semantics — an unmatched candidate is surfaced for review, never silently linked as a broken reference.
 
 ---
 
@@ -139,6 +141,8 @@ canonic setup
 # Point at a .duckdb file, or let it read a CSV/Parquet directly
 ```
 
+![canonic setup end-to-end on the vehicle rental example](docs/demo_canonic_setup.gif)
+
 The wizard walks you through:
 1. **Name** your project.
 2. **Connect** a source — SQLite/DuckDB file, or Postgres if you have a server.
@@ -146,14 +150,17 @@ The wizard walks you through:
 4. **Bootstrap** — canonic introspects the schema and drafts your semantics.
 5. **First answer** — the wizard runs a real query against your data and shows the result, plus how fresh it is and which definition it used.
 
+Don't have a database handy? `examples/` ships 5 ready-to-run sample projects — dbt Jaffle Shop, e-commerce, vehicle rental, SaaS analytics, and Dutch railway — a good way to try the wizard before pointing it at your own data. See the [guides](docs/guides/) for the walkthrough behind each one, e.g. [vehicle rental](docs/guides/rental.mdx).
+
 You now have a working context layer committed to your repo. Ask your own questions:
 ```bash
 canonic query --metrics revenue --dimensions order_date
 canonic query --metrics revenue --filter "status=paid"
-canonic knowledge search "active customer"
 ```
 
-For a query with more filters or joins than is comfortable inline, write a `SemanticQuery` JSON file and pass it with `-f` instead.
+For a query with more filters or joins than is comfortable inline, write a `SemanticQuery` JSON file and pass it with `-f` instead — see [`canonic query`](docs/cli-reference/query-sql-assert.mdx) for the full flag reference.
+
+> `canonic knowledge search` is not implemented yet (returns a "not implemented" notice); see [CLI reference: knowledge](docs/cli-reference/knowledge.mdx) for its current status. `canonic knowledge add <url>` (fetch-and-write a page) works today.
 
 Review what canonic drafted when you're ready — it's all an ordinary git diff:
 ```bash
@@ -237,7 +244,22 @@ canonic mcp status
 ```
 (See the per-client docs for the exact config location — Claude Code, Cursor, and Codex each load standard MCP configuration.)
 
-**3. Your agent now has these tools:**
+If you started the daemon with `--http` instead (a background daemon on a fixed host/port, useful when the client can't spawn a process), point your client at the HTTP endpoint:
+```bash
+canonic mcp start --http --host 127.0.0.1 --port 7474
+```
+```json
+{
+  "mcpServers": {
+    "canonic": {
+      "url": "http://127.0.0.1:7474/mcp"
+    }
+  }
+}
+```
+Adjust host/port to match the flags used to start the daemon — see [`canonic mcp`](docs/cli-reference/mcp.mdx) for the full flag reference.
+
+**3. Your agent now has these tools** ([full reference](docs/mcp-integration/tools-reference.mdx)):
 
 | Tool | What the agent does with it |
 | --- | --- |
@@ -270,10 +292,10 @@ Every answer comes back with the **metadata band** — resolved definition, guar
 
 ## Where to go next
 
-- **Concepts** — the three layers and the split rule (the one mental model worth learning first).
-- **Canonical bindings** — resolving "which definition wins."
-- **Guardrails & contracts** — turning documented caveats into enforced rules.
-- **Connectors** — adding dbt, BI tools, wikis (Confluence, Jira, etc.), and docs as context sources.
-- **Air-gapped operation** — running fully offline with local models.
+- **[Concepts](docs/concepts/three-layers.mdx)** — the three layers and the split rule (the one mental model worth learning first).
+- **[CLI reference](docs/cli-reference/overview.mdx)** — every command, flag by flag.
+- **[MCP / agent integration](docs/mcp-integration/connecting-your-agent.mdx)** — wiring canonic into Claude Code, Cursor, Codex, or any MCP client.
+- **[Guides](docs/guides/)** — 5 ready-to-run example projects: [Jaffle Shop](docs/guides/jaffle-shop.mdx), [e-commerce](docs/guides/ecommerce.mdx), [vehicle rental](docs/guides/rental.mdx), [SaaS analytics](docs/guides/saas-analytics.mdx), [Dutch railway](docs/guides/dutch-railway.mdx).
+- **[Reference](docs/reference/error-codes.mdx)** — error codes and the full `canonic.yaml` config schema.
 
 canonic is local-first, git-native, and read-only by design. Start with a SQLite file and one question; grow into the full context layer as your needs do.
