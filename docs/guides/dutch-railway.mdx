@@ -9,7 +9,7 @@ Compared to the [ecommerce guide](/guides/ecommerce), this project exercises a d
 
 <Info>Full source: [`examples/dutch-railway/`](https://github.com/mischuh/canonic/tree/main/examples/dutch-railway)</Info>
 
-## Data
+## Schema
 
 The fact table is pinned to a single demo day (`service_date = 2024-08-01`): 63,946 service stops across 397 stations.
 
@@ -20,13 +20,25 @@ The fact table is pinned to a single demo day (`service_date = 2024-08-01`): 63,
 | `dim_nl_train_stations` | 397 | `station_sk` |
 | `fact_services` | 63,946 | `service_sk` |
 
-## Quickstart
+## Setup
+
+Bundled DuckDB file: no server, no credentials.
 
 ```bash
 cd examples/dutch-railway   # canonic commands must run from here
-canonic ingest --bootstrap  # introspect DuckDB → write semantics/*.yaml
-canonic mcp start           # serve: agents call query() + search_knowledge() together
+canonic status
+# Canonic project: dutch-railway-demo (version 1)
 ```
+
+## Quickstart
+
+```bash
+canonic ingest --bootstrap                                    # introspect DuckDB → write semantics/*.yaml
+canonic query --metrics service_count --dimensions station_name  # guardrail fires automatically
+canonic mcp start                                              # serve: agents call query() + search_knowledge() together
+```
+
+`canonic status`, `canonic ingest --bootstrap`, `canonic query`, and `canonic mcp start` never call the LLM: every table here has a declared primary key, so grain is inferred deterministically. `CANONIC_LLM_API_KEY` and `llm:` in `canonic.yaml` only matter for low-confidence grain-drafting on schemas with undeclared keys, which this one doesn't need.
 
 ## Metrics
 

@@ -27,12 +27,22 @@ Business Vault (8 dimensions, 10 facts) + 4 data marts:
 | `fct_nps_responses` / `fct_payments` | 18 / 130 | NPS survey, payment transactions |
 | `mart_*` | n/a | Pre-aggregated monthly MRR, cohort retention, account health, rep quota |
 
-## Quickstart
+## Setup
+
+Bundled DuckDB file: no server, no credentials.
 
 ```bash
 cd examples/saas-analytics
 bash scripts/build.sh   # (optional) rebuild the warehouse from setup.sql
+canonic status
+# Canonic project: saas-analytics-demo (version 1)
+```
 
+## Quickstart
+
+Unlike the other guides, there's no `canonic ingest --bootstrap` step here: every semantic source, metric, and guardrail already ships `provenance: human_curated` in `contracts/` and `semantics/`, so there is nothing to bootstrap. (Run `canonic ingest --dry-run` any time to see it reconcile cleanly against the live `saas.duckdb` schema with zero diffs.)
+
+```bash
 canonic query --metrics ending_mrr --dimensions snapshot_month
 canonic query --metrics arpu --dimensions snapshot_month
 canonic query --metrics customer_ltv --dimensions customer_id
@@ -41,7 +51,7 @@ canonic assert       # runs the contract assertions, gates on accuracy
 canonic mcp start
 ```
 
-No LLM is required: this example ships hand-curated semantics and contracts.
+No LLM is required for any of these commands: this example ships hand-curated semantics and contracts, so canonic never needs to draft anything.
 
 ## Metric catalogue: all 7 binding kinds
 
