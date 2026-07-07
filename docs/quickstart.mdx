@@ -105,3 +105,7 @@ canonic status        # always tells you the best next step
 - **More sources**: dbt / Metabase / Notion / web pages, layered on as context evidence. The connector contract is extensible, so a Confluence, Jira, or other wiki/knowledge-base connector can be added the same way.
 
 The design principle throughout: **canonic proposes, you approve.** It never silently edits your context: every change is a reviewable diff.
+
+<Info>
+  See the [end-to-end example](/end-to-end-example) for the full loop in one place: `ingest → review → apply`, what happens when your data actually changes, defining a canonical metric and guardrail by hand, and running the same loop headless in CI.
+</Info>

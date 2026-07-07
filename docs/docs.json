@@ -17,6 +17,7 @@
           "introduction",
           "installation",
           "quickstart",
+          "end-to-end-example",
           "configuring-an-llm"
         ]
       },
@@ -72,7 +73,10 @@
         "group": "Reference",
         "pages": [
           "reference/error-codes",
-          "reference/config-schema"
+          "reference/config-schema",
+          "reference/semantic-schema",
+          "reference/contract-schema",
+          "reference/knowledge-schema"
         ]
       }
     ]
