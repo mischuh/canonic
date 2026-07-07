@@ -23,17 +23,25 @@ customers ──< orders ──< order_items >── products
 | `orders` | 25 | One row per order with payment breakdown |
 | `order_items` | 37 | One row per line item |
 
+## Setup
+
+Bundled DuckDB file: no server, no credentials.
+
+```bash
+cd examples/jaffle-shop   # canonic commands must run from here
+canonic status
+# Canonic project: jaffle-shop-demo (version 1)
+```
+
 ## Quickstart
 
 ```bash
-cd examples/jaffle-shop
-
 canonic ingest --bootstrap                              # introspects DuckDB + loads dbt manifest as modeling-tier evidence
 canonic query --metrics revenue --dimensions store_id    # revenue by store
 canonic mcp start                                        # expose metrics to any MCP-compatible agent
 ```
 
-No LLM is required for the deterministic bootstrap. Set `CANONIC_LLM_API_KEY` and configure `llm:` in `canonic.yaml` to enable grain-drafting for low-confidence proposals.
+`canonic status`, `canonic ingest --bootstrap`, `canonic query`, and `canonic mcp start` never call the LLM: every table here has a declared primary key, so grain is inferred deterministically. `CANONIC_LLM_API_KEY` and `llm:` in `canonic.yaml` only matter if you point canonic at a schema with undeclared keys, where low-confidence grain-drafting falls back to the model.
 
 ## What canonic extracts from the dbt manifest
 
@@ -44,6 +52,22 @@ The `jaffle_dbt` connection parses `manifest.json` (schema v11, dbt 1.7, MetricF
 - **3 metrics** → `revenue`, `order_count`, `units_sold`.
 
 Because MetricFlow's semantic models name measures explicitly, the resulting semantic sources in `semantics/jaffle_duckdb/` carry business-meaningful measure names (`revenue`, `order_count`) rather than generic inferred ones (`total_amount`, `row_count`); the clearest illustration in these examples of why [modeling-tier evidence outranks raw introspection](/concepts/connectors#schema-acquisition-ladder).
+
+## Metrics
+
+`contracts/metrics/` ships **8** metric contracts. Three are the canonical showcase bindings straight from the dbt manifest's MetricFlow metrics; the rest are supporting ratio and count metrics the bootstrap also drafted from the same manifest.
+
+| Metric | Source · measure | Notes |
+| --- | --- | --- |
+| `revenue` | `orders.revenue` | Canonical, named by MetricFlow |
+| `order_count` | `orders.order_count` | Canonical, named by MetricFlow |
+| `units_sold` | `order_items.units_sold` | Canonical, named by MetricFlow |
+| `avg_revenue` | ratio: `revenue` / `num_customers` | Supporting metric |
+| `avg_product_price` | ratio: `total_price` / `product_count` | Supporting metric |
+| `num_customers` / `product_count` | `customers`/`products` row counts | Supporting metric |
+| `total_price` | `products.total_price` | Supporting metric |
+
+No guardrails or assertions ship in this example.
 
 ## Regenerating the artifacts
 

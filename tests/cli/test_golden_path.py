@@ -331,7 +331,7 @@ def test_write_bootstrap_contracts_creates_files(tmp_path):
     assert "metric: revenue" in text
     assert "source: orders" in text
     assert "measure: revenue" in text
-    assert "provenance: inferred" in text
+    assert "provenance: human_curated" in text
     assert "status: active" in text
 
 

@@ -69,7 +69,7 @@ def write_inferred_contracts(root: Path, sources: list[SemanticSource]) -> int:
                 f"canonical:\n"
                 f"  source: {source.name}\n"
                 f"  measure: {name}\n"
-                f"provenance: inferred\n"
+                f"provenance: human_curated\n"
                 f"status: active\n"
             )
             written += 1

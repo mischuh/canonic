@@ -1,0 +1,175 @@
+---
+title: "Contract schema"
+description: "Every field across the four contract file types: metrics, guardrails, finality, and assertions."
+---
+
+Contracts are split across four directories, each validated against its own Pydantic model at load time. See [Contracts & guardrails](/concepts/contracts-and-guardrails) for the concepts behind these fields.
+
+| Directory | Model | Loaded by |
+| --- | --- | --- |
+| `contracts/metrics/*.yaml` | `MetricBinding` | `load_metric_bindings` |
+| `contracts/guardrails/*.yaml` (excluding `finality-*.yaml`) | `Guardrail` | `load_guardrails` |
+| `contracts/guardrails/finality-*.yaml` | `FinalityRule` | `load_finality` |
+| `contracts/assertions/*.yaml` | `Assertion` | `load_assertions` |
+
+A finality rule is filename-discriminated from a guardrail — both live under `contracts/guardrails/`, but only files named `finality-*.yaml` load as `FinalityRule`; everything else in that directory loads as `Guardrail`.
+
+## `contracts/metrics/*.yaml` — `MetricBinding`
+
+```yaml
+metric: revenue
+owner: "@data-platform"
+canonical:
+  kind: single
+  source: orders
+  measure: total_revenue
+provenance: human_curated
+aliases: ["net revenue", "rev"]
+status: active
+```
+
+| Field | Type | Default | Governs |
+| --- | --- | --- | --- |
+| `metric` | `str` | n/a (required) | The logical metric name the binding resolves. |
+| `owner` | `str \| null` | `null` | Team/person accountable for the definition. |
+| `canonical` | `CanonicalRef` | n/a (required) | The compilation strategy and its parameters; see below. |
+| `provenance` | `Provenance` | `human_curated` | `board_approved` \| `human_curated` \| `inferred`. |
+| `label` | `str \| null` | `null` | Human-readable display name. |
+| `aliases` | `list[str]` | `[]` | Alternate names resolving to this binding (must not duplicate `metric` itself). |
+| `deprecated_alternatives` | `list[DeprecatedAlternative]` | `[]` | Known non-canonical definitions, explicitly flagged as superseded. |
+| `examples` | `list[Example]` | `[]` | Usage-backed example queries (from assertions, observed queries, or usage evidence). |
+| `status` | `Status` | `active` | `active` \| `deprecated`. Only `active` bindings are checked for duplicate names/aliases across the project. |
+
+**Ambiguity rule:** if a requested name matches zero or more than one active binding, the compiler returns a structured `AMBIGUOUS`/`UNRESOLVED` error rather than guessing.
+
+### `canonical` (`CanonicalRef`) — one shape per `kind`
+
+`kind` selects a compilation strategy; each kind requires a different subset of fields (validated at load time — missing a required field for the chosen `kind` raises a located error):
+
+| `kind` | Required fields | Compiles as |
+| --- | --- | --- |
+| `single` (default) | `source`, `measure` | Resolve to one `(source, measure)` pair. |
+| `ratio` | `numerator`, `denominator` (metric names) | Aggregate numerator & denominator independently, divide after. |
+| `weighted_avg` | `weighted_sum`, `weight` (metric names) | Weighted-sum ÷ weight. |
+| `semi_additive` | `source`, `measure`, `collapse_dimension`, `collapse_agg` | Sum over every dimension except `collapse_dimension`, which collapses via `collapse_agg`. |
+| `distinct_count` | `source`, `distinct_on` (column name) | Recompute `count(distinct …)` at the requested grain. |
+| `percentile` | `source`, `column`, `quantile` ∈ (0, 1) | Recompute the quantile at the requested grain from base rows. |
+| `opaque` | `source`, `measure`, `native_grain` (non-empty list of dimension columns) | Serve only at its declared native grain; any other grain returns `UNSUPPORTED_MEASURE`. |
+
+Full field list on `CanonicalRef`:
+
+| Field | Type | Default | Used by |
+| --- | --- | --- | --- |
+| `kind` | `BindingKind` | `single` | All. |
+| `source` | `str \| null` | `null` | `single`, `semi_additive`, `distinct_count`, `percentile`, `opaque`. |
+| `measure` | `str \| null` | `null` | `single`, `semi_additive`, `opaque`. |
+| `numerator` / `denominator` | `str \| null` | `null` | `ratio` (both are metric names). |
+| `weighted_sum` / `weight` | `str \| null` | `null` | `weighted_avg` (both are metric names). |
+| `on_zero_denominator` | `OnZeroDenominator` | `null` (coerced) | `ratio`/`weighted_avg`: `null` \| `zero` \| `error` when the denominator is zero. |
+| `collapse_dimension` | `str \| null` | `null` | `semi_additive`: the dimension that collapses (typically time). |
+| `collapse_agg` | `CollapseAgg \| null` | `null` | `semi_additive`: `last` \| `first` \| `avg` \| `min` \| `max`. |
+| `distinct_on` | `str \| null` | `null` | `distinct_count`: column to count distinct values of. |
+| `column` | `str \| null` | `null` | `percentile`: column the quantile is computed over. |
+| `quantile` | `float \| null` | `null` | `percentile`: value in (0, 1). |
+| `native_grain` | `list[str] \| null` | `null` | `opaque`: dimension columns the metric is pre-aggregated to. |
+| `population_filter` | `str \| null` | `null` | All `kind`s: SQL predicate AND-ed into every leaf query's `WHERE` before aggregation, defining the population the metric is *about* (e.g. excluding test accounts). |
+
+### `deprecated_alternatives[]` (`DeprecatedAlternative`)
+
+| Field | Type | Default | Governs |
+| --- | --- | --- | --- |
+| `source` | `str` | n/a (required) | The superseded source. |
+| `ref` | `str` | n/a (required) | The superseded measure/column reference. |
+| `reason` | `str` | n/a (required) | Why it was superseded. |
+
+### `examples[]` (`Example`)
+
+| Field | Type | Default | Governs |
+| --- | --- | --- | --- |
+| `query` | `ExampleQuery` | n/a (required) | `{ metrics: list[str], dimensions: list[str] = [], filters: list[str] = [] }`. |
+| `origin` | `str` | n/a (required) | Typed discriminator: `observed_query`, `assertion:<id>`, or `usage_evidence:<id>`. |
+| `frequency` | `int \| null` | `null` | Observed count, when available (omitted for assertion-sourced examples). |
+
+## `contracts/guardrails/*.yaml` — `Guardrail`
+
+```yaml
+id: revenue-excludes-refunds
+applies_to: { source: orders, measure: total_revenue }
+kind: mandatory_filter
+filter: "status != 'refunded'"
+severity: error
+rationale: "Refunds are reversals, not revenue."
+```
+
+| Field | Type | Default | Governs |
+| --- | --- | --- | --- |
+| `id` | `str` | n/a (required) | Guardrail identifier. |
+| `applies_to` | `AppliesTo` | n/a (required) | Target: `{ source, measure }` **or** `{ metric }` — exactly one shape, never both or neither. |
+| `kind` | `GuardrailKind` | n/a (required) | `mandatory_filter` \| `required_dimension` \| `restrict_source`; see below. |
+| `filter` | `str \| null` | `null` | Required (non-empty) when `kind: mandatory_filter`. |
+| `restrict_to` | `RestrictTo \| null` | `null` | Required when `kind: restrict_source`; `{ role: "final" \| "provisional" }`. |
+| `context` | `str \| null` | `null` | Required (non-empty) when `kind: restrict_source` — the named context the restriction applies in (e.g. `board_reporting`). |
+| `severity` | `Severity` | `error` | `error` blocks the query; `warn` annotates the result without blocking it. |
+| `rationale` | `str` | n/a (required) | Why the rule exists — surfaced to the caller. |
+| `phase` | `str \| null` | `null` | Optional compiler-pipeline phase hint. |
+
+| `kind` | Behavior | Status |
+| --- | --- | --- |
+| `mandatory_filter` | The predicate is always AND-ed into the compiled `WHERE`. | Enforced |
+| `restrict_source` | In a given `context`, only the source matching `restrict_to.role` is permitted. | Enforced |
+| `required_dimension` | The query must group by or filter on a given dimension or be rejected. | Declarable in the schema; not yet enforced by the compiler |
+
+## `contracts/guardrails/finality-*.yaml` — `FinalityRule`
+
+```yaml
+metric: revenue
+realizations:
+  - { source: orders,    role: final,       watermark: "business_day - 1 day" }
+  - { source: orders_rt, role: provisional }
+coalescing: "window <= watermark ? final : provisional"
+result_flag: per_row
+board_only_final: true
+```
+
+| Field | Type | Default | Governs |
+| --- | --- | --- | --- |
+| `metric` | `str` | n/a (required) | The metric these realizations apply to. |
+| `realizations` | `list[Realization]` | `[]` | Physical sources along the freshness axis; see below. |
+| `coalescing` | `str \| null` | `null` | Expression selecting which realization backs a given time window. |
+| `result_flag` | `str \| null` | `null` | How the `final`/`provisional` tag is attached to results (e.g. `per_row`). |
+| `board_only_final` | `bool` | `false` | Pairs with a `restrict_source` guardrail so a restricted context sees only the `final` source. |
+
+### `realizations[]` (`Realization`)
+
+| Field | Type | Default | Governs |
+| --- | --- | --- | --- |
+| `source` | `str` | n/a (required) | The semantic source backing this realization. |
+| `role` | `str` | n/a (required) | `"final"` or `"provisional"`. |
+| `watermark` | `str \| null` | `null` | Cutoff expression for this realization. |
+| `tz` | `str \| null` | `null` | Timezone the watermark is evaluated in. |
+
+## `contracts/assertions/*.yaml` — `Assertion`
+
+```yaml
+id: revenue-2025-q1
+query: { metrics: [revenue], filters: ["order_date in 2025-Q1"] }
+expect: { rows: 1, values: { revenue: 4218334.10 }, tolerance: 0.01 }
+source_of_truth: "Finance close, FY25 Q1"
+```
+
+| Field | Type | Default | Governs |
+| --- | --- | --- | --- |
+| `id` | `str` | n/a (required) | Assertion identifier. |
+| `query` | `dict[str, Any]` | n/a (required) | A semantic query (`metrics`, `dimensions`, `filters`) run through the compiler. |
+| `expect` | `AssertionExpect` | `{}` | Expected result; see below. |
+| `source_of_truth` | `str \| null` | `null` | Where the expected value came from (e.g. a finance close). |
+
+### `expect` (`AssertionExpect`)
+
+| Field | Type | Default | Governs |
+| --- | --- | --- | --- |
+| `rows` | `int \| null` | `null` | Expected row count. |
+| `values` | `dict[str, Any]` | `{}` | Expected value per output column. |
+| `tolerance` | `float \| null` | `null` | Relative tolerance for numeric comparison (e.g. `0.01` = 1%); `null` means exact match. |
+
+[`canonic assert`](/cli-reference/query-sql-assert) runs every assertion through the compiler and gates on the result; `canonic query --harness` runs matching assertions inline against a single query.

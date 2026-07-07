@@ -1,0 +1,269 @@
+---
+title: "End-to-end example"
+description: "Ingest → review → apply, in headless mode, and what happens when your data actually changes."
+---
+
+[Quickstart](/quickstart) gets you a first answer. This page walks the loop you'll actually live in day to day — including the "a bit more effort" half quickstart only lists — against the [Rental guide](/guides/rental) project: `canonic ingest → review → apply`, a real schema change and how canonic reacts to it, defining a canonical metric and a guardrail by hand, and the same loop running headless in CI.
+
+Every command below and every diff shown is real output from a live run against a copy of `examples/rental`, not hand-written.
+
+## The loop, once
+
+A fresh project, bootstrapped:
+
+```bash
+canonic ingest --bootstrap
+```
+
+canonic introspects the schema and drafts one proposal per table. With an LLM configured, the deterministic core (types, grains, joins, additive measures) is joined by LLM-assisted naming — human-readable labels, aliases, and a guessed join with its reasoning:
+
+```yaml
+# semantics/rental_db/customers.yaml — proposed
+dimensions:
+- name: email
+  column: email
+  label: Email Address
+  aliases: [email_address, email]
+joins:
+- to: rentals
+  on: customers.customer_id = rentals.customer_id
+  relationship: many_to_one
+meta:
+  join_draft: true
+  join_reasoning:
+  - column: customer_id
+    to: rentals
+    confidence: 0.85
+    reasoning: The column name 'customer_id' is a direct match for the
+      'customer_id' column in the 'rentals' table, suggesting a direct
+      foreign key relationship.
+```
+
+Nothing is written to `semantics/` yet — it's a proposal. Walk through them:
+
+```bash
+canonic review
+```
+
+```text
+Proposal 1/8: semantics/rental_db/customers.yaml  [add, confidence: 0.85, llm]
+--- a/semantics/rental_db/customers.yaml
++++ b/semantics/rental_db/customers.yaml
+...
+[a]ccept / [r]eject / [s]kip / [f]reeze / [q]uit
+> accepted → semantics/rental_db/customers.yaml
+```
+
+Accept, reject, skip, or freeze each one in turn; quitting or crashing mid-review resumes at the first still-pending item next time. `canonic apply <run_dir>` is the batch alternative — apply everything still pending in one shot, useful scripted or after hand-editing a diff file yourself.
+
+## When the data actually changes
+
+Six months later, someone adds a column: the rental company starts tracking goodwill repair-cost waivers.
+
+```bash
+sqlite3 rental.db "ALTER TABLE damages ADD COLUMN waived_amount NUMERIC(10,2);"
+```
+
+Run `canonic ingest` again — not `--bootstrap`, this project is already onboarded:
+
+```bash
+canonic ingest
+```
+
+```text
+# Ingest reconciliation summary
+
+## Decisions
+- add: 0
+- contradiction: 0
+- edit: 1
+- no_op: 7
+- prune: 0
+```
+
+Seven tables didn't change: same `source_fingerprint`, so nothing is proposed beyond a `last_validated_at` refresh — [no_op, per the reconciliation decision table](/concepts/ingestion-and-reconciliation#reconciliation). `damages` did change, so it's an **edit**, not a silent rewrite:
+
+```diff
+--- a/semantics/rental_db/damages.yaml
++++ b/semantics/rental_db/damages.yaml
+@@ -28,10 +28,13 @@
+ - name: at_fault_customer
+   type: int
+   nullable: false
++- name: waived_amount
++  type: decimal
++  nullable: true
+ measures:
+ - name: row_count
+   expr: count(*)
+   additivity: additive
+ - name: total_repair_cost
+   expr: sum(repair_cost)
+   additivity: additive
++- name: total_waived_amount
++  expr: sum(waived_amount)
++  additivity: additive
+```
+
+The deterministic builder didn't just notice the new column — it drafted an additive `sum` measure for it too, `confidence: 1.0`. It's still `propose-only`: this project's `canonic.yaml` has `reconcile.auto_apply.enabled: false` (the default), and structural fields like new measures never auto-apply regardless of confidence. `canonic review` shows the same diff and prompt as before; accept it, and `damages.yaml` now has `waived_amount` and `total_waived_amount`.
+
+<Note>
+  If `damages.yaml` had instead been `human_curated` (hand-edited after the wizard, as [the tracked rental example](https://github.com/mischuh/canonic/tree/main/examples/rental) is), this same run would **not** propose a clean edit. A curated file always outranks new `inferred` evidence — reconciliation flags a **contradiction** and leaves the file untouched, for every table whose drafted shape no longer matches the hand-curated one, not just the changed table. See [provenance tiers](/concepts/ingestion-and-reconciliation#reconciliation).
+</Note>
+
+At this point `waived_amount` is a real, queryable measure — but a raw `(source, measure)` pair, not yet a canonical metric.
+
+## From auto-drafted to governed
+
+This is the "a bit more manual effort" half quickstart mentions but doesn't show. Semantics is auto-maintained; deciding what's *canonical* and *mandatory* is deliberately [human-owned](/concepts/contracts-and-guardrails):
+
+```yaml
+# contracts/metrics/waived-amount.yaml
+metric: waived_amount
+owner: "@claims-team"
+canonical:
+  kind: single
+  source: damages
+  measure: total_waived_amount
+provenance: human_curated
+aliases: ["goodwill waiver", "waived repair cost"]
+status: active
+```
+
+```yaml
+# contracts/guardrails/waived-amount-requires-customer.yaml
+id: waived-amount-requires-customer
+applies_to: { source: damages, measure: total_waived_amount }
+kind: mandatory_filter
+filter: "at_fault_customer is not null"
+severity: error
+rationale: "A goodwill waiver only makes sense tied to the customer it was
+  waived for. Rows with no at_fault_customer are data-entry gaps, not real
+  waivers, and would inflate the total if summed in."
+```
+
+Neither file comes from `canonic ingest` — you write them, commit them, review them like any other code change. That's the split rule from [the three layers](/concepts/three-layers#the-split-rule): semantics tracks physical reality; contracts decide what's authoritative.
+
+## Prove it
+
+```bash
+canonic query --metrics waived_amount
+```
+
+```text
+┏━━━━━━━━━━━━━━━━━━━━━┓
+┃ total_waived_amount ┃
+┡━━━━━━━━━━━━━━━━━━━━━┩
+│ 280                 │
+└─────────────────────┘
+```
+
+`--json` shows the resolution and the guardrail actually firing:
+
+```json
+{
+  "compiled": {
+    "sql": "SELECT SUM(\"damages\".\"waived_amount\") AS \"total_waived_amount\" FROM \"main\".\"damages\" AS \"damages\" WHERE NOT \"damages\".\"at_fault_customer\" IS NULL"
+  },
+  "metadata": {
+    "resolved": { "metrics": { "waived_amount": "damages.total_waived_amount" } },
+    "guardrails_fired": [{ "id": "waived-amount-requires-customer", "kind": "mandatory_filter" }]
+  }
+}
+```
+
+The guardrail's `mandatory_filter` is AND-ed into the compiled SQL whether or not the caller asked for it. An [MCP-connected agent](/mcp-integration/connecting-your-agent) resolves the exact same binding and guardrail on its next call — CLI and MCP dispatch to the same core service, there's no separate "agent view" to keep in sync.
+
+`canonic report`'s onboarding funnel also now shows the curated-review milestone reached:
+
+```text
+onboarding funnel
+  · setup_started
+  · connection_added
+  · bootstrap_completed
+  · first_answer_served
+  ✓ first_curated_review_completed  2026-07-07T14:44:42Z
+```
+
+<Note>
+  The earlier funnel steps only light up when they're driven through the interactive `canonic setup` wizard — this walkthrough called `canonic ingest`/`query` directly, so only the review milestone fired. Following [Quickstart](/quickstart) first fills in the rest.
+</Note>
+
+## The same loop, headless
+
+Everything above works unattended. Headless mode is explicit `--headless`, or auto-detected from `CI=true`:
+
+```bash
+CI=true canonic ingest --bootstrap
+```
+
+The deterministic builder is pinned — no LLM in the loop, so no labels, no aliases, and no guessed joins:
+
+```yaml
+# semantics/rental_db/customers.yaml — headless bootstrap
+dimensions:
+- name: email
+  column: email
+  granularity:
+  label:
+  description:
+  aliases: []
+joins: []          # vs. a guessed customers → rentals join in LLM-assisted mode
+meta:
+  provenance: inferred
+```
+
+Compare that to the LLM-assisted version at the top of this page: same columns, grain, and types (the deterministic core is identical either way — that's the part that's reproducible), but no naming or join guesses without an LLM in the loop. `canonic apply` batches these in without a review prompt, matching how a CI job would consume them.
+
+The same data-change scenario, headless:
+
+```bash
+CI=true canonic ingest --strict
+```
+
+```text
+## Decisions
+- add: 0
+- contradiction: 0
+- edit: 1
+- no_op: 7
+```
+
+By default this also opens a PR carrying the diff and any contradiction notes (`--open-pr`/`--no-pr` to force either way) — it needs an actual git remote to push to, which a scratch directory doesn't have. `--strict` is the CI gate: any flagged contradiction fails the run with [exit code `14`](/reference/error-codes), instead of silently proceeding.
+
+<Warning>
+  Headless mode never authors contracts or guardrails — that step from ["From auto-drafted to governed"](#from-auto-drafted-to-governed) is always a deliberate, human, out-of-band change, in every mode.
+</Warning>
+
+A minimal scheduled-ingest job looks like:
+
+```yaml
+# .github/workflows/canonic-ingest.yml
+on:
+  schedule:
+    - cron: "0 6 * * *"
+jobs:
+  ingest:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: pip install canonic
+      - run: canonic ingest --strict
+        env:
+          CANONIC_LLM_API_KEY: ${{ secrets.CANONIC_LLM_API_KEY }}
+```
+
+Because reconciliation's *decision* is always deterministic, identical evidence and accepted state reproduce byte-identical proposals across runs — this job is safe to run on a schedule.
+
+## Recap
+
+| Step | Command | Docs |
+| --- | --- | --- |
+| Draft proposals from live schema | `canonic ingest` | [CLI reference](/cli-reference/ingest) · [Concept](/concepts/ingestion-and-reconciliation) |
+| Walk through them one by one | `canonic review` | [CLI reference](/cli-reference/review-apply) |
+| Batch-accept a run | `canonic apply` | [CLI reference](/cli-reference/review-apply) |
+| Ask a question | `canonic query` | [CLI reference](/cli-reference/query-sql-assert) |
+| Declare what's canonical / mandatory | `contracts/metrics/*.yaml`, `contracts/guardrails/*.yaml` | [Concept](/concepts/contracts-and-guardrails) |
+| Check project state | `canonic status` / `canonic report` | [CLI reference](/cli-reference/status-report) |
+
+Same design principle throughout: **canonic proposes, you approve.**

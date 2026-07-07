@@ -1,0 +1,130 @@
+---
+title: "Semantic source schema"
+description: "Every field in a semantics/*.yaml file, section by section."
+---
+
+A semantic source (`semantics/<connection-id>/<name>.yaml`) is validated against `SemanticSource` at load time. `name`, `connection`, `table`, `grain`, and `columns` are required; everything else defaults. See [Semantics](/concepts/semantics) for the concepts behind these fields.
+
+## Top-level fields
+
+| Field | Type | Default | Governs |
+| --- | --- | --- | --- |
+| `name` | `str` | n/a (required) | Unique identifier across the whole project. |
+| `connection` | `str` | n/a (required) | Which configured connection this source reads from. |
+| `table` | `str` | n/a (required) | Physical relation (`schema.table`) queried at compile time. |
+| `grain` | `list[str]` | n/a (required) | Row-uniqueness columns; must already be declared in `columns`. Drives join fanout safety. |
+| `description` | `str \| null` | `null` | Free-text explanation. |
+| `columns` | `list[Column]` | n/a (required) | Typed physical columns; see below. |
+| `measures` | `list[Measure]` | `[]` | Aggregations over the source; see below. |
+| `dimensions` | `list[Dimension]` | `[]` | Grouping/filtering columns; see below. |
+| `joins` | `list[Join]` | `[]` | Declared join paths to other semantic sources; see below. |
+| `filters` | `list[Filter]` | `[]` | Named reusable predicates; see below. |
+| `finality` | `FinalityMeta` | `{watermark: null}` | Per-source finality watermark; see below. |
+| `meta` | `SourceMeta` | `{provenance: inferred}` | System-managed provenance metadata; see below. |
+
+Cross-field rules enforced at write time: column, measure, dimension, and join-alias names must each be unique within the file; every `grain` entry and every `dimensions[].column` must reference a declared column; every column a measure's `expr` touches must be declared. Violations raise a located `SemanticValidationError` (file + YAML path), not a silent drop.
+
+## `columns[]`
+
+```yaml
+columns:
+  - { name: order_id, type: string, nullable: false }
+```
+
+| Field | Type | Default | Governs |
+| --- | --- | --- | --- |
+| `name` | `str` | n/a (required) | Column name as it appears in `table`. |
+| `type` | `NormalizedType` | n/a (required) | Dialect-neutral type: `string`, `int`, `decimal`, `float`, `bool`, `date`, `timestamp`, `json`. The [compiler's dialect adapter](/concepts/compiler#dialect-adapter) maps this to each connector's native type. |
+| `nullable` | `bool` | `true` | Whether the column may be `NULL`. |
+
+## `measures[]`
+
+```yaml
+measures:
+  - name: total_revenue
+    expr: "sum(amount)"
+    additivity: additive
+```
+
+| Field | Type | Default | Governs |
+| --- | --- | --- | --- |
+| `name` | `str` | n/a (required) | Measure identifier, unique within the file. |
+| `expr` | `str` | n/a (required) | SQL aggregate expression; may reference only declared columns. |
+| `additivity` | `Additivity` | `additive` | `additive` \| `semi_additive` \| `non_additive`; see [Additivity](/concepts/semantics#additivity). |
+| `semi_additive_over` | `list[str]` | `[]` | Dimensions the measure is *not* additive over (semi-additive measures only). |
+
+A measure is `is_p0_compilable` only if it's `additive` and its `expr` parses to a single `sum`/`count`/`min`/`max` (not `count(distinct …)`); measures outside that set are valid YAML but rejected at compile time with `UNSUPPORTED_MEASURE`, never at load time.
+
+## `dimensions[]`
+
+```yaml
+dimensions:
+  - { name: order_date, column: created_at, granularity: day, label: "Order Date" }
+```
+
+| Field | Type | Default | Governs |
+| --- | --- | --- | --- |
+| `name` | `str` | n/a (required) | Dimension identifier, unique within the file. |
+| `column` | `str` | n/a (required) | Must reference a declared column. |
+| `granularity` | `str \| null` | `null` | Time bucketing, e.g. `day`, `month`. |
+| `label` | `str \| null` | `null` | Human-readable display name. |
+| `description` | `str \| null` | `null` | Free-text explanation. |
+| `aliases` | `list[str]` | `[]` | Alternate lookup names. |
+
+## `joins[]`
+
+```yaml
+joins:
+  - to: customers
+    on: "orders.customer_id = customers.customer_id"
+    relationship: many_to_one
+```
+
+| Field | Type | Default | Governs |
+| --- | --- | --- | --- |
+| `to` | `str` | n/a (required) | Target semantic source's `name`. |
+| `on` | `str` | n/a (required) | SQL join predicate. |
+| `relationship` | `Relationship` | n/a (required) | `one_to_one` \| `many_to_one` \| `one_to_many` \| `many_to_many`. |
+| `name` | `str \| null` | `null` | SQL alias for the target table; defaults to `to` (the join's effective alias must be unique within the file). |
+
+## `filters[]`
+
+```yaml
+filters:
+  - { name: completed, expr: "status = 'completed'" }
+```
+
+| Field | Type | Default | Governs |
+| --- | --- | --- | --- |
+| `name` | `str` | n/a (required) | Filter identifier. |
+| `expr` | `str` | n/a (required) | Reusable SQL predicate. |
+
+## `finality`
+
+```yaml
+finality:
+  watermark: "business_day - 1 day"   # null = always-final source
+```
+
+| Field | Type | Default | Governs |
+| --- | --- | --- | --- |
+| `watermark` | `str \| null` | `null` | Cutoff expression before which rows are considered final; `null` means the source is always final. See [Finality](/concepts/contracts-and-guardrails#finality) for how this combines with a contract's `FinalityRule`. |
+
+## `meta`
+
+System-managed — not hand-edited; reconciliation writes these fields.
+
+```yaml
+meta:
+  provenance: inferred             # board_approved | human_curated | inferred
+  source_fingerprint: "sha256:…"
+  last_validated_at: "2026-06-13T00:00:00Z"
+  frozen: false
+```
+
+| Field | Type | Default | Governs |
+| --- | --- | --- | --- |
+| `provenance` | `Provenance` | `inferred` | `board_approved` \| `human_curated` \| `inferred`. `board_approved`/`human_curated` facts are never auto-overwritten; only `inferred` facts can be revised, and even then only through a reviewable diff. |
+| `source_fingerprint` | `str \| null` | `null` | sha256 of the introspected/declared schema; drives drift detection. |
+| `last_validated_at` | `datetime \| null` | `null` | When this source was last checked against live evidence. |
+| `frozen` | `bool` | `false` | Human-owned freeze marker; reconciliation flags conflicts but never edits a frozen source. |

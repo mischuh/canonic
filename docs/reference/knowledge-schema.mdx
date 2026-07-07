@@ -1,0 +1,59 @@
+---
+title: "Knowledge page schema"
+description: "Every frontmatter field in a knowledge/**/*.md page."
+---
+
+A knowledge page (`knowledge/global/<id>.md` or `knowledge/user/<id>/<id>.md`) is Markdown with YAML frontmatter, validated against `KnowledgePage` at load time. Every field is optional with a sensible default, so a page with empty frontmatter is valid. See [Knowledge](/concepts/knowledge-layer) for the concepts behind these fields.
+
+```yaml
+---
+summary: "Why test accounts are excluded from active-customer counts."
+tags: [customers, definitions]
+sl_refs:
+  - warehouse_pg.customers
+  - warehouse_pg.orders.total_revenue
+refs: [test-account-policy]
+usage_mode: caveat
+meta:
+  provenance: human_curated
+  last_validated_at: "2026-06-14T00:00:00Z"
+  bound_fingerprints:
+    "warehouse_pg.orders.total_revenue": "sha256:…"
+  frozen: false
+---
+```
+
+## Frontmatter fields
+
+| Field | Type | Default | Governs |
+| --- | --- | --- | --- |
+| `summary` | `str` | `""` | One-line summary; indexed and shown in search results, boosted over body-only matches. |
+| `tags` | `list[str]` | `[]` | Free-form tags; indexed and boosted in lexical search. |
+| `sl_refs` | `list[str]` | `[]` | Fully-qualified semantic entity references (e.g. `orders.revenue`). Each must resolve to a live semantic entity at write time, or the write is rejected. |
+| `refs` | `list[str]` | `[]` | References to other pages by id/slug. Each must point at an existing page in a visible scope, or the write is rejected. |
+| `usage_mode` | `UsageMode` | `reference` | `reference` \| `caveat` \| `policy` \| `definition`; see below. |
+| `meta` | `KnowledgePageMeta` | `{provenance: inferred}` | System-managed; see below. |
+
+`id`, `path`, and `scope` are **derived from the filesystem path**, never accepted from frontmatter — `knowledge/global/<id>.md` gives `scope: global`; `knowledge/user/<user-id>/<id>.md` gives `scope: user`. The Markdown body after the frontmatter fence is stored verbatim as `body`.
+
+## `usage_mode`
+
+| Mode | Behavior |
+| --- | --- |
+| `reference` | Found by search/traversal only. The default. |
+| `caveat` | Auto-surfaced whenever a bound `sl_ref` entity appears in a result, even if nobody searched for it. |
+| `policy` | A business rule/definition page; ranked like `reference` but tagged distinguishably. |
+| `definition` | The canonical prose definition for a term; collisions follow the strict-additive rule (global wins, user pages annotate rather than override). |
+
+## `meta`
+
+System-managed — not hand-edited; reconciliation and the loader write these fields.
+
+| Field | Type | Default | Governs |
+| --- | --- | --- | --- |
+| `provenance` | `Provenance` | `inferred` | `board_approved` \| `human_curated` \| `inferred`. |
+| `last_validated_at` | `datetime \| null` | `null` | When this page's references were last checked against live entities; drives a staleness signal at query time. |
+| `bound_fingerprints` | `dict[str, str]` | `{}` | Measure-definition fingerprints this page's prose depends on, keyed by fully-qualified entity name. When a bound fingerprint changes, the page is flagged for review. |
+| `frozen` | `bool` | `false` | Human-owned freeze marker; reconciliation flags conflicts but never edits a frozen page. |
+
+Inline `{{ sl:<entity>.expr }}` in the body renders the *live* value of a semantic field at read time, so prose can't fall out of sync with the definition it describes; `[[slug]]` or `[[slug|alias]]` resolves an inline link the same way `refs` does.

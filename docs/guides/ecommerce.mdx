@@ -3,19 +3,28 @@ title: "Guide: Ecommerce (Postgres)"
 description: "A small but complete Postgres project covering the full Phase 1 loop, evidence connectors, and observability."
 ---
 
-A small but end-to-end canonic project: a Postgres connection, a four-source star schema (two facts, three dimensions), three canonical metrics, one enforced guardrail, and a companion dbt manifest demonstrating the definition-connector class. This is the broadest walkthrough of the full loop: bootstrap, serve, evidence connectors, accuracy tracking, and observability all in one place.
+A small but end-to-end canonic project: a Postgres connection, a four-source star schema (two facts, three dimensions), three canonical metrics, three guardrail contracts (a refund filter plus a finality-backed board-reporting restriction), and a companion dbt manifest demonstrating the definition-connector class. This is the broadest walkthrough of the full loop: bootstrap, serve, evidence connectors, accuracy tracking, and observability all in one place.
 
 <Info>Full source: [`examples/ecommerce/`](https://github.com/mischuh/canonic/tree/main/examples/ecommerce)</Info>
 
-## The full loop
+## Schema
 
-```bash
-canonic ingest --bootstrap          # 1. bootstrap: introspect Postgres → write semantics/*.yaml
-canonic mcp start                   # 2. serve: agents call query() + search_knowledge() together
-canonic eval baseline \             # 3. track: measure grain-inference accuracy on the live schema
-  --candidates candidates.yaml \
-  --dataset eval/grain_cases.jsonl
 ```
+customers ──< orders >── channels
+                 │
+              order_items >── products
+
+orders_rt: intraday provisional mirror of orders (same grain, no order_items)
+```
+
+| Table | Rows | Description |
+| --- | --- | --- |
+| `customers` | 5 | Customer accounts (`country` dimension) |
+| `channels` | 3 | Sales channels |
+| `products` | 5 | Product catalogue (`category` dimension) |
+| `orders` | 10 | Final orders; join target for `revenue`/`order_count` |
+| `orders_rt` | (intraday) | Provisional same-day order estimates; `finality-revenue` coalesces this with `orders` |
+| `order_items` | 17 | Line items; join target for `units_sold` |
 
 ## Setup
 
@@ -25,9 +34,33 @@ psql "postgres://postgres:${CANONIC_PG_PASSWORD}@localhost:5432/postgres" < setu
 
 cd examples/ecommerce   # canonic commands must run from here
 canonic status
+# Canonic project: ecommerce-demo (version 1)
+# Root: /path/to/examples/ecommerce
+# Connection: warehouse_pg (postgres)
 ```
 
 `setup.sql` is idempotent; re-running it drops and recreates all tables in the correct order.
+
+## Quickstart
+
+```bash
+canonic ingest --bootstrap                  # bootstrap: introspect Postgres → write semantics/*.yaml
+canonic query --metrics revenue --dimensions order_date   # guardrail fires automatically
+canonic mcp start                           # serve: agents call query() + search_knowledge() together
+canonic eval baseline \                     # (optional) track: measure grain-inference accuracy
+  --candidates candidates.yaml \
+  --dataset eval/grain_cases.jsonl
+```
+
+Each step proves one Phase 1 exit criterion:
+
+| Step | Criterion |
+| --- | --- |
+| `canonic ingest --bootstrap` | Bootstraps context from a real stack |
+| `query()` + `search_knowledge()` | Agents get both executable definitions and business meaning |
+| `canonic eval baseline` | Accuracy is tracked |
+
+`canonic status`, `canonic ingest --bootstrap`, `canonic query`, and `canonic mcp start` never call the LLM: every table here has a declared primary key, so grain is inferred deterministically. `CANONIC_LLM_API_KEY` only matters for `canonic eval baseline`, which explicitly benchmarks the configured model.
 
 ## Metrics
 
@@ -37,7 +70,18 @@ canonic status
 | `order_count` | `orders.order_count` | "orders", "number of orders" |
 | `units_sold` | `order_items.units_sold` | "units", "quantity sold" |
 
-The `revenue-excludes-refunds` guardrail (`mandatory_filter`) AND-s `status != 'refunded'` into every query touching `orders.total_revenue`. Expected revenue after the guardrail: **3790.50** (7 completed + 1 pending order; the seed data's two refunded orders, totaling 260.00, never appear).
+## Guardrails
+
+`contracts/guardrails/` ships **3** contracts, not just the one refund filter:
+
+- **`revenue-excludes-refunds`** (`mandatory_filter`): AND-s `status != 'refunded'` into every query touching `orders.total_revenue`. Expected revenue after the guardrail: **3790.50** (7 completed + 1 pending order; the seed data's two refunded orders, totaling 260.00, never appear).
+- **`board-final-only`** (`restrict_source`): in a `context: board_reporting` query, confines `revenue` to the final `orders` source only, excluding the intraday `orders_rt` estimates.
+- **`finality-revenue`**: not a guardrail kind itself, but the paired finality rule `board-final-only` enforces — it declares `orders` as the `final` realization (watermark `business_day - 1 day`) and `orders_rt` as `provisional`, with `coalescing: "window <= watermark ? final : provisional"`.
+
+```json
+// Board reporting confines revenue to the final orders source, dropping today's provisional orders_rt rows
+query({"metrics": ["revenue"], "dimensions": ["order_date"], "context": "board_reporting"})
+```
 
 ## Example queries
 
@@ -162,7 +206,6 @@ The five cases in `eval/grain_cases.jsonl` exercise the shape of the live schema
 ## CLI usage
 
 ```bash
-canonic query --metrics revenue --dimensions order_date
 canonic --json query --metrics revenue --dimensions order_date    # byte-identical to the MCP query tool
 
 canonic sql "SELECT status, sum(amount) FROM analytics.fct_orders GROUP BY status"
@@ -200,6 +243,7 @@ The daemon never starts misconfigured: a public LLM endpoint or a remote secret 
 | Page | `usage_mode` | Effect |
 | --- | --- | --- |
 | `revenue-definition` | `definition` | Canonical prose definition, surfaced by search |
+| `units-sold-definition` | `definition` | Canonical prose definition for `units_sold` |
 | `revenue-excludes-refunds-caveat` | `caveat` | Auto-surfaced whenever a result references `total_revenue` |
 | `revenue-reporting-policy` | `policy` | Month-end cutoff rules |
 | `order-items-fanout-caveat` | `caveat` | Auto-surfaced whenever a result references `units_sold`/`line_revenue` |
