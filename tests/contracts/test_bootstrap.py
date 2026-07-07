@@ -79,7 +79,7 @@ def test_write_inferred_contracts_creates_files(tmp_path):
     text = (tmp_path / "contracts" / "metrics" / "revenue.yaml").read_text()
     assert "metric: revenue" in text
     assert "source: orders" in text
-    assert "provenance: inferred" in text
+    assert "provenance: human_curated" in text
     assert "status: active" in text
 
 
