@@ -70,4 +70,26 @@ When `air_gapped: true`, load-time validation additionally rejects: a public `ll
 
 ## Reserved directories
 
-Independent of `canonic.yaml` fields, every project scaffolds four committed context directories (`semantics/`, `knowledge/`, `contracts/`, `raw-sources/`) plus a git-ignored `.canonic/` local-state directory (created with `0o700` permissions).
+Independent of `canonic.yaml` fields, every project scaffolds four committed context directories plus a git-ignored `.canonic/` local-state directory (created with `0o700` permissions):
+
+| Directory | Contents | Schema reference |
+| --- | --- | --- |
+| `semantics/` | Hand-drafted-then-reviewed relations: grain, columns, measures, dimensions, joins. | [Semantic source schema](/reference/semantic-schema) |
+| `knowledge/` | Markdown pages with YAML frontmatter carrying business meaning. | [Knowledge page schema](/reference/knowledge-schema) |
+| `contracts/` | Human-owned metric bindings, guardrails, finality rules, and assertions. | [Contract schema](/reference/contract-schema) |
+| `raw-sources/` | System-generated, committed audit trail — never hand-edited. | See below. |
+
+### `raw-sources/<connection-id>/evidence.jsonl`
+
+Not a hand-authored config file: it's a deterministically-sorted, one-JSON-object-per-line snapshot of the evidence ingestion collected for a connection, written by `DiskSnapshotStore` so re-running ingestion against the same source yields a byte-identical file. Each line validates against `EvidenceItem`:
+
+| Field | Type | Governs |
+| --- | --- | --- |
+| `source` | `str` | The connection id this evidence came from. |
+| `kind` | `str` (open set) | `relation_schema` \| `observed_query` \| `definition` \| `doc_evidence` \| `usage_evidence`, or an unrecognized future kind (accepted, just not dispatched). |
+| `acquisition_tier` | `AcquisitionTier` | Curation rank of the evidence, e.g. `live`, `modeling`, `query_history`, `declarative`, `sample`, `hand_authored`. |
+| `payload` | `dict[str, Any]` | Shape depends on `kind` — e.g. a `RelationSchema` for `relation_schema`. |
+| `source_fingerprint` | `str` | sha256 identifying the exact evidence content, for dedup and drift detection. |
+| `observed_at` | `datetime` | When the evidence was collected. |
+
+This is what [`canonic ingest`](/cli-reference/ingest) reads to draft proposals against `semantics/`; you'd only ever read it, not write it.

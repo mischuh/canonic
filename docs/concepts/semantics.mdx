@@ -5,6 +5,8 @@ description: "How canonic describes a table well enough to query it safely."
 
 A **semantic source** describes one queryable table or relation the way an agent needs to reason about it: its grain, its typed columns, its measures, and how it joins to other sources. These files live under `semantics/<connection-id>/<name>.yaml` and are what [`canonic ingest`](/cli-reference/ingest) drafts from your live schema.
 
+For the exhaustive field-by-field reference (types, defaults, validation rules), see the [semantic source schema](/reference/semantic-schema).
+
 ## Shape of a semantic source
 
 ```yaml
