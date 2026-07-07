@@ -3,7 +3,21 @@ title: "canonic eval"
 description: "Evaluate local models against the tested baseline."
 ---
 
-`canonic eval` is an operator command; it makes live model calls, so it is not run in CI (only the deterministic harness internals are unit-tested).
+Canonic uses an LLM in two places outside the (deterministic, LLM-free) compiler: drafting a
+grain for relations with no declared primary key, and resolving contradictions during
+reconciliation. `canonic eval` answers "which model is actually good enough for that job" — it
+is not a correctness test for canonic itself (that's [`canonic assert`](/cli-reference/query-sql-assert#canonic-assert),
+which gates CI). Point it at one or more candidate local/hosted models, and it drives the real
+production drafter over a labeled dataset for each one, then reports accuracy against the known
+answers, whether the model actually returns parseable structured output, and latency — so you can
+pick or swap the model your `draft`/`reconcile` pipeline runs on with numbers instead of a guess.
+
+It's an operator command: it makes live model calls (so results depend on whatever's running at
+`base_url` when you invoke it), and is therefore not run in CI — only the deterministic harness
+internals are unit-tested. Re-run it before tagging a release, or whenever you change the
+candidate model, so the recommendation tracks reality instead of being asserted once. See
+[Instrumentation & evaluation](/concepts/instrumentation-and-eval#model-baseline-harness-canonic-eval-baseline)
+for how this fits alongside the event log and the accuracy harness.
 
 ## `eval baseline`
 
@@ -14,12 +28,39 @@ canonic eval baseline --candidates candidates.yaml
 canonic eval baseline --candidates candidates.yaml --task reconcile --out reports/reconcile-baseline.md
 ```
 
+`--candidates` points at a YAML file listing the models to compare, each shaped like a
+canonic.yaml `llm` block (`openai_compatible` covers local runtimes — Ollama, vLLM, LM Studio,
+llama.cpp, TGI — and hosted endpoints alike; they differ only by `base_url` and whether an API
+key is needed):
+
+```yaml
+candidates:
+  - name: gemma-4-e2b-it-4bit (small, draft)
+    provider: openai_compatible
+    base_url: http://127.0.0.1:11434/v1
+    model: gemma-4-e2b-it-4bit
+
+  - name: DeepSeek-R1-0528-Qwen3-8B-MLX-4bit (mid)
+    provider: openai_compatible
+    base_url: http://127.0.0.1:11434/v1
+    model: DeepSeek-R1-0528-Qwen3-8B-MLX-4bit
+```
+
 | Flag | Description |
 | --- | --- |
 | `--candidates`, `-c` | YAML list of `openai_compatible` candidate models. |
 | `--dataset`, `-d` | Labeled JSONL set (defaults to the shipped set). |
 | `--out`, `-o` | Where to write the markdown baseline doc (default `reports/baseline-models.md`). |
 | `--task` | Task to evaluate; only `draft` has a live call site in v1; `reconcile` is also supported. |
-| `--adherence-floor` | Minimum structured-output adherence required to recommend a candidate. |
+| `--adherence-floor` | Minimum structured-output adherence required to recommend a candidate (default `0.9`). |
 
-For each candidate, the report includes accuracy, structured-output adherence, and p50 latency, plus which candidate (if any) is recommended. Re-run this before tagging a release so the baseline tracks reality as models churn.
+For each candidate, the report includes accuracy, structured-output adherence, and p50 latency, plus which candidate (if any) is recommended (the most accurate one clearing the adherence floor — none, if none clears it):
+
+```markdown
+## Task: `draft` (grain inference)
+
+| Model | Accuracy | Structured output | p50 latency | Recommended |
+| --- | --- | --- | --- | --- |
+| gemma-4-e2b-it-4bit (small, draft) | 100% (8/8) | honored 8/8 | 250 ms | ✅ |
+| DeepSeek-R1-0528-Qwen3-8B-MLX-4bit (mid) | 88% (7/8) | honored 8/8 | 416 ms | |
+```
