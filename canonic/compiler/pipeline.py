@@ -17,7 +17,11 @@ from typing import TYPE_CHECKING, cast
 import sqlglot
 from sqlglot import exp
 
-from canonic.compiler.dialect import DIALECT_ADAPTERS, adapter_for  # noqa: F401 — re-exported
+from canonic.compiler.dialect import (  # noqa: F401 — re-exported
+    DIALECT_ADAPTERS,
+    DialectAdapter,
+    adapter_for,
+)
 from canonic.compiler.joins import JoinEdge, build_alias_tree, plan_joins, reachable_dimension_names
 from canonic.compiler.result import (
     CompileResult,
@@ -965,8 +969,17 @@ def _compile_recompute_at_grain(
         where_conditions=where_conditions,
         join_edges=join_edges,
         sources_by_name=sources_by_name,
+        adapter=adapter,
     )
     sql = adapter.emit(ast, limit=query.limit)
+    warnings: list[str] = []
+    if rg.kind is BindingKind.PERCENTILE and not adapter.supports_percentile_cont():
+        warnings.append(
+            f"metric {queried_name!r}: dialect {adapter.dialect!r} has no native percentile "
+            f"aggregate — computed via nearest-rank window function, which returns an actual "
+            f"row value rather than a linearly interpolated one (differs from PERCENTILE_CONT "
+            f"on even-sized groups)"
+        )
 
     # Stage 8 — result metadata.
     used_sources = sorted({source_name} | {e.join.to for e in join_edges})
@@ -976,7 +989,7 @@ def _compile_recompute_at_grain(
         resolved={queried_name: f"recompute_at_grain({source_name}.{col_name})"},
         guardrails_fired=fired,
         freshness=[_freshness(sources_by_name[s]) for s in used_sources],
-        warnings=[],
+        warnings=warnings,
         recompute_at_grain=RecomputeAtGrainMetadata(
             kind=str(rg.kind),
             distinct_on=rg.distinct_on,
@@ -1112,21 +1125,35 @@ def _build_recompute(
     where_conditions: list[exp.Expression],
     join_edges: list[JoinEdge],
     sources_by_name: dict[str, SemanticSource],
+    adapter: DialectAdapter,
 ) -> exp.Select:
     """Build the recompute-at-grain SELECT: group base table by dims, aggregate directly.
 
     distinct_count → COUNT(DISTINCT <col>)
-    percentile     → PERCENTILE_CONT(q) WITHIN GROUP (ORDER BY <col>)
+    percentile     → PERCENTILE_CONT(q) WITHIN GROUP (ORDER BY <col>) where the dialect has
+                      a native ordered-set aggregate; otherwise a CUME_DIST() window-function
+                      fallback (see :func:`_build_percentile_fallback`).
 
     Never wraps in DISTINCT ON dedup — the grain is always recomputed from base rows.
-    For multi-dialect support of percentile_cont vs approx_quantile, a future
-    DialectAdapter.percentile() method will abstract the difference (SPEC §4.3 open question).
     """
     if rg.kind is BindingKind.DISTINCT_COUNT:
         qualified_col = exp.column(col_phys, table=col_alias)
         agg_expr: exp.Expression = cast(
             "exp.Expression",
             exp.Count(this=exp.Distinct(expressions=[qualified_col])),
+        )
+    elif not adapter.supports_percentile_cont():
+        assert rg.quantile is not None  # noqa: S101 — enforced by model_validator
+        return _build_percentile_fallback(
+            owner=owner,
+            quantile=rg.quantile,
+            col_alias=col_alias,
+            col_phys=col_phys,
+            metric_name=metric_name,
+            dimensions=dimensions,
+            where_conditions=where_conditions,
+            join_edges=join_edges,
+            sources_by_name=sources_by_name,
         )
     else:
         # PERCENTILE: parse PERCENTILE_CONT(q) WITHIN GROUP (ORDER BY col), then qualify.
@@ -1151,6 +1178,73 @@ def _build_recompute(
     if group_exprs:
         select = select.group_by(*group_exprs)
     return select
+
+
+def _build_percentile_fallback(
+    owner: str,
+    quantile: float,
+    col_alias: str,
+    col_phys: str,
+    metric_name: str,
+    dimensions: list[tuple[str, Dimension]],
+    where_conditions: list[exp.Expression],
+    join_edges: list[JoinEdge],
+    sources_by_name: dict[str, SemanticSource],
+) -> exp.Select:
+    """Build a percentile recompute for dialects without an ordered-set aggregate (e.g. SQLite).
+
+    Ranks each row within its dimension partition via ``CUME_DIST()`` and picks the smallest
+    value at or past the target quantile — the standard window-function substitute for
+    engines with no ``PERCENTILE_CONT() WITHIN GROUP`` support. This is a nearest-rank
+    (percentile_disc-style) result: for even-sized groups it returns an actual row value
+    rather than the linear interpolation between the two middle values that PERCENTILE_CONT
+    would produce.
+    """
+    _RANKED = "_ranked"
+    _VAL = "_val"
+    _CD = "_cd"
+
+    col_expr = exp.column(col_phys, table=col_alias)
+
+    inner = exp.Select()
+    inner_projections: list[exp.Expression] = []
+    partition_exprs: list[exp.Expression] = []
+    for src, dim in dimensions:
+        expr = _dimension_expr(src, dim)
+        inner_projections.append(_alias(expr, dim.name))
+        partition_exprs.append(expr)
+    inner_projections.append(_alias(col_expr, _VAL))
+    cume_dist = cast(
+        "exp.Expression",
+        exp.Window(
+            this=exp.CumeDist(),
+            partition_by=partition_exprs,
+            order=exp.Order(expressions=[exp.Ordered(this=col_expr)]),
+        ),
+    )
+    inner_projections.append(_alias(cume_dist, _CD))
+    inner = inner.select(*inner_projections)
+    inner = _from_and_joins(inner, owner, join_edges, sources_by_name)
+    if where_conditions:
+        inner = inner.where(exp.and_(*where_conditions))
+
+    outer = exp.Select()
+    outer_projections: list[exp.Expression] = []
+    outer_group: list[exp.Expression] = []
+    for _src, dim in dimensions:
+        dim_col = cast("exp.Expression", exp.column(dim.name, table=_RANKED))
+        outer_projections.append(_alias(dim_col, dim.name))
+        outer_group.append(dim_col)
+    val_col = cast("exp.Expression", exp.column(_VAL, table=_RANKED))
+    outer_projections.append(_alias(_func("MIN", val_col), metric_name))
+    outer = outer.select(*outer_projections)
+    outer = outer.from_(exp.to_table(_RANKED))
+    cd_col = cast("exp.Expression", exp.column(_CD, table=_RANKED))
+    outer = outer.where(exp.GTE(this=cd_col, expression=exp.Literal.number(quantile)))
+    if outer_group:
+        outer = outer.group_by(*outer_group)
+
+    return outer.with_(_RANKED, as_=inner)
 
 
 def _compile_simple_additive(

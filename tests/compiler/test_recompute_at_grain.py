@@ -272,6 +272,66 @@ def test_ac2_non_median_quantile() -> None:
 
 
 # ---------------------------------------------------------------------------
+# AC2b — SQLite has no PERCENTILE_CONT: falls back to a CUME_DIST() window query
+# ---------------------------------------------------------------------------
+
+
+def test_percentile_sqlite_fallback_by_region(
+    rg_resolver: ContractResolver,
+    orders_rg: SemanticSource,
+    customers_rg: SemanticSource,
+) -> None:
+    """On sqlite, median_order_value by region uses CUME_DIST() instead of PERCENTILE_CONT."""
+    result = compile(
+        SemanticQuery(metrics=["median_order_value"], dimensions=["region"]),
+        rg_resolver,
+        [orders_rg, customers_rg],
+        connection_dialects={"warehouse_pg": "sqlite"},
+    )
+    sqlglot.parse_one(result.sql, dialect="sqlite")
+    sql_upper = result.sql.upper()
+    assert "PERCENTILE_CONT" not in sql_upper
+    assert "CUME_DIST" in sql_upper
+    assert "GROUP BY" in sql_upper
+    assert result.recompute_at_grain is not None
+    assert result.recompute_at_grain.kind == "percentile"
+    assert result.recompute_at_grain.quantile == 0.5
+    assert len(result.warnings) == 1
+    assert "nearest-rank" in result.warnings[0]
+
+
+def test_percentile_sqlite_fallback_scalar(
+    rg_resolver: ContractResolver,
+    orders_rg: SemanticSource,
+) -> None:
+    """Scalar (no dims) sqlite percentile still uses the CUME_DIST() fallback, no GROUP BY."""
+    result = compile(
+        SemanticQuery(metrics=["median_order_value"]),
+        rg_resolver,
+        [orders_rg],
+        connection_dialects={"warehouse_pg": "sqlite"},
+    )
+    sqlglot.parse_one(result.sql, dialect="sqlite")
+    sql_upper = result.sql.upper()
+    assert "CUME_DIST" in sql_upper
+    assert "GROUP BY" not in sql_upper
+
+
+def test_percentile_postgres_no_fallback_warning(
+    rg_resolver: ContractResolver,
+    orders_rg: SemanticSource,
+    customers_rg: SemanticSource,
+) -> None:
+    """Postgres (native PERCENTILE_CONT) never emits the fallback warning."""
+    result = compile(
+        SemanticQuery(metrics=["median_order_value"], dimensions=["region"]),
+        rg_resolver,
+        [orders_rg, customers_rg],
+    )
+    assert result.warnings == []
+
+
+# ---------------------------------------------------------------------------
 # AC3 (S2b-AC4) — population_filter applied before COUNT(DISTINCT …)
 # ---------------------------------------------------------------------------
 
