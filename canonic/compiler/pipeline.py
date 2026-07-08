@@ -35,6 +35,7 @@ from canonic.compiler.result import (
     RelatedMetadata,
     RelatedMetric,
     SourceFreshness,
+    TrustInput,
 )
 from canonic.contracts.models import BindingKind, CollapseAgg, OnZeroDenominator
 from canonic.contracts.resolver import Ambiguous as ResolverAmbiguous
@@ -44,6 +45,9 @@ from canonic.contracts.resolver import Unresolved as ResolverUnresolved
 from canonic.exc import Ambiguous, FanoutUnsafe, GuardrailBlock, Unresolved, UnsupportedMeasure
 from canonic.exc import Unreachable as UnreachableError
 from canonic.semantic.models import Additivity, Measure, NormalizedType, Relationship
+from canonic.trust.models import TrustTier, tier_meets
+from canonic.trust.scorer import TrustScorer
+from canonic.trust.signals import static_signals_for
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -119,6 +123,57 @@ def _dialect_for_bindings(
     return "postgres"
 
 
+def _trust_inputs_for(
+    raw_bindings: list[tuple[str, ResolverBinding]],
+    resolver: ContractResolver,
+) -> list[TrustInput]:
+    """Gather static per-metric trust signals once, shared by every compile path (SPEC-E14 §4)."""
+    inputs: list[TrustInput] = []
+    for name, binding in raw_bindings:
+        has_assertion = bool(resolver.assertions_for({"metrics": [name]}))
+        inputs.append(
+            TrustInput(
+                metric=name,
+                provenance=binding.binding.provenance.value,
+                has_assertion=has_assertion,
+            )
+        )
+    return inputs
+
+
+def _enforce_min_trust(
+    raw_bindings: list[tuple[str, ResolverBinding]],
+    resolver: ContractResolver,
+    context: str | None,
+    trust_inputs: list[TrustInput],
+) -> None:
+    """Stage 6b: raise GuardrailBlock when a min_trust guardrail's floor is not met (SPEC-E14 §7).
+
+    Enforced from the static signal set only (provenance, assertion coverage) — the signals
+    known before SQL is generated. Only metrics with a single resolved (source, measure) are
+    matched (SINGLE/SEMI_ADDITIVE/OPAQUE kinds); composite (ratio/weighted_avg) and
+    recompute_at_grain metrics have no single source/measure pair to match against
+    ``applies_to``, the same limitation ``restrict_source`` already has.
+    """
+    if context is None:
+        return
+    score = TrustScorer.score(static_signals_for(trust_inputs))
+    for _name, binding in raw_bindings:
+        if binding.source is None or binding.measure is None:
+            continue
+        for guardrail in resolver.min_trust_for(binding.source, binding.measure, context):
+            assert guardrail.level is not None  # noqa: S101 — enforced by model_validator
+            floor = TrustTier(guardrail.level)
+            if not tier_meets(score.tier, floor):
+                logger.warning(
+                    "min_trust enforced: guardrail=%s tier=%s required=%s",
+                    guardrail.id,
+                    score.tier.value,
+                    floor.value,
+                )
+                raise GuardrailBlock(guardrail.rationale)
+
+
 class _ResolvedMetric:
     """A metric request bound to its canonical source and measure (stage 1)."""
 
@@ -191,6 +246,8 @@ def compile(  # noqa: A001 — the public verb for this capability is "compile"
                     queried_sources.add(component.source)
     queried_metric_names = {name for name, _ in raw_bindings}
     related = _related(queried_sources, queried_metric_names, query, resolver, sources_by_name)
+    trust_inputs = _trust_inputs_for(raw_bindings, resolver)
+    _enforce_min_trust(raw_bindings, resolver, query.context, trust_inputs)
 
     composite_indices = [
         i
@@ -221,6 +278,7 @@ def compile(  # noqa: A001 — the public verb for this capability is "compile"
         return dataclasses.replace(
             _compile_composite(query, composite, resolver, sources_by_name, dialect=dialect),
             related=related,
+            trust_inputs=trust_inputs,
         )
     if semi_additive_indices:
         if len(query.metrics) > 1:
@@ -233,6 +291,7 @@ def compile(  # noqa: A001 — the public verb for this capability is "compile"
         return dataclasses.replace(
             _compile_semi_additive(query, sa_binding, resolver, sources_by_name, dialect=dialect),
             related=related,
+            trust_inputs=trust_inputs,
         )
     if recompute_indices:
         if len(query.metrics) > 1:
@@ -247,6 +306,7 @@ def compile(  # noqa: A001 — the public verb for this capability is "compile"
                 query, rg_binding, resolver, sources_by_name, dialect=dialect
             ),
             related=related,
+            trust_inputs=trust_inputs,
         )
     if opaque_indices:
         if len(query.metrics) > 1:
@@ -259,12 +319,14 @@ def compile(  # noqa: A001 — the public verb for this capability is "compile"
         return dataclasses.replace(
             _compile_opaque(query, opaque_binding, resolver, sources_by_name, dialect=dialect),
             related=related,
+            trust_inputs=trust_inputs,
         )
 
     logger.info("compile path: simple/additive metrics=%s", query.metrics)
     return dataclasses.replace(
         _compile_simple_additive(query, raw_bindings, resolver, sources_by_name, dialect=dialect),
         related=related,
+        trust_inputs=trust_inputs,
     )
 
 

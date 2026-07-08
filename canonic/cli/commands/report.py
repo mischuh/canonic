@@ -4,16 +4,24 @@ from __future__ import annotations
 
 import contextlib
 import json
-from typing import Annotated
+from typing import TYPE_CHECKING, Annotated
 
 import typer
 from rich.console import Console
 from rich.table import Table
 
+if TYPE_CHECKING:
+    from pathlib import Path
+
+    from canonic.trust.models import TrustScore
+
 from canonic.cli._errors import get_cli_context, handle_errors
 from canonic.config import ConfigError, find_project_root, load_config
+from canonic.core.service import CanonicService
+from canonic.exc import ContractError
 from canonic.instrumentation.models import FunnelMilestone
 from canonic.instrumentation.report import FunnelReport, build_funnel, build_report, read_events
+from canonic.trust.models import TrustTier
 
 _console = Console(soft_wrap=True)
 
@@ -39,6 +47,34 @@ def _render_funnel(funnel: FunnelReport) -> None:
         _console.print(
             f"  time-to-first-answer: [bold]{funnel.time_to_first_answer_seconds:.1f}s[/bold]"
         )
+    _console.print()
+
+
+def _load_trust_scores(root: Path) -> list[tuple[str, TrustScore]]:
+    """Static trust tiers for every active metric, or [] if the project can't load."""
+    with contextlib.suppress(ConfigError, ContractError):
+        return CanonicService.from_project(root).trust_report()
+    return []
+
+
+def _render_trust_report(trust_scores: list[tuple[str, TrustScore]]) -> None:
+    if not trust_scores:
+        return
+    order = list(TrustTier)
+    ranked = sorted(trust_scores, key=lambda item: order.index(item[1].tier))
+    table = Table(title="Trust tier by metric", show_header=True, header_style="bold")
+    table.add_column("metric")
+    table.add_column("tier")
+    table.add_column("reasons")
+    tier_style = {
+        TrustTier.CAUTION: "red",
+        TrustTier.PROVISIONAL: "yellow",
+        TrustTier.TRUSTED: "green",
+    }
+    for metric, score in ranked:
+        style = tier_style[score.tier]
+        table.add_row(metric, f"[{style}]{score.tier.value}[/{style}]", "; ".join(score.reasons))
+    _console.print(table)
     _console.print()
 
 
@@ -73,11 +109,16 @@ def report(
     rep = build_report(events, recent=recent)
     funnel_events = read_events(root, kind="funnel_milestone")
     funnel = build_funnel(funnel_events)
+    trust_scores = _load_trust_scores(root)
 
     if json_output:
         payload = rep.model_dump(mode="json")
         payload["telemetry_enabled"] = telemetry_enabled
         payload["funnel"] = funnel.model_dump(mode="json")
+        payload["trust"] = [
+            {"metric": metric, "tier": score.tier.value, "reasons": list(score.reasons)}
+            for metric, score in trust_scores
+        ]
         typer.echo(json.dumps(payload))
         return
 
@@ -87,6 +128,7 @@ def report(
     _console.print()
 
     _render_funnel(funnel)
+    _render_trust_report(trust_scores)
 
     if rep.count == 0:
         _console.print("[yellow]no served answers recorded yet[/yellow]")

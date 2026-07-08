@@ -1,0 +1,8 @@
+id: board-reporting-trusted-only
+applies_to:
+  metric: gross_revenue
+kind: min_trust
+level: trusted
+context: board_reporting
+severity: error
+rationale: "Board figures must come from human-approved, final, validated definitions."

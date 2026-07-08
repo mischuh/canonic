@@ -15,11 +15,13 @@ from typing import TYPE_CHECKING, Any, cast
 from canonic.compiler import SemanticQuery, compile
 from canonic.compiler.dialect import adapter_for
 from canonic.compiler.joins import build_alias_tree, reachable_dimension_names
+from canonic.compiler.result import TrustInput
 from canonic.config import CanonicConfig, Connection, load_config
 from canonic.connectors.base import Capability, require_capability
 from canonic.connectors.factory import default_factory
 from canonic.contract import CONTRACT_SCHEMA
 from canonic.contracts import ContractResolver
+from canonic.contracts.models import Status
 from canonic.contracts.resolver import Ambiguous as ResolverAmbiguous
 from canonic.contracts.resolver import Binding
 from canonic.contracts.resolver import Unresolved as ResolverUnresolved
@@ -39,6 +41,8 @@ from canonic.instrumentation.events import AnswerEventLog, DiskAnswerEventLog, N
 from canonic.instrumentation.models import AnswerEvent, _age_days, _sha256_json
 from canonic.log import query_id_var
 from canonic.semantic.loader import list_semantic_sources
+from canonic.trust.scorer import TrustScorer
+from canonic.trust.signals import static_signals_for
 
 if TYPE_CHECKING:
     from canonic.compiler.result import CompileResult
@@ -48,6 +52,7 @@ if TYPE_CHECKING:
     from canonic.knowledge.results import SearchResult
     from canonic.semantic.models import Dimension as _Dimension
     from canonic.semantic.models import SemanticSource
+    from canonic.trust.models import TrustScore
 
 logger = logging.getLogger(__name__)
 
@@ -233,6 +238,29 @@ class CanonicService:
             except CanonicError:
                 enriched.append(s)
         return enriched
+
+    def trust_report(self) -> list[tuple[str, TrustScore]]:
+        """Static trust tier for every active canonical metric, sorted by name.
+
+        A worklist for improving context (SPEC-E14 §8): uses only the static,
+        compile-time signals (provenance, assertion coverage) — the same ones a
+        ``min_trust`` guardrail would enforce — so this matches what querying each
+        metric would actually be scored.
+        """
+        seen: set[str] = set()
+        scores: list[tuple[str, TrustScore]] = []
+        for candidates in self._resolver._name_index.values():
+            for b in candidates:
+                if b.status is not Status.ACTIVE or b.metric in seen:
+                    continue
+                seen.add(b.metric)
+                trust_input = TrustInput(
+                    metric=b.metric,
+                    provenance=b.provenance.value,
+                    has_assertion=bool(self._resolver.assertions_for({"metrics": [b.metric]})),
+                )
+                scores.append((b.metric, TrustScorer.score(static_signals_for([trust_input]))))
+        return sorted(scores, key=lambda item: item[0])
 
     def describe_metric(self, name: str) -> MetricDetail:
         """Return grain, dimensions, measures, and freshness for a metric (SPEC §4.1).

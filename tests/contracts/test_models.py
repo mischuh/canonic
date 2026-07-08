@@ -37,6 +37,7 @@ class TestEnums:
         assert GuardrailKind.MANDATORY_FILTER == "mandatory_filter"
         assert GuardrailKind.REQUIRED_DIMENSION == "required_dimension"
         assert GuardrailKind.RESTRICT_SOURCE == "restrict_source"
+        assert GuardrailKind.MIN_TRUST == "min_trust"
 
 
 class TestMetricBinding:
@@ -169,6 +170,49 @@ class TestGuardrail:
                 applies_to=AppliesTo(metric="revenue"),
                 kind=GuardrailKind.RESTRICT_SOURCE,
                 restrict_to=RestrictTo(role="final"),
+                rationale="Missing context.",
+            )
+
+    def test_min_trust_valid(self) -> None:
+        g = Guardrail(
+            id="board-reporting-trusted-only",
+            applies_to=AppliesTo(metric="revenue"),
+            kind=GuardrailKind.MIN_TRUST,
+            level="trusted",
+            context="board_reporting",
+            rationale="Board figures must come from validated definitions.",
+        )
+        assert g.level == "trusted"
+        assert g.context == "board_reporting"
+
+    def test_min_trust_missing_level_raises(self) -> None:
+        with pytest.raises(ValidationError, match="requires 'level'"):
+            Guardrail(
+                id="bad-min-trust",
+                applies_to=AppliesTo(metric="revenue"),
+                kind=GuardrailKind.MIN_TRUST,
+                context="board_reporting",
+                rationale="Missing level.",
+            )
+
+    def test_min_trust_invalid_level_raises(self) -> None:
+        with pytest.raises(ValidationError, match="requires 'level'"):
+            Guardrail(
+                id="bad-min-trust",
+                applies_to=AppliesTo(metric="revenue"),
+                kind=GuardrailKind.MIN_TRUST,
+                level="super-trusted",
+                context="board_reporting",
+                rationale="Invalid level value.",
+            )
+
+    def test_min_trust_missing_context_raises(self) -> None:
+        with pytest.raises(ValidationError, match="requires a non-empty 'context'"):
+            Guardrail(
+                id="bad-min-trust",
+                applies_to=AppliesTo(metric="revenue"),
+                kind=GuardrailKind.MIN_TRUST,
+                level="trusted",
                 rationale="Missing context.",
             )
 

@@ -19,6 +19,8 @@ from canonic.contract import CONTRACT_SCHEMA
 from canonic.contracts.models import (
     Example,  # noqa: TC001 — Pydantic resolves field annotations at runtime
 )
+from canonic.trust.scorer import TrustScorer
+from canonic.trust.signals import finality_signal, freshness_signal, static_signals_for
 
 if TYPE_CHECKING:
     from canonic.compiler.result import CompileResult
@@ -40,6 +42,7 @@ __all__ = [
     "RelatedMetricOut",
     "RelatedOut",
     "SourceFreshnessOut",
+    "TrustScoreOut",
 ]
 
 
@@ -71,6 +74,15 @@ class FinalityOut(BaseModel):
     sources_used: list[str]
     final_rows: int | None = None
     provisional_rows: int | None = None
+
+
+class TrustScoreOut(BaseModel):
+    """The ``metadata.trust_score`` block: tier + capping reasons (SPEC-E14 §3, §6)."""
+
+    model_config = ConfigDict(frozen=True)
+
+    tier: str
+    reasons: list[str] = []
 
 
 class RelatedDimensionOut(BaseModel):
@@ -201,6 +213,7 @@ class QueryMetadata(BaseModel):
     contract_schema: str = CONTRACT_SCHEMA
     finality: FinalityOut | None = None
     related: RelatedOut = RelatedOut()
+    trust_score: TrustScoreOut | None = None
 
     @classmethod
     def from_compile_result(
@@ -210,12 +223,14 @@ class QueryMetadata(BaseModel):
 
         When ``result`` is provided and the compile result carries finality metadata,
         the ``is_final`` column in the result set is used to tally ``final_rows`` and
-        ``provisional_rows``.
+        ``provisional_rows``. Those tallies also feed the trust tier (SPEC-E14 §6):
+        static signals (provenance, assertion coverage) apply regardless of ``result``,
+        while the finality/freshness signals only activate once row-level data is known.
         """
+        final_rows: int | None = None
+        provisional_rows: int | None = None
         finality_out: FinalityOut | None = None
         if compiled.finality is not None:
-            final_rows: int | None = None
-            provisional_rows: int | None = None
             if result is not None:
                 col_names = [c.name for c in result.columns]
                 if "is_final" in col_names:
@@ -228,6 +243,13 @@ class QueryMetadata(BaseModel):
                 final_rows=final_rows,
                 provisional_rows=provisional_rows,
             )
+        trust = TrustScorer.score(
+            [
+                *static_signals_for(compiled.trust_inputs),
+                finality_signal(final_rows, provisional_rows),
+                freshness_signal(compiled.freshness),
+            ]
+        )
         return cls(
             resolved={"metrics": dict(compiled.resolved)},
             guardrails_fired=[
@@ -252,6 +274,7 @@ class QueryMetadata(BaseModel):
                     for m in compiled.related.sibling_metrics
                 ],
             ),
+            trust_score=TrustScoreOut(tier=trust.tier.value, reasons=list(trust.reasons)),
         )
 
 

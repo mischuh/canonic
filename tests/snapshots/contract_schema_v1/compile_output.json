@@ -120,7 +120,7 @@
           "type": "array"
         },
         "contract_schema": {
-          "default": "2.0",
+          "default": "2.1",
           "title": "Contract Schema",
           "type": "string"
         },
@@ -141,6 +141,17 @@
             "unused_dimensions": [],
             "sibling_metrics": []
           }
+        },
+        "trust_score": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TrustScoreOut"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         }
       },
       "required": [
@@ -253,6 +264,28 @@
         "source"
       ],
       "title": "SourceFreshnessOut",
+      "type": "object"
+    },
+    "TrustScoreOut": {
+      "description": "The ``metadata.trust_score`` block: tier + capping reasons (SPEC-E14 \u00a73, \u00a76).",
+      "properties": {
+        "tier": {
+          "title": "Tier",
+          "type": "string"
+        },
+        "reasons": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Reasons",
+          "type": "array"
+        }
+      },
+      "required": [
+        "tier"
+      ],
+      "title": "TrustScoreOut",
       "type": "object"
     }
   },

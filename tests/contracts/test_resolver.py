@@ -205,6 +205,58 @@ class TestRestrictSourceFor:
         assert [r.id for r in result] == ["a-guard", "z-guard"]
 
 
+def _min_trust_guardrail(
+    gid: str, *, metric: str, context: str, level: str = "trusted"
+) -> Guardrail:
+    return Guardrail(
+        id=gid,
+        applies_to=AppliesTo(metric=metric),
+        kind=GuardrailKind.MIN_TRUST,
+        level=level,
+        context=context,
+        rationale="test min_trust",
+    )
+
+
+class TestMinTrustFor:
+    def test_returns_guardrail_on_matching_context(self) -> None:
+        revenue = _binding("revenue")
+        g = _min_trust_guardrail("board-trusted-only", metric="revenue", context="board_reporting")
+        resolver = ContractResolver(bindings=[revenue], guardrails=[g])
+        result = resolver.min_trust_for("orders", "total_revenue", "board_reporting")
+        assert [r.id for r in result] == ["board-trusted-only"]
+
+    def test_returns_empty_on_wrong_context(self) -> None:
+        revenue = _binding("revenue")
+        g = _min_trust_guardrail("board-trusted-only", metric="revenue", context="board_reporting")
+        resolver = ContractResolver(bindings=[revenue], guardrails=[g])
+        result = resolver.min_trust_for("orders", "total_revenue", "internal_dashboard")
+        assert result == []
+
+    def test_returns_empty_when_context_is_none(self) -> None:
+        revenue = _binding("revenue")
+        g = _min_trust_guardrail("board-trusted-only", metric="revenue", context="board_reporting")
+        resolver = ContractResolver(bindings=[revenue], guardrails=[g])
+        result = resolver.min_trust_for("orders", "total_revenue", None)
+        assert result == []
+
+    def test_does_not_return_restrict_source_guardrails(self) -> None:
+        revenue = _binding("revenue")
+        rs = _restrict_guardrail("board-final-only", metric="revenue", context="board_reporting")
+        resolver = ContractResolver(bindings=[revenue], guardrails=[rs])
+        result = resolver.min_trust_for("orders", "total_revenue", "board_reporting")
+        assert result == []
+
+    @pytest.mark.release_gate
+    def test_stable_sort_by_id(self) -> None:
+        revenue = _binding("revenue")
+        g1 = _min_trust_guardrail("z-guard", metric="revenue", context="board_reporting")
+        g2 = _min_trust_guardrail("a-guard", metric="revenue", context="board_reporting")
+        resolver = ContractResolver(bindings=[revenue], guardrails=[g1, g2])
+        result = resolver.min_trust_for("orders", "total_revenue", "board_reporting")
+        assert [r.id for r in result] == ["a-guard", "z-guard"]
+
+
 class TestP0Stubs:
     def test_finality_for_returns_none(self) -> None:
         resolver = ContractResolver(bindings=[_binding("revenue")], guardrails=[])

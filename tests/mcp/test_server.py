@@ -193,7 +193,7 @@ async def test_compile_query(canonic_service: CanonicService) -> None:
     assert "SELECT" in data["compiled"]["sql"].upper()
     assert data["metadata"]["resolved"]["metrics"]["revenue"] == "orders.total_revenue"
     assert any(g["id"] == "revenue-excludes-refunds" for g in data["metadata"]["guardrails_fired"])
-    assert data["metadata"]["contract_schema"] == "2.0"
+    assert data["metadata"]["contract_schema"] == "2.1"
     # S12: related block is always present
     assert "related" in data["metadata"]
     assert isinstance(data["metadata"]["related"]["unused_dimensions"], list)

@@ -386,6 +386,28 @@ class ContractResolver:
         ]
         return sorted(matched, key=lambda g: g.id)
 
+    def min_trust_for(
+        self,
+        source: str,
+        measure: str,
+        context: str | None,
+    ) -> list[Guardrail]:
+        """Return min_trust guardrails active for this (source, measure) and context.
+
+        Only returns guardrails when ``context`` is not None and matches ``g.context``.
+        Stable-sorted by ``id`` (SPEC-E14 §7).
+        """
+        if context is None:
+            return []
+        matched = [
+            g
+            for g in self._guardrails
+            if g.kind is GuardrailKind.MIN_TRUST
+            and g.context == context
+            and self._guardrail_applies(g, source, measure)
+        ]
+        return sorted(matched, key=lambda g: g.id)
+
     def finality_for(self, metric: str) -> FinalityRule | None:
         """Return the finality rule for a metric, or ``None`` if no rule is defined."""
         return self._finality_by_metric.get(metric)
