@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.4.0](https://github.com/mischuh/canonic/compare/v0.3.4...v0.4.0) (2026-07-08)
+
+
+### Features
+
+* **distribution:** switch to Python-only distribution (uv/PyPI, pip, Docker) ([410643d](https://github.com/mischuh/canonic/commit/410643db04e5c51f83ac4ecd5e9e3e49675b5c32))
+
+
+### Bug Fixes
+
+* add commitlint configuration extending conventional config ([a000232](https://github.com/mischuh/canonic/commit/a000232804a3ef75758690c51d07b4c5e397c95b))
+* **compiler:** qualify dimension output aliases by join role to avoid column collisions ([6785fd7](https://github.com/mischuh/canonic/commit/6785fd7001bd107c3b35deb571a9db1640b44fa0))
+
 ## [0.3.4](https://github.com/mischuh/canonic/compare/v0.3.3...v0.3.4) (2026-07-08)
 
 
