@@ -1,41 +1,42 @@
 ---
 title: "Installation"
-description: "Install the canonic CLI via npm, Homebrew, or Docker."
+description: "Install the canonic CLI via uv, pip, or Docker."
 ---
 
 canonic ships as one distributable (CLI + local daemon). Local embeddings are an optional add-on.
 
-<Note>
-  Package and image names below show the shape of each install channel; exact names are confirmed per release.
-</Note>
-
 <Tabs>
-  <Tab title="npm">
-    For dev machines:
+  <Tab title="uv">
+    Primary channel for dev machines:
 
     ```bash
-    npm install -g @canonic/cli
+    uvx canonic --version        # ephemeral, no install step
+    uv tool install canonic      # persistent, global command
     ```
   </Tab>
-  <Tab title="Homebrew">
-    For macOS / Linux:
+  <Tab title="pip">
+    Fallback for environments without `uv`:
 
     ```bash
-    brew install canonic
+    pip install canonic
     ```
   </Tab>
   <Tab title="Docker">
     For CI, headless, or air-gapped environments:
 
     ```bash
-    docker pull canonic:latest
+    docker pull ghcr.io/mischuh/canonic:latest
     ```
   </Tab>
 </Tabs>
 
 ## Air-gapped install
 
-An **offline / air-gapped install** path (Docker image or vendored tarball, no outbound calls during install) is available for restricted environments.
+Install from a local wheel directory with no outbound network calls during install:
+
+```bash
+uv pip install --no-index --find-links ./wheels canonic
+```
 
 ## Verify
 

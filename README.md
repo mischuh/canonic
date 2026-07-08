@@ -101,22 +101,26 @@ The design principle throughout: **canonic proposes, you approve.** It never sil
 
 > canonic ships as one distributable (CLI + local daemon). Local embeddings are an optional add-on.
 
-**npm** (dev machines):
+**uv** (dev machines, primary):
 ```bash
-npm install -g @canonic/cli
+uvx canonic --version        # ephemeral, no install step
+uv tool install canonic      # persistent, global command
 ```
 
-**Homebrew** (macOS / Linux):
+**pip** (fallback for environments without `uv`):
 ```bash
-brew install canonic
+pip install canonic
 ```
 
 **Docker** (CI, headless, air-gapped):
 ```bash
-docker pull canonic:latest
+docker pull ghcr.io/mischuh/canonic:latest
 ```
 
-An **offline / air-gapped install** path (Docker image or vendored tarball, no outbound calls during install) is available for restricted environments.
+**Offline / air-gapped install** — no outbound network calls during install:
+```bash
+uv pip install --no-index --find-links ./wheels canonic
+```
 
 Verify:
 ```bash

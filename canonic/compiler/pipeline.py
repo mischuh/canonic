@@ -441,7 +441,7 @@ def _plan_leaf(
         fired=fired,
         used_sources=used,
         warnings=[],
-        dim_names=[dim.name for _, dim in dimensions],
+        dim_names=_dimension_output_names(dimensions),
         finality=leaf_finality,
     )
 
@@ -459,9 +459,9 @@ def _build_leaf_select(
     select = exp.Select()
     projections: list[exp.Expression] = []
     group_exprs: list[exp.Expression] = []
-    for src, dim in dimensions:
+    for (src, dim), name in zip(dimensions, _dimension_output_names(dimensions), strict=True):
         expr = _dimension_expr(src, dim)
-        projections.append(_alias(expr, dim.name))
+        projections.append(_alias(expr, name))
         group_exprs.append(expr)
     projections.append(_alias(_measure_expr(owner, measure), measure_alias))
     select = select.select(*projections)
@@ -781,12 +781,13 @@ def _build_semi_additive(
         order_dir = "DESC" if collapse_agg is CollapseAgg.LAST else "ASC"
 
         # Inner CTE: project grouped dimensions + raw input columns + ROW_NUMBER window.
+        dim_names = _dimension_output_names(dimensions)
         inner = exp.Select()
         inner_projections: list[exp.Expression] = []
         partition_exprs: list[exp.Expression] = []
-        for src, dim in dimensions:
+        for (src, dim), name in zip(dimensions, dim_names, strict=True):
             expr = _dimension_expr(src, dim)
-            inner_projections.append(_alias(expr, dim.name))
+            inner_projections.append(_alias(expr, name))
             partition_exprs.append(expr)
 
         for input_col in _input_columns(measure):
@@ -818,9 +819,9 @@ def _build_semi_additive(
         outer = exp.Select()
         outer_projections: list[exp.Expression] = []
         outer_group: list[exp.Expression] = []
-        for _src, dim in dimensions:
-            dim_col = cast("exp.Expression", exp.column(dim.name, table=_RANKED))
-            outer_projections.append(_alias(dim_col, dim.name))
+        for name in dim_names:
+            dim_col = cast("exp.Expression", exp.column(name, table=_RANKED))
+            outer_projections.append(_alias(dim_col, name))
             outer_group.append(dim_col)
         outer_projections.append(_alias(_qualify_to(_parse(measure.expr), _RANKED), metric_name))
         outer = outer.select(*outer_projections)
@@ -843,12 +844,13 @@ def _build_semi_additive(
     agg_fn = str(collapse_agg).upper()
 
     # Inner CTE: group by (grouped dims + collapse dim), compute measure per snapshot.
+    dim_names = _dimension_output_names(dimensions)
     inner = exp.Select()
     inner_projections = []
     inner_group: list[exp.Expression] = []
-    for src, dim in dimensions:
+    for (src, dim), name in zip(dimensions, dim_names, strict=True):
         expr = _dimension_expr(src, dim)
-        inner_projections.append(_alias(expr, dim.name))
+        inner_projections.append(_alias(expr, name))
         inner_group.append(expr)
     inner_projections.append(_alias(_measure_expr(owner, measure), "m"))
     inner_group.append(collapse_col)
@@ -862,9 +864,9 @@ def _build_semi_additive(
     outer = exp.Select()
     outer_projections = []
     outer_group = []
-    for _src, dim in dimensions:
-        dim_col = cast("exp.Expression", exp.column(dim.name, table=_PER_SNAP))
-        outer_projections.append(_alias(dim_col, dim.name))
+    for name in dim_names:
+        dim_col = cast("exp.Expression", exp.column(name, table=_PER_SNAP))
+        outer_projections.append(_alias(dim_col, name))
         outer_group.append(dim_col)
     m_col = cast("exp.Expression", exp.column("m", table=_PER_SNAP))
     outer_projections.append(_alias(_func(agg_fn, m_col), metric_name))
@@ -1105,8 +1107,8 @@ def _build_opaque(
     """Build a raw direct-lookup SELECT for an opaque metric — no aggregate, no GROUP BY (§4.4)."""
     select = exp.Select()
     projections: list[exp.Expression] = []
-    for src, dim in dimensions:
-        projections.append(_alias(_dimension_expr(src, dim), dim.name))
+    for (src, dim), name in zip(dimensions, _dimension_output_names(dimensions), strict=True):
+        projections.append(_alias(_dimension_expr(src, dim), name))
     projections.append(_alias(_measure_expr(metric.source, metric.measure), metric.measure.name))
     select = select.select(*projections)
     select = _from_and_joins(select, owner, join_edges, sources_by_name)
@@ -1166,9 +1168,9 @@ def _build_recompute(
     select = exp.Select()
     projections: list[exp.Expression] = []
     group_exprs: list[exp.Expression] = []
-    for src, dim in dimensions:
+    for (src, dim), name in zip(dimensions, _dimension_output_names(dimensions), strict=True):
         expr = _dimension_expr(src, dim)
-        projections.append(_alias(expr, dim.name))
+        projections.append(_alias(expr, name))
         group_exprs.append(expr)
     projections.append(_alias(agg_expr, metric_name))
     select = select.select(*projections)
@@ -1206,12 +1208,13 @@ def _build_percentile_fallback(
 
     col_expr = exp.column(col_phys, table=col_alias)
 
+    dim_names = _dimension_output_names(dimensions)
     inner = exp.Select()
     inner_projections: list[exp.Expression] = []
     partition_exprs: list[exp.Expression] = []
-    for src, dim in dimensions:
+    for (src, dim), name in zip(dimensions, dim_names, strict=True):
         expr = _dimension_expr(src, dim)
-        inner_projections.append(_alias(expr, dim.name))
+        inner_projections.append(_alias(expr, name))
         partition_exprs.append(expr)
     inner_projections.append(_alias(col_expr, _VAL))
     cume_dist = cast(
@@ -1231,9 +1234,9 @@ def _build_percentile_fallback(
     outer = exp.Select()
     outer_projections: list[exp.Expression] = []
     outer_group: list[exp.Expression] = []
-    for _src, dim in dimensions:
-        dim_col = cast("exp.Expression", exp.column(dim.name, table=_RANKED))
-        outer_projections.append(_alias(dim_col, dim.name))
+    for name in dim_names:
+        dim_col = cast("exp.Expression", exp.column(name, table=_RANKED))
+        outer_projections.append(_alias(dim_col, name))
         outer_group.append(dim_col)
     val_col = cast("exp.Expression", exp.column(_VAL, table=_RANKED))
     outer_projections.append(_alias(_func("MIN", val_col), metric_name))
@@ -1403,6 +1406,21 @@ def _compile_simple_additive(
 # --- Stage 2 -----------------------------------------------------------------
 
 
+def _dimension_output_names(dimensions: list[tuple[str, Dimension]]) -> list[str]:
+    """Output column name for each requested dimension.
+
+    Different join roles can resolve to dimensions sharing the same bare name (e.g.
+    ``pickup.city`` and ``dropoff.city`` both name a ``city`` dimension on the same
+    joined source). Aliasing both to bare ``city`` in the emitted SQL collapses them
+    into a single column and corrupts the GROUP BY. Qualify with the role alias only
+    when the bare name isn't unique within this dimension list.
+    """
+    counts: dict[str, int] = {}
+    for _role, dim in dimensions:
+        counts[dim.name] = counts.get(dim.name, 0) + 1
+    return [dim.name if counts[dim.name] == 1 else f"{role}.{dim.name}" for role, dim in dimensions]
+
+
 def _resolve_dimensions(
     query: SemanticQuery,
     sources_by_name: dict[str, SemanticSource],
@@ -1532,9 +1550,9 @@ def _build_simple(
     select = exp.Select()
     projections: list[exp.Expression] = []
     group_exprs: list[exp.Expression] = []
-    for src, dim in dimensions:
+    for (src, dim), name in zip(dimensions, _dimension_output_names(dimensions), strict=True):
         expr = _dimension_expr(src, dim)
-        projections.append(_alias(expr, dim.name))
+        projections.append(_alias(expr, name))
         group_exprs.append(expr)
     for m in metrics:
         projections.append(_alias(_measure_expr(m.source, m.measure), m.measure.name))
@@ -1565,11 +1583,12 @@ def _build_deduped(
     grain_cols = [exp.column(g, table=owner) for g in owner_source.grain]
 
     # Inner: DISTINCT ON (grain) projecting dimensions + each measure's input columns.
+    dim_names = _dimension_output_names(dimensions)
     inner = exp.Select()
     inner_projections: list[exp.Expression] = []
     measure_inputs: dict[str, exp.Expression] = {}
-    for src, dim in dimensions:
-        inner_projections.append(_alias(_dimension_expr(src, dim), dim.name))
+    for (src, dim), name in zip(dimensions, dim_names, strict=True):
+        inner_projections.append(_alias(_dimension_expr(src, dim), name))
     for m in metrics:
         for input_col in _input_columns(m.measure):
             measure_inputs.setdefault(input_col, exp.column(input_col, table=m.source))
@@ -1584,9 +1603,9 @@ def _build_deduped(
     outer = exp.Select()
     projections: list[exp.Expression] = []
     group_exprs: list[exp.Expression] = []
-    for _src, dim in dimensions:
-        dim_col = exp.column(dim.name, table=_DEDUP_ALIAS)
-        projections.append(_alias(dim_col, dim.name))
+    for name in dim_names:
+        dim_col = exp.column(name, table=_DEDUP_ALIAS)
+        projections.append(_alias(dim_col, name))
         group_exprs.append(dim_col)
     for m in metrics:
         projections.append(
@@ -1941,6 +1960,8 @@ def _build_finality_union(
         ),
     )
 
+    dim_names = _dimension_output_names(dimensions)
+
     branches: list[exp.Select] = []
     for realization in rule.realizations:
         src_name = realization.source
@@ -2023,9 +2044,9 @@ def _build_finality_union(
         select = exp.Select()
         projections: list[exp.Expression] = []
         group_exprs: list[exp.Expression] = []
-        for b_src, dim in branch_dims:
+        for (b_src, dim), name in zip(branch_dims, dim_names, strict=True):
             expr = _dimension_expr(b_src, dim)
-            projections.append(_alias(expr, dim.name))
+            projections.append(_alias(expr, name))
             group_exprs.append(expr)
         for m in branch_metrics:
             col_alias = measure_alias if measure_alias is not None else m.measure.name
