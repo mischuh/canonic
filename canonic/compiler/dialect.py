@@ -15,7 +15,13 @@ from sqlglot import exp
 from canonic.exc import ReadOnlyViolation
 from canonic.semantic.models import NormalizedType
 
-__all__ = ["DIALECT_ADAPTERS", "DialectAdapter", "PostgresDialectAdapter", "adapter_for"]
+__all__ = [
+    "DIALECT_ADAPTERS",
+    "DialectAdapter",
+    "PostgresDialectAdapter",
+    "SQLiteDialectAdapter",
+    "adapter_for",
+]
 
 # DML/DDL nodes that may never appear anywhere in the AST — including inside a CTE
 # (Postgres permits data-modifying statements in ``WITH``). Catching them by class
@@ -82,6 +88,16 @@ class DialectAdapter(ABC):
     def map_type(self, normalized: NormalizedType) -> str:
         """Map a normalized internal type to its dialect type name."""
 
+    def supports_percentile_cont(self) -> bool:
+        """Whether the dialect has a native ordered-set aggregate for percentile queries.
+
+        True means the compiler can emit ``PERCENTILE_CONT(q) WITHIN GROUP (ORDER BY col)``
+        directly. Dialects without one (e.g. SQLite) override this to False, which routes
+        ``percentile`` recompute_at_grain metrics through a window-function fallback instead
+        (SPEC §4.3 open question).
+        """
+        return True
+
 
 class _GenericDialectAdapter(DialectAdapter):
     """Adapter for any sqlglot-supported dialect, parameterized at construction."""
@@ -131,11 +147,21 @@ class PostgresDialectAdapter(_GenericDialectAdapter):
         super().__init__("postgres", _POSTGRES_TYPE_MAP)
 
 
+class SQLiteDialectAdapter(_GenericDialectAdapter):
+    """SQLite renderer — has no ordered-set aggregate for percentile queries."""
+
+    def __init__(self) -> None:
+        super().__init__("sqlite", _SQLITE_TYPE_MAP)
+
+    def supports_percentile_cont(self) -> bool:
+        return False
+
+
 # Pre-built adapters for the three supported query connectors.
 DIALECT_ADAPTERS: dict[str, DialectAdapter] = {
     "postgres": PostgresDialectAdapter(),
     "duckdb": _GenericDialectAdapter("duckdb", _DUCKDB_TYPE_MAP),
-    "sqlite": _GenericDialectAdapter("sqlite", _SQLITE_TYPE_MAP),
+    "sqlite": SQLiteDialectAdapter(),
 }
 
 # Connection type → sqlglot dialect name when they differ.
@@ -164,5 +190,6 @@ def adapter_for(dialect: str) -> DialectAdapter:
         return DIALECT_ADAPTERS["postgres"]
 
 
-# Future: add a DialectAdapter.percentile(q, col) method to abstract percentile_cont (Postgres/DuckDB)
-# vs approx_quantile (BigQuery/Trino) when multi-dialect support is added (SPEC §4.3 open question).
+# SQLite (no ordered-set aggregate) is handled via supports_percentile_cont() — the compiler
+# falls back to a CUME_DIST() window-function query. Future: dialects with an approximate
+# aggregate instead (e.g. BigQuery/Trino APPROX_QUANTILE) may want a third strategy here.
