@@ -8,35 +8,26 @@ on:
       - "v*.*.*"
 
 jobs:
-  npm-publish:
-    # Disabled: no NPM_TOKEN secret exists yet, so this job fails every release
-    # (ENEEDAUTH). The npm channel is still a scaffold — see the NOTE below and
-    # SPEC-E1-foundation-config-distribution.md §5. Re-enable once NPM_TOKEN is
-    # set and the binary-distribution design lands.
-    if: false
+  pypi-publish:
+    # Uses PyPI Trusted Publishing (OIDC) — no token secret needed, but the
+    # `pypi` environment and a pending trusted publisher must be configured on
+    # PyPI first (one-time maintainer setup, see SETUP.md).
     runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write
+      contents: read
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up Node
-        uses: actions/setup-node@v4
-        with:
-          node-version: "20"
-          registry-url: "https://registry.npmjs.org"
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
 
-      - name: Sync package.json version to tag
-        run: |
-          VERSION="${GITHUB_REF_NAME#v}"
-          npm version "$VERSION" --no-git-tag-version --allow-same-version
+      - name: Build
+        run: uv build
 
-      # NOTE: this is a scaffold, not a functional binary distribution.
-      # SPEC-E1-foundation-config-distribution.md §5 lists the npm scope and
-      # binary-distribution mechanism as an open question. bin/canon.js is a
-      # stub that tells users to install via pip/uv until that design lands.
-      - name: Publish to npm
-        run: npm publish --access public
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+      - name: Publish to PyPI
+        run: uv publish
 
   docker-publish:
     runs-on: ubuntu-latest
@@ -64,13 +55,3 @@ jobs:
           tags: |
             ghcr.io/mischuh/canonic:${{ github.ref_name }}
             ghcr.io/mischuh/canonic:latest
-
-  homebrew-bump:
-    runs-on: ubuntu-latest
-    steps:
-      # TODO: bump the Homebrew formula once one exists (see
-      # SPEC-E1-foundation-config-distribution.md §5, "Homebrew" channel).
-      # Not implemented yet — no tap/formula has been created.
-      - name: Homebrew formula bump (not implemented)
-        run: |
-          echo "TODO: Homebrew formula bump not implemented yet — see SPEC-E1 §5."
