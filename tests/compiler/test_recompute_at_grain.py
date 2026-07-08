@@ -317,6 +317,75 @@ def test_percentile_sqlite_fallback_scalar(
     assert "GROUP BY" not in sql_upper
 
 
+def test_percentile_sqlite_fallback_role_qualified_dims_distinct() -> None:
+    """Regression: percentile fallback must not collide same-named dims from different roles.
+
+    Mirrors a rentals-style query — 'pickup.city' and 'dropoff.city' both resolve to the
+    same underlying 'city' dimension on a 'locations' source joined twice under different
+    roles. Aliasing both to bare 'city' in the CUME_DIST() CTE collapses the SELECT/GROUP BY
+    to a single column, so every row spuriously shows the same pickup and dropoff city.
+    """
+    locations = SemanticSource(
+        name="locations",
+        connection="warehouse_sqlite",
+        table="analytics.locations",
+        grain=["location_id"],
+        columns=[
+            Column(name="location_id", type="string", nullable=False),
+            Column(name="city", type="string", nullable=False),
+        ],
+        dimensions=[Dimension(name="city", column="city")],
+    )
+    rentals = SemanticSource(
+        name="rentals",
+        connection="warehouse_sqlite",
+        table="analytics.rentals",
+        grain=["rental_id"],
+        columns=[
+            Column(name="rental_id", type="string", nullable=False),
+            Column(name="pickup_location_id", type="string", nullable=False),
+            Column(name="dropoff_location_id", type="string", nullable=False),
+            Column(name="total_amount", type="decimal", nullable=False),
+        ],
+        joins=[
+            Join(
+                name="pickup",
+                to="locations",
+                on="rentals.pickup_location_id = locations.location_id",
+                relationship=Relationship.MANY_TO_ONE,
+            ),
+            Join(
+                name="dropoff",
+                to="locations",
+                on="rentals.dropoff_location_id = locations.location_id",
+                relationship=Relationship.MANY_TO_ONE,
+            ),
+        ],
+    )
+    binding = MetricBinding(
+        metric="median_rental_amount",
+        canonical=CanonicalRef(
+            kind=BindingKind.PERCENTILE,
+            source="rentals",
+            column="total_amount",
+            quantile=0.5,
+        ),
+    )
+    resolver = ContractResolver(bindings=[binding], guardrails=[])
+
+    result = compile(
+        SemanticQuery(metrics=["median_rental_amount"], dimensions=["pickup.city", "dropoff.city"]),
+        resolver,
+        [rentals, locations],
+        connection_dialects={"warehouse_sqlite": "sqlite"},
+    )
+    parsed = sqlglot.parse_one(result.sql, dialect="sqlite")
+    outer_select = parsed if isinstance(parsed, sqlglot.exp.Select) else parsed.this
+    output_names = [e.alias_or_name for e in outer_select.expressions]
+    assert output_names[:2] == ["pickup.city", "dropoff.city"]
+    assert len(set(output_names)) == len(output_names)
+
+
 def test_percentile_postgres_no_fallback_warning(
     rg_resolver: ContractResolver,
     orders_rg: SemanticSource,

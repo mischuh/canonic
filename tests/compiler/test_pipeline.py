@@ -636,6 +636,25 @@ def test_named_join_both_roles_compile() -> None:
     assert "dropoff" in result.sql
 
 
+def test_named_join_both_roles_have_distinct_output_columns() -> None:
+    """Regression: pickup.city and dropoff.city must not collide on the bare 'city' alias.
+
+    Both dimensions share the same underlying 'city' column on the joined 'loc' source;
+    aliasing both to bare 'city' collapses the GROUP BY/SELECT to one column and silently
+    duplicates the pickup value into the dropoff position.
+    """
+    owner, loc, res = _make_role_sources()
+    result = compile(
+        SemanticQuery(metrics=["m"], dimensions=["pickup.city", "dropoff.city"]),
+        res,
+        [owner, loc],
+    )
+    parsed = sqlglot.parse_one(result.sql, dialect="postgres")
+    output_names = [e.alias_or_name for e in parsed.expressions]
+    assert output_names[:2] == ["pickup.city", "dropoff.city"]
+    assert len(set(output_names)) == len(output_names)
+
+
 def test_named_join_unqualified_ambiguous_dim_raises() -> None:
     owner, loc, res = _make_role_sources()
     with pytest.raises(exc.Ambiguous) as ei:
