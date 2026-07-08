@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.3.4](https://github.com/mischuh/canonic/compare/v0.3.3...v0.3.4) (2026-07-08)
+
+
+### Bug Fixes
+
+* fall back to CUME_DIST() window query for percentile on SQLite ([4851aad](https://github.com/mischuh/canonic/commit/4851aadcd4f426acbb9db1f32dfe6c7957f9ffd8))
+* fall back to CUME_DIST() window query for percentile on SQLite ([d92d301](https://github.com/mischuh/canonic/commit/d92d3015109acc34e72eec50f30328649d7cf95b))
+
 ## [0.3.3](https://github.com/mischuh/canonic/compare/v0.3.2...v0.3.3) (2026-07-07)
 
 
