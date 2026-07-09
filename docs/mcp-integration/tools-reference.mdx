@@ -26,7 +26,7 @@ The MCP server (`canonic/mcp/server.py`) registers 11 tools. Each does transport
 Returns the serving contract version this daemon implements. Call at session start to confirm compatibility.
 
 ```json
-{"contract_schema": "2.0"}
+{"contract_schema": "2.2"}
 ```
 
 ### `negotiate_contract(contract_major: int)`
@@ -67,7 +67,7 @@ On an `ambiguous_join_path` error, inspect the returned candidates (each has a `
 
 ### `query(query: dict)`
 
-Same `query` shape as `compile_query`, but compiles **and executes** read-only. Returns rows plus compiler metadata: resolved bindings, guardrails fired, freshness. This is the main path: with `--json`/over MCP, the payload is identical to `canonic query --json`.
+Same `query` shape as `compile_query`, but compiles **and executes** read-only. Returns rows plus compiler metadata: resolved bindings, guardrails fired, freshness, and `trust_score` (tier plus reasons, see [Trust score](/concepts/contracts-and-guardrails#trust-score)). This is the main path: with `--json`/over MCP, the payload is identical to `canonic query --json`.
 
 ### `run_sql(sql: str, connection: str | None = None)`
 

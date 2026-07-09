@@ -13,6 +13,8 @@ canonic status
 
 Prints the project root, `canonic.yaml` config version (or a config error if invalid), whether `.canonic/` (local state) is present, the serving contract schema version, and a one-line summary of served-answer events (count, error count, p95 latency) if any exist. This is always a safe "what's my next step" command; run it whenever you're unsure of project state.
 
+The serving contract schema is currently `2.2`. It moved from `2.0` across two additive bumps: `2.1` added the E14 trust tier to `QueryMetadata`, and `2.2` added the trust tier to every logged `AnswerEvent` plus the new `answer_outcome` event kind.
+
 ## `canonic report`
 
 Show event-log figures from the local `.canonic/` store: counts, error distribution, latency, bytes scanned, and freshness.
@@ -33,10 +35,13 @@ When `answer_outcome` events are present (see [`canonic outcome mark`](#canonic-
 
 - **Trust calibration** — outcome verdicts bucketed by E14 trust tier, so you can see whether `caution` predicts `incorrect` materially more often than `trusted`. This is the metric that validates whether E14's tiers are actually predictive.
 - **Correction recurrence** — bindings with more than one `incorrect` outcome. A rising count means the feedback loop isn't closing: the same canonical definition keeps getting marked wrong.
+- **Feedback loop**: a table of every binding with any `wrong_definition` outcome history, with columns `binding`, `wrong_definition` count, distinct `markers`, whether it's crossed the E4 evidence gate (`gated (E4)`), and whether it's currently capping the E14 trust tier (`trust capped`). Shown even below the gate, so a pattern is visible before it fires. Also included in `--json` under `"feedback"`. See [Feedback loop (E11)](/concepts/ingestion-and-reconciliation#feedback-loop-e11) and the `feedback` block in [config schema](/reference/config-schema#feedback).
 
 ## `canonic outcome mark`
 
-Record a correct/incorrect ground-truth mark on a served answer, with an attribution reason-code when incorrect. This only *records* the outcome to the local event log — acting on it (e.g. flagging a binding as contradicted) is a separate, later capability; `canonic outcome mark` never mutates any contract file.
+Record a correct/incorrect ground-truth mark on a served answer, with an attribution reason-code when incorrect. `canonic outcome mark` itself only *records* the outcome to the local event log and never mutates any contract file.
+
+Recurring `wrong_definition` outcomes are acted on separately, by the [feedback loop (E11)](/concepts/ingestion-and-reconciliation#feedback-loop-e11): once a binding crosses the `feedback` config's pattern thresholds, `canonic ingest` flags it as E4 contradiction evidence, and it caps the binding's [trust tier](/concepts/contracts-and-guardrails#trust-score) at `caution`.
 
 ```bash
 canonic outcome mark --ref sha256:… --verdict correct

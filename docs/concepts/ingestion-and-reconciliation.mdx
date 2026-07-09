@@ -47,10 +47,21 @@ Merges each proposal against the currently accepted file with a deterministic de
 | conflicts, tier ≤ proposal, confidence ≥ threshold | n/a | propose **edit** (auto-apply only if policy allows) |
 | conflicts, tier ≤ proposal, confidence < threshold | n/a | propose **edit**, marked low-confidence for review |
 | target evidence disappeared | n/a | propose **prune** / mark stale |
+| `answer_outcome` evidence, E11 pattern gate crossed | n/a | **flag contradiction**, unconditionally, never add/edit, regardless of tier or frozen state |
 
 **Provenance tiers:** `board_approved > human_curated > inferred`. Higher always wins: since new evidence is always `inferred`, it can never silently displace a curated or approved fact. A **frozen** fact is never edited by reconciliation regardless of the incoming tier or confidence; conflicting evidence is flagged, not applied.
 
+The `answer_outcome` row is a deliberate exception to that tier logic: it always reconciles to a contradiction, never to an add or edit, no matter how low-confidence or high-tier the target binding is. This is an attribution safeguard, feedback should never silently rewrite a definition; a human always reviews it. See [Feedback loop (E11)](#feedback-loop-e11) below.
+
 A conflict is never resolved by silent overwrite. The worst case is a flagged contradiction a human resolves: contradictions ride into the review surface (a PR comment in headless mode) and don't fail a run by default.
+
+## Feedback loop (E11)
+
+[`canonic outcome mark`](/cli-reference/status-report#canonic-outcome-mark) records a correct/incorrect ground-truth verdict against a served answer, with an attribution reason-code (`wrong_definition`, `wrong_data`, `wrong_interpretation`, or `unspecified`) when incorrect. Only `wrong_definition` ever implicates the canonical binding that served the answer; the other reason codes are recorded but never feed back into reconciliation or trust.
+
+`canonic ingest` folds this history in alongside connector evidence: it builds a per-binding `BindingOutcomeHistory` from `.canonic/events.jsonl` and, once a binding crosses the `feedback` config's pattern gate (`pattern_min_count` distinct-enough `wrong_definition` outcomes from `pattern_min_markers` distinct markers within `pattern_window_days`), mints `answer_outcome` evidence for it. That evidence always reconciles to a **contradiction** per the table above, never to an add or edit; E11 only flags, it never rewrites a binding in place.
+
+Independently, a recent confirmed `wrong_definition` outcome caps the binding's [E14 trust tier](/concepts/contracts-and-guardrails#trust-score) at `caution` for `trust_cap_window_days`, or until a later `correct` outcome on the same binding supersedes it. `canonic report` lists every binding with `wrong_definition` history, gated or not, in its Feedback loop table; see [`canonic report`](/cli-reference/status-report#canonic-report). The four thresholds are configured under `feedback:` in `canonic.yaml`; see [config schema](/reference/config-schema#feedback).
 
 ## Propose-only by default
 

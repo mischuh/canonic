@@ -16,6 +16,7 @@ description: "Every top-level field in the project config file, and what it gove
 | `embeddings` | `EmbeddingConfig` | `model: all-MiniLM-L6-v2` | Local embedding model for knowledge vector search. |
 | `telemetry` | `TelemetryConfig` | `enabled: false` | Opt-in telemetry flag; see [Instrumentation & evaluation](/concepts/instrumentation-and-eval#opt-in-telemetry). |
 | `reconcile` | `ReconcileConfig` | propose-only | Auto-apply policy for ingestion; see [Ingestion & reconciliation](/concepts/ingestion-and-reconciliation#propose-only-by-default). |
+| `feedback` | `FeedbackConfig` | see [below](#feedback) | Pattern-gate and trust-cap thresholds for the E11 feedback loop; see [Feedback loop (E11)](/concepts/ingestion-and-reconciliation#feedback-loop-e11). |
 | `runtime` | `RuntimeConfig` | `air_gapped: false` | Air-gapped enforcement; see [LLM & embeddings runtime](/concepts/llm-runtime#air-gapped-mode--enforced-not-advisory). |
 | `logging` | `LoggingConfig` | `level: WARNING`, `format: text` | Log level, optional file, and text/json format. |
 
@@ -58,6 +59,25 @@ reconcile:
   strict_contradictions: false
 ```
 
+## `feedback`
+
+```yaml
+feedback:
+  pattern_min_count: 2        # distinct-enough wrong_definition outcomes before evidence is minted
+  pattern_window_days: 90     # window the count is evaluated over
+  pattern_min_markers: 1      # distinct markers (people/agents) required within that window
+  trust_cap_window_days: 90   # how long a confirmed wrong_definition caps the trust tier at caution
+```
+
+| Field | Type | Default | Governs |
+| --- | --- | --- | --- |
+| `pattern_min_count` | `int` (`ge=1`) | `2` | How many distinct-enough `wrong_definition` outcomes on a binding are required before `canonic ingest` mints E4 contradiction evidence. |
+| `pattern_window_days` | `int` (`ge=1`) | `90` | The rolling window `pattern_min_count` is evaluated over. |
+| `pattern_min_markers` | `int` (`ge=1`) | `1` | How many distinct `marked_by` roles must be represented within the window for the pattern to count (guards against one noisy marker). |
+| `trust_cap_window_days` | `int` (`ge=1`) | `90` | How long a recent confirmed `wrong_definition` outcome caps the binding's E14 trust tier at `caution`, independent of the evidence gate above. |
+
+See [Feedback loop (E11)](/concepts/ingestion-and-reconciliation#feedback-loop-e11) for how these thresholds are used.
+
 ## `runtime`
 
 ```yaml
@@ -86,7 +106,7 @@ Not a hand-authored config file: it's a deterministically-sorted, one-JSON-objec
 | Field | Type | Governs |
 | --- | --- | --- |
 | `source` | `str` | The connection id this evidence came from. |
-| `kind` | `str` (open set) | `relation_schema` \| `observed_query` \| `definition` \| `doc_evidence` \| `usage_evidence`, or an unrecognized future kind (accepted, just not dispatched). |
+| `kind` | `str` (open set) | `relation_schema` \| `observed_query` \| `definition` \| `doc_evidence` \| `usage_evidence` \| `answer_outcome`, or an unrecognized future kind (accepted, just not dispatched). |
 | `acquisition_tier` | `AcquisitionTier` | Curation rank of the evidence, e.g. `live`, `modeling`, `query_history`, `declarative`, `sample`, `hand_authored`. |
 | `payload` | `dict[str, Any]` | Shape depends on `kind` — e.g. a `RelationSchema` for `relation_schema`. |
 | `source_fingerprint` | `str` | sha256 identifying the exact evidence content, for dedup and drift detection. |

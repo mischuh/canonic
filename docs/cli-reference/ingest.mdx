@@ -14,6 +14,8 @@ canonic ingest --connection warehouse --strict
 
 Propose-only by default; it writes the audit trail and refreshes `last_validated_at` on unchanged files, but never edits committed semantics in place.
 
+Alongside connector evidence, `canonic ingest` also gathers E11 outcome evidence from `.canonic/events.jsonl`: bindings with a recurring, gate-crossing pattern of `wrong_definition` outcomes get flagged as contradictions the same way any other conflicting evidence would. See [Feedback loop (E11)](/concepts/ingestion-and-reconciliation#feedback-loop-e11).
+
 | Flag | Description |
 | --- | --- |
 | `--bootstrap` | Fast initial path for a fresh connection: introspect and draft that one connection. |
