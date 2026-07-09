@@ -19,8 +19,7 @@ from canonic.contract import CONTRACT_SCHEMA
 from canonic.contracts.models import (
     Example,  # noqa: TC001 — Pydantic resolves field annotations at runtime
 )
-from canonic.trust.scorer import TrustScorer
-from canonic.trust.signals import finality_signal, freshness_signal, static_signals_for
+from canonic.trust.scorer import trust_for_compiled
 
 if TYPE_CHECKING:
     from canonic.compiler.result import CompileResult
@@ -243,13 +242,7 @@ class QueryMetadata(BaseModel):
                 final_rows=final_rows,
                 provisional_rows=provisional_rows,
             )
-        trust = TrustScorer.score(
-            [
-                *static_signals_for(compiled.trust_inputs),
-                finality_signal(final_rows, provisional_rows),
-                freshness_signal(compiled.freshness),
-            ]
-        )
+        trust = trust_for_compiled(compiled, result)
         return cls(
             resolved={"metrics": dict(compiled.resolved)},
             guardrails_fired=[

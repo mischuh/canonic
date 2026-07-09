@@ -1,5 +1,5 @@
 {
-  "description": "One served-answer record appended to ``.canonic/events.jsonl`` (SPEC-E16 §3).\n\nReserved fields (``trust_score``, ``cache_hit``, ``over_limit_blocked``) are\npresent in the v1 shape as ``null`` so E13/E14 can populate them later without\na schema migration (S3-AC1).",
+  "description": "One served-answer record appended to ``.canonic/events.jsonl`` (SPEC-E16 §3).\n\n``trust_score`` carries the E14 trust tier (``caution``/``provisional``/``trusted``)\npopulated by the serving path (SPEC-E16 Part 2 §4). ``cache_hit``/``over_limit_blocked``\nremain reserved as ``null`` until E13 lands (S3-AC1).",
   "properties": {
     "bytes_scanned": {
       "anyOf": [
@@ -135,7 +135,7 @@
     "trust_score": {
       "anyOf": [
         {
-          "type": "number"
+          "type": "string"
         },
         {
           "type": "null"

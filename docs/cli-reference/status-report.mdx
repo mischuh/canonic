@@ -1,6 +1,6 @@
 ---
 title: "canonic status / report"
-description: "Inspect project state and local event-log figures."
+description: "Inspect project state, local event-log figures, and record answer outcomes."
 ---
 
 ## `canonic status`
@@ -28,3 +28,27 @@ canonic report --last 100 --recent 20
 | `--recent` | Number of recent answers to list (default `10`). |
 
 Output includes the onboarding funnel (setup started → connection added → bootstrap completed → first answer served → first curated review completed, each with a timestamp once reached), overall answer counts and latency percentiles, bytes scanned, stale-answer and guardrail-hit counts, an error distribution table, and a table of the most recent answers.
+
+When `answer_outcome` events are present (see [`canonic outcome mark`](#canonic-outcome-mark) below), the report also shows:
+
+- **Trust calibration** — outcome verdicts bucketed by E14 trust tier, so you can see whether `caution` predicts `incorrect` materially more often than `trusted`. This is the metric that validates whether E14's tiers are actually predictive.
+- **Correction recurrence** — bindings with more than one `incorrect` outcome. A rising count means the feedback loop isn't closing: the same canonical definition keeps getting marked wrong.
+
+## `canonic outcome mark`
+
+Record a correct/incorrect ground-truth mark on a served answer, with an attribution reason-code when incorrect. This only *records* the outcome to the local event log — acting on it (e.g. flagging a binding as contradicted) is a separate, later capability; `canonic outcome mark` never mutates any contract file.
+
+```bash
+canonic outcome mark --ref sha256:… --verdict correct
+canonic outcome mark --ref sha256:… --verdict incorrect --reason wrong_definition --correction sha256:…
+```
+
+| Flag | Description |
+| --- | --- |
+| `--ref` | The `AnswerEvent.query_hash` this outcome is about (required). |
+| `--verdict` | `correct` or `incorrect` (required). |
+| `--reason` | Why it was wrong: `wrong_definition`, `wrong_data`, `wrong_interpretation`, or `unspecified`. Only valid alongside `--verdict incorrect`; defaults to `unspecified` when omitted. |
+| `--by` | Who is marking this: `analyst` (default), `agent`, or `ci`. |
+| `--correction` | A corrected SQL hash or definition reference. |
+
+The reason-code is an attribution safeguard, not a formality: only `wrong_definition` implicates the canonical binding used and is eligible to become contradiction evidence downstream. `wrong_data` and `wrong_interpretation` are recorded but never flag the binding; `unspecified` carries the lowest weight. Passing `--reason` together with `--verdict correct` fails with `VALIDATION_FAILED` (exit `9`) — a reason only makes sense for an incorrect verdict.

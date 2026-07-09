@@ -41,7 +41,7 @@ from canonic.instrumentation.events import AnswerEventLog, DiskAnswerEventLog, N
 from canonic.instrumentation.models import AnswerEvent, _age_days, _sha256_json
 from canonic.log import query_id_var
 from canonic.semantic.loader import list_semantic_sources
-from canonic.trust.scorer import TrustScorer
+from canonic.trust.scorer import TrustScorer, trust_for_compiled
 from canonic.trust.signals import static_signals_for
 
 if TYPE_CHECKING:
@@ -501,7 +501,9 @@ class CanonicService:
     # Assertions (SPEC-Fuller-E15 §3) — the oracle for E16's accuracy harness
     # ------------------------------------------------------------------
 
-    async def run_assertion(self, assertion: Assertion) -> AssertionOutcome:
+    async def run_assertion(
+        self, assertion: Assertion, *, resolver: ContractResolver | None = None
+    ) -> AssertionOutcome:
         """Compile, execute read-only, and match one assertion (SPEC-Fuller-E15 §3.2).
 
         Compiles the assertion's *semantic* query (so it survives compiler changes),
@@ -509,13 +511,18 @@ class CanonicService:
         Returns a structured :class:`~canonic.contracts.assertions.AssertionOutcome`; it never
         raises on a mismatch — callers (the CI gate, E16's harness) decide what a failure
         means. Raises :class:`~canonic.exc.ValidationFailed` only when the assertion is not in
-        executable semantic-query form.
+        executable semantic-query form. ``resolver`` overrides the project's curated resolver —
+        used by :meth:`run_accuracy_baseline` (SPEC-E16 Part 2 §2) to compile the same query
+        against raw schema instead of canon's bindings.
         """
         from canonic.contracts.assertions import assertion_to_query, match_result
 
         sq = assertion_to_query(assertion)
         compiled = compile(
-            sq, self._resolver, self._sources, connection_dialects=self._connection_dialects
+            sq,
+            resolver or self._resolver,
+            self._sources,
+            connection_dialects=self._connection_dialects,
         )
         result = await self._execute(compiled.sql, self._connection_for_sql(compiled))
         return match_result(assertion, result, resolved=compiled.resolved)
@@ -553,6 +560,39 @@ class CanonicService:
         from canonic.contracts.assertions import accuracy_report
 
         return accuracy_report(await self.check_assertions(assertions))
+
+    async def run_accuracy_baseline(
+        self, assertions: list[Assertion] | None = None
+    ) -> AccuracyReport:
+        """Run the labeled assertion set against a schema-only resolver (SPEC-E16 Part 2 §2).
+
+        Compiles and executes the same assertions as :meth:`run_accuracy_harness` but against
+        :class:`~canonic.contracts.resolver.ContractResolver.schema_only` — an agent working
+        from the raw physical schema, with no canonical bindings, aliases, or guardrails. A
+        metric name that only resolves through a curated alias or composite binding fails to
+        resolve here; that failure *is* the point — the delta between this accuracy and
+        :meth:`run_accuracy_harness`'s is the measurable lift the context layer provides
+        (PRD §8), not an asserted one. Deterministic and LLM-free.
+        """
+        from canonic.contracts.assertions import AssertionOutcome, accuracy_report, is_executable
+
+        schema_only = ContractResolver.schema_only(self._sources)
+        candidates = assertions if assertions is not None else self._resolver.all_assertions()
+        outcomes: list[AssertionOutcome] = []
+        for assertion in candidates:
+            if not is_executable(assertion):
+                continue
+            try:
+                outcomes.append(await self.run_assertion(assertion, resolver=schema_only))
+            except CanonicError as exc:
+                outcomes.append(
+                    AssertionOutcome(
+                        assertion_id=assertion.id,
+                        passed=False,
+                        detail=f"{assertion.id}: schema-only baseline could not resolve — {exc}",
+                    )
+                )
+        return accuracy_report(outcomes)
 
     async def _check_query_assertions(self, query: SemanticQuery, *, harness: bool) -> None:
         """Evaluate assertions matching a user query (SPEC-Fuller-E15 §3.2).
@@ -617,6 +657,9 @@ class CanonicService:
                 latency_ms=latency_ms,
                 bytes_scanned=result.bytes_scanned if result is not None else None,
                 error=error_code,
+                trust_score=trust_for_compiled(compiled, result).tier.value
+                if compiled is not None
+                else None,
             )
             self._event_log.append(event)
         except Exception as exc:

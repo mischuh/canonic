@@ -50,10 +50,14 @@ Run the accuracy harness over all loaded assertions and gate on the result; this
 ```bash
 canonic assert
 canonic assert --min-accuracy 0.95
+canonic assert --baseline
 ```
 
 | Flag | Description |
 | --- | --- |
 | `--min-accuracy` | Accuracy floor for the CI gate (default `1.0`; every assertion must hold). Below it, exits `10` (`ASSERTION_FAILED`). |
+| `--baseline` | Also run the same assertions against a schema-only resolver and report the accuracy lift. |
 
-Every executable assertion in `contracts/assertions/` is compiled, executed read-only, and compared to its expected value within tolerance. The harness reports `accuracy = passed / total` and prints any diverging checks.
+Every executable assertion in `contracts/assertions/` is compiled, executed read-only, and compared to its expected value within tolerance. The harness reports `accuracy = passed / total` and prints any diverging checks. The `--min-accuracy` gate always applies to the canon accuracy, never the baseline.
+
+With `--baseline`, the same assertions are also compiled against a resolver that only knows the raw physical schema — no curated bindings, aliases, or guardrails, so a metric name reachable only through an alias or composite binding fails to resolve. The gap between the two accuracy numbers (`lift`) is a measured, reproducible number for how much canon's curated context is worth, rather than an asserted one.

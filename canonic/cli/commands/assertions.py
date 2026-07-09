@@ -37,6 +37,13 @@ def assert_(
             max=1.0,
         ),
     ] = 1.0,
+    baseline: Annotated[
+        bool,
+        typer.Option(
+            "--baseline",
+            help="Also run the schema-only baseline and report the lift (SPEC-E16 Part 2 §2).",
+        ),
+    ] = False,
 ) -> None:
     """Run the accuracy harness over all loaded assertions and gate on the result.
 
@@ -44,15 +51,26 @@ def assert_(
     and compared to its expected value within ``tolerance``. The harness reports
     ``accuracy = correct / total``; when it drops below ``--min-accuracy`` (default ``1.0`` —
     every assertion must hold), the command exits 10 with the diverging checks, so a regression
-    fails CI.
+    fails CI. With ``--baseline``, the same assertions also run against a schema-only resolver
+    (no curated bindings/aliases/guardrails) so the accuracy lift from canon's context layer is
+    measured, not asserted; the gate still applies to the canon accuracy only.
     """
     service = load_service(ctx)
     report = asyncio.run(service.run_accuracy_harness())
+    baseline_report: AccuracyReport | None = None
+    if baseline:
+        baseline_report = asyncio.run(service.run_accuracy_baseline())
 
     if get_cli_context(ctx).json_output:
-        typer.echo(json.dumps(report.to_dict()))
+        payload = report.to_dict()
+        if baseline_report is not None:
+            payload["baseline"] = baseline_report.to_dict()
+            payload["lift"] = report.accuracy - baseline_report.accuracy
+        typer.echo(json.dumps(payload))
     else:
         _render(report)
+        if baseline_report is not None:
+            _render_baseline(report, baseline_report)
 
     if report.accuracy < min_accuracy:
         first = report.failures[0] if report.failures else None
@@ -71,3 +89,13 @@ def _render(report: AccuracyReport) -> None:
     )
     for failure in report.failures:
         _console.print(f"  [red]✗[/red] {failure.detail}")
+
+
+def _render_baseline(report: AccuracyReport, baseline_report: AccuracyReport) -> None:
+    """Print the schema-only baseline accuracy and the lift over it."""
+    lift = report.accuracy - baseline_report.accuracy
+    _console.print(
+        f"baseline (schema-only) [bold]{baseline_report.accuracy:.1%}[/bold] "
+        f"({baseline_report.passed}/{baseline_report.total} assertions passed)"
+    )
+    _console.print(f"lift: [bold]{lift:+.1%}[/bold]")

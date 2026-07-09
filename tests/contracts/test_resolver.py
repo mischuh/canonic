@@ -31,6 +31,8 @@ from canonic.contracts.resolver import (
 if TYPE_CHECKING:
     from pathlib import Path
 
+    from canonic.semantic.models import SemanticSource
+
 
 def _binding(
     metric: str,
@@ -341,3 +343,28 @@ class TestMetricsForSource:
         )
         resolver = ContractResolver(bindings=[active, inactive], guardrails=[])
         assert resolver.metrics_for_source("orders") == ["revenue"]
+
+
+class TestSchemaOnly:
+    """SPEC-E16 Part 2 §2 — the schema-only baseline resolver."""
+
+    def test_resolves_raw_measure_names(self, orders_source: SemanticSource) -> None:
+        resolver = ContractResolver.schema_only([orders_source])
+        result = resolver.resolve_metric("total_revenue")
+        assert isinstance(result, Binding)
+        assert result.source == "orders"
+        assert result.measure == "total_revenue"
+
+    def test_does_not_resolve_curated_aliases(self, orders_source: SemanticSource) -> None:
+        # "revenue" is only reachable via a curated binding/alias, never a raw measure name.
+        resolver = ContractResolver.schema_only([orders_source])
+        assert isinstance(resolver.resolve_metric("revenue"), Unresolved)
+
+    def test_has_no_guardrails_or_finality(self, orders_source: SemanticSource) -> None:
+        resolver = ContractResolver.schema_only([orders_source])
+        assert resolver.guardrails_for("orders", "total_revenue") == []
+        assert resolver.finality_for("total_revenue") is None
+
+    def test_has_no_assertions(self, orders_source: SemanticSource) -> None:
+        resolver = ContractResolver.schema_only([orders_source])
+        assert resolver.all_assertions() == []

@@ -20,6 +20,7 @@ from canonic.cli.commands import (
     ingest,
     knowledge,
     mcp,
+    outcome,
     overview,
     query,
     report,
@@ -89,6 +90,7 @@ app.add_typer(sl.app, name="sl")
 app.add_typer(mcp.app, name="mcp")
 app.add_typer(knowledge.app, name="knowledge")
 app.add_typer(evaluate.app, name="eval")
+app.add_typer(outcome.app, name="outcome")
 
 # Top-level single commands.
 app.command("overview")(overview.overview)

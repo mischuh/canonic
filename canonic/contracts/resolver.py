@@ -39,6 +39,7 @@ if TYPE_CHECKING:
     from typing import Any
 
     from canonic.contracts.models import Assertion
+    from canonic.semantic.models import SemanticSource
 
 logger = logging.getLogger(__name__)
 
@@ -198,6 +199,31 @@ class ContractResolver:
             finality=load_finality(project_root),
             assertions=load_assertions(project_root),
         )
+
+    @classmethod
+    def schema_only(cls, sources: Iterable[SemanticSource]) -> ContractResolver:
+        """A resolver over raw schema only — no curated bindings, aliases, or guardrails.
+
+        One synthetic single-kind binding per measure, named after the measure itself, with
+        :attr:`Provenance.INFERRED`. This is the "agent with raw schema, no canon context"
+        baseline (SPEC-E16 Part 2 §2): compiling the same labeled queries against this
+        resolver instead of the project's curated one measures the accuracy *lift* the
+        canonical bindings/guardrails/aliases provide, rather than asserting it.
+        """
+        from canonic.semantic.models import Provenance
+
+        bindings = [
+            MetricBinding(
+                metric=measure.name,
+                canonical=CanonicalRef(
+                    kind=BindingKind.SINGLE, source=source.name, measure=measure.name
+                ),
+                provenance=Provenance.INFERRED,
+            )
+            for source in sources
+            for measure in source.measures
+        ]
+        return cls(bindings=bindings, guardrails=(), finality=(), assertions=())
 
     def metrics_for_source(self, source: str) -> list[str]:
         """Return active canonical metric names bound to *source*, sorted alphabetically."""

@@ -14,6 +14,7 @@ if TYPE_CHECKING:
 
     from canonic.instrumentation.models import (
         AnswerEvent,
+        AnswerOutcomeEvent,
         FunnelEvent,
         FunnelMilestone,
         ReconcileDecisionEvent,
@@ -30,7 +31,7 @@ __all__ = [
 
 _EVENTS_FILE = "events.jsonl"
 
-CanonicEvent = Union["AnswerEvent", "ReconcileDecisionEvent", "FunnelEvent"]
+CanonicEvent = Union["AnswerEvent", "ReconcileDecisionEvent", "FunnelEvent", "AnswerOutcomeEvent"]
 
 
 class AnswerEventLog(Protocol):

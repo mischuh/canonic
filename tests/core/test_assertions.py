@@ -167,6 +167,50 @@ class TestAccuracyHarness:
         assert report.accuracy == 1.0
 
 
+class TestAccuracyBaseline:
+    async def test_lift_is_measurable_over_schema_only_resolver(
+        self, orders_source: SemanticSource, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # "revenue" only resolves via the curated binding; the raw measure is
+        # "total_revenue", so the schema-only baseline can't resolve it (SPEC-E16 P2 §2).
+        svc = _service(
+            orders_source, [_assertion(100.0)], _revenue_result(Decimal("100.0")), monkeypatch
+        )
+        canon = await svc.run_accuracy_harness()
+        baseline = await svc.run_accuracy_baseline()
+        assert canon.accuracy == 1.0
+        assert baseline.accuracy == 0.0
+        assert baseline.total == 1
+        assert "revenue-2025-q1" in baseline.failures[0].assertion_id
+        assert canon.accuracy - baseline.accuracy > 0
+
+    async def test_baseline_resolves_metrics_named_after_raw_measures(
+        self, orders_source: SemanticSource, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # A query naming the raw measure directly ("total_revenue") resolves fine
+        # under the schema-only resolver — it's curated *aliases* that don't survive.
+        raw_assertion = Assertion(
+            id="raw-total-revenue",
+            query={"metrics": ["total_revenue"]},
+            expect=AssertionExpect(rows=1, values={"total_revenue": 100.0}),
+        )
+        svc = _service(
+            orders_source, [raw_assertion], _revenue_result(Decimal("100.0")), monkeypatch
+        )
+        baseline = await svc.run_accuracy_baseline([raw_assertion])
+        assert baseline.accuracy == 1.0
+
+    async def test_candidate_assertions_are_skipped_not_failed(
+        self, orders_source: SemanticSource, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        candidate = Assertion(id="usage-x", query={"native": "sum(amount)"})
+        svc = _service(
+            orders_source, [_assertion(100.0), candidate], _revenue_result(100.0), monkeypatch
+        )
+        baseline = await svc.run_accuracy_baseline()
+        assert baseline.total == 1
+
+
 class TestHarnessGate:
     async def test_ac1_harness_mode_raises_assertion_failed_on_mismatch(
         self, orders_source: SemanticSource, monkeypatch: pytest.MonkeyPatch

@@ -20,7 +20,17 @@ from canonic.config import ConfigError, find_project_root, load_config
 from canonic.core.service import CanonicService
 from canonic.exc import ContractError
 from canonic.instrumentation.models import FunnelMilestone
-from canonic.instrumentation.report import FunnelReport, build_funnel, build_report, read_events
+from canonic.instrumentation.report import (
+    CalibrationReport,
+    CorrectionRecurrenceReport,
+    FunnelReport,
+    build_calibration,
+    build_correction_recurrence,
+    build_funnel,
+    build_report,
+    read_events,
+)
+from canonic.instrumentation.telemetry import build_telemetry_payload
 from canonic.trust.models import TrustTier
 
 _console = Console(soft_wrap=True)
@@ -78,6 +88,45 @@ def _render_trust_report(trust_scores: list[tuple[str, TrustScore]]) -> None:
     _console.print()
 
 
+def _render_calibration(calibration: CalibrationReport) -> None:
+    if not calibration.buckets:
+        return
+    table = Table(title="Trust calibration", show_header=True, header_style="bold")
+    table.add_column("tier")
+    table.add_column("total", justify="right")
+    table.add_column("incorrect", justify="right")
+    table.add_column("incorrect rate", justify="right")
+    tier_style = {
+        TrustTier.CAUTION: "red",
+        TrustTier.PROVISIONAL: "yellow",
+        TrustTier.TRUSTED: "green",
+    }
+    for bucket in calibration.buckets:
+        style = tier_style.get(TrustTier(bucket.tier), "white")
+        table.add_row(
+            f"[{style}]{bucket.tier}[/{style}]",
+            str(bucket.total),
+            str(bucket.incorrect),
+            f"{bucket.incorrect_rate:.1%}",
+        )
+    _console.print(table)
+    if calibration.unmatched:
+        _console.print(f"  ({calibration.unmatched} outcome(s) unmatched to a scored answer)")
+    _console.print()
+
+
+def _render_recurrence(recurrence: CorrectionRecurrenceReport) -> None:
+    if not recurrence.entries:
+        return
+    table = Table(title="Correction recurrence", show_header=True, header_style="bold")
+    table.add_column("binding")
+    table.add_column("incorrect outcomes", justify="right")
+    for entry in recurrence.entries:
+        table.add_row(entry.binding, str(entry.count))
+    _console.print(table)
+    _console.print()
+
+
 @handle_errors
 def report(
     ctx: typer.Context,
@@ -89,6 +138,14 @@ def report(
         int,
         typer.Option("--recent", help="Number of recent answers to list.", min=1),
     ] = 10,
+    telemetry_preview: Annotated[
+        bool,
+        typer.Option(
+            "--telemetry-preview",
+            help="Print exactly the aggregate payload opt-in telemetry would send, "
+            "without sending it (SPEC-E16 Part 2 §5).",
+        ),
+    ] = False,
 ) -> None:
     """Show event-log figures: counts, error distribution, latency, bytes scanned, and freshness."""
     json_output = get_cli_context(ctx).json_output
@@ -102,13 +159,33 @@ def report(
         return
 
     telemetry_enabled: bool = False
+    air_gapped: bool = False
     with contextlib.suppress(ConfigError):
-        telemetry_enabled = load_config(root / "canonic.yaml").telemetry.enabled
+        cfg = load_config(root / "canonic.yaml")
+        telemetry_enabled = cfg.telemetry.enabled
+        air_gapped = cfg.runtime.air_gapped
 
     events = read_events(root, last=last, kind="served_answer")
     rep = build_report(events, recent=recent)
     funnel_events = read_events(root, kind="funnel_milestone")
     funnel = build_funnel(funnel_events)
+    outcome_events = read_events(root, kind="answer_outcome")
+    calibration = build_calibration(events, outcome_events)
+    recurrence = build_correction_recurrence(events, outcome_events)
+
+    if telemetry_preview:
+        payload = build_telemetry_payload(rep, calibration, recurrence, funnel)
+        if json_output:
+            typer.echo(json.dumps(payload))
+            return
+        status = "on" if telemetry_enabled else "off"
+        if air_gapped:
+            status += ", forced off (air-gapped)"
+        _console.print(f"[bold]telemetry preview[/bold]  (telemetry: {status})")
+        _console.print("this is exactly what would be sent — nothing is sent by this command")
+        _console.print_json(json.dumps(payload))
+        return
+
     trust_scores = _load_trust_scores(root)
 
     if json_output:
@@ -119,6 +196,8 @@ def report(
             {"metric": metric, "tier": score.tier.value, "reasons": list(score.reasons)}
             for metric, score in trust_scores
         ]
+        payload["calibration"] = calibration.model_dump(mode="json")
+        payload["correction_recurrence"] = recurrence.model_dump(mode="json")
         typer.echo(json.dumps(payload))
         return
 
@@ -129,6 +208,8 @@ def report(
 
     _render_funnel(funnel)
     _render_trust_report(trust_scores)
+    _render_calibration(calibration)
+    _render_recurrence(recurrence)
 
     if rep.count == 0:
         _console.print("[yellow]no served answers recorded yet[/yellow]")

@@ -24,25 +24,44 @@ freshness: [{ source: orders, stale: false, age_days: 2 }]
 latency_ms: 142
 bytes_scanned: 10485760
 error: null
+trust_score: trusted                # the E14 tier: caution | provisional | trusted
 # reserved, present now, populated once their producing feature lands:
-trust_score: null
 cache_hit: null
 over_limit_blocked: null
 ```
 
 A `reconcile_decision` event (add/edit/prune/contradiction/no-op, with tier, confidence, and anchored evidence) shares the same substrate: one store backs both serving and ingest traceability.
 
+### Outcome capture: `answer_outcome`
+
+The ground-truth feed: an analyst, CI verdict, or agent self-report marking a served answer correct or incorrect, recorded via [`canonic outcome mark`](/cli-reference/status-report#canonic-outcome-mark) and linked back to the originating `served_answer` event by `query_hash`.
+
+```yaml
+kind: answer_outcome
+ref: "sha256:…"                     # the AnswerEvent.query_hash this is about
+verdict: incorrect                  # correct | incorrect
+reason_code: wrong_definition       # only set when verdict is incorrect
+correction: "sha256:…"              # optional: corrected SQL hash or definition ref
+marked_by: analyst                  # analyst | agent | ci
+```
+
+The `reason_code` is an attribution safeguard: acting on the wrong cause corrupts good context. `wrong_definition` is the only code that implicates the binding used — it's the one eligible to become contradiction evidence downstream. `wrong_data` (the warehouse data is wrong) and `wrong_interpretation` (the wrong metric was picked) are recorded but never flag the binding. `unspecified` — the default when a verdict is marked incorrect without an explicit reason — carries the lowest weight. canonic records the code faithfully; it does not act on it.
+
 ## Local inspection, no telemetry required
 
-`canonic status` and `canonic report` read the log directly: counts, error-code distribution, latency percentiles, bytes scanned, freshness and guardrail-hit coverage, and the onboarding funnel (setup started → connection added → bootstrap completed → first answer served → first curated review completed). None of this requires telemetry to be enabled; the log is not a black box on day one.
+`canonic status` and `canonic report` read the log directly: counts, error-code distribution, latency percentiles, bytes scanned, freshness and guardrail-hit coverage, the onboarding funnel (setup started → connection added → bootstrap completed → first answer served → first curated review completed), trust-tier calibration, and correction recurrence. None of this requires telemetry to be enabled; the log is not a black box on day one.
 
 ## Opt-in telemetry
 
-`canonic.yaml`'s `telemetry.enabled` flag defaults to `false`, and is forced off whenever `runtime.air_gapped: true` is set. As of today, the flag only gates *whether local data could be sent*: no aggregate-telemetry transport is implemented yet, so nothing leaves the machine regardless of the setting.
+`canonic.yaml`'s `telemetry.enabled` flag defaults to `false`, and is forced off whenever `runtime.air_gapped: true` is set. No aggregate-telemetry transport is implemented yet, so nothing leaves the machine regardless of the setting — but the exact payload it would send is already fully defined and previewable locally, so there's nothing hidden to review before that lands.
+
+`canonic report --telemetry-preview` prints precisely that payload: counts, distributions, latency and bytes-scanned aggregates, the trust-calibration buckets, and (when available) accuracy/baseline numbers. It **never** includes `query_hash`, resolved bindings, SQL, `compiled_sql_hash`, freshness source names, or any other field that could re-identify a query or reveal warehouse/schema content — the same content-safety rule as the local log itself, applied one notch stricter since this payload is meant to leave the machine.
 
 ## Accuracy harness: `canonic assert`
 
 The mechanism that turns ">90% accuracy" from aspirational into measured. Every executable assertion in `contracts/assertions/` is compiled, executed read-only, and compared to its expected value within tolerance; the harness reports `accuracy = passed / total` and gates on a floor (default `1.0`, every assertion must hold). See [`canonic assert`](/cli-reference/query-sql-assert#canonic-assert) for the CLI, and [Assertions](/concepts/contracts-and-guardrails#assertions) for how an assertion is declared.
+
+`canonic assert --baseline` also runs the same assertions against a schema-only resolver — raw physical schema, no curated bindings/aliases/guardrails — so the accuracy *lift* the canonical context layer provides is a measured delta, not an asserted one.
 
 ## Model baseline harness: `canonic eval baseline`
 
