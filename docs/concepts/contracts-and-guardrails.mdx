@@ -59,8 +59,37 @@ rationale: "Refunds are reversals, not revenue."
 | `mandatory_filter` | The predicate is always AND-ed into the compiled `WHERE`, even if the request already filters differently. | Enforced |
 | `restrict_source` | In a given `context` (e.g. board reporting), only a specific source is permitted. | Enforced |
 | `required_dimension` | The query must group by or filter on a given dimension or be rejected. | Declarable in the schema; not yet enforced by the compiler |
+| `min_trust` | In a given `context`, blocks (or warns) if the answer's trust tier is below `level`. | Enforced |
 
 `severity: error` blocks the query; `severity: warn` annotates the result without blocking it.
+
+## Trust score
+
+Every compiled answer carries a **trust tier**: `caution` < `provisional` < `trusted`. It is a category with reasons, not a numeric score. It reports confidence in the *context* behind an answer (provenance, assertion coverage, finality, freshness), never a claim that the number itself is factually correct.
+
+Scoring is **worst-signal-dominates**. The tier starts at `trusted` and drops to the lowest tier forced by any active signal, with `reasons` listing only the signals tied at that worst tier.
+
+| Signal | Caps at | When active |
+| --- | --- | --- |
+| Provenance | `provisional` | The binding's provenance is `inferred`. |
+| Assertion coverage | `provisional` | No assertion covers the binding (or one does, but pass/fail isn't wired to scoring yet). |
+| Finality | `provisional` | Served rows include `provisional` (non-final) rows. |
+| Freshness | `provisional` | A source is stale (not yet enforced, no staleness policy defined). |
+| Outcome (E11, dynamic) | `caution` | A binding has a recent confirmed `wrong_definition` outcome within the feedback loop's trust-cap window; see [Feedback loop](/concepts/ingestion-and-reconciliation#feedback-loop-e11). |
+
+A `min_trust` guardrail enforces a floor on the served tier for a given `context`:
+
+```yaml
+id: board-reporting-trusted-only
+applies_to: { metric: gross_revenue }
+kind: min_trust
+level: trusted
+context: board_reporting
+severity: error
+rationale: "Board figures must come from human-approved, final, validated definitions."
+```
+
+`canonic report` includes a trust-tier worklist ranking every canonical metric worst-tier-first; see [`canonic report`](/cli-reference/status-report#canonic-report).
 
 ## Finality
 

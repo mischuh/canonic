@@ -14,23 +14,35 @@ from canonic.config import LOCAL_STATE_DIR
 from canonic.instrumentation.events import _EVENTS_FILE, CanonicEvent
 from canonic.instrumentation.models import (
     AnswerEvent,
+    AnswerOutcomeEvent,
     FunnelEvent,
     FunnelMilestone,
+    OutcomeVerdict,
     ReconcileDecisionEvent,
 )
+from canonic.trust.models import TrustTier
 
 if TYPE_CHECKING:
     from pathlib import Path
 
 __all__ = [
     "BytesSummary",
+    "CalibrationBucket",
+    "CalibrationReport",
+    "CorrectionRecurrenceReport",
     "EventReport",
     "FunnelReport",
     "LatencySummary",
+    "RecurrenceEntry",
+    "build_calibration",
+    "build_correction_recurrence",
     "build_funnel",
     "build_report",
+    "latest_outcome_by_ref",
     "read_events",
 ]
+
+_TIER_ORDER = list(TrustTier)
 
 _ORDERED_MILESTONES = [
     FunnelMilestone.SETUP_STARTED,
@@ -89,6 +101,63 @@ class FunnelReport(BaseModel):
     """Last milestone reached before the funnel stalls; None when all five are complete."""
 
 
+class CalibrationBucket(BaseModel):
+    """Outcome verdicts for one E14 trust tier (SPEC-E16 Part 2 §4, S3-AC1)."""
+
+    model_config = ConfigDict(frozen=True)
+
+    tier: str
+    total: int
+    incorrect: int
+    incorrect_rate: float
+
+
+class CalibrationReport(BaseModel):
+    """Whether ``caution`` predicts ``incorrect`` more than ``trusted`` (SPEC-E16 Part 2 §4)."""
+
+    model_config = ConfigDict(frozen=True)
+
+    buckets: list[CalibrationBucket]
+    unmatched: int
+    """``answer_outcome`` events whose ``ref`` matched no known AnswerEvent (excluded above)."""
+
+
+class RecurrenceEntry(BaseModel):
+    """A binding with more than one ``incorrect`` outcome (SPEC-E16 Part 2 §4)."""
+
+    model_config = ConfigDict(frozen=True)
+
+    binding: str
+    """The resolved ``source.measure`` repeatedly marked incorrect."""
+    count: int
+
+
+class CorrectionRecurrenceReport(BaseModel):
+    """Repeated ``incorrect`` outcomes on the same binding — a rising count means the
+    feedback loop (E11) isn't closing (SPEC-E16 Part 2 §4).
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    entries: list[RecurrenceEntry]
+    """Sorted by count descending, then binding name — bindings with count == 1 excluded."""
+
+
+def latest_outcome_by_ref(outcomes: list[AnswerOutcomeEvent]) -> dict[str, AnswerOutcomeEvent]:
+    """Dedup outcomes by ``ref`` — the last recorded verdict per answer wins.
+
+    A re-marked answer is counted once (SPEC-E16 Part 2 §9 open question: "counted once
+    for calibration"). Outcomes are in file/append order, so later entries overwrite
+    earlier ones for the same ``ref``. Shared with
+    :class:`canonic.feedback.history.BindingOutcomeHistory` (SPEC-E11) so the two never
+    drift on what "the latest outcome" means.
+    """
+    latest: dict[str, AnswerOutcomeEvent] = {}
+    for outcome in outcomes:
+        latest[outcome.ref] = outcome
+    return latest
+
+
 def _percentile(sorted_values: list[int], p: float) -> int:
     """Nearest-rank percentile on a pre-sorted list (must be non-empty)."""
     n = len(sorted_values)
@@ -110,6 +179,8 @@ def _parse_line(line: str) -> CanonicEvent | None:
             return ReconcileDecisionEvent.model_validate(data)
         if kind == "funnel_milestone":
             return FunnelEvent.model_validate(data)
+        if kind == "answer_outcome":
+            return AnswerOutcomeEvent.model_validate(data)
     except ValidationError:
         pass
     return None
@@ -147,20 +218,31 @@ def read_events(
     project_root: Path,
     last: int | None = ...,
     *,
+    kind: Literal["answer_outcome"],
+) -> list[AnswerOutcomeEvent]: ...
+
+
+@overload
+def read_events(
+    project_root: Path,
+    last: int | None = ...,
+    *,
     kind: None = ...,
-) -> list[AnswerEvent | ReconcileDecisionEvent | FunnelEvent]: ...
+) -> list[AnswerEvent | ReconcileDecisionEvent | FunnelEvent | AnswerOutcomeEvent]: ...
 
 
 def read_events(
     project_root: Path,
     last: int | None = None,
     *,
-    kind: Literal["served_answer", "reconcile_decision", "funnel_milestone"] | None = None,
+    kind: Literal["served_answer", "reconcile_decision", "funnel_milestone", "answer_outcome"]
+    | None = None,
 ) -> (
     list[AnswerEvent]
     | list[ReconcileDecisionEvent]
     | list[FunnelEvent]
-    | list[AnswerEvent | ReconcileDecisionEvent | FunnelEvent]
+    | list[AnswerOutcomeEvent]
+    | list[AnswerEvent | ReconcileDecisionEvent | FunnelEvent | AnswerOutcomeEvent]
 ):
     """Read and parse events from the local event log.
 
@@ -278,3 +360,73 @@ def build_report(events: list[AnswerEvent], recent: int = 10) -> EventReport:
         guardrail_coverage=guardrail_coverage,
         recent=events[-recent:],
     )
+
+
+def build_calibration(
+    answers: list[AnswerEvent], outcomes: list[AnswerOutcomeEvent]
+) -> CalibrationReport:
+    """Correlate E14 trust tiers with outcome verdicts (SPEC-E16 Part 2 §4, S3-AC1).
+
+    Joins each outcome to its originating :class:`AnswerEvent` by ``ref == query_hash`` and
+    buckets by the answer's ``trust_score`` tier, so ``canonic report`` can show whether
+    ``caution`` predicts ``incorrect`` materially more than ``trusted`` — the metric that
+    validates E14's predictiveness. Outcomes are deduped by ``ref`` first (one verdict per
+    answer); outcomes whose ``ref`` matches no known answer, or whose answer has no trust
+    score recorded, are counted in ``unmatched`` rather than a tier bucket.
+    """
+    by_hash = {a.query_hash: a for a in answers}
+    tier_totals: dict[str, int] = {}
+    tier_incorrect: dict[str, int] = {}
+    unmatched = 0
+    for ref, outcome in latest_outcome_by_ref(outcomes).items():
+        answer = by_hash.get(ref)
+        if answer is None or answer.trust_score is None:
+            unmatched += 1
+            continue
+        tier_totals[answer.trust_score] = tier_totals.get(answer.trust_score, 0) + 1
+        if outcome.verdict == OutcomeVerdict.INCORRECT:
+            tier_incorrect[answer.trust_score] = tier_incorrect.get(answer.trust_score, 0) + 1
+
+    buckets = [
+        CalibrationBucket(
+            tier=tier,
+            total=total,
+            incorrect=tier_incorrect.get(tier, 0),
+            incorrect_rate=tier_incorrect.get(tier, 0) / total,
+        )
+        for tier, total in sorted(
+            tier_totals.items(), key=lambda item: _TIER_ORDER.index(TrustTier(item[0]))
+        )
+    ]
+    return CalibrationReport(buckets=buckets, unmatched=unmatched)
+
+
+def build_correction_recurrence(
+    answers: list[AnswerEvent], outcomes: list[AnswerOutcomeEvent]
+) -> CorrectionRecurrenceReport:
+    """Repeated ``incorrect`` outcomes on the same binding (SPEC-E16 Part 2 §4).
+
+    A rising count for one binding is the signal that E11's feedback loop isn't closing —
+    the same canonical definition keeps getting marked wrong. Deduped by ``ref`` like
+    :func:`build_calibration`, so a re-marked answer counts once.
+    """
+    by_hash = {a.query_hash: a for a in answers}
+    counts: dict[str, int] = {}
+    for ref, outcome in latest_outcome_by_ref(outcomes).items():
+        if outcome.verdict != OutcomeVerdict.INCORRECT:
+            continue
+        answer = by_hash.get(ref)
+        if answer is None:
+            continue
+        for binding in answer.resolved.get("metrics", {}).values():
+            counts[binding] = counts.get(binding, 0) + 1
+
+    entries = sorted(
+        (
+            RecurrenceEntry(binding=binding, count=count)
+            for binding, count in counts.items()
+            if count > 1
+        ),
+        key=lambda e: (-e.count, e.binding),
+    )
+    return CorrectionRecurrenceReport(entries=entries)

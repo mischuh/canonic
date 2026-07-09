@@ -4,16 +4,36 @@ from __future__ import annotations
 
 import contextlib
 import json
-from typing import Annotated
+from typing import TYPE_CHECKING, Annotated
 
 import typer
 from rich.console import Console
 from rich.table import Table
 
+if TYPE_CHECKING:
+    from pathlib import Path
+
+    from canonic.trust.models import TrustScore
+
 from canonic.cli._errors import get_cli_context, handle_errors
-from canonic.config import ConfigError, find_project_root, load_config
+from canonic.config import ConfigError, FeedbackConfig, find_project_root, load_config
+from canonic.core.service import CanonicService
+from canonic.exc import ContractError
+from canonic.feedback.history import BindingOutcomeHistory
+from canonic.feedback.report import FeedbackReport, build_feedback_report
 from canonic.instrumentation.models import FunnelMilestone
-from canonic.instrumentation.report import FunnelReport, build_funnel, build_report, read_events
+from canonic.instrumentation.report import (
+    CalibrationReport,
+    CorrectionRecurrenceReport,
+    FunnelReport,
+    build_calibration,
+    build_correction_recurrence,
+    build_funnel,
+    build_report,
+    read_events,
+)
+from canonic.instrumentation.telemetry import build_telemetry_payload
+from canonic.trust.models import TrustTier
 
 _console = Console(soft_wrap=True)
 
@@ -42,6 +62,96 @@ def _render_funnel(funnel: FunnelReport) -> None:
     _console.print()
 
 
+def _load_trust_scores(root: Path) -> list[tuple[str, TrustScore]]:
+    """Static trust tiers for every active metric, or [] if the project can't load."""
+    with contextlib.suppress(ConfigError, ContractError):
+        return CanonicService.from_project(root).trust_report()
+    return []
+
+
+def _render_trust_report(trust_scores: list[tuple[str, TrustScore]]) -> None:
+    if not trust_scores:
+        return
+    order = list(TrustTier)
+    ranked = sorted(trust_scores, key=lambda item: order.index(item[1].tier))
+    table = Table(title="Trust tier by metric", show_header=True, header_style="bold")
+    table.add_column("metric")
+    table.add_column("tier")
+    table.add_column("reasons")
+    tier_style = {
+        TrustTier.CAUTION: "red",
+        TrustTier.PROVISIONAL: "yellow",
+        TrustTier.TRUSTED: "green",
+    }
+    for metric, score in ranked:
+        style = tier_style[score.tier]
+        table.add_row(metric, f"[{style}]{score.tier.value}[/{style}]", "; ".join(score.reasons))
+    _console.print(table)
+    _console.print()
+
+
+def _render_calibration(calibration: CalibrationReport) -> None:
+    if not calibration.buckets:
+        return
+    table = Table(title="Trust calibration", show_header=True, header_style="bold")
+    table.add_column("tier")
+    table.add_column("total", justify="right")
+    table.add_column("incorrect", justify="right")
+    table.add_column("incorrect rate", justify="right")
+    tier_style = {
+        TrustTier.CAUTION: "red",
+        TrustTier.PROVISIONAL: "yellow",
+        TrustTier.TRUSTED: "green",
+    }
+    for bucket in calibration.buckets:
+        style = tier_style.get(TrustTier(bucket.tier), "white")
+        table.add_row(
+            f"[{style}]{bucket.tier}[/{style}]",
+            str(bucket.total),
+            str(bucket.incorrect),
+            f"{bucket.incorrect_rate:.1%}",
+        )
+    _console.print(table)
+    if calibration.unmatched:
+        _console.print(f"  ({calibration.unmatched} outcome(s) unmatched to a scored answer)")
+    _console.print()
+
+
+def _render_recurrence(recurrence: CorrectionRecurrenceReport) -> None:
+    if not recurrence.entries:
+        return
+    table = Table(title="Correction recurrence", show_header=True, header_style="bold")
+    table.add_column("binding")
+    table.add_column("incorrect outcomes", justify="right")
+    for entry in recurrence.entries:
+        table.add_row(entry.binding, str(entry.count))
+    _console.print(table)
+    _console.print()
+
+
+def _render_feedback(feedback: FeedbackReport) -> None:
+    if not feedback.entries:
+        return
+    table = Table(title="Feedback loop", show_header=True, header_style="bold")
+    table.add_column("binding")
+    table.add_column("wrong_definition", justify="right")
+    table.add_column("markers", justify="right")
+    table.add_column("gated (E4)")
+    table.add_column("trust capped")
+    for entry in feedback.entries:
+        gated = "[red]yes[/red]" if entry.gated else "no"
+        capped = "[red]yes[/red]" if entry.capped else "no"
+        table.add_row(
+            entry.binding,
+            str(entry.wrong_definition_count),
+            str(entry.distinct_markers),
+            gated,
+            capped,
+        )
+    _console.print(table)
+    _console.print()
+
+
 @handle_errors
 def report(
     ctx: typer.Context,
@@ -53,6 +163,14 @@ def report(
         int,
         typer.Option("--recent", help="Number of recent answers to list.", min=1),
     ] = 10,
+    telemetry_preview: Annotated[
+        bool,
+        typer.Option(
+            "--telemetry-preview",
+            help="Print exactly the aggregate payload opt-in telemetry would send, "
+            "without sending it (SPEC-E16 Part 2 §5).",
+        ),
+    ] = False,
 ) -> None:
     """Show event-log figures: counts, error distribution, latency, bytes scanned, and freshness."""
     json_output = get_cli_context(ctx).json_output
@@ -66,18 +184,50 @@ def report(
         return
 
     telemetry_enabled: bool = False
+    air_gapped: bool = False
+    feedback_config = FeedbackConfig()
     with contextlib.suppress(ConfigError):
-        telemetry_enabled = load_config(root / "canonic.yaml").telemetry.enabled
+        cfg = load_config(root / "canonic.yaml")
+        telemetry_enabled = cfg.telemetry.enabled
+        air_gapped = cfg.runtime.air_gapped
+        feedback_config = cfg.feedback
 
     events = read_events(root, last=last, kind="served_answer")
     rep = build_report(events, recent=recent)
     funnel_events = read_events(root, kind="funnel_milestone")
     funnel = build_funnel(funnel_events)
+    outcome_events = read_events(root, kind="answer_outcome")
+    calibration = build_calibration(events, outcome_events)
+    recurrence = build_correction_recurrence(events, outcome_events)
+    outcome_history = BindingOutcomeHistory.from_events(events, outcome_events)
+    feedback = build_feedback_report(outcome_history, feedback_config)
+
+    if telemetry_preview:
+        payload = build_telemetry_payload(rep, calibration, recurrence, funnel)
+        if json_output:
+            typer.echo(json.dumps(payload))
+            return
+        status = "on" if telemetry_enabled else "off"
+        if air_gapped:
+            status += ", forced off (air-gapped)"
+        _console.print(f"[bold]telemetry preview[/bold]  (telemetry: {status})")
+        _console.print("this is exactly what would be sent — nothing is sent by this command")
+        _console.print_json(json.dumps(payload))
+        return
+
+    trust_scores = _load_trust_scores(root)
 
     if json_output:
         payload = rep.model_dump(mode="json")
         payload["telemetry_enabled"] = telemetry_enabled
         payload["funnel"] = funnel.model_dump(mode="json")
+        payload["trust"] = [
+            {"metric": metric, "tier": score.tier.value, "reasons": list(score.reasons)}
+            for metric, score in trust_scores
+        ]
+        payload["calibration"] = calibration.model_dump(mode="json")
+        payload["correction_recurrence"] = recurrence.model_dump(mode="json")
+        payload["feedback"] = feedback.model_dump(mode="json")
         typer.echo(json.dumps(payload))
         return
 
@@ -87,6 +237,10 @@ def report(
     _console.print()
 
     _render_funnel(funnel)
+    _render_trust_report(trust_scores)
+    _render_calibration(calibration)
+    _render_recurrence(recurrence)
+    _render_feedback(feedback)
 
     if rep.count == 0:
         _console.print("[yellow]no served answers recorded yet[/yellow]")

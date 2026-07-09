@@ -30,4 +30,17 @@ CI (`.github/workflows/contract-schema-guard.yml`,
 
 ## History
 
+## 2.2 (2026-07-09) - MINOR
+
+- ADR/PR: bced9e6 (feat(instrumentation): add E16 Part 2 full instrumentation)
+- Summary: Log the E14 trust tier on every `AnswerEvent`. Additive field on
+  the instrumentation payload; no existing consumer's shape changes.
+
+## 2.1 (2026-07-08) - MINOR
+
+- ADR/PR: 5c42da2 (feat(trust): add E14 answer trust score and min_trust guardrail)
+- Summary: Add a per-answer trust tier (trusted/provisional/caution) with
+  inspectable reasons to `QueryMetadata`, plus a new `min_trust` guardrail
+  kind. Additive to the existing contract surface.
+
 <!-- Add new entries above this line, most recent first. -->

@@ -73,8 +73,8 @@ def _entry(decision: ReconciliationDecision, **kwargs: object) -> Reconciliation
 class TestEvidenceItem:
     def test_unknown_kind_accepted(self) -> None:
         """AC1 — open set: unknown kinds must not raise."""
-        item = _evidence(kind="answer_outcome")
-        assert item.kind == "answer_outcome"
+        item = _evidence(kind="future_kind")
+        assert item.kind == "future_kind"
         assert item.is_known() is False
 
     def test_known_kind_recognised(self) -> None:
@@ -92,6 +92,7 @@ class TestEvidenceItem:
             "definition",
             "doc_evidence",
             "usage_evidence",
+            "answer_outcome",
         } == KNOWN_EVIDENCE_KINDS
 
 

@@ -274,7 +274,7 @@ class TestOpenKindPreserved:
     async def test_future_kind_lands_in_builder_skip_ledger(self) -> None:
         future_item = EvidenceItem(
             source=_SOURCE,
-            kind="answer_outcome",
+            kind="future_kind",
             acquisition_tier=AcquisitionTier.LIVE,
             payload={"foo": "bar"},
             source_fingerprint="sha256:abc",
@@ -284,7 +284,7 @@ class TestOpenKindPreserved:
 
         assert result.proposals == []
         assert result.skipped == [
-            SkippedEvidence(source=_SOURCE, kind="answer_outcome", reason="unknown evidence kind")
+            SkippedEvidence(source=_SOURCE, kind="future_kind", reason="unknown evidence kind")
         ]
 
 

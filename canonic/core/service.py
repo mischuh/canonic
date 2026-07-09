@@ -15,11 +15,13 @@ from typing import TYPE_CHECKING, Any, cast
 from canonic.compiler import SemanticQuery, compile
 from canonic.compiler.dialect import adapter_for
 from canonic.compiler.joins import build_alias_tree, reachable_dimension_names
+from canonic.compiler.result import TrustInput
 from canonic.config import CanonicConfig, Connection, load_config
 from canonic.connectors.base import Capability, require_capability
 from canonic.connectors.factory import default_factory
 from canonic.contract import CONTRACT_SCHEMA
 from canonic.contracts import ContractResolver
+from canonic.contracts.models import Status
 from canonic.contracts.resolver import Ambiguous as ResolverAmbiguous
 from canonic.contracts.resolver import Binding
 from canonic.contracts.resolver import Unresolved as ResolverUnresolved
@@ -35,10 +37,13 @@ from canonic.core.models import (
 )
 from canonic.core.overview import questions_for_group
 from canonic.exc import Ambiguous, CanonicError, Unresolved, UnsupportedMeasure
+from canonic.feedback.history import BindingOutcomeHistory
 from canonic.instrumentation.events import AnswerEventLog, DiskAnswerEventLog, NullAnswerEventLog
 from canonic.instrumentation.models import AnswerEvent, _age_days, _sha256_json
 from canonic.log import query_id_var
 from canonic.semantic.loader import list_semantic_sources
+from canonic.trust.scorer import TrustScorer, trust_for_compiled
+from canonic.trust.signals import static_signals_for
 
 if TYPE_CHECKING:
     from canonic.compiler.result import CompileResult
@@ -48,6 +53,7 @@ if TYPE_CHECKING:
     from canonic.knowledge.results import SearchResult
     from canonic.semantic.models import Dimension as _Dimension
     from canonic.semantic.models import SemanticSource
+    from canonic.trust.models import TrustScore
 
 logger = logging.getLogger(__name__)
 
@@ -233,6 +239,31 @@ class CanonicService:
             except CanonicError:
                 enriched.append(s)
         return enriched
+
+    def trust_report(self) -> list[tuple[str, TrustScore]]:
+        """Static trust tier for every active canonical metric, sorted by name.
+
+        A worklist for improving context (SPEC-E14 §8): uses only the static,
+        compile-time signals (provenance, assertion coverage) — the same ones a
+        ``min_trust`` guardrail would enforce. A served query may still score lower than
+        this: E11's dynamic outcome-history signal (SPEC-E11 §5) can additionally cap a
+        binding at ``caution`` at serve time — see ``canonic report``'s Feedback loop
+        section for that per-binding state.
+        """
+        seen: set[str] = set()
+        scores: list[tuple[str, TrustScore]] = []
+        for candidates in self._resolver._name_index.values():
+            for b in candidates:
+                if b.status is not Status.ACTIVE or b.metric in seen:
+                    continue
+                seen.add(b.metric)
+                trust_input = TrustInput(
+                    metric=b.metric,
+                    provenance=b.provenance.value,
+                    has_assertion=bool(self._resolver.assertions_for({"metrics": [b.metric]})),
+                )
+                scores.append((b.metric, TrustScorer.score(static_signals_for([trust_input]))))
+        return sorted(scores, key=lambda item: item[0])
 
     def describe_metric(self, name: str) -> MetricDetail:
         """Return grain, dimensions, measures, and freshness for a metric (SPEC §4.1).
@@ -427,6 +458,7 @@ class CanonicService:
         connection_id: str | None = None
         result: ResultSet | None = None
         error_code: str | None = None
+        outcome_history: BindingOutcomeHistory | None = None
         qid_token = query_id_var.set(uuid.uuid4().hex[:8])
         logger.info(
             "query received: metrics=%s dimensions=%d",
@@ -446,7 +478,13 @@ class CanonicService:
                     self._config.project.default_connection,
                 )
             result = await self._execute(compiled.sql, connection_id)
-            query_result = QueryResult.from_parts(compiled, result)
+            outcome_history = self._load_outcome_history()
+            query_result = QueryResult.from_parts(
+                compiled,
+                result,
+                outcome_history=outcome_history,
+                outcome_window_days=self._config.feedback.trust_cap_window_days,
+            )
             await self._check_query_assertions(query, harness=harness)
             return query_result
         except CanonicError as err:
@@ -456,8 +494,21 @@ class CanonicService:
             latency_ms = round((time.perf_counter() - started) * 1000)
             if result is not None:
                 logger.info("query completed: latency_ms=%d rows=%d", latency_ms, len(result.rows))
-            self._emit_answer_event(query, compiled, connection_id, result, latency_ms, error_code)
+            self._emit_answer_event(
+                query, compiled, connection_id, result, latency_ms, error_code, outcome_history
+            )
             query_id_var.reset(qid_token)
+
+    def _load_outcome_history(self) -> BindingOutcomeHistory | None:
+        """Load the current per-binding outcome history, or None with no project root.
+
+        Read fresh on every call (matching :func:`canonic.instrumentation.report.read_events`'s
+        own convention) rather than cached on the service instance, so a long-lived daemon
+        reflects an outcome marked between queries without a restart (SPEC-E11 §5).
+        """
+        if self._project_root is None:
+            return None
+        return BindingOutcomeHistory.from_project(self._project_root)
 
     async def _execute(self, sql: str, connection_id: str | None) -> ResultSet:
         """Run read-only SQL on the resolved connection, always closing the connector."""
@@ -473,7 +524,9 @@ class CanonicService:
     # Assertions (SPEC-Fuller-E15 §3) — the oracle for E16's accuracy harness
     # ------------------------------------------------------------------
 
-    async def run_assertion(self, assertion: Assertion) -> AssertionOutcome:
+    async def run_assertion(
+        self, assertion: Assertion, *, resolver: ContractResolver | None = None
+    ) -> AssertionOutcome:
         """Compile, execute read-only, and match one assertion (SPEC-Fuller-E15 §3.2).
 
         Compiles the assertion's *semantic* query (so it survives compiler changes),
@@ -481,13 +534,18 @@ class CanonicService:
         Returns a structured :class:`~canonic.contracts.assertions.AssertionOutcome`; it never
         raises on a mismatch — callers (the CI gate, E16's harness) decide what a failure
         means. Raises :class:`~canonic.exc.ValidationFailed` only when the assertion is not in
-        executable semantic-query form.
+        executable semantic-query form. ``resolver`` overrides the project's curated resolver —
+        used by :meth:`run_accuracy_baseline` (SPEC-E16 Part 2 §2) to compile the same query
+        against raw schema instead of canon's bindings.
         """
         from canonic.contracts.assertions import assertion_to_query, match_result
 
         sq = assertion_to_query(assertion)
         compiled = compile(
-            sq, self._resolver, self._sources, connection_dialects=self._connection_dialects
+            sq,
+            resolver or self._resolver,
+            self._sources,
+            connection_dialects=self._connection_dialects,
         )
         result = await self._execute(compiled.sql, self._connection_for_sql(compiled))
         return match_result(assertion, result, resolved=compiled.resolved)
@@ -526,6 +584,39 @@ class CanonicService:
 
         return accuracy_report(await self.check_assertions(assertions))
 
+    async def run_accuracy_baseline(
+        self, assertions: list[Assertion] | None = None
+    ) -> AccuracyReport:
+        """Run the labeled assertion set against a schema-only resolver (SPEC-E16 Part 2 §2).
+
+        Compiles and executes the same assertions as :meth:`run_accuracy_harness` but against
+        :class:`~canonic.contracts.resolver.ContractResolver.schema_only` — an agent working
+        from the raw physical schema, with no canonical bindings, aliases, or guardrails. A
+        metric name that only resolves through a curated alias or composite binding fails to
+        resolve here; that failure *is* the point — the delta between this accuracy and
+        :meth:`run_accuracy_harness`'s is the measurable lift the context layer provides
+        (PRD §8), not an asserted one. Deterministic and LLM-free.
+        """
+        from canonic.contracts.assertions import AssertionOutcome, accuracy_report, is_executable
+
+        schema_only = ContractResolver.schema_only(self._sources)
+        candidates = assertions if assertions is not None else self._resolver.all_assertions()
+        outcomes: list[AssertionOutcome] = []
+        for assertion in candidates:
+            if not is_executable(assertion):
+                continue
+            try:
+                outcomes.append(await self.run_assertion(assertion, resolver=schema_only))
+            except CanonicError as exc:
+                outcomes.append(
+                    AssertionOutcome(
+                        assertion_id=assertion.id,
+                        passed=False,
+                        detail=f"{assertion.id}: schema-only baseline could not resolve — {exc}",
+                    )
+                )
+        return accuracy_report(outcomes)
+
     async def _check_query_assertions(self, query: SemanticQuery, *, harness: bool) -> None:
         """Evaluate assertions matching a user query (SPEC-Fuller-E15 §3.2).
 
@@ -559,6 +650,7 @@ class CanonicService:
         result: ResultSet | None,
         latency_ms: int,
         error_code: str | None,
+        outcome_history: BindingOutcomeHistory | None = None,
     ) -> None:
         try:
             freshness: list[dict[str, Any]] = (
@@ -589,6 +681,14 @@ class CanonicService:
                 latency_ms=latency_ms,
                 bytes_scanned=result.bytes_scanned if result is not None else None,
                 error=error_code,
+                trust_score=trust_for_compiled(
+                    compiled,
+                    result,
+                    outcome_history=outcome_history,
+                    outcome_window_days=self._config.feedback.trust_cap_window_days,
+                ).tier.value
+                if compiled is not None
+                else None,
             )
             self._event_log.append(event)
         except Exception as exc:

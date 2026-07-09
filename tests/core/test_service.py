@@ -41,6 +41,26 @@ class TestListMetrics:
         assert any(d.name == "order_date" for d in s.dimensions)
 
 
+class TestTrustReport:
+    """SPEC-E14 §8: canon report's per-metric worklist, sourced from the resolver."""
+
+    def test_returns_one_entry_per_active_metric(self, canonic_service: CanonicService) -> None:
+        scores = canonic_service.trust_report()
+        assert [m for m, _ in scores] == ["revenue"]
+
+    def test_untested_human_curated_binding_is_provisional(
+        self, canonic_service: CanonicService
+    ) -> None:
+        _metric, score = canonic_service.trust_report()[0]
+        assert score.tier == "provisional"
+        assert any("untested" in r for r in score.reasons)
+
+    def test_sorted_by_metric_name(self, canonic_service: CanonicService) -> None:
+        scores = canonic_service.trust_report()
+        names = [m for m, _ in scores]
+        assert names == sorted(names)
+
+
 class TestListMetricsDistinctCount:
     def test_distinct_count_appears_in_list(self, distinct_count_service: CanonicService) -> None:
         summaries = distinct_count_service.list_metrics()

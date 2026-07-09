@@ -1,0 +1,88 @@
+{
+  "$defs": {
+    "OutcomeMarkedBy": {
+      "description": "Who produced the outcome verdict (SPEC-E16 Part 2 §3), retained so E11 can weight sources.",
+      "enum": [
+        "analyst",
+        "agent",
+        "ci"
+      ],
+      "title": "OutcomeMarkedBy",
+      "type": "string"
+    },
+    "OutcomeReasonCode": {
+      "description": "What was wrong, when ``verdict`` is ``incorrect`` (SPEC-E16 Part 2 §3).\n\nThis is the attribution safeguard: acting on the wrong cause corrupts good context.\nOnly ``WRONG_DEFINITION`` implicates the binding used and becomes contradiction\nevidence for E4 (via E11); ``WRONG_DATA`` and ``WRONG_INTERPRETATION`` are recorded\nbut do not flag the binding; ``UNSPECIFIED`` carries lower weight and alone flags\nnothing. E16 records the code faithfully — E11 decides what may act on it.",
+      "enum": [
+        "wrong_definition",
+        "wrong_data",
+        "wrong_interpretation",
+        "unspecified"
+      ],
+      "title": "OutcomeReasonCode",
+      "type": "string"
+    },
+    "OutcomeVerdict": {
+      "description": "Whether a served answer was correct (SPEC-E16 Part 2 §3).",
+      "enum": [
+        "correct",
+        "incorrect"
+      ],
+      "title": "OutcomeVerdict",
+      "type": "string"
+    }
+  },
+  "description": "The FR-9 ground-truth feed: a correct/incorrect mark on a served answer (SPEC-E16 Part 2 §3).\n\n``ref`` links back to the originating ``AnswerEvent.query_hash``. An ``incorrect``\nverdict without an explicit ``reason_code`` defaults to ``unspecified`` (SPEC-E16 Part 2\n§9 — conservative default so E11 can weight it low rather than guessing the cause).",
+  "properties": {
+    "correction": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Correction"
+    },
+    "kind": {
+      "const": "answer_outcome",
+      "default": "answer_outcome",
+      "title": "Kind",
+      "type": "string"
+    },
+    "marked_by": {
+      "$ref": "#/$defs/OutcomeMarkedBy"
+    },
+    "reason_code": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/OutcomeReasonCode"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "ref": {
+      "title": "Ref",
+      "type": "string"
+    },
+    "ts": {
+      "title": "Ts",
+      "type": "string"
+    },
+    "verdict": {
+      "$ref": "#/$defs/OutcomeVerdict"
+    }
+  },
+  "required": [
+    "ts",
+    "ref",
+    "verdict",
+    "marked_by"
+  ],
+  "title": "AnswerOutcomeEvent",
+  "type": "object"
+}

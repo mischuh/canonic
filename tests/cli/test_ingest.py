@@ -287,6 +287,92 @@ def test_ob_s6_dry_run_does_not_emit_first_curated_review_completed(project: Pat
 
 
 # ---------------------------------------------------------------------------
+# E11 — recurring wrong_definition outcomes flow into the same ingest run (SPEC-E11 §4)
+# ---------------------------------------------------------------------------
+
+
+_OUTCOME_BINDING = "fct_orders.row_count"  # matches _FakeConnector's only inferred measure
+
+
+def _seed_binding_and_outcomes(project: Path, *, count: int) -> None:
+    """A human_curated ``revenue`` binding plus ``count`` recent wrong_definition outcomes on it.
+
+    References the ``fct_orders``/``row_count`` binding the connector's own evidence produces
+    in this same ingest run, so ``validate_contracts`` resolves it (SPEC-E11 §4).
+    """
+    from datetime import UTC, datetime, timedelta
+
+    from canonic.contracts.loader import dump_metric_binding
+    from canonic.contracts.models import CanonicalRef, MetricBinding
+    from canonic.instrumentation.events import DiskAnswerEventLog
+    from canonic.instrumentation.models import AnswerEvent, AnswerOutcomeEvent
+
+    binding_path = project / "contracts" / "metrics" / "revenue.yaml"
+    binding_path.parent.mkdir(parents=True, exist_ok=True)
+    binding_path.write_text(
+        dump_metric_binding(
+            MetricBinding(
+                metric="revenue",
+                canonical=CanonicalRef(source="fct_orders", measure="row_count"),
+            )
+        )
+    )
+
+    ts = (datetime.now(UTC) - timedelta(days=1)).isoformat()
+    log = DiskAnswerEventLog(project)
+    for i in range(count):
+        log.append(
+            AnswerEvent(
+                ts=ts,
+                contract_schema="2.2",
+                query_hash=f"sha256:q{i}",
+                compiled_sql_hash="sha256:sql",
+                connection="warehouse_pg",
+                resolved={"metrics": {"revenue": _OUTCOME_BINDING}},
+                latency_ms=10,
+            )
+        )
+        log.append(
+            AnswerOutcomeEvent(
+                ts=ts,
+                ref=f"sha256:q{i}",
+                verdict="incorrect",
+                reason_code="wrong_definition",
+                marked_by="analyst",
+            )
+        )
+
+
+def test_recurring_wrong_definition_flags_contradiction(project: Path) -> None:
+    """S2-AC2/S3-AC1: a recurring wrong_definition pattern flags the binding for review,
+    alongside the connector's own schema evidence, in the same ingest run.
+    """
+    _seed_binding_and_outcomes(project, count=2)
+
+    result = CliRunner().invoke(app, ["--json", "ingest", "--dry-run"])
+
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.output)
+    notes = payload["report"]["entries"]
+    contradiction_targets = {e["target"] for e in notes if e["decision"] == "contradiction"}
+    assert "contracts/metrics/revenue.yaml" in contradiction_targets
+
+
+def test_single_wrong_definition_does_not_flag(project: Path) -> None:
+    """S2-AC1: a single incident opens a review flag at most, not a contradiction."""
+    _seed_binding_and_outcomes(project, count=1)
+
+    result = CliRunner().invoke(app, ["--json", "ingest", "--dry-run"])
+
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.output)
+    contradiction_targets = {
+        e["target"] for e in payload["report"]["entries"] if e["decision"] == "contradiction"
+    }
+    assert "contracts/metrics/revenue.yaml" not in contradiction_targets
+
+
+# ---------------------------------------------------------------------------
 # _wire_extraction_skills — backfills GenericEvidenceConnector's default Null skill
 # with the real, config-driven ExtractionSkill without overriding a deliberate choice
 # (e.g. Notion's deterministic NotionExtractionSkill) (E3 §5 amendment).

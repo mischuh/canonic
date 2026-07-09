@@ -1,6 +1,6 @@
 ---
 title: "canonic status / report"
-description: "Inspect project state and local event-log figures."
+description: "Inspect project state, local event-log figures, and record answer outcomes."
 ---
 
 ## `canonic status`
@@ -12,6 +12,8 @@ canonic status
 ```
 
 Prints the project root, `canonic.yaml` config version (or a config error if invalid), whether `.canonic/` (local state) is present, the serving contract schema version, and a one-line summary of served-answer events (count, error count, p95 latency) if any exist. This is always a safe "what's my next step" command; run it whenever you're unsure of project state.
+
+The serving contract schema is currently `2.2`. It moved from `2.0` across two additive bumps: `2.1` added the E14 trust tier to `QueryMetadata`, and `2.2` added the trust tier to every logged `AnswerEvent` plus the new `answer_outcome` event kind.
 
 ## `canonic report`
 
@@ -28,3 +30,30 @@ canonic report --last 100 --recent 20
 | `--recent` | Number of recent answers to list (default `10`). |
 
 Output includes the onboarding funnel (setup started → connection added → bootstrap completed → first answer served → first curated review completed, each with a timestamp once reached), overall answer counts and latency percentiles, bytes scanned, stale-answer and guardrail-hit counts, an error distribution table, and a table of the most recent answers.
+
+When `answer_outcome` events are present (see [`canonic outcome mark`](#canonic-outcome-mark) below), the report also shows:
+
+- **Trust calibration** — outcome verdicts bucketed by E14 trust tier, so you can see whether `caution` predicts `incorrect` materially more often than `trusted`. This is the metric that validates whether E14's tiers are actually predictive.
+- **Correction recurrence** — bindings with more than one `incorrect` outcome. A rising count means the feedback loop isn't closing: the same canonical definition keeps getting marked wrong.
+- **Feedback loop**: a table of every binding with any `wrong_definition` outcome history, with columns `binding`, `wrong_definition` count, distinct `markers`, whether it's crossed the E4 evidence gate (`gated (E4)`), and whether it's currently capping the E14 trust tier (`trust capped`). Shown even below the gate, so a pattern is visible before it fires. Also included in `--json` under `"feedback"`. See [Feedback loop (E11)](/concepts/ingestion-and-reconciliation#feedback-loop-e11) and the `feedback` block in [config schema](/reference/config-schema#feedback).
+
+## `canonic outcome mark`
+
+Record a correct/incorrect ground-truth mark on a served answer, with an attribution reason-code when incorrect. `canonic outcome mark` itself only *records* the outcome to the local event log and never mutates any contract file.
+
+Recurring `wrong_definition` outcomes are acted on separately, by the [feedback loop (E11)](/concepts/ingestion-and-reconciliation#feedback-loop-e11): once a binding crosses the `feedback` config's pattern thresholds, `canonic ingest` flags it as E4 contradiction evidence, and it caps the binding's [trust tier](/concepts/contracts-and-guardrails#trust-score) at `caution`.
+
+```bash
+canonic outcome mark --ref sha256:… --verdict correct
+canonic outcome mark --ref sha256:… --verdict incorrect --reason wrong_definition --correction sha256:…
+```
+
+| Flag | Description |
+| --- | --- |
+| `--ref` | The `AnswerEvent.query_hash` this outcome is about (required). |
+| `--verdict` | `correct` or `incorrect` (required). |
+| `--reason` | Why it was wrong: `wrong_definition`, `wrong_data`, `wrong_interpretation`, or `unspecified`. Only valid alongside `--verdict incorrect`; defaults to `unspecified` when omitted. |
+| `--by` | Who is marking this: `analyst` (default), `agent`, or `ci`. |
+| `--correction` | A corrected SQL hash or definition reference. |
+
+The reason-code is an attribution safeguard, not a formality: only `wrong_definition` implicates the canonical binding used and is eligible to become contradiction evidence downstream. `wrong_data` and `wrong_interpretation` are recorded but never flag the binding; `unspecified` carries the lowest weight. Passing `--reason` together with `--verdict correct` fails with `VALIDATION_FAILED` (exit `9`) — a reason only makes sense for an incorrect verdict.

@@ -105,12 +105,13 @@ rationale: "Refunds are reversals, not revenue."
 | --- | --- | --- | --- |
 | `id` | `str` | n/a (required) | Guardrail identifier. |
 | `applies_to` | `AppliesTo` | n/a (required) | Target: `{ source, measure }` **or** `{ metric }` — exactly one shape, never both or neither. |
-| `kind` | `GuardrailKind` | n/a (required) | `mandatory_filter` \| `required_dimension` \| `restrict_source`; see below. |
+| `kind` | `GuardrailKind` | n/a (required) | `mandatory_filter` \| `required_dimension` \| `restrict_source` \| `min_trust`; see below. |
 | `filter` | `str \| null` | `null` | Required (non-empty) when `kind: mandatory_filter`. |
 | `restrict_to` | `RestrictTo \| null` | `null` | Required when `kind: restrict_source`; `{ role: "final" \| "provisional" }`. |
-| `context` | `str \| null` | `null` | Required (non-empty) when `kind: restrict_source` — the named context the restriction applies in (e.g. `board_reporting`). |
+| `level` | `str \| null` | `null` | Required when `kind: min_trust`, one of `caution` \| `provisional` \| `trusted`, the minimum trust tier the query must meet. See [Trust score](/concepts/contracts-and-guardrails#trust-score). |
+| `context` | `str \| null` | `null` | Required (non-empty) when `kind: restrict_source` or `kind: min_trust`, the named context the restriction applies in (e.g. `board_reporting`). |
 | `severity` | `Severity` | `error` | `error` blocks the query; `warn` annotates the result without blocking it. |
-| `rationale` | `str` | n/a (required) | Why the rule exists — surfaced to the caller. |
+| `rationale` | `str` | n/a (required) | Why the rule exists, surfaced to the caller. |
 | `phase` | `str \| null` | `null` | Optional compiler-pipeline phase hint. |
 
 | `kind` | Behavior | Status |
@@ -118,6 +119,7 @@ rationale: "Refunds are reversals, not revenue."
 | `mandatory_filter` | The predicate is always AND-ed into the compiled `WHERE`. | Enforced |
 | `restrict_source` | In a given `context`, only the source matching `restrict_to.role` is permitted. | Enforced |
 | `required_dimension` | The query must group by or filter on a given dimension or be rejected. | Declarable in the schema; not yet enforced by the compiler |
+| `min_trust` | In a given `context`, blocks (`severity: error`) or warns if the computed trust tier is below `level`. | Enforced |
 
 ## `contracts/guardrails/finality-*.yaml` — `FinalityRule`
 

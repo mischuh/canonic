@@ -8,6 +8,7 @@ from typing import Any
 from pydantic import BaseModel, ConfigDict, field_validator, model_validator
 
 from canonic.semantic.models import Provenance
+from canonic.trust.models import TrustTier
 
 __all__ = [
     "AppliesTo",
@@ -66,6 +67,7 @@ class GuardrailKind(StrEnum):
     MANDATORY_FILTER = "mandatory_filter"  # [P0]
     REQUIRED_DIMENSION = "required_dimension"  # [P1]
     RESTRICT_SOURCE = "restrict_source"  # [P1]
+    MIN_TRUST = "min_trust"  # [P2] SPEC-E14 §7
 
 
 class BindingKind(StrEnum):
@@ -343,6 +345,7 @@ class Guardrail(BaseModel):
     kind: GuardrailKind
     filter: str | None = None
     restrict_to: RestrictTo | None = None
+    level: str | None = None
     context: str | None = None
     severity: Severity = Severity.ERROR
     rationale: str
@@ -365,6 +368,19 @@ class Guardrail(BaseModel):
                 raise ContractValidationError(
                     ("context",),
                     "restrict_source guardrail requires a non-empty 'context' field",
+                )
+        if self.kind is GuardrailKind.MIN_TRUST:
+            valid_levels = {t.value for t in TrustTier}
+            if self.level not in valid_levels:
+                raise ContractValidationError(
+                    ("level",),
+                    f"min_trust guardrail requires 'level' to be one of "
+                    f"{sorted(valid_levels)}, got {self.level!r}",
+                )
+            if not self.context:
+                raise ContractValidationError(
+                    ("context",),
+                    "min_trust guardrail requires a non-empty 'context' field",
                 )
         return self
 

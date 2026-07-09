@@ -221,3 +221,229 @@ def test_report_funnel_time_to_first_answer_none_when_missing_milestone(
     result = runner.invoke(app, ["--json", "report"])
     payload = json.loads(result.output)
     assert payload["funnel"]["time_to_first_answer_seconds"] is None
+
+
+# ---------------------------------------------------------------------------
+# SPEC-E16 Part 2 §4 — trust calibration + correction recurrence
+# ---------------------------------------------------------------------------
+
+
+def _outcome_event(
+    ref: str, verdict: str, ts: str = "2026-01-01T00:01:00+00:00", **overrides: Any
+) -> dict[str, Any]:
+    return {
+        "kind": "answer_outcome",
+        "ts": ts,
+        "ref": ref,
+        "verdict": verdict,
+        "marked_by": "analyst",
+        **overrides,
+    }
+
+
+def test_report_shows_calibration_when_outcomes_present(
+    runner: CliRunner, project_dir: Path
+) -> None:
+    _write_events(
+        project_dir / ".canonic",
+        [
+            _event(query_hash="sha256:1", trust_score="caution"),
+            _outcome_event("sha256:1", "incorrect", reason_code="wrong_definition"),
+        ],
+    )
+    result = runner.invoke(app, ["report"])
+    assert result.exit_code == 0
+    assert "Trust calibration" in result.output
+    assert "caution" in result.output
+
+
+def test_report_json_includes_calibration_and_recurrence(
+    runner: CliRunner, project_dir: Path
+) -> None:
+    _write_events(
+        project_dir / ".canonic",
+        [
+            _event(query_hash="sha256:1", trust_score="caution"),
+            _outcome_event("sha256:1", "incorrect", reason_code="wrong_definition"),
+        ],
+    )
+    result = runner.invoke(app, ["--json", "report"])
+    payload = json.loads(result.output)
+    assert payload["calibration"]["buckets"][0]["tier"] == "caution"
+    assert payload["calibration"]["buckets"][0]["incorrect"] == 1
+    assert "correction_recurrence" in payload
+
+
+def test_report_shows_recurrence_for_repeated_binding(runner: CliRunner, project_dir: Path) -> None:
+    _write_events(
+        project_dir / ".canonic",
+        [
+            _event(
+                query_hash="sha256:1",
+                resolved={"metrics": {"revenue": "orders.total_revenue"}},
+            ),
+            _event(
+                query_hash="sha256:2",
+                resolved={"metrics": {"revenue": "orders.total_revenue"}},
+            ),
+            _outcome_event("sha256:1", "incorrect"),
+            _outcome_event("sha256:2", "incorrect"),
+        ],
+    )
+    result = runner.invoke(app, ["report"])
+    assert result.exit_code == 0
+    assert "Correction recurrence" in result.output
+    assert "orders.total_revenue" in result.output
+
+
+# ---------------------------------------------------------------------------
+# SPEC-E11 §6 — Feedback loop section (S5-AC1)
+# ---------------------------------------------------------------------------
+
+
+def _recent_ts(days_ago: float = 1) -> str:
+    from datetime import UTC, datetime, timedelta
+
+    return (datetime.now(UTC) - timedelta(days=days_ago)).isoformat()
+
+
+def test_report_shows_feedback_section_for_recurring_pattern(
+    runner: CliRunner, project_dir: Path
+) -> None:
+    ts = _recent_ts()
+    _write_events(
+        project_dir / ".canonic",
+        [
+            _event(
+                query_hash="sha256:1",
+                resolved={"metrics": {"revenue": "orders.total_revenue"}},
+            ),
+            _event(
+                query_hash="sha256:2",
+                resolved={"metrics": {"revenue": "orders.total_revenue"}},
+            ),
+            _outcome_event("sha256:1", "incorrect", ts=ts, reason_code="wrong_definition"),
+            _outcome_event("sha256:2", "incorrect", ts=ts, reason_code="wrong_definition"),
+        ],
+    )
+    result = runner.invoke(app, ["report"])
+    assert result.exit_code == 0
+    assert "Feedback loop" in result.output
+    assert "orders.total_revenue" in result.output
+
+
+def test_report_feedback_section_hidden_without_wrong_definition_history(
+    runner: CliRunner, project_dir: Path
+) -> None:
+    _write_events(project_dir / ".canonic", [_event(latency_ms=10)])
+    result = runner.invoke(app, ["report"])
+    assert result.exit_code == 0
+    assert "Feedback loop" not in result.output
+
+
+def test_report_json_feedback_reflects_gate_and_cap(runner: CliRunner, project_dir: Path) -> None:
+    ts = _recent_ts()
+    _write_events(
+        project_dir / ".canonic",
+        [
+            _event(
+                query_hash="sha256:1",
+                resolved={"metrics": {"revenue": "orders.total_revenue"}},
+            ),
+            _event(
+                query_hash="sha256:2",
+                resolved={"metrics": {"revenue": "orders.total_revenue"}},
+            ),
+            _outcome_event("sha256:1", "incorrect", ts=ts, reason_code="wrong_definition"),
+            _outcome_event("sha256:2", "incorrect", ts=ts, reason_code="wrong_definition"),
+        ],
+    )
+    result = runner.invoke(app, ["--json", "report"])
+    payload = json.loads(result.output)
+    entries = payload["feedback"]["entries"]
+    assert len(entries) == 1
+    entry = entries[0]
+    assert entry["binding"] == "orders.total_revenue"
+    assert entry["wrong_definition_count"] == 2
+    assert entry["gated"] is True
+    assert entry["capped"] is True
+    assert entry["refs"] == ["sha256:1", "sha256:2"]
+
+
+def test_report_json_feedback_single_incident_not_gated(
+    runner: CliRunner, project_dir: Path
+) -> None:
+    """S2-AC1: a single incident is visible in the audit but never gated."""
+    ts = _recent_ts()
+    _write_events(
+        project_dir / ".canonic",
+        [
+            _event(
+                query_hash="sha256:1",
+                resolved={"metrics": {"revenue": "orders.total_revenue"}},
+            ),
+            _outcome_event("sha256:1", "incorrect", ts=ts, reason_code="wrong_definition"),
+        ],
+    )
+    result = runner.invoke(app, ["--json", "report"])
+    payload = json.loads(result.output)
+    entries = payload["feedback"]["entries"]
+    assert len(entries) == 1
+    assert entries[0]["gated"] is False
+
+
+def test_report_json_feedback_ignores_wrong_data(runner: CliRunner, project_dir: Path) -> None:
+    """S1: wrong_data outcomes never surface in the feedback audit."""
+    ts = _recent_ts()
+    _write_events(
+        project_dir / ".canonic",
+        [
+            _event(
+                query_hash="sha256:1",
+                resolved={"metrics": {"revenue": "orders.total_revenue"}},
+            ),
+            _outcome_event("sha256:1", "incorrect", ts=ts, reason_code="wrong_data"),
+        ],
+    )
+    result = runner.invoke(app, ["--json", "report"])
+    payload = json.loads(result.output)
+    assert payload["feedback"]["entries"] == []
+
+
+# ---------------------------------------------------------------------------
+# SPEC-E16 Part 2 §5 — --telemetry-preview
+# ---------------------------------------------------------------------------
+
+
+def test_telemetry_preview_shows_payload(runner: CliRunner, project_dir: Path) -> None:
+    _write_events(project_dir / ".canonic", [_event(latency_ms=100)])
+    result = runner.invoke(app, ["report", "--telemetry-preview"])
+    assert result.exit_code == 0
+    assert "telemetry preview" in result.output
+    assert "nothing is sent" in result.output
+
+
+def test_telemetry_preview_json_content_safe(runner: CliRunner, project_dir: Path) -> None:
+    _write_events(
+        project_dir / ".canonic",
+        [_event(query_hash="sha256:super-secret", compiled_sql_hash="sha256:sql-secret")],
+    )
+    result = runner.invoke(app, ["--json", "report", "--telemetry-preview"])
+    assert result.exit_code == 0
+    payload = json.loads(result.output)
+    assert payload["schema_version"] == "1"
+    assert payload["answer_count"] == 1
+    dumped = json.dumps(payload)
+    assert "sha256:super-secret" not in dumped
+    assert "sha256:sql-secret" not in dumped
+    assert "query_hash" not in payload
+    assert "resolved" not in payload
+
+
+def test_telemetry_preview_does_not_send_anything(runner: CliRunner, project_dir: Path) -> None:
+    """No network code exists yet; the preview must be purely local and side-effect-free."""
+    _write_events(project_dir / ".canonic", [_event()])
+    before = (project_dir / ".canonic" / "events.jsonl").read_text()
+    runner.invoke(app, ["report", "--telemetry-preview"])
+    after = (project_dir / ".canonic" / "events.jsonl").read_text()
+    assert before == after

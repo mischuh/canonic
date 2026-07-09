@@ -41,10 +41,11 @@ __all__ = [
 class EvidenceKind(StrEnum):
     """Known evidence kinds dispatched by the builder (SPEC-E4 §3).
 
-    ``EvidenceItem.kind`` is a plain ``str`` (open set) so future kinds — e.g.
-    ``answer_outcome`` from E11 — are accepted without code changes.  This enum
-    provides the known-kind constants used for dispatch and the ``KNOWN_EVIDENCE_KINDS``
-    membership set.
+    ``EvidenceItem.kind`` is a plain ``str`` (open set), so a kind not listed here is still
+    accepted rather than raising — ``is_known()`` reports it False and the builder records it
+    as skipped instead of guessing. This enum provides the known-kind constants used for
+    dispatch and the ``KNOWN_EVIDENCE_KINDS`` membership set. ``ANSWER_OUTCOME`` is E11's
+    outcome-history evidence (SPEC-E11 §4), reserved here as anticipated by SPEC-E4 §11.
     """
 
     RELATION_SCHEMA = "relation_schema"
@@ -52,6 +53,7 @@ class EvidenceKind(StrEnum):
     DEFINITION = "definition"
     DOC_EVIDENCE = "doc_evidence"
     USAGE_EVIDENCE = "usage_evidence"
+    ANSWER_OUTCOME = "answer_outcome"
 
 
 class DraftedBy(StrEnum):

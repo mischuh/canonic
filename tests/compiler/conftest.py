@@ -247,3 +247,45 @@ def board_resolver(
         guardrails=[refund_guardrail, board_guardrail],
         finality=[finality_rule],
     )
+
+
+@pytest.fixture
+def min_trust_trusted_guardrail() -> Guardrail:
+    """SPEC-E14 §7: floor unreachable in v1 (no assertion-pass/outcome signal exists yet)."""
+    return Guardrail(
+        id="board-reporting-trusted-only",
+        applies_to=AppliesTo(metric="revenue"),
+        kind=GuardrailKind.MIN_TRUST,
+        level="trusted",
+        context="board_reporting",
+        severity=Severity.ERROR,
+        rationale="Board figures must come from human-approved, final, validated definitions.",
+    )
+
+
+@pytest.fixture
+def min_trust_provisional_guardrail() -> Guardrail:
+    """A floor the fixture's revenue binding (human_curated, untested) actually meets."""
+    return Guardrail(
+        id="dashboards-provisional-floor",
+        applies_to=AppliesTo(metric="revenue"),
+        kind=GuardrailKind.MIN_TRUST,
+        level="provisional",
+        context="internal_dashboard",
+        severity=Severity.ERROR,
+        rationale="Internal dashboards require at least a provisional trust tier.",
+    )
+
+
+@pytest.fixture
+def min_trust_resolver(
+    revenue_binding: MetricBinding,
+    refund_guardrail: Guardrail,
+    min_trust_trusted_guardrail: Guardrail,
+    min_trust_provisional_guardrail: Guardrail,
+) -> ContractResolver:
+    """Resolver with min_trust guardrails on both an unreachable and a met floor."""
+    return ContractResolver(
+        bindings=[revenue_binding],
+        guardrails=[refund_guardrail, min_trust_trusted_guardrail, min_trust_provisional_guardrail],
+    )

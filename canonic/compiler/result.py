@@ -20,6 +20,7 @@ __all__ = [
     "RelatedMetadata",
     "RelatedMetric",
     "SourceFreshness",
+    "TrustInput",
 ]
 
 
@@ -120,6 +121,24 @@ class OpaqueMetadata:
 
 
 @dataclass(frozen=True, slots=True)
+class TrustInput:
+    """Static per-metric trust signal inputs, gathered once at resolve time (SPEC-E14 §4).
+
+    Kept separate from the computed tier so serve-time-only signals (finality row split,
+    freshness) can be folded in later without recomputing binding-level lookups.
+
+    ``binding`` is the resolved ``"source.measure"`` string for single-source-bound kinds
+    (``None`` for composite ratio/weighted_avg metrics, which have no physical binding of
+    their own) — the join key E11's per-binding outcome history signal looks up (SPEC-E11 §5).
+    """
+
+    metric: str
+    provenance: str
+    has_assertion: bool
+    binding: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
 class FinalityMetadata:
     """Finality coalescing metadata produced by compiler stage 5 (SPEC-E5-E15 §4 stage 8).
 
@@ -157,3 +176,4 @@ class CompileResult:
     partial_additive: PartialAdditiveMetadata | None = None
     recompute_at_grain: RecomputeAtGrainMetadata | None = None
     opaque: OpaqueMetadata | None = None
+    trust_inputs: list[TrustInput] = field(default_factory=list)

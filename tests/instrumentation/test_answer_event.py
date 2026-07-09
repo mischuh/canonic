@@ -188,8 +188,9 @@ async def test_ac2_log_contains_no_sql_or_rows(
     assert "refunded" not in raw_line
 
     ev = json.loads(raw_line)
-    # Reserved fields serialise as null (S3-AC1)
-    assert ev["trust_score"] is None
+    # trust_score is populated from E14 (SPEC-E16 Part 2 §4); cache_hit/over_limit_blocked
+    # remain reserved until E13 lands (S3-AC1).
+    assert ev["trust_score"] in ("caution", "provisional", "trusted")
     assert ev["cache_hit"] is None
     assert ev["over_limit_blocked"] is None
 
@@ -245,12 +246,12 @@ def test_s3_populated_reserved_fields_validate() -> None:
         compiled_sql_hash="sha256:def",
         connection="warehouse_pg",
         latency_ms=42,
-        trust_score=0.92,
+        trust_score="trusted",
         cache_hit=True,
         over_limit_blocked=False,
     )
     dumped = ev.model_dump(mode="json")
-    assert dumped["trust_score"] == 0.92
+    assert dumped["trust_score"] == "trusted"
     assert dumped["cache_hit"] is True
     assert dumped["over_limit_blocked"] is False
     reloaded = AnswerEvent.model_validate(dumped)
