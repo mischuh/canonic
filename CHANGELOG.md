@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.5.0](https://github.com/mischuh/canonic/compare/v0.4.0...v0.5.0) (2026-07-09)
+
+
+### Features
+
+* **feedback:** add E11 answer feedback loop ([3238132](https://github.com/mischuh/canonic/commit/3238132d3bdd4d4f4c4ea6fafaadd33a52180f10))
+* **instrumentation:** add E16 Part 2 full instrumentation ([bced9e6](https://github.com/mischuh/canonic/commit/bced9e634dfddb970d3b302f97856511f571af50))
+* **trust:** add E14 answer trust score and min_trust guardrail ([5c42da2](https://github.com/mischuh/canonic/commit/5c42da222053107352477c6176b03c9e366adce3))
+
+
+### Documentation
+
+* cover E14 trust score, E16 schema bump, and E11 feedback loop ([3d312a7](https://github.com/mischuh/canonic/commit/3d312a7d08da71da70c72d41e6e9b91275b490a5))
+* update CONTRACT_CHANGELOG with new version 2.2 and summary for E14 trust tier logging ([5a89dda](https://github.com/mischuh/canonic/commit/5a89dda26ce0e2f034b0a41d801af38427e2a125))
+
 ## [0.4.0](https://github.com/mischuh/canonic/compare/v0.3.4...v0.4.0) (2026-07-08)
 
 
