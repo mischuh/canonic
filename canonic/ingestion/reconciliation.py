@@ -20,7 +20,7 @@ from pydantic import BaseModel, ConfigDict
 from canonic.config import ReconcileConfig
 from canonic.connectors.base import AcquisitionTier
 from canonic.contracts.loader import load_metric_bindings
-from canonic.ingestion.builder import _DA_SENTINEL
+from canonic.ingestion.builder import _ANSWER_OUTCOME_SENTINEL, _DA_SENTINEL
 from canonic.ingestion.models import (
     DraftedBy,
     Proposal,
@@ -411,6 +411,8 @@ class ReconciliationEngine:
         self, proposal: Proposal, existing: ExistingFact | None
     ) -> ReconciliationEntry:
         """Apply the §5.2 decision table to one proposal against its accepted fact."""
+        if _ANSWER_OUTCOME_SENTINEL in proposal.content:
+            return self._flag_answer_outcome(proposal, existing)
         if existing is None:
             return ReconciliationEntry(
                 decision=ReconciliationDecision.ADD,
@@ -473,6 +475,44 @@ class ReconciliationEngine:
             ReconciliationDecision.EDIT,
             low_confidence=proposal.confidence < self._config.auto_apply.min_confidence,
             auto_apply=self._auto_apply_eligible(proposal, existing, ReconciliationDecision.EDIT),
+        )
+
+    @staticmethod
+    def _flag_answer_outcome(
+        proposal: Proposal, existing: ExistingFact | None
+    ) -> ReconciliationEntry:
+        """Always flag outcome evidence as a contradiction for review (SPEC-E11 §4, S2-AC2).
+
+        E11 holds no corrected definition to propose — only a recurring wrong_definition
+        pattern — so it never edits or adds a binding, regardless of the existing fact's
+        provenance tier or freeze state (SPEC-E11 S3-AC1/AC2): a human resolves the flag by
+        fixing the definition, promoting a better binding, or dismissing the feedback as noise
+        (§4). This also keeps a bare evidence-only proposal from ever being rendered as a
+        file-replacing EDIT.
+        """
+        if existing is None:
+            recommended_action = (
+                "outcome evidence recorded but the target binding no longer exists; "
+                "resolve manually"
+            )
+        elif existing.frozen:
+            recommended_action = (
+                "binding is frozen; outcome evidence flagged for review — unfreeze and "
+                "re-ingest to accept a fix"
+            )
+        else:
+            recommended_action = (
+                f"recurring wrong_definition outcomes flagged against {proposal.target}; "
+                "fix the definition, promote a better binding, or dismiss as noise"
+            )
+        return ReconciliationEntry(
+            decision=ReconciliationDecision.CONTRADICTION,
+            target=proposal.target,
+            proposal=proposal,
+            existing=existing.content if existing is not None else None,
+            existing_provenance=existing.provenance if existing is not None else None,
+            existing_frozen=existing.frozen if existing is not None else False,
+            recommended_action=recommended_action,
         )
 
     def _merge_deprecated_alternative(

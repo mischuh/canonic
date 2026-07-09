@@ -5,15 +5,27 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from canonic.trust.models import SignalVerdict, TrustScore, TrustTier
-from canonic.trust.signals import finality_signal, freshness_signal, static_signals_for
+from canonic.trust.signals import (
+    finality_signal,
+    freshness_signal,
+    outcome_signal,
+    static_signals_for,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
 
     from canonic.compiler.result import CompileResult
     from canonic.connectors.base import ResultSet
+    from canonic.feedback.history import BindingOutcomeHistory
 
 __all__ = ["TrustScorer", "trust_for_compiled"]
+
+#: Default outcome-cap window when a caller passes ``outcome_history`` without an explicit
+#: ``outcome_window_days`` — matches ``FeedbackConfig.trust_cap_window_days``'s default
+#: (SPEC-E11 §5, §8). Kept as a plain constant here (not imported from ``canonic.config``) so
+#: trust scoring stays config-agnostic, like every other threshold in this module.
+_DEFAULT_OUTCOME_WINDOW_DAYS = 90
 
 _TIER_ORDER = list(TrustTier)
 
@@ -43,13 +55,23 @@ class TrustScorer:
         return TrustScore(tier=worst, reasons=tuple(reasons))
 
 
-def trust_for_compiled(compiled: CompileResult, result: ResultSet | None = None) -> TrustScore:
+def trust_for_compiled(
+    compiled: CompileResult,
+    result: ResultSet | None = None,
+    *,
+    outcome_history: BindingOutcomeHistory | None = None,
+    outcome_window_days: int = _DEFAULT_OUTCOME_WINDOW_DAYS,
+) -> TrustScore:
     """Compute the trust tier for a compiled query (SPEC-E14 §3, §6).
 
     Shared by the served ``QueryMetadata.trust_score`` block and the E16 ``AnswerEvent``
     log (SPEC-E16 Part 2 §4) so both surfaces score trust identically. Row-level finality
     tallies require ``result``; when it's absent (e.g. logging a failed query) the
     finality signal stays inactive rather than guessing.
+
+    ``outcome_history`` folds in E11's dynamic outcome signal (SPEC-E11 §5) — a recent
+    confirmed-``wrong_definition`` caps the affected binding at ``caution``. Omitting it
+    (the default) leaves trust scoring exactly as it was before E11: static signals only.
     """
     final_rows: int | None = None
     provisional_rows: int | None = None
@@ -59,10 +81,14 @@ def trust_for_compiled(compiled: CompileResult, result: ResultSet | None = None)
             idx = col_names.index("is_final")
             final_rows = sum(1 for row in result.rows if row[idx])
             provisional_rows = len(result.rows) - final_rows
-    return TrustScorer.score(
-        [
-            *static_signals_for(compiled.trust_inputs),
-            finality_signal(final_rows, provisional_rows),
-            freshness_signal(compiled.freshness),
-        ]
-    )
+    signals = [
+        *static_signals_for(compiled.trust_inputs),
+        finality_signal(final_rows, provisional_rows),
+        freshness_signal(compiled.freshness),
+    ]
+    if outcome_history is not None:
+        signals.extend(
+            outcome_signal(trust_input, outcome_history, outcome_window_days)
+            for trust_input in compiled.trust_inputs
+        )
+    return TrustScorer.score(signals)

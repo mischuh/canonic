@@ -656,12 +656,12 @@ class TestDeterminism:
 class TestSkipping:
     async def test_unknown_kind_skipped_without_exception(self) -> None:
         schema = _relation_schema()
-        result = await ContextBuilder().build([_evidence(schema, kind="answer_outcome")])
+        result = await ContextBuilder().build([_evidence(schema, kind="future_kind")])
 
         assert result.proposals == []
         assert result.skipped == [
             SkippedEvidence(
-                source="warehouse_pg", kind="answer_outcome", reason="unknown evidence kind"
+                source="warehouse_pg", kind="future_kind", reason="unknown evidence kind"
             )
         ]
 

@@ -27,6 +27,8 @@ from canonic.config import find_project_root, load_config
 from canonic.connectors.evidence import GenericEvidenceConnector, NullExtractionSkill
 from canonic.connectors.factory import default_factory
 from canonic.exc import CanonicError, ConnectionError, ContradictionsFound
+from canonic.feedback.evidence import outcome_evidence
+from canonic.feedback.history import BindingOutcomeHistory
 from canonic.ingestion.autopr import AutoPRPublisher, PullRequestPublisher, SubprocessPublisher
 from canonic.ingestion.models import ReconciliationDecision
 from canonic.ingestion.pipeline import IngestionPipeline
@@ -227,6 +229,8 @@ async def _ingest(
             for conn in targets
             for item in await _gather_evidence(connectors[conn.id], conn.id)
         ]
+        history = BindingOutcomeHistory.from_project(root)
+        evidence += outcome_evidence(root, history, config.feedback)
         logger.info(
             "gathered %d evidence item(s) across %d connection(s)", len(evidence), len(targets)
         )

@@ -176,6 +176,21 @@ class ReconcileConfig(BaseModel):
     strict_contradictions: bool = False
 
 
+class FeedbackConfig(BaseModel):
+    """Feedback-loop policy from canonic.yaml (SPEC-E11 §4, §5, §8).
+
+    Governs the pattern gate that turns recurring ``wrong_definition`` outcomes on a binding
+    into contradiction evidence for E4 (§4) and how long a confirmed-wrong outcome caps that
+    binding's served trust tier at ``caution`` (§5). Both are explicitly tunable — the spec
+    (§9) leaves the right threshold as an open calibration question.
+    """
+
+    pattern_min_count: int = Field(default=2, ge=1)
+    pattern_window_days: int = Field(default=90, ge=1)
+    pattern_min_markers: int = Field(default=1, ge=1)
+    trust_cap_window_days: int = Field(default=90, ge=1)
+
+
 class LoggingConfig(BaseModel):
     """Logging policy from the ``logging:`` section of canonic.yaml."""
 
@@ -225,6 +240,7 @@ class CanonicConfig(BaseSettings):
     embeddings: EmbeddingConfig = EmbeddingConfig()
     telemetry: TelemetryConfig = TelemetryConfig()
     reconcile: ReconcileConfig = ReconcileConfig()
+    feedback: FeedbackConfig = FeedbackConfig()
     runtime: RuntimeConfig = RuntimeConfig()
     logging: LoggingConfig = LoggingConfig()
 

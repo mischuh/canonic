@@ -38,6 +38,7 @@ __all__ = [
     "build_correction_recurrence",
     "build_funnel",
     "build_report",
+    "latest_outcome_by_ref",
     "read_events",
 ]
 
@@ -142,12 +143,14 @@ class CorrectionRecurrenceReport(BaseModel):
     """Sorted by count descending, then binding name — bindings with count == 1 excluded."""
 
 
-def _latest_outcome_by_ref(outcomes: list[AnswerOutcomeEvent]) -> dict[str, AnswerOutcomeEvent]:
+def latest_outcome_by_ref(outcomes: list[AnswerOutcomeEvent]) -> dict[str, AnswerOutcomeEvent]:
     """Dedup outcomes by ``ref`` — the last recorded verdict per answer wins.
 
     A re-marked answer is counted once (SPEC-E16 Part 2 §9 open question: "counted once
     for calibration"). Outcomes are in file/append order, so later entries overwrite
-    earlier ones for the same ``ref``.
+    earlier ones for the same ``ref``. Shared with
+    :class:`canonic.feedback.history.BindingOutcomeHistory` (SPEC-E11) so the two never
+    drift on what "the latest outcome" means.
     """
     latest: dict[str, AnswerOutcomeEvent] = {}
     for outcome in outcomes:
@@ -375,7 +378,7 @@ def build_calibration(
     tier_totals: dict[str, int] = {}
     tier_incorrect: dict[str, int] = {}
     unmatched = 0
-    for ref, outcome in _latest_outcome_by_ref(outcomes).items():
+    for ref, outcome in latest_outcome_by_ref(outcomes).items():
         answer = by_hash.get(ref)
         if answer is None or answer.trust_score is None:
             unmatched += 1
@@ -409,7 +412,7 @@ def build_correction_recurrence(
     """
     by_hash = {a.query_hash: a for a in answers}
     counts: dict[str, int] = {}
-    for ref, outcome in _latest_outcome_by_ref(outcomes).items():
+    for ref, outcome in latest_outcome_by_ref(outcomes).items():
         if outcome.verdict != OutcomeVerdict.INCORRECT:
             continue
         answer = by_hash.get(ref)

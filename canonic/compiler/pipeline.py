@@ -131,11 +131,17 @@ def _trust_inputs_for(
     inputs: list[TrustInput] = []
     for name, binding in raw_bindings:
         has_assertion = bool(resolver.assertions_for({"metrics": [name]}))
+        binding_str = (
+            f"{binding.source}.{binding.measure}"
+            if binding.source is not None and binding.measure is not None
+            else None
+        )
         inputs.append(
             TrustInput(
                 metric=name,
                 provenance=binding.binding.provenance.value,
                 has_assertion=has_assertion,
+                binding=binding_str,
             )
         )
     return inputs

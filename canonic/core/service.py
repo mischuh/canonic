@@ -37,6 +37,7 @@ from canonic.core.models import (
 )
 from canonic.core.overview import questions_for_group
 from canonic.exc import Ambiguous, CanonicError, Unresolved, UnsupportedMeasure
+from canonic.feedback.history import BindingOutcomeHistory
 from canonic.instrumentation.events import AnswerEventLog, DiskAnswerEventLog, NullAnswerEventLog
 from canonic.instrumentation.models import AnswerEvent, _age_days, _sha256_json
 from canonic.log import query_id_var
@@ -244,8 +245,10 @@ class CanonicService:
 
         A worklist for improving context (SPEC-E14 §8): uses only the static,
         compile-time signals (provenance, assertion coverage) — the same ones a
-        ``min_trust`` guardrail would enforce — so this matches what querying each
-        metric would actually be scored.
+        ``min_trust`` guardrail would enforce. A served query may still score lower than
+        this: E11's dynamic outcome-history signal (SPEC-E11 §5) can additionally cap a
+        binding at ``caution`` at serve time — see ``canonic report``'s Feedback loop
+        section for that per-binding state.
         """
         seen: set[str] = set()
         scores: list[tuple[str, TrustScore]] = []
@@ -455,6 +458,7 @@ class CanonicService:
         connection_id: str | None = None
         result: ResultSet | None = None
         error_code: str | None = None
+        outcome_history: BindingOutcomeHistory | None = None
         qid_token = query_id_var.set(uuid.uuid4().hex[:8])
         logger.info(
             "query received: metrics=%s dimensions=%d",
@@ -474,7 +478,13 @@ class CanonicService:
                     self._config.project.default_connection,
                 )
             result = await self._execute(compiled.sql, connection_id)
-            query_result = QueryResult.from_parts(compiled, result)
+            outcome_history = self._load_outcome_history()
+            query_result = QueryResult.from_parts(
+                compiled,
+                result,
+                outcome_history=outcome_history,
+                outcome_window_days=self._config.feedback.trust_cap_window_days,
+            )
             await self._check_query_assertions(query, harness=harness)
             return query_result
         except CanonicError as err:
@@ -484,8 +494,21 @@ class CanonicService:
             latency_ms = round((time.perf_counter() - started) * 1000)
             if result is not None:
                 logger.info("query completed: latency_ms=%d rows=%d", latency_ms, len(result.rows))
-            self._emit_answer_event(query, compiled, connection_id, result, latency_ms, error_code)
+            self._emit_answer_event(
+                query, compiled, connection_id, result, latency_ms, error_code, outcome_history
+            )
             query_id_var.reset(qid_token)
+
+    def _load_outcome_history(self) -> BindingOutcomeHistory | None:
+        """Load the current per-binding outcome history, or None with no project root.
+
+        Read fresh on every call (matching :func:`canonic.instrumentation.report.read_events`'s
+        own convention) rather than cached on the service instance, so a long-lived daemon
+        reflects an outcome marked between queries without a restart (SPEC-E11 §5).
+        """
+        if self._project_root is None:
+            return None
+        return BindingOutcomeHistory.from_project(self._project_root)
 
     async def _execute(self, sql: str, connection_id: str | None) -> ResultSet:
         """Run read-only SQL on the resolved connection, always closing the connector."""
@@ -627,6 +650,7 @@ class CanonicService:
         result: ResultSet | None,
         latency_ms: int,
         error_code: str | None,
+        outcome_history: BindingOutcomeHistory | None = None,
     ) -> None:
         try:
             freshness: list[dict[str, Any]] = (
@@ -657,7 +681,12 @@ class CanonicService:
                 latency_ms=latency_ms,
                 bytes_scanned=result.bytes_scanned if result is not None else None,
                 error=error_code,
-                trust_score=trust_for_compiled(compiled, result).tier.value
+                trust_score=trust_for_compiled(
+                    compiled,
+                    result,
+                    outcome_history=outcome_history,
+                    outcome_window_days=self._config.feedback.trust_cap_window_days,
+                ).tier.value
                 if compiled is not None
                 else None,
             )

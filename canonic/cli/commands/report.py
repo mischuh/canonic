@@ -16,9 +16,11 @@ if TYPE_CHECKING:
     from canonic.trust.models import TrustScore
 
 from canonic.cli._errors import get_cli_context, handle_errors
-from canonic.config import ConfigError, find_project_root, load_config
+from canonic.config import ConfigError, FeedbackConfig, find_project_root, load_config
 from canonic.core.service import CanonicService
 from canonic.exc import ContractError
+from canonic.feedback.history import BindingOutcomeHistory
+from canonic.feedback.report import FeedbackReport, build_feedback_report
 from canonic.instrumentation.models import FunnelMilestone
 from canonic.instrumentation.report import (
     CalibrationReport,
@@ -127,6 +129,29 @@ def _render_recurrence(recurrence: CorrectionRecurrenceReport) -> None:
     _console.print()
 
 
+def _render_feedback(feedback: FeedbackReport) -> None:
+    if not feedback.entries:
+        return
+    table = Table(title="Feedback loop", show_header=True, header_style="bold")
+    table.add_column("binding")
+    table.add_column("wrong_definition", justify="right")
+    table.add_column("markers", justify="right")
+    table.add_column("gated (E4)")
+    table.add_column("trust capped")
+    for entry in feedback.entries:
+        gated = "[red]yes[/red]" if entry.gated else "no"
+        capped = "[red]yes[/red]" if entry.capped else "no"
+        table.add_row(
+            entry.binding,
+            str(entry.wrong_definition_count),
+            str(entry.distinct_markers),
+            gated,
+            capped,
+        )
+    _console.print(table)
+    _console.print()
+
+
 @handle_errors
 def report(
     ctx: typer.Context,
@@ -160,10 +185,12 @@ def report(
 
     telemetry_enabled: bool = False
     air_gapped: bool = False
+    feedback_config = FeedbackConfig()
     with contextlib.suppress(ConfigError):
         cfg = load_config(root / "canonic.yaml")
         telemetry_enabled = cfg.telemetry.enabled
         air_gapped = cfg.runtime.air_gapped
+        feedback_config = cfg.feedback
 
     events = read_events(root, last=last, kind="served_answer")
     rep = build_report(events, recent=recent)
@@ -172,6 +199,8 @@ def report(
     outcome_events = read_events(root, kind="answer_outcome")
     calibration = build_calibration(events, outcome_events)
     recurrence = build_correction_recurrence(events, outcome_events)
+    outcome_history = BindingOutcomeHistory.from_events(events, outcome_events)
+    feedback = build_feedback_report(outcome_history, feedback_config)
 
     if telemetry_preview:
         payload = build_telemetry_payload(rep, calibration, recurrence, funnel)
@@ -198,6 +227,7 @@ def report(
         ]
         payload["calibration"] = calibration.model_dump(mode="json")
         payload["correction_recurrence"] = recurrence.model_dump(mode="json")
+        payload["feedback"] = feedback.model_dump(mode="json")
         typer.echo(json.dumps(payload))
         return
 
@@ -210,6 +240,7 @@ def report(
     _render_trust_report(trust_scores)
     _render_calibration(calibration)
     _render_recurrence(recurrence)
+    _render_feedback(feedback)
 
     if rep.count == 0:
         _console.print("[yellow]no served answers recorded yet[/yellow]")

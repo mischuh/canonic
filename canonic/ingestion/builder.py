@@ -85,6 +85,11 @@ _ID_SUFFIX_RE = re.compile(r"_(id|fk|key)$", re.IGNORECASE)
 # deprecated_alternatives list without touching canonical (FR-13).
 _DA_SENTINEL = "_deprecated_alternative"
 
+# Sentinel key marking an E11 outcome-evidence proposal (SPEC-E11 §4). Reconciliation detects
+# this key and always decides CONTRADICTION — never ADD/EDIT — since the proposal carries no
+# corrected definition, only a wrong_definition pattern for a human to review (S3-AC2).
+_ANSWER_OUTCOME_SENTINEL = "_answer_outcome_evidence"
+
 
 def _metric_slug(title: str) -> str:
     """Derive a ``contracts/metrics/<slug>.yaml`` filename from a question title.
@@ -317,6 +322,8 @@ class ContextBuilder:
                 )
             elif item.kind == EvidenceKind.USAGE_EVIDENCE:
                 proposals.extend(self._build_usage_evidence(item))
+            elif item.kind == EvidenceKind.ANSWER_OUTCOME:
+                proposals.append(self._build_answer_outcome(item))
             elif item.kind == EvidenceKind.DEFINITION:
                 pass  # consumed by the pre-collection pass above
             else:
@@ -699,3 +706,27 @@ class ContextBuilder:
             ]
 
         return []
+
+    @staticmethod
+    def _build_answer_outcome(item: EvidenceItem) -> Proposal:
+        """Map one outcome-evidence item to a review-flagging proposal (SPEC-E11 §4).
+
+        The payload (minted by :func:`canonic.feedback.evidence.outcome_evidence`) carries no
+        corrected definition — only the pattern of ``wrong_definition`` outcomes (refs, count,
+        window) that crossed the gate. The content is wrapped in the ``_ANSWER_OUTCOME_SENTINEL``
+        key so reconciliation always decides CONTRADICTION for it (§4, S2-AC2), regardless of the
+        existing binding's provenance tier — E11 only ever flags, it never edits (S3-AC2).
+        """
+        payload = item.payload
+        metric = str(payload["metric"])
+        refs = [str(ref) for ref in payload.get("refs", [])]
+        return Proposal(
+            target=f"contracts/metrics/{_metric_slug(metric)}.yaml",
+            op=ProposalOp.EDIT,
+            content={_ANSWER_OUTCOME_SENTINEL: dict(payload)},
+            provenance=Provenance.INFERRED,
+            confidence=DETERMINISTIC_CONFIDENCE,
+            anchored_to=refs,
+            drafted_by=DraftedBy.DETERMINISTIC,
+            acquisition_tier=item.acquisition_tier,
+        )

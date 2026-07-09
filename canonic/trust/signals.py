@@ -1,11 +1,13 @@
 """Pluggable trust signals — each a pure function from raw inputs to a SignalVerdict.
 
-Static signals (provenance, assertion coverage) are available from E14 v1 onward. Signals
-not yet backed by real data are deliberately omitted here rather than faked, per SPEC-E14
-§4 ("when a source isn't online yet ... that signal is simply inactive"):
+Static signals (provenance, assertion coverage) are available from E14 v1 onward.
+``outcome_signal`` is the one dynamic signal: E11's per-binding outcome history
+(:class:`canonic.feedback.history.BindingOutcomeHistory`), folded in only when a caller
+supplies one (SPEC-E11 §5). Signals not yet backed by real data are deliberately omitted
+here rather than faked, per SPEC-E14 §4 ("when a source isn't online yet ... that signal is
+simply inactive"):
 
-- Assertion *pass/fail* and outcome history need the E16 accuracy harness and E11 outcome
-  aggregation, neither of which exist yet.
+- Assertion *pass/fail* needs the E16 accuracy harness, which does not exist yet.
 - Drift and contradiction are currently build-time/knowledge-page signals, not persisted
   per binding, so there is nothing to read at serve time.
 
@@ -22,11 +24,13 @@ from canonic.trust.models import SignalVerdict, TrustTier
 
 if TYPE_CHECKING:
     from canonic.compiler.result import SourceFreshness, TrustInput
+    from canonic.feedback.history import BindingOutcomeHistory
 
 __all__ = [
     "assertion_signal",
     "finality_signal",
     "freshness_signal",
+    "outcome_signal",
     "provenance_signal",
     "static_signals_for",
 ]
@@ -90,4 +94,22 @@ def freshness_signal(freshness: list[SourceFreshness]) -> SignalVerdict:
         return SignalVerdict(
             cap=TrustTier.PROVISIONAL, reason=f"freshness: stale ({', '.join(stale)})"
         )
+    return SignalVerdict(cap=None)
+
+
+def outcome_signal(
+    trust_input: TrustInput, history: BindingOutcomeHistory, window_days: int
+) -> SignalVerdict:
+    """A recent confirmed-``wrong_definition`` outcome caps a binding at ``caution`` (SPEC-E11 §5).
+
+    Only ``wrong_definition`` outcomes ever cap trust — the attribution safeguard (SPEC-E11
+    §3) is enforced inside :meth:`~canonic.feedback.history.BindingOutcomeHistory.is_capped`,
+    so ``wrong_data``/``wrong_interpretation``/``unspecified`` never reach this signal.
+    Inactive when the metric has no known ``source.measure`` binding (composite ratio/
+    weighted_avg kinds) or no capping history.
+    """
+    if trust_input.binding is None:
+        return SignalVerdict(cap=None)
+    if history.is_capped(trust_input.binding, window_days=window_days):
+        return SignalVerdict(cap=TrustTier.CAUTION, reason="outcome: confirmed-wrong")
     return SignalVerdict(cap=None)
