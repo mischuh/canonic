@@ -235,17 +235,30 @@ canonic mcp start
 canonic mcp status
 ```
 
-**2. Register canonic in your client's MCP config.** A standard MCP server entry, for example:
+**2. Register canonic in your client's MCP config.** MCP clients typically spawn the server with an arbitrary working directory (not your project folder), so pass `--project` explicitly rather than relying on cwd detection:
 ```json
 {
   "mcpServers": {
     "canonic": {
       "command": "canonic",
-      "args": ["mcp", "start"]
+      "args": ["mcp", "start", "--project", "/absolute/path/to/your/project"]
     }
   }
 }
 ```
+If canonic isn't installed globally (see [Install](#install)), point the client at `uvx` instead so it fetches canonic on demand:
+```json
+{
+  "mcpServers": {
+    "canonic": {
+      "command": "uvx",
+      "args": ["canonic", "mcp", "start", "--project", "/absolute/path/to/your/project"]
+    }
+  }
+}
+```
+Pin a version (`"args": ["canonic==0.5.1", "mcp", "start", ...]`) if you want reproducible daemon versions instead of always resolving the latest release from PyPI.
+
 (See the per-client docs for the exact config location — Claude Code, Cursor, and Codex each load standard MCP configuration.)
 
 If you started the daemon with `--http` instead (a background daemon on a fixed host/port, useful when the client can't spawn a process), point your client at the HTTP endpoint:
