@@ -261,6 +261,34 @@ Pin a version (`"args": ["canonic==0.5.1", "mcp", "start", ...]`) if you want re
 
 (See the per-client docs for the exact config location — Claude Code, Cursor, and Codex each load standard MCP configuration.)
 
+**Environment variables for credentials.** If a connection's `credentials_ref` points at `env:SOME_VAR` (e.g. a database password), that variable must be readable by the spawned `canonic` process. GUI-launched MCP clients (Claude Desktop, Cursor, etc.) start the process with a minimal environment — they do **not** source your shell profile (`~/.zshrc`, `~/.bash_profile`) — so an `export` that works in your terminal will not reach the daemon. Pass the variable explicitly via the config's `env` field instead:
+```json
+{
+  "mcpServers": {
+    "canonic": {
+      "command": "canonic",
+      "args": ["mcp", "start", "--project", "/absolute/path/to/your/project"],
+      "env": {
+        "CANONIC_PG_PASSWORD": "your-password-here"
+      }
+    }
+  }
+}
+```
+A missing or empty variable surfaces as an `internal_error` at query time, not at startup — if you see one, check the connection's `credentials_ref` in `canonic.yaml` and confirm the named variable is set in the MCP config's `env` block.
+
+**Follow-up suggestions.** Add `--suggestions` to `mcp start` to have `query` responses include a `metadata.related` field — unused dimensions on the resolved metric and sibling metrics on the same source — so the agent can see what else is queryable without an extra `describe_metric` round trip. Off by default; descriptive only (no ranking or recommendation), same additive pattern as `guardrails_fired`/`freshness`.
+```json
+{
+  "mcpServers": {
+    "canonic": {
+      "command": "canonic",
+      "args": ["mcp", "start", "--project", "/absolute/path/to/your/project", "--suggestions"]
+    }
+  }
+}
+```
+
 If you started the daemon with `--http` instead (a background daemon on a fixed host/port, useful when the client can't spawn a process), point your client at the HTTP endpoint:
 ```bash
 canonic mcp start --http --host 127.0.0.1 --port 7474
