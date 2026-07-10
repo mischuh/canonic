@@ -311,8 +311,8 @@ class DiffEmitter:
         """Render proposed/existing content as the target's file body (SPEC-E4 §6).
 
         YAML reuses the round-trippable dump style of
-        :func:`canonic.semantic.loader.dump_semantic_source`; Markdown emits the page's
-        ``body`` (knowledge pages are not yet built — forward-looking, §1).
+        :func:`canonic.semantic.loader.dump_semantic_source`; Markdown emits the
+        :class:`~canonic.knowledge.models.KnowledgePage` body directly.
         """
         if content is None:
             return ""
