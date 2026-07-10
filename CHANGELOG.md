@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.5.3](https://github.com/mischuh/canonic/compare/v0.5.2...v0.5.3) (2026-07-10)
+
+
+### Bug Fixes
+
+* stop LLM from auto-picking ambiguous join paths ([6761375](https://github.com/mischuh/canonic/commit/6761375d302ba5c8a6795f31453765b5a28ce9e8))
+* stop LLM from auto-picking ambiguous join paths ([c05bad7](https://github.com/mischuh/canonic/commit/c05bad79ba2642bd6dde7d6a35dc896b8d13b552))
+
 ## [0.5.2](https://github.com/mischuh/canonic/compare/v0.5.1...v0.5.2) (2026-07-10)
 
 
