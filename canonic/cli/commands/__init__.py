@@ -23,7 +23,8 @@ _console = Console()
 def not_implemented(ctx: typer.Context, feature: str) -> None:
     """Print a uniform ``not implemented yet`` notice and exit 0 (no traceback).
 
-    Stub for capability commands whose logic lands in later epics (E2/E5/E6/E8/E9).
+    Stub for capability commands not yet wired up: currently just ``completion``
+    (no backing implementation).
     """
     json_output = get_cli_context(ctx).json_output
     if json_output:

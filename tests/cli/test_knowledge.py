@@ -1,4 +1,4 @@
-"""Tests for `canonic knowledge add` (SPEC-E3 §5 fetch/extract-split amendment).
+"""Tests for `canonic knowledge add`/`search` (SPEC-E3 §5, SPEC-E6).
 
 Fetch and extraction are stubbed (no network, no LLM) via the same monkeypatch style as
 tests/cli/test_ingest.py's `_StubFactory` — this exercises the CLI wiring, preview,
@@ -8,6 +8,7 @@ confirmation, and write/round-trip behavior, not the real UrlFetchAdapter/Runtim
 
 from __future__ import annotations
 
+import json
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
@@ -181,3 +182,51 @@ def test_custom_slug_overrides_derived_slug(project: Path, monkeypatch: pytest.M
 
     assert result.exit_code == 0, result.output
     assert (project / "knowledge" / "global" / "custom-slug.md").exists()
+
+
+def _write_page(project: Path, rel_path: str, *, summary: str, body: str) -> None:
+    p = project / "knowledge" / rel_path
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(f'---\nsummary: "{summary}"\n---\n\n{body}\n')
+
+
+def test_search_finds_matching_page(project: Path) -> None:
+    _write_page(
+        project, "global/mrr.md", summary="MRR definition", body="Monthly recurring revenue."
+    )
+    _write_page(project, "global/weather.md", summary="Weather note", body="Rain and sun.")
+
+    result = CliRunner().invoke(app, ["knowledge", "search", "revenue"])
+
+    assert result.exit_code == 0, result.output
+    assert "mrr" in result.output
+    assert "weather" not in result.output
+
+
+def test_search_json_matches_mcp_payload_shape(project: Path) -> None:
+    _write_page(
+        project, "global/mrr.md", summary="MRR definition", body="Monthly recurring revenue."
+    )
+
+    result = CliRunner().invoke(app, ["--json", "knowledge", "search", "revenue"])
+
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.output)
+    assert payload["hits"][0]["page"] == "mrr"
+    assert payload["hits"][0]["matched_on"] == ["lexical"]
+    assert payload["caveats"] == []
+
+
+def test_search_no_knowledge_dir_returns_empty(project: Path) -> None:
+    result = CliRunner().invoke(app, ["knowledge", "search", "revenue"])
+
+    assert result.exit_code == 0, result.output
+    assert "no hits" in result.output
+
+
+def test_search_no_project_exits_nonzero(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.chdir(tmp_path)
+
+    result = CliRunner().invoke(app, ["knowledge", "search", "revenue"])
+
+    assert result.exit_code != 0

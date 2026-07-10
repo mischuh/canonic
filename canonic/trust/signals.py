@@ -7,7 +7,9 @@ supplies one (SPEC-E11 §5). Signals not yet backed by real data are deliberatel
 here rather than faked, per SPEC-E14 §4 ("when a source isn't online yet ... that signal is
 simply inactive"):
 
-- Assertion *pass/fail* needs the E16 accuracy harness, which does not exist yet.
+- Assertion *pass/fail* needs a per-binding result from the E16 accuracy harness; the
+  harness itself exists, but its outcomes are not yet persisted to a store this signal
+  could join against at serve time.
 - Drift and contradiction are currently build-time/knowledge-page signals, not persisted
   per binding, so there is nothing to read at serve time.
 
@@ -48,10 +50,11 @@ def provenance_signal(trust_input: TrustInput) -> SignalVerdict:
 def assertion_signal(trust_input: TrustInput) -> SignalVerdict:
     """Assertion coverage/validation (SPEC-E14 §3 table row "Assertion").
 
-    v1 has no execution harness (E16), so a "passing" verdict can never be confirmed —
-    an authored assertion is necessary but not yet sufficient for ``trusted``. Every
-    metric caps at ``provisional`` here until E16 supplies a real pass/fail signal
-    (SPEC-E14 §5, "+ E16 Phase 2").
+    The E16 accuracy harness runs assertions and reports pass/fail, but its results are
+    not yet persisted per binding, so this signal has nothing to join against at serve
+    time — an authored assertion is necessary but not yet sufficient for ``trusted``.
+    Every metric caps at ``provisional`` here until harness results are persisted and
+    wired in (SPEC-E14 §5, "+ E16 Phase 2").
     """
     if not trust_input.has_assertion:
         return SignalVerdict(
@@ -59,7 +62,7 @@ def assertion_signal(trust_input: TrustInput) -> SignalVerdict:
         )
     return SignalVerdict(
         cap=TrustTier.PROVISIONAL,
-        reason=f"{trust_input.metric}: assertion unverified (pass/fail pending E16)",
+        reason=f"{trust_input.metric}: assertion unverified (pass/fail not yet persisted)",
     )
 
 
