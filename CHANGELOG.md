@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.5.2](https://github.com/mischuh/canonic/compare/v0.5.1...v0.5.2) (2026-07-10)
+
+
+### Documentation
+
+* document --project, env passthrough, and --suggestions flag for MCP setup ([55734f2](https://github.com/mischuh/canonic/commit/55734f21764656c45ae8605390526e9611fe2eec))
+* enhance MCP client configuration instructions and add environment variable handling ([208d8cb](https://github.com/mischuh/canonic/commit/208d8cbfd50e76a73d0a26294027f37d414cd50a))
+* update MCP configuration instructions for uvx canonic setup ([ba4720f](https://github.com/mischuh/canonic/commit/ba4720f48a348c8d91fad997059177876b58c3fd))
+* update MCP configuration instructions for uvx canonic setup ([5d6b379](https://github.com/mischuh/canonic/commit/5d6b379011cf65b90d9480793b515949be58a38c))
+
 ## [0.5.1](https://github.com/mischuh/canonic/compare/v0.5.0...v0.5.1) (2026-07-10)
 
 
