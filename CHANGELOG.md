@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.5.1](https://github.com/mischuh/canonic/compare/v0.5.0...v0.5.1) (2026-07-10)
+
+
+### Documentation
+
+* update README links to point to the correct URLs ([ebc7b02](https://github.com/mischuh/canonic/commit/ebc7b0264953388e0b74433ddba70f03de5d5313))
+* update README links to point to the correct URLs ([4ed3ecb](https://github.com/mischuh/canonic/commit/4ed3ecb0046e276e32268d9b5f10cc56f6fa8951))
+
 ## [0.5.0](https://github.com/mischuh/canonic/compare/v0.4.0...v0.5.0) (2026-07-09)
 
 
