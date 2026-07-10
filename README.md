@@ -145,7 +145,7 @@ canonic setup
 # Point at a .duckdb file, or let it read a CSV/Parquet directly
 ```
 
-![canonic setup end-to-end on the vehicle rental example](docs/demo_canonic_setup.gif)
+![canonic setup end-to-end on the vehicle rental example](https://raw.githubusercontent.com/mischuh/canonic/main/docs/demo_canonic_setup.gif)
 
 The wizard walks you through:
 1. **Name** your project.
@@ -154,7 +154,7 @@ The wizard walks you through:
 4. **Bootstrap** — canonic introspects the schema and drafts your semantics.
 5. **First answer** — the wizard runs a real query against your data and shows the result, plus how fresh it is and which definition it used.
 
-Don't have a database handy? `examples/` ships 5 ready-to-run sample projects — dbt Jaffle Shop, e-commerce, vehicle rental, SaaS analytics, and Dutch railway — a good way to try the wizard before pointing it at your own data. See the [guides](docs/guides/) for the walkthrough behind each one, e.g. [vehicle rental](docs/guides/rental.mdx).
+Don't have a database handy? `examples/` ships 5 ready-to-run sample projects — dbt Jaffle Shop, e-commerce, vehicle rental, SaaS analytics, and Dutch railway — a good way to try the wizard before pointing it at your own data. See the [guides](https://docs.getcanonic.app/guides/jaffle-shop) for the walkthrough behind each one, e.g. [vehicle rental](https://docs.getcanonic.app/guides/rental).
 
 You now have a working context layer committed to your repo. Ask your own questions:
 ```bash
@@ -162,9 +162,9 @@ canonic query --metrics revenue --dimensions order_date
 canonic query --metrics revenue --filter "status=paid"
 ```
 
-For a query with more filters or joins than is comfortable inline, write a `SemanticQuery` JSON file and pass it with `-f` instead — see [`canonic query`](docs/cli-reference/query-sql-assert.mdx) for the full flag reference.
+For a query with more filters or joins than is comfortable inline, write a `SemanticQuery` JSON file and pass it with `-f` instead — see [`canonic query`](https://docs.getcanonic.app/cli-reference/query-sql-assert) for the full flag reference.
 
-> `canonic knowledge search` is not implemented yet (returns a "not implemented" notice); see [CLI reference: knowledge](docs/cli-reference/knowledge.mdx) for its current status. `canonic knowledge add <url>` (fetch-and-write a page) works today.
+> `canonic knowledge search` is not implemented yet (returns a "not implemented" notice); see [CLI reference: knowledge](https://docs.getcanonic.app/cli-reference/knowledge) for its current status. `canonic knowledge add <url>` (fetch-and-write a page) works today.
 
 Review what canonic drafted when you're ready — it's all an ordinary git diff:
 ```bash
@@ -261,9 +261,9 @@ canonic mcp start --http --host 127.0.0.1 --port 7474
   }
 }
 ```
-Adjust host/port to match the flags used to start the daemon — see [`canonic mcp`](docs/cli-reference/mcp.mdx) for the full flag reference.
+Adjust host/port to match the flags used to start the daemon — see [`canonic mcp`](https://docs.getcanonic.app/cli-reference/mcp) for the full flag reference.
 
-**3. Your agent now has these tools** ([full reference](docs/mcp-integration/tools-reference.mdx)):
+**3. Your agent now has these tools** ([full reference](https://docs.getcanonic.app/mcp-integration/tools-reference)):
 
 | Tool | What the agent does with it |
 | --- | --- |
@@ -296,10 +296,10 @@ Every answer comes back with the **metadata band** — resolved definition, guar
 
 ## Where to go next
 
-- **[Concepts](docs/concepts/three-layers.mdx)** — the three layers and the split rule (the one mental model worth learning first).
-- **[CLI reference](docs/cli-reference/overview.mdx)** — every command, flag by flag.
-- **[MCP / agent integration](docs/mcp-integration/connecting-your-agent.mdx)** — wiring canonic into Claude Code, Cursor, Codex, or any MCP client.
-- **[Guides](docs/guides/)** — 5 ready-to-run example projects: [Jaffle Shop](docs/guides/jaffle-shop.mdx), [e-commerce](docs/guides/ecommerce.mdx), [vehicle rental](docs/guides/rental.mdx), [SaaS analytics](docs/guides/saas-analytics.mdx), [Dutch railway](docs/guides/dutch-railway.mdx).
-- **[Reference](docs/reference/error-codes.mdx)** — error codes and the full `canonic.yaml` config schema.
+- **[Concepts](https://docs.getcanonic.app/concepts/three-layers)** — the three layers and the split rule (the one mental model worth learning first).
+- **[CLI reference](https://docs.getcanonic.app/cli-reference/overview)** — every command, flag by flag.
+- **[MCP / agent integration](https://docs.getcanonic.app/mcp-integration/connecting-your-agent)** — wiring canonic into Claude Code, Cursor, Codex, or any MCP client.
+- **[Guides](https://docs.getcanonic.app/guides/jaffle-shop)** — 5 ready-to-run example projects: [Jaffle Shop](https://docs.getcanonic.app/guides/jaffle-shop), [e-commerce](https://docs.getcanonic.app/guides/ecommerce), [vehicle rental](https://docs.getcanonic.app/guides/rental), [SaaS analytics](https://docs.getcanonic.app/guides/saas-analytics), [Dutch railway](https://docs.getcanonic.app/guides/dutch-railway).
+- **[Reference](https://docs.getcanonic.app/reference/error-codes)** — error codes and the full `canonic.yaml` config schema.
 
 canonic is local-first, git-native, and read-only by design. Start with a SQLite file and one question; grow into the full context layer as your needs do.
