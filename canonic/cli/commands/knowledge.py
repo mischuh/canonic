@@ -1,4 +1,4 @@
-"""``canonic knowledge`` — knowledge search (stub; E6, P1) and one-shot page authoring.
+"""``canonic knowledge`` — knowledge search (E6, P1) and one-shot page authoring.
 
 ``add`` is the one-shot counterpart to the recurring ``canonic ingest`` path (SPEC-E3 §5
 fetch/extract-split amendment): fetch a single external doc, classify it via the same
@@ -12,14 +12,15 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import json
 import re
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Annotated
 
 import typer
 
-from canonic.cli._errors import handle_errors
-from canonic.cli.commands import _console, not_implemented
+from canonic.cli._errors import get_cli_context, handle_errors
+from canonic.cli.commands import _console, load_service
 from canonic.config import find_project_root, load_config
 from canonic.connectors.web import UrlFetchAdapter
 from canonic.exc import KnowledgePageError, UnknownConnectorType
@@ -39,6 +40,7 @@ if TYPE_CHECKING:
     from canonic.connectors.base import DocEvidence
     from canonic.connectors.evidence import FetchAdapter
     from canonic.knowledge.models import KnowledgePage
+    from canonic.knowledge.results import SearchResult
     from canonic.semantic.models import SemanticSource
 
 app = typer.Typer(name="knowledge", help="Search project knowledge and semantics.")
@@ -54,9 +56,60 @@ _ADHOC_ADAPTERS: dict[str, Callable[[str], FetchAdapter]] = {
 
 
 @app.command("search")
-def search(ctx: typer.Context, query: str = typer.Argument(..., help="Search text.")) -> None:
-    """Hybrid search over knowledge + semantics."""
-    not_implemented(ctx, "knowledge search")
+@handle_errors
+def search(
+    ctx: typer.Context,
+    query: Annotated[str, typer.Argument(help="Search text.")],
+    user: Annotated[
+        str | None, typer.Option("--user", help="Requesting user id, for access control.")
+    ] = None,
+    limit: Annotated[int, typer.Option("--limit", help="Max hits to return.")] = 10,
+) -> None:
+    """Hybrid search over knowledge pages for business context (E6, P1).
+
+    With ``--json`` the output matches the MCP ``search_knowledge`` tool payload byte-for-byte.
+    """
+    result = load_service(ctx).search_knowledge(query, user=user, limit=limit)
+    payload = {
+        "hits": [
+            {
+                "page": h.page,
+                "summary": h.summary,
+                "usage_mode": h.usage_mode,
+                "matched_on": [m.value for m in h.matched_on],
+                "sl_refs": h.sl_refs,
+            }
+            for h in result.hits
+        ],
+        "caveats": [
+            {"page": c.page, "summary": c.summary, "triggered_by": c.triggered_by}
+            for c in result.caveats
+        ],
+    }
+
+    if get_cli_context(ctx).json_output:
+        typer.echo(json.dumps(payload))
+        return
+
+    _render_search(result)
+
+
+def _render_search(result: SearchResult) -> None:
+    """Render ranked hits plus any auto-surfaced caveats as human-readable text."""
+    if not result.hits:
+        _console.print("[yellow]no hits[/yellow]")
+    for h in result.hits:
+        arms = "+".join(m.value for m in h.matched_on)
+        _console.print(
+            f"[bold]{h.page}[/bold]  score={h.score:.3f}  via={arms}  usage={h.usage_mode.value}"
+        )
+        _console.print(f"  {h.summary}")
+        if h.sl_refs:
+            _console.print(f"  sl_refs: {', '.join(h.sl_refs)}")
+    if result.caveats:
+        _console.print("\n[bold yellow]caveats:[/bold yellow]")
+        for c in result.caveats:
+            _console.print(f"  {c.page}: {c.summary}")
 
 
 @app.command("add")

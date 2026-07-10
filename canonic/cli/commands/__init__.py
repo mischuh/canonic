@@ -23,9 +23,8 @@ _console = Console()
 def not_implemented(ctx: typer.Context, feature: str) -> None:
     """Print a uniform ``not implemented yet`` notice and exit 0 (no traceback).
 
-    Stub for capability commands not yet wired up: ``knowledge search`` (backing
-    ``KnowledgeSearch``/E6 is built and used via the ``search_knowledge`` MCP tool, but
-    no CLI command calls it yet) and ``completion`` (no backing implementation).
+    Stub for capability commands not yet wired up: currently just ``completion``
+    (no backing implementation).
     """
     json_output = get_cli_context(ctx).json_output
     if json_output:

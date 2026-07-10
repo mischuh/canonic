@@ -13,11 +13,10 @@ _GROUPS = ["setup", "connection", "sl", "query", "sql", "knowledge", "status", "
 # Capability stubs that must exit 0 with a "not implemented yet" notice.
 # (``setup`` is now a real interactive command — see tests/cli/test_setup.py.)
 _STUBS = [
-    ["knowledge", "search", "orders"],
     ["completion"],
 ]
 
-# Real capability commands (E5/E7/E8/E2) that require a project directory and exit
+# Real capability commands (E5/E6/E7/E8/E2) that require a project directory and exit
 # non-zero when run outside one. Excluded from the stub test.
 _MCP_COMMANDS = [
     ["mcp", "start"],
@@ -25,6 +24,7 @@ _MCP_COMMANDS = [
     ["mcp", "status"],
     ["sql", "SELECT 1"],
     ["sl", "resolve", "revenue"],
+    ["knowledge", "search", "orders"],
 ]
 
 
