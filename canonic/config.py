@@ -202,6 +202,38 @@ class LoggingConfig(BaseModel):
     format: Literal["text", "json"] = "text"
 
 
+class McpTokenEntry(BaseModel):
+    """One bearer-token/client mapping for the MCP daemon's ``http`` transport."""
+
+    client_id: str
+    token_ref: str
+
+    @field_validator("token_ref")
+    @classmethod
+    def _reject_literal_token(cls, v: str) -> str:
+        if not _REF_PATTERN.match(v):
+            raise ValueError("must be a reference (env:…, keyring:…, file:…), not a literal secret")
+        return v
+
+
+class McpAuthConfig(BaseModel):
+    """Bearer-token auth for the MCP daemon's ``http`` transport (AMENDMENT-remote-mcp-transport).
+
+    ``stdio`` transport needs none of this — process-level trust is sufficient for a
+    local subprocess. ``http`` transport is network-reachable, so ``canonic mcp start
+    --transport http`` refuses to start unless at least one token resolves here (or via
+    the ``--token-ref`` CLI override).
+    """
+
+    tokens: list[McpTokenEntry] = []
+
+
+class McpConfig(BaseModel):
+    """The ``mcp:`` block from canonic.yaml."""
+
+    auth: McpAuthConfig = McpAuthConfig()
+
+
 class YamlConfigSource(PydanticBaseSettingsSource):
     """Pydantic-settings source that reads a canonic.yaml file via ruamel.yaml."""
 
@@ -243,6 +275,7 @@ class CanonicConfig(BaseSettings):
     feedback: FeedbackConfig = FeedbackConfig()
     runtime: RuntimeConfig = RuntimeConfig()
     logging: LoggingConfig = LoggingConfig()
+    mcp: McpConfig = McpConfig()
 
     @model_validator(mode="after")
     def _enforce_air_gapped(self) -> CanonicConfig:

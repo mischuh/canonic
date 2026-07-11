@@ -11,18 +11,31 @@ Start the local MCP daemon.
 
 ```bash
 canonic mcp start
-canonic mcp start --http --port 7474
+canonic mcp start --transport http --port 7474
 ```
 
 | Flag | Description |
 | --- | --- |
 | `--project`, `-p` | Path to the canonic project root (overrides the cwd walk). |
-| `--http` | Start as a background HTTP daemon instead of the default stdio transport. |
+| `--transport` | `stdio` (default, local) or `http` (remote, network-reachable). |
 | `--port` | Port for the HTTP daemon (default `7474`). |
 | `--host` | Host for the HTTP daemon (default `127.0.0.1`). |
+| `--token-ref` | Bearer token reference (`env:VAR`) for `--transport http`, overriding/supplementing `mcp.auth.tokens` in `canonic.yaml`. |
 | `--suggestions` | Enable follow-up suggestions in query responses. |
 
-Without `--http`, the daemon runs in the foreground over stdio; the MCP client manages its process lifetime. With `--http`, it forks a background uvicorn daemon bound to the given host/port.
+With `--transport stdio` (the default), the daemon runs in the foreground over stdio; the MCP client manages its process lifetime — no auth layer, since a local subprocess is inherently process-trusted.
+
+With `--transport http`, it forks a background uvicorn daemon bound to the given host/port using Streamable HTTP. Because the daemon becomes network-reachable, it **requires** at least one bearer token — configure `mcp.auth.tokens` in `canonic.yaml`:
+
+```yaml
+mcp:
+  auth:
+    tokens:
+      - client_id: alice
+        token_ref: env:CANONIC_MCP_TOKEN_ALICE
+```
+
+or pass `--token-ref env:SOME_VAR` for a quick one-off token. Starting `--transport http` with no token configured is a hard error. Clients authenticate with `Authorization: Bearer <token>`; the resolved `client_id` is recorded on every `query`/`run_sql` answer event for per-user attribution.
 
 On first start in a project with no active metric contracts, canonic auto-generates inferred metric contracts from the loaded semantic sources before serving.
 
@@ -42,4 +55,4 @@ Report whether the MCP daemon is running.
 canonic mcp status
 ```
 
-Shows the PID, transport, address (for HTTP), version, and start time. Warns if the running daemon's version differs from the current CLI version; in which case, restart it with `canonic mcp stop && canonic mcp start`.
+Shows the PID, transport, address and auth state (for HTTP), version, and start time. Warns if the running daemon's version differs from the current CLI version; in which case, restart it with `canonic mcp stop && canonic mcp start`.

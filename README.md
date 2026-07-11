@@ -289,15 +289,19 @@ A missing or empty variable surfaces as an `internal_error` at query time, not a
 }
 ```
 
-If you started the daemon with `--http` instead (a background daemon on a fixed host/port, useful when the client can't spawn a process), point your client at the HTTP endpoint:
+If you started the daemon with `--transport http` instead (a background daemon on a fixed host/port, useful when the client can't spawn a process), it requires a bearer token since it's network-reachable — configure `mcp.auth.tokens` in `canonic.yaml` or pass `--token-ref`:
 ```bash
-canonic mcp start --http --host 127.0.0.1 --port 7474
+canonic mcp start --transport http --host 127.0.0.1 --port 7474 --token-ref env:CANONIC_MCP_TOKEN
 ```
+Point your client at the HTTP endpoint with the matching token:
 ```json
 {
   "mcpServers": {
     "canonic": {
-      "url": "http://127.0.0.1:7474/mcp"
+      "url": "http://127.0.0.1:7474/mcp",
+      "headers": {
+        "Authorization": "Bearer your-token-here"
+      }
     }
   }
 }

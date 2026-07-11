@@ -5,7 +5,9 @@ State is written to ``.canonic/mcp.json`` in the project root. Two transports:
 - **stdio** (default) — the server runs in the foreground; the MCP client manages
   the process lifetime (``canonic mcp start`` blocks until the client disconnects).
 - **http** — a uvicorn-backed HTTP daemon is forked into the background; the PID
-  file tracks the process so ``canonic mcp stop/status`` work.
+  file tracks the process so ``canonic mcp stop/status`` work. Network-reachable, so
+  it requires a bearer-token verifier (AMENDMENT-remote-mcp-transport.md) — ``stdio``
+  needs none.
 
 Version compatibility: the running Canonic package version is stamped in the state
 file so a mismatch is surfaced immediately (SPEC §4.2 AC2).
@@ -22,6 +24,10 @@ from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path  # noqa: TC003 — used in function bodies, not just annotations
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from canonic.mcp.auth import CanonicTokenVerifier
 
 __all__ = [
     "DaemonState",
@@ -55,6 +61,7 @@ class DaemonState:
     host: str | None
     port: int | None
     started_at: str
+    auth_enabled: bool = False
 
     def to_json(self) -> str:
         return json.dumps(asdict(self), indent=2)
@@ -73,6 +80,7 @@ class DaemonStatus:
     started_at: str | None = None
     version_mismatch: bool = False
     current_version: str | None = None
+    auth_enabled: bool = False
 
 
 def _state_path(project_root: Path) -> Path:
@@ -134,6 +142,7 @@ def status(project_root: Path) -> DaemonStatus:
         started_at=state.started_at,
         version_mismatch=mismatch,
         current_version=current,
+        auth_enabled=state.auth_enabled,
     )
 
 
@@ -185,13 +194,27 @@ def start_http(
     host: str = _DEFAULT_HOST,
     port: int = _DEFAULT_PORT,
     *,
+    auth: CanonicTokenVerifier | None,
     suggestions: bool = False,
 ) -> None:
     """Fork a uvicorn HTTP daemon in the background and write the state file.
 
     The parent process returns immediately; the child runs ``mcp.run_http_async``.
     ``canonic mcp stop`` sends SIGTERM to the child via the recorded PID.
+
+    ``auth`` is required (not optional): ``http`` transport is network-reachable once
+    bound, so an unauthenticated daemon would be exactly the gap
+    AMENDMENT-remote-mcp-transport.md closes. Callers must resolve a token verifier
+    (``canonic.mcp.auth.build_token_verifier``) before calling this function and raise
+    their own user-facing error when none resolves — this function raises generically
+    for any caller that skips that step.
     """
+    if auth is None:
+        raise RuntimeError(
+            "http transport requires at least one bearer token — configure mcp.auth.tokens "
+            "in canonic.yaml or pass --token-ref"
+        )
+
     _check_version_on_start(project_root)
 
     existing = status(project_root)
@@ -221,6 +244,7 @@ def start_http(
             host=host,
             port=port,
             started_at=datetime.now(UTC).isoformat(),
+            auth_enabled=True,
         )
         _write_state(project_root, state)
         return
@@ -249,7 +273,7 @@ def start_http(
         level, file, format = _effective_log_params("WARNING", None)
     configure_logging(level=level, file=file, format=format)
 
-    mcp = build_server(service, suggestions=suggestions)  # type: ignore[arg-type]
+    mcp = build_server(service, suggestions=suggestions, auth=auth)  # type: ignore[arg-type]
     import asyncio
 
     # stateless_http=True: no session IDs are issued or expected, so restarting the

@@ -442,7 +442,9 @@ class CanonicService:
             query, self._resolver, self._sources, connection_dialects=self._connection_dialects
         )
 
-    async def query(self, query: SemanticQuery, *, harness: bool = False) -> QueryResult:
+    async def query(
+        self, query: SemanticQuery, *, harness: bool = False, caller: str | None = None
+    ) -> QueryResult:
         """Compile and execute a semantic query read-only (SPEC §2).
 
         Derives the connection from the primary metric's owning source.
@@ -452,6 +454,10 @@ class CanonicService:
         raises :class:`~canonic.exc.AssertionFailed` (exit 10). In normal mode the assertions
         are still evaluated for instrumentation (logged to the answer-event stream so E16 can
         spot stale assertions) but never block the result.
+
+        ``caller`` is the verified bearer-token client_id for MCP http-transport calls
+        (``None`` for stdio/CLI, which have no auth layer); recorded on the emitted
+        answer event for per-user attribution (AMENDMENT-remote-mcp-transport.md).
         """
         started = time.perf_counter()
         compiled: CompileResult | None = None
@@ -495,7 +501,14 @@ class CanonicService:
             if result is not None:
                 logger.info("query completed: latency_ms=%d rows=%d", latency_ms, len(result.rows))
             self._emit_answer_event(
-                query, compiled, connection_id, result, latency_ms, error_code, outcome_history
+                query,
+                compiled,
+                connection_id,
+                result,
+                latency_ms,
+                error_code,
+                outcome_history,
+                caller=caller,
             )
             query_id_var.reset(qid_token)
 
@@ -651,6 +664,8 @@ class CanonicService:
         latency_ms: int,
         error_code: str | None,
         outcome_history: BindingOutcomeHistory | None = None,
+        *,
+        caller: str | None = None,
     ) -> None:
         try:
             freshness: list[dict[str, Any]] = (
@@ -689,24 +704,71 @@ class CanonicService:
                 ).tier.value
                 if compiled is not None
                 else None,
+                user=caller,
             )
             self._event_log.append(event)
         except Exception as exc:
             logger.warning("answer event emission failed: %s", exc)
 
-    async def run_sql(self, sql: str, connection: str | None = None) -> ResultSet:
+    def _emit_sql_event(
+        self,
+        sql: str,
+        connection_id: str | None,
+        result: ResultSet | None,
+        latency_ms: int,
+        error_code: str | None,
+        caller: str | None,
+    ) -> None:
+        """Answer-event counterpart of :meth:`_emit_answer_event` for the raw-SQL escape hatch.
+
+        ``run_sql`` has no :class:`SemanticQuery`/compiled query to hash or derive
+        resolved bindings/trust score from, so this builds a minimal :class:`AnswerEvent`
+        directly rather than overloading ``_emit_answer_event``'s signature.
+        """
+        try:
+            event = AnswerEvent(
+                ts=datetime.now(UTC).isoformat(),
+                contract_schema=CONTRACT_SCHEMA,
+                query_hash=_sha256_json({"sql": sql}),
+                compiled_sql_hash=None,
+                connection=connection_id,
+                latency_ms=latency_ms,
+                bytes_scanned=result.bytes_scanned if result is not None else None,
+                error=error_code,
+                user=caller,
+            )
+            self._event_log.append(event)
+        except Exception as exc:
+            logger.warning("answer event emission failed: %s", exc)
+
+    async def run_sql(
+        self, sql: str, connection: str | None = None, *, caller: str | None = None
+    ) -> ResultSet:
         """Execute a raw read-only SQL string on the named connection (SPEC §2).
 
         ``connection`` defaults to the project's ``default_connection``.
         Raises :class:`canonic.exc.ReadOnlyViolation` (exit 11) for non-SELECT.
+
+        ``caller`` is the verified bearer-token client_id for MCP http-transport calls
+        (``None`` for stdio/CLI); recorded on the emitted answer event for per-user
+        attribution (AMENDMENT-remote-mcp-transport.md).
         """
+        started = time.perf_counter()
+        result: ResultSet | None = None
+        error_code: str | None = None
         connector = default_factory.for_id(self._config, connection)
         try:
-            return await cast(
+            result = await cast(
                 "SQLExecutable", require_capability(connector, Capability.RUN_READ_ONLY_SQL)
             ).run_read_only_sql(sql)
+            return result
+        except CanonicError as err:
+            error_code = err.code.value if err.code is not None else None
+            raise
         finally:
             await connector.aclose()
+            latency_ms = round((time.perf_counter() - started) * 1000)
+            self._emit_sql_event(sql, connection, result, latency_ms, error_code, caller)
 
     def search_knowledge(
         self,

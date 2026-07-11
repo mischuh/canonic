@@ -13,6 +13,7 @@ from canonic.config import CanonicConfig
 from canonic.contracts.models import CanonicalRef, MetricBinding, Status
 from canonic.contracts.resolver import ContractResolver
 from canonic.core.service import CanonicService  # noqa: TC001
+from canonic.mcp.auth import CanonicTokenVerifier
 from canonic.mcp.server import build_server
 from canonic.semantic.models import Column, Dimension, Join, Measure, Relationship, SemanticSource
 
@@ -81,6 +82,19 @@ def _ambiguous_service(monkeypatch: pytest.MonkeyPatch) -> CanonicService:
         }
     )
     return CanonicService(config=config, resolver=resolver, sources=[owner, hop_a, hop_b, dim])
+
+
+def test_build_server_defaults_to_no_auth(canonic_service: CanonicService) -> None:
+    """stdio transport builds with no auth layer (AMENDMENT-remote-mcp-transport)."""
+    mcp = build_server(canonic_service)
+    assert mcp.auth is None
+
+
+def test_build_server_wires_auth_verifier(canonic_service: CanonicService) -> None:
+    """http transport passes its resolved verifier straight through to FastMCP."""
+    verifier = CanonicTokenVerifier({"secret-token": "alice"})
+    mcp = build_server(canonic_service, auth=verifier)
+    assert mcp.auth is verifier
 
 
 @pytest.mark.asyncio
@@ -193,7 +207,7 @@ async def test_compile_query(canonic_service: CanonicService) -> None:
     assert "SELECT" in data["compiled"]["sql"].upper()
     assert data["metadata"]["resolved"]["metrics"]["revenue"] == "orders.total_revenue"
     assert any(g["id"] == "revenue-excludes-refunds" for g in data["metadata"]["guardrails_fired"])
-    assert data["metadata"]["contract_schema"] == "2.2"
+    assert data["metadata"]["contract_schema"] == "2.3"
     # S12: related block is always present
     assert "related" in data["metadata"]
     assert isinstance(data["metadata"]["related"]["unused_dimensions"], list)

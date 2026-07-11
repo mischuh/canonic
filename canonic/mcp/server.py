@@ -14,6 +14,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 from fastmcp import FastMCP
+from fastmcp.server.dependencies import get_access_token
 
 from canonic.compiler.query import SemanticQuery
 from canonic.contract import CONTRACT_SCHEMA
@@ -21,7 +22,21 @@ from canonic.core.models import CompileOutput
 from canonic.mcp.errors import canonic_error_response
 
 if TYPE_CHECKING:
+    from fastmcp.server.auth.auth import TokenVerifier
+
     from canonic.core.service import CanonicService
+
+
+def _caller_id() -> str | None:
+    """The verified client_id for the current request, or ``None`` under stdio.
+
+    ``stdio`` transport has no ``AccessToken`` (no auth layer); ``http`` transport
+    always has one once a request is authenticated (unauthenticated requests never
+    reach a tool body — FastMCP's auth middleware rejects them with 401 first).
+    """
+    token = get_access_token()
+    return token.client_id if token is not None else None
+
 
 __all__ = ["build_server"]
 
@@ -92,9 +107,16 @@ def _format_suggestions(related: dict[str, Any]) -> str | None:
     return " | ".join(parts)
 
 
-def build_server(service: CanonicService, *, suggestions: bool = False) -> FastMCP:
-    """Return a :class:`FastMCP` instance with all P0 tools registered against *service*."""
-    mcp: FastMCP = FastMCP("canonic", instructions=_INSTRUCTIONS)
+def build_server(
+    service: CanonicService, *, suggestions: bool = False, auth: TokenVerifier | None = None
+) -> FastMCP:
+    """Return a :class:`FastMCP` instance with all P0 tools registered against *service*.
+
+    ``auth`` is ``None`` for ``stdio`` transport (no auth layer). ``http`` transport
+    always passes a resolved :class:`~canonic.mcp.auth.CanonicTokenVerifier` — see
+    ``canonic.mcp.daemon.start_http``.
+    """
+    mcp: FastMCP = FastMCP("canonic", instructions=_INSTRUCTIONS, auth=auth)
 
     # ------------------------------------------------------------------
     # Tool: list_metrics
@@ -268,7 +290,7 @@ def build_server(service: CanonicService, *, suggestions: bool = False) -> FastM
     @canonic_error_response
     async def query(query: dict[str, Any]) -> dict[str, Any]:
         sq = SemanticQuery.model_validate(query)
-        result = await service.query(sq)
+        result = await service.query(sq, caller=_caller_id())
         response = result.model_dump(mode="json")
         if suggestions:
             s = _format_suggestions(response.get("metadata", {}).get("related", {}))
@@ -288,7 +310,7 @@ def build_server(service: CanonicService, *, suggestions: bool = False) -> FastM
     )
     @canonic_error_response
     async def run_sql(sql: str, connection: str | None = None) -> dict[str, Any]:
-        result = await service.run_sql(sql, connection=connection)
+        result = await service.run_sql(sql, connection=connection, caller=_caller_id())
         return result.model_dump(mode="json")
 
     # ------------------------------------------------------------------

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path  # noqa: TC003 — used in function return type (runtime)
-from typing import Annotated
+from typing import Annotated, Literal
 
 import typer
 from rich.console import Console
@@ -67,13 +67,26 @@ def start(
         Path | None,
         typer.Option("--project", "-p", help="Path to canonic project root (overrides cwd walk)."),
     ] = None,
-    http: Annotated[bool, typer.Option("--http", help="Start as background HTTP daemon.")] = False,
+    transport: Annotated[
+        Literal["stdio", "http"],
+        typer.Option("--transport", help="Transport: 'stdio' (default, local) or 'http' (remote)."),
+    ] = "stdio",
     port: Annotated[
         int, typer.Option("--port", help="Port for HTTP daemon (default 7474).")
     ] = 7474,
     host: Annotated[
         str, typer.Option("--host", help="Host for HTTP daemon (default 127.0.0.1).")
     ] = "127.0.0.1",
+    token_ref: Annotated[
+        str | None,
+        typer.Option(
+            "--token-ref",
+            help=(
+                "Bearer token reference (env:VAR) for --transport http, overriding/"
+                "supplementing mcp.auth.tokens in canonic.yaml."
+            ),
+        ),
+    ] = None,
     suggestions: Annotated[
         bool,
         typer.Option("--suggestions", help="Enable follow-up suggestions in query responses."),
@@ -81,15 +94,17 @@ def start(
 ) -> None:
     """Start the local MCP daemon.
 
-    Without ``--http``: runs in the foreground using stdio transport (the
-    MCP client manages the process lifetime). With ``--http``: forks a
-    background uvicorn daemon bound to the given host/port.
+    With ``--transport stdio`` (default): runs in the foreground (the MCP client
+    manages the process lifetime). With ``--transport http``: forks a background
+    uvicorn daemon bound to the given host/port; requires at least one bearer token
+    (``mcp.auth.tokens`` in canonic.yaml or ``--token-ref``) since the daemon becomes
+    network-reachable (AMENDMENT-remote-mcp-transport.md).
     """
     root = _resolve_root(ctx, project)
     json_output = get_cli_context(ctx).json_output
 
     try:
-        load_config(root / "canonic.yaml")
+        cfg = load_config(root / "canonic.yaml")
     except ConfigError as exc:
         msg = f"config error: {exc}"
         if json_output:
@@ -99,6 +114,8 @@ def start(
         raise typer.Exit(1) from exc
 
     from canonic.core.service import CanonicService
+    from canonic.exc import CredentialError
+    from canonic.mcp.auth import build_token_verifier
     from canonic.mcp.daemon import start_http, start_stdio
 
     try:
@@ -126,8 +143,28 @@ def start(
                 service = CanonicService.from_project(root)
 
     try:
-        if http:
-            start_http(service, root, host=host, port=port, suggestions=suggestions)
+        if transport == "http":
+            try:
+                auth = build_token_verifier(cfg.mcp.auth, extra_token_ref=token_ref)
+            except CredentialError as exc:
+                msg = f"could not resolve mcp auth token: {exc}"
+                if json_output:
+                    typer.echo(json.dumps({"error": msg}))
+                else:
+                    _console.print(f"[red]error:[/red] {msg}")
+                raise typer.Exit(1) from exc
+            if auth is None:
+                msg = (
+                    "http transport requires at least one bearer token — add "
+                    "mcp.auth.tokens to canonic.yaml or pass --token-ref"
+                )
+                if json_output:
+                    typer.echo(json.dumps({"error": msg}))
+                else:
+                    _console.print(f"[red]error:[/red] {msg}")
+                raise typer.Exit(1)
+
+            start_http(service, root, host=host, port=port, auth=auth, suggestions=suggestions)
             if json_output:
                 typer.echo(
                     json.dumps(
@@ -184,6 +221,7 @@ def status(ctx: typer.Context) -> None:
             "port": s.port,
             "started_at": s.started_at,
             "version_mismatch": s.version_mismatch,
+            "auth_enabled": s.auth_enabled,
         }
         typer.echo(json.dumps(payload))
         return
@@ -197,6 +235,7 @@ def status(ctx: typer.Context) -> None:
     _console.print(f"  transport: {s.transport}")
     if s.transport == "http":
         _console.print(f"  address:   {s.host}:{s.port}")
+        _console.print(f"  auth:      {'token-protected' if s.auth_enabled else 'none'}")
     _console.print(f"  version:   {s.version}")
     _console.print(f"  started:   {s.started_at}")
     if s.version_mismatch:
