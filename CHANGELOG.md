@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.6.0](https://github.com/mischuh/canonic/compare/v0.5.3...v0.6.0) (2026-07-12)
+
+
+### Features
+
+* **mcp:** add bearer-token auth for --transport http ([01f5cca](https://github.com/mischuh/canonic/commit/01f5cca56511679f6adda4b9260019d1977a3900))
+* **mcp:** add bearer-token auth for --transport http ([7b2376a](https://github.com/mischuh/canonic/commit/7b2376aee10f656c267c47192acb6c1a870a0acd))
+
+
+### Bug Fixes
+
+* clarify documentation for unimplemented features and update signal descriptions ([ba1fd23](https://github.com/mischuh/canonic/commit/ba1fd23002422dcf685067c67788422ac6b2b6ec))
+* update knowledge search command and tests for clarity and functionality ([ebd2180](https://github.com/mischuh/canonic/commit/ebd218068ca8f7d4bb113ff8f72e142f5bb59753))
+
 ## [0.5.3](https://github.com/mischuh/canonic/compare/v0.5.2...v0.5.3) (2026-07-10)
 
 
