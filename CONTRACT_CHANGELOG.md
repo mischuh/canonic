@@ -30,6 +30,14 @@ CI (`.github/workflows/contract-schema-guard.yml`,
 
 ## History
 
+## 2.3 (2026-07-11) - MINOR
+
+- ADR/PR: specs/AMENDMENT-remote-mcp-transport.md (feat(mcp): remote http transport with bearer-token auth)
+- Summary: Add `user` (verified bearer-token client_id) to `AnswerEvent`, populated
+  for MCP `http`-transport `query`/`run_sql` calls so per-user attribution flows into
+  the event log. Additive field, `None` for stdio/CLI callers; no existing consumer's
+  shape changes.
+
 ## 2.2 (2026-07-09) - MINOR
 
 - ADR/PR: bced9e6 (feat(instrumentation): add E16 Part 2 full instrumentation)

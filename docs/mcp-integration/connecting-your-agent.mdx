@@ -14,7 +14,7 @@ canonic mcp start
 canonic mcp status
 ```
 
-See [`canonic mcp`](/cli-reference/mcp) for the full flag reference, including `--http` for a background daemon on a fixed host/port.
+See [`canonic mcp`](/cli-reference/mcp) for the full flag reference, including `--transport http` for a background daemon on a fixed host/port.
 
 ## 2. Register canonic in your client's MCP config
 
@@ -48,19 +48,39 @@ Pin a version (`"args": ["canonic==0.5.1", "mcp", "start", ...]`) if you want re
 
 See your client's own docs for the exact config file location; Claude Code, Cursor, and Codex each load standard MCP configuration.
 
-If you started the daemon with `--http` (see [`canonic mcp`](/cli-reference/mcp)), point your client at the HTTP endpoint instead of spawning a process:
+If you started the daemon with `--transport http` (see [`canonic mcp`](/cli-reference/mcp)), point your client at the HTTP endpoint with the bearer token instead of spawning a process:
 
 ```json
 {
   "mcpServers": {
     "canonic": {
-      "url": "http://127.0.0.1:7474/mcp"
+      "url": "http://127.0.0.1:7474/mcp",
+      "headers": {
+        "Authorization": "Bearer your-token-here"
+      }
     }
   }
 }
 ```
 
-Adjust the host/port to match the `--host`/`--port` flags used to start the daemon.
+Adjust the host/port to match the `--host`/`--port` flags used to start the daemon. The token must match one resolved from `mcp.auth.tokens`/`--token-ref` on the daemon side — see the [remote/enterprise deployment](#remote-enterprise-deployment) section below.
+
+### Remote/enterprise deployment
+
+`--transport http` is meant for a daemon running centrally (e.g. in a data center) with clients connecting from local machines over the network, not just local loopback. Local binding is not a security boundary once the daemon is network-reachable, so `--transport http` refuses to start without at least one bearer token configured:
+
+```yaml
+# canonic.yaml
+mcp:
+  auth:
+    tokens:
+      - client_id: alice
+        token_ref: env:CANONIC_MCP_TOKEN_ALICE
+      - client_id: bob
+        token_ref: env:CANONIC_MCP_TOKEN_BOB
+```
+
+Each client authenticates with its own token (`Authorization: Bearer <token>`), and the resolved `client_id` is attributed on every `query`/`run_sql` answer event in `.canonic/events.jsonl` — so usage is traceable per user, not just per daemon instance. TLS termination is expected to happen at a reverse proxy/ingress in front of the daemon, not in the daemon itself.
 
 ### Environment variables for credentials
 

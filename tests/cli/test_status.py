@@ -50,7 +50,7 @@ def test_status_inside_project_prints_root_and_version(
     assert str(project_dir) in result.output
     assert "config version: 1" in result.output
     assert "absent" in result.output  # no .canonic/ yet
-    assert "2.2" in result.output  # contract_schema
+    assert "2.3" in result.output  # contract_schema
 
 
 def test_status_detects_dotcanonic(runner: CliRunner, project_dir: Path) -> None:
@@ -74,7 +74,7 @@ def test_status_json_inside_project(runner: CliRunner, project_dir: Path) -> Non
     assert payload["config_version"] == 1
     assert payload["dotcanonic_present"] is False
     assert payload["config_error"] is None
-    assert payload["contract_schema"] == "2.2"
+    assert payload["contract_schema"] == "2.3"
 
 
 def test_status_reports_invalid_config(runner: CliRunner, tmp_path: Path, monkeypatch) -> None:

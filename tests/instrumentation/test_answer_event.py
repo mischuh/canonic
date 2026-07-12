@@ -156,6 +156,72 @@ async def test_ac1_event_written_on_served_answer(
     assert ev["latency_ms"] >= 0
     assert ev["bytes_scanned"] == 10485760
     assert ev["error"] is None
+    assert ev["user"] is None
+
+
+# ---------------------------------------------------------------------------
+# Caller attribution (AMENDMENT-remote-mcp-transport.md) — the verified
+# bearer-token client_id flows into the emitted answer event.
+# ---------------------------------------------------------------------------
+
+
+async def test_query_caller_attributed_on_event(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    svc = _make_service(monkeypatch, tmp_path)
+
+    class _StubFactory:
+        def for_id(self, _cfg, _cid):
+            return _fake_connector()
+
+    monkeypatch.setattr("canonic.core.service.default_factory", _StubFactory())
+
+    q = SemanticQuery(metrics=["revenue"])
+    await svc.query(q, caller="alice")
+
+    events = _read_events(tmp_path)
+    assert events[0]["user"] == "alice"
+
+
+async def test_run_sql_emits_event_with_caller(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    svc = _make_service(monkeypatch, tmp_path)
+
+    class _StubFactory:
+        def for_id(self, _cfg, _cid):
+            return _fake_connector(bytes_scanned=2048)
+
+    monkeypatch.setattr("canonic.core.service.default_factory", _StubFactory())
+
+    await svc.run_sql("select 1", caller="bob")
+
+    events = _read_events(tmp_path)
+    assert len(events) == 1
+    ev = events[0]
+    assert ev["kind"] == "served_answer"
+    assert ev["user"] == "bob"
+    assert ev["query_hash"].startswith("sha256:")
+    assert ev["compiled_sql_hash"] is None
+    assert ev["bytes_scanned"] == 2048
+    assert ev["error"] is None
+
+
+async def test_run_sql_without_caller_leaves_user_none(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    svc = _make_service(monkeypatch, tmp_path)
+
+    class _StubFactory:
+        def for_id(self, _cfg, _cid):
+            return _fake_connector()
+
+    monkeypatch.setattr("canonic.core.service.default_factory", _StubFactory())
+
+    await svc.run_sql("select 1")
+
+    events = _read_events(tmp_path)
+    assert events[0]["user"] is None
 
 
 # ---------------------------------------------------------------------------

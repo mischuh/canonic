@@ -147,6 +147,18 @@
     "ts": {
       "title": "Ts",
       "type": "string"
+    },
+    "user": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "User"
     }
   },
   "required": [

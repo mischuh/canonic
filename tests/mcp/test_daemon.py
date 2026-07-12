@@ -7,7 +7,7 @@ from pathlib import Path  # noqa: TC003
 
 import pytest
 
-from canonic.mcp.daemon import DaemonState, _canonic_version, read_state, status, stop
+from canonic.mcp.daemon import DaemonState, _canonic_version, read_state, start_http, status, stop
 
 
 @pytest.fixture
@@ -16,7 +16,9 @@ def project_root(tmp_path: Path) -> Path:
     return tmp_path
 
 
-def _write_state_file(root: Path, pid: int, v: str, transport: str = "stdio") -> None:
+def _write_state_file(
+    root: Path, pid: int, v: str, transport: str = "stdio", auth_enabled: bool = False
+) -> None:
     state = DaemonState(
         pid=pid,
         version=v,
@@ -24,6 +26,7 @@ def _write_state_file(root: Path, pid: int, v: str, transport: str = "stdio") ->
         host=None,
         port=None,
         started_at="2026-01-01T00:00:00+00:00",
+        auth_enabled=auth_enabled,
     )
     (root / ".canonic" / "mcp.json").write_text(state.to_json())
 
@@ -72,6 +75,14 @@ class TestStatus:
         assert s.version_mismatch
         assert s.version == "0.0.0-old"
 
+    def test_auth_enabled_propagated(self, project_root: Path) -> None:
+        _write_state_file(
+            project_root, pid=os.getpid(), v=_canonic_version(), transport="http", auth_enabled=True
+        )
+        s = status(project_root)
+        assert s.running
+        assert s.auth_enabled is True
+
 
 class TestStop:
     def test_no_daemon(self, project_root: Path) -> None:
@@ -100,3 +111,17 @@ class TestStop:
         finally:
             if proc.poll() is None:
                 proc.kill()
+
+
+class TestStartHttpAuth:
+    """``start_http`` must fail closed when no auth verifier is supplied
+
+    (AMENDMENT-remote-mcp-transport.md — http transport is network-reachable, so an
+    unauthenticated daemon is exactly the gap the amendment closes).
+    """
+
+    def test_raises_without_auth(self, project_root: Path) -> None:
+        with pytest.raises(RuntimeError, match="bearer token"):
+            start_http(object(), project_root, auth=None)
+        # Fails before ever forking/writing state.
+        assert not (project_root / ".canonic" / "mcp.json").exists()

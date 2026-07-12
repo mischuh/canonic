@@ -65,6 +65,10 @@ class AnswerEvent(BaseModel):
     bytes_scanned: int | None = None
     error: str | None = None
     trust_score: str | None = None
+    # Verified caller identity (bearer-token client_id) for MCP http-transport calls;
+    # None for stdio transport and the CLI, which have no auth layer
+    # (AMENDMENT-remote-mcp-transport.md).
+    user: str | None = None
     # reserved — null until E13 lands (S3-AC1):
     cache_hit: bool | None = None
     over_limit_blocked: bool | None = None

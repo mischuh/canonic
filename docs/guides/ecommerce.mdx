@@ -126,16 +126,16 @@ canonic mcp start
 **HTTP daemon** (background process, multiple clients):
 
 ```bash
-canonic mcp start --http --port 7474
+canonic mcp start --transport http --port 7474 --token-ref env:CANONIC_MCP_TOKEN
 canonic mcp status
 canonic mcp stop
 ```
 
 ```json
-{ "mcpServers": { "canonic": { "transport": "streamable-http", "url": "http://127.0.0.1:7474/mcp" } } }
+{ "mcpServers": { "canonic": { "transport": "streamable-http", "url": "http://127.0.0.1:7474/mcp", "headers": { "Authorization": "Bearer your-token-here" } } } }
 ```
 
-The server uses FastMCP's Streamable HTTP transport at `/mcp` (SSE at `/sse` for clients that only support that). Only `--http` mode writes `.canonic/mcp.json`: in stdio mode the MCP client owns the process and no state file is created.
+The server uses FastMCP's Streamable HTTP transport at `/mcp` (SSE at `/sse` for clients that only support that). Only `--transport http` writes `.canonic/mcp.json`: in stdio mode the MCP client owns the process and no state file is created. `--transport http` is network-reachable, so it requires a bearer token — configure `mcp.auth.tokens` in `canonic.yaml` or pass `--token-ref`.
 
 ## Ingestion: keep semantics current
 

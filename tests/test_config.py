@@ -155,6 +155,44 @@ class TestLoadConfig:
         assert cfg.project.default_connection == "warehouse_pg"
 
 
+class TestMcpAuthConfig:
+    """``mcp.auth`` block (AMENDMENT-remote-mcp-transport.md)."""
+
+    def test_defaults_when_block_absent(self, tmp_path: Path) -> None:
+        cfg = load_config(_canonic_yaml(tmp_path, _VALID))
+        assert cfg.mcp.auth.tokens == []
+
+    def test_tokens_parsed(self, tmp_path: Path) -> None:
+        content = (
+            _VALID
+            + "mcp:\n"
+            + "  auth:\n"
+            + "    tokens:\n"
+            + "      - client_id: alice\n"
+            + "        token_ref: env:CANONIC_MCP_TOKEN_ALICE\n"
+            + "      - client_id: bob\n"
+            + "        token_ref: keyring:mcp-bob\n"
+        )
+        cfg = load_config(_canonic_yaml(tmp_path, content))
+        assert [(t.client_id, t.token_ref) for t in cfg.mcp.auth.tokens] == [
+            ("alice", "env:CANONIC_MCP_TOKEN_ALICE"),
+            ("bob", "keyring:mcp-bob"),
+        ]
+
+    def test_literal_token_ref_raises(self, tmp_path: Path) -> None:
+        content = (
+            _VALID
+            + "mcp:\n"
+            + "  auth:\n"
+            + "    tokens:\n"
+            + "      - client_id: alice\n"
+            + "        token_ref: not-a-reference\n"
+        )
+        with pytest.raises(ConfigError) as exc_info:
+            load_config(_canonic_yaml(tmp_path, content))
+        assert "token_ref" in str(exc_info.value)
+
+
 class TestLLMProviders:
     """Multi-provider ``llm.provider`` validation (SPEC-E10 §2)."""
 
