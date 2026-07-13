@@ -53,14 +53,18 @@ class KnowledgeSearch:
         pages: Iterable[KnowledgePage],
         *,
         embedder: Embedder | None = None,
+        vectors: VectorStore | None = None,
         entity_index: EntityIndex | None = None,
         rrf_k: int = _DEFAULT_RRF_K,
         weights: dict[MatchedOn, float] | None = None,
     ) -> None:
         """Build the index(es) over ``pages``.
 
-        The lexical arm is always built. The vector arm is built only when ``embedder``
-        is supplied — its absence is the §5.2 fallback switch. ``weights`` tunes each
+        The lexical arm is always built. The vector arm runs only when ``embedder`` is
+        supplied — its absence is the §5.2 fallback switch. If a caller already has a
+        ``VectorStore`` (e.g. from a persistent cache, SPEC-E6 §5.3), pass it as
+        ``vectors`` to skip rebuilding it from ``pages``; ``embedder`` is still required
+        in that case to embed the live query text at search time. ``weights`` tunes each
         arm's RRF contribution (default 1.0 each). When ``entity_index`` is supplied,
         returned pages whose ``meta.bound_fingerprints`` no longer match the live measure
         definition are flagged for prose review (§7); without it no drift is computed.
@@ -69,7 +73,13 @@ class KnowledgeSearch:
         self._by_doc_key: dict[str, KnowledgePage] = {_doc_key(p): p for p in self._pages}
         self._index = KnowledgeIndex.build(self._pages)
         self._embedder = embedder
-        self._vectors = VectorStore.build(self._pages, embedder) if embedder is not None else None
+        self._vectors: VectorStore | None
+        if vectors is not None:
+            self._vectors = vectors
+        elif embedder is not None:
+            self._vectors = VectorStore.build(self._pages, embedder)
+        else:
+            self._vectors = None
         self._entity_index = entity_index
         self._drift = DriftDetector()
         self._rrf_k = rrf_k

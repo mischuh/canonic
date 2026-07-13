@@ -7,13 +7,45 @@ description: "Search and author knowledge pages."
 
 ## `knowledge search`
 
-<Warning>
-  Not implemented yet; the command currently returns a `not implemented` notice and exits `0`. Hybrid search over knowledge + semantics is planned but not wired up in the CLI on `main` today.
-</Warning>
+Hybrid search over `knowledge/**/*.md` pages: a lexical (BM25, `tantivy`) arm that's always on, fused with an optional vector (cosine similarity) arm when the `canonic[embeddings]` add-on is installed. See [Knowledge](/concepts/knowledge-layer#retrieval) and [LLM & embeddings runtime](/concepts/llm-runtime#local-embeddings) for how the two arms combine and degrade.
 
 ```bash
 canonic knowledge search "active customer"
+canonic knowledge search "active customer" --user alice --limit 5
 ```
+
+| Argument / Flag | Description |
+| --- | --- |
+| `query` | Search text (positional). |
+| `--user` | Requesting user id; scopes results to `knowledge/global/` + that user's own `knowledge/user/<id>/` pages. |
+| `--limit` | Max hits to return (default `10`). |
+
+Each hit shows a human-readable match label, its RRF-fused `score`, which arm(s) matched (`via=lexical`, `via=vector`, or `via=lexical+vector`), and the page's `usage_mode`:
+
+```bash
+$ canonic knowledge search "active customer"
+active-customer-definition  match=strong  score=0.033  via=lexical+vector  usage=definition
+  The count of distinct customers with at least one non-cancelled rental.
+  sl_refs: warehouse_pg.customers
+```
+
+`match` (`strong` / `good` / `weak`) is computed by comparing each hit's `score` against the *top* hit's `score` in this same result set — it's a CLI-only presentation aid (not present in `--json`/MCP output) and, like the score itself, only meaningful relative to the other hits in this one search.
+
+`--json` output matches the MCP `search_knowledge` tool payload byte-for-byte.
+
+<Note>
+  Without the `embeddings` add-on installed, search runs lexical-only — never a failure, just a narrower match. When embeddings are available, page vectors are cached under `.canonic/knowledge-index/` and only re-embedded when a page's content actually changes, so repeated searches don't re-run the model over the whole knowledge base.
+</Note>
+
+### Reading `score`
+
+`score` is **not** a confidence percentage or a "how relevant is this, 0–100%" number — a `0.033` next to a hit is not "3.3% relevant." It's a Reciprocal Rank Fusion (RRF) score: each arm (lexical, vector) ranks the pages it matched, and a page's contribution from an arm is `1 / (60 + rank)`, where `60` is a fixed damping constant and `rank` is 0 for that arm's top hit, 1 for its second, and so on. A page matched by both arms sums both contributions.
+
+That makes the scale small and bounded on purpose:
+- Best possible score for a single-arm match (rank 0 in that arm): `1/60 ≈ 0.017`.
+- Best possible score for a hit both arms rank first: `2/60 ≈ 0.033`.
+
+So `score=0.033` is actually the *ceiling* — it means this hit was the top result in every arm that matched it, not a weak 3% match. What the number is for is **ordering results against each other in this one search**, not judging any single hit in isolation, and it isn't comparable across different queries or projects. See [Knowledge → Retrieval](/concepts/knowledge-layer#retrieval) for how the two arms combine.
 
 ## `knowledge add`
 

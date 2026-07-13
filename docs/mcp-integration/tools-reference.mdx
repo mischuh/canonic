@@ -79,6 +79,8 @@ Executes a read-only SQL `SELECT` on a named connection (or the project default)
 
 Searches the project's knowledge pages for business context: definitions, caveats, and policies. Returns ranked hits plus any caveats auto-surfaced because a hit references their bound semantic entity. Call this **before** answering any question about what a metric means or how it's calculated: this project's definitions may differ from textbook ones. Returns empty hits when the project has no knowledge pages.
 
+Each hit's `score` is a rank-fusion value (RRF), not a confidence or relevance percentage — use hit *order*, not the raw number, to judge how well a result matches. See [`canonic knowledge search`](/cli-reference/knowledge#reading-score) for the exact formula.
+
 ### `read_knowledge_page(page: str, user: str | None = None)`
 
 Retrieves the full content of a knowledge page by its id (page slug). Use after `search_knowledge()` to read the complete definition, caveat, or policy: the rendered body has live `{{ sl:entity.expr }}` definitions substituted, plus metadata, drift review flags, staleness warnings, and linked references.

@@ -34,5 +34,6 @@ contracts/metrics/              ← 9 metric contracts (rental-revenue, rental-c
                                    avg-rental-duration + 6 more)
 contracts/guardrails/           ← completed-rentals-only.yaml
 knowledge/global/               ← 5 definition/caveat pages
+knowledge/user/client_1/        ← 1 personal note (scoped to the client_1 MCP token)
 eval/grain_cases.jsonl          ← 8 labeled grain-inference cases (PK omitted)
 ```

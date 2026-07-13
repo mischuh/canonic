@@ -80,10 +80,27 @@ def project(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     return tmp_path
 
 
+class _UnavailableEmbeddingRuntime:
+    """Stub that reports the vector arm as unavailable, regardless of what's installed.
+
+    Search tests below assert lexical-only behavior; without this, they'd pass or fail
+    depending on whether ``sentence-transformers`` happens to be installed in whatever
+    environment runs the suite (e.g. a dev trying out embeddings locally) rather than
+    deterministically.
+    """
+
+    def __init__(self, config: object) -> None:
+        pass
+
+    def is_available(self) -> bool:
+        return False
+
+
 @pytest.fixture(autouse=True)
 def _no_real_fetch_or_llm(monkeypatch: pytest.MonkeyPatch) -> None:
     """Every test replaces the fetch adapter explicitly; default to an empty-doc no-op."""
     monkeypatch.setattr(knowledge_cmd, "make_extraction_skill", lambda *a, **k: _FakeSkill())
+    monkeypatch.setattr("canonic.runtime.embeddings.EmbeddingRuntime", _UnavailableEmbeddingRuntime)
 
 
 def _stub_adapter(monkeypatch: pytest.MonkeyPatch, docs: list[RawDoc]) -> None:

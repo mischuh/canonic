@@ -164,7 +164,7 @@ canonic query --metrics revenue --filter "status=paid"
 
 For a query with more filters or joins than is comfortable inline, write a `SemanticQuery` JSON file and pass it with `-f` instead — see [`canonic query`](https://docs.getcanonic.app/cli-reference/query-sql-assert) for the full flag reference.
 
-> `canonic knowledge search` is not implemented yet (returns a "not implemented" notice); see [CLI reference: knowledge](https://docs.getcanonic.app/cli-reference/knowledge) for its current status. `canonic knowledge add <url>` (fetch-and-write a page) works today.
+> `canonic knowledge search "<question>"` runs hybrid search over `knowledge/**/*.md`: lexical (BM25) always, plus a vector arm when the optional `canonic[embeddings]` add-on is installed — see [CLI reference: knowledge](https://docs.getcanonic.app/cli-reference/knowledge). `canonic knowledge add <url>` (fetch-and-write a page) works today too.
 
 Review what canonic drafted when you're ready — it's all an ordinary git diff:
 ```bash

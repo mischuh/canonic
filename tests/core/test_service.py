@@ -2,15 +2,28 @@
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 import pytest
 
 from canonic.compiler.query import SemanticQuery
 from canonic.config import CanonicConfig
-from canonic.contracts.models import CanonicalRef, Example, ExampleQuery, MetricBinding, Status
+from canonic.contracts.models import (
+    CanonicalRef,
+    Example,
+    ExampleQuery,
+    Guardrail,
+    MetricBinding,
+    Status,
+)
 from canonic.contracts.resolver import ContractResolver
 from canonic.core.models import DimensionInfo, MetricDetail, MetricSummary, OverviewResult
 from canonic.core.service import CanonicService
 from canonic.exc import Ambiguous, Unresolved
+from canonic.knowledge.results import MatchedOn
+
+if TYPE_CHECKING:
+    from canonic.semantic.models import SemanticSource
 
 
 class TestListMetrics:
@@ -332,3 +345,104 @@ class TestCompileQuery:
         q = SemanticQuery(metrics=["unknown"])
         with pytest.raises(exc.Unresolved):
             canonic_service.compile_query(q)
+
+
+class TestSearchKnowledge:
+    """search_knowledge's embedder/cache wiring (SPEC-E6 §5.1-§5.3)."""
+
+    @pytest.fixture
+    def service_with_pages(
+        self,
+        tmp_path,
+        revenue_binding: MetricBinding,
+        refund_guardrail: Guardrail,
+        orders_source: SemanticSource,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> CanonicService:
+        """A CanonicService rooted at tmp_path with two knowledge pages on disk."""
+        monkeypatch.setenv("PG_PASSWORD", "testpassword")
+        resolver = ContractResolver(bindings=[revenue_binding], guardrails=[refund_guardrail])
+        config = CanonicConfig.model_validate(
+            {
+                "version": 1,
+                "project": {"name": "test", "default_connection": "warehouse_pg"},
+                "connections": [
+                    {
+                        "id": "warehouse_pg",
+                        "type": "postgres",
+                        "params": {
+                            "host": "localhost",
+                            "port": 5432,
+                            "dbname": "testdb",
+                            "user": "test",
+                        },
+                        "credentials_ref": "env:PG_PASSWORD",
+                    }
+                ],
+                "llm": {
+                    "provider": "openai_compatible",
+                    "base_url": "http://localhost/v1",
+                    "model": "llama3",
+                },
+            }
+        )
+        knowledge_dir = tmp_path / "knowledge" / "global"
+        knowledge_dir.mkdir(parents=True)
+        (knowledge_dir / "revenue-definition.md").write_text(
+            '---\nsummary: "What revenue means."\nusage_mode: definition\n---\n\n'
+            "Revenue is recognized when the rental agreement closes.\n"
+        )
+        (knowledge_dir / "damage-policy.md").write_text(
+            '---\nsummary: "How damage claims are handled."\nusage_mode: policy\n---\n\n'
+            "Damage claims are reviewed by the branch manager.\n"
+        )
+        return CanonicService(
+            config=config, resolver=resolver, sources=[orders_source], project_root=tmp_path
+        )
+
+    def test_lexical_only_when_no_embedder_available(
+        self, service_with_pages: CanonicService, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # Force unavailability explicitly rather than relying on sentence-transformers
+        # happening to be absent from the test-running environment — the optional add-on
+        # may well be installed locally (e.g. a dev trying out embeddings), and this test
+        # must still deterministically exercise the "unavailable" path (SPEC-E6 §5.2).
+        class _UnavailableEmbeddingRuntime:
+            def __init__(self, config: object) -> None:
+                pass
+
+            def is_available(self) -> bool:
+                return False
+
+        monkeypatch.setattr(
+            "canonic.runtime.embeddings.EmbeddingRuntime", _UnavailableEmbeddingRuntime
+        )
+
+        result = service_with_pages.search_knowledge("revenue", user="alice")
+        assert result.hits
+        assert all(h.matched_on == [MatchedOn.LEXICAL] for h in result.hits)
+
+    def test_vector_arm_used_when_embedder_available(
+        self, service_with_pages: CanonicService, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        import numpy as np
+
+        class _FakeEmbeddingRuntime:
+            def __init__(self, config: object) -> None:
+                pass
+
+            def is_available(self) -> bool:
+                return True
+
+            def embed(self, texts):
+                return np.array(
+                    [[1.0 if "revenue" in t.lower() else 0.0] for t in texts], dtype=np.float32
+                )
+
+            def model_identity(self) -> str:
+                return "fake-embedder@v1"
+
+        monkeypatch.setattr("canonic.runtime.embeddings.EmbeddingRuntime", _FakeEmbeddingRuntime)
+
+        result = service_with_pages.search_knowledge("revenue", user="alice")
+        assert any(MatchedOn.VECTOR in h.matched_on for h in result.hits)

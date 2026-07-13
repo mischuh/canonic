@@ -94,14 +94,32 @@ def search(
     _render_search(result)
 
 
+def _match_label(score: float, max_score: float) -> str:
+    """Human-readable match strength, relative to the strongest hit in this result set.
+
+    The RRF ``score`` isn't a confidence percentage and isn't comparable across queries
+    (see the CLI docs), so this buckets each hit against the *best* hit returned for this
+    search rather than against a fixed absolute threshold.
+    """
+    ratio = score / max_score if max_score > 0 else 0.0
+    if ratio >= 0.75:
+        return "strong"
+    if ratio >= 0.4:
+        return "good"
+    return "weak"
+
+
 def _render_search(result: SearchResult) -> None:
     """Render ranked hits plus any auto-surfaced caveats as human-readable text."""
     if not result.hits:
         _console.print("[yellow]no hits[/yellow]")
+    max_score = result.hits[0].score if result.hits else 0.0
     for h in result.hits:
         arms = "+".join(m.value for m in h.matched_on)
+        label = _match_label(h.score, max_score)
         _console.print(
-            f"[bold]{h.page}[/bold]  score={h.score:.3f}  via={arms}  usage={h.usage_mode.value}"
+            f"[bold]{h.page}[/bold]  match={label}  score={h.score:.3f}  via={arms}  "
+            f"usage={h.usage_mode.value}"
         )
         _console.print(f"  {h.summary}")
         if h.sl_refs:

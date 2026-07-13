@@ -41,6 +41,16 @@ def _load_backend(model_name: str) -> tuple[Any, str]:
     """
     import sentence_transformers  # type: ignore[import-not-found]  # optional add-on, no stubs
 
+    # huggingface_hub is always installed (a transitive dependency of litellm's
+    # tokenizers, not of the optional embeddings extra), so no import-not-found guard is
+    # needed here — only its logging helper lacks type stubs.
+    from huggingface_hub.utils import logging as hf_logging
+
+    # The Hub nags about unauthenticated requests (a rate-limit notice, not an error) on
+    # every download — canonic's local-embeddings path needs no HF account, and this
+    # shouldn't leak into otherwise clean CLI/agent output. Real failures still raise.
+    hf_logging.set_verbosity_error()  # type: ignore[no-untyped-call]
+
     model = sentence_transformers.SentenceTransformer(model_name)
     return model, sentence_transformers.__version__
 
@@ -105,5 +115,12 @@ class EmbeddingRuntime:
                 f"embedding backend unavailable for model {self._config.model!r}: "
                 f"{self._unavailable_reason}"
             )
-        dim = self._model.get_sentence_embedding_dimension()
+        # `get_sentence_embedding_dimension` was renamed to `get_embedding_dimension` in a
+        # later sentence-transformers release (FutureWarning on the old name); the pinned
+        # minimum (>=3.0) may not have the new one yet, so prefer it only when present.
+        dim = (
+            self._model.get_embedding_dimension()
+            if hasattr(self._model, "get_embedding_dimension")
+            else self._model.get_sentence_embedding_dimension()
+        )
         return f"sentence-transformers/{self._config.model}@dim={dim}@stv={self._st_version}"

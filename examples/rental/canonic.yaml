@@ -16,6 +16,12 @@ llm:
   model: gemma-4-e2b-it-4bit
   api_key_ref: env:CANONIC_LLM_API_KEY
 
+mcp:
+  auth:
+    tokens:
+      - client_id: client_1
+        token_ref: env:CANONIC_MCP_TOKEN
+
 embeddings:
   model: all-MiniLM-L6-v2
 
