@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.7.0](https://github.com/mischuh/canonic/compare/v0.6.0...v0.7.0) (2026-07-13)
+
+
+### Features
+
+* **embeddings:** Wire embeddings into knowledge search with a persis… ([cc3eb17](https://github.com/mischuh/canonic/commit/cc3eb175453a3d4a4a164fc57da04cd2638fcc84))
+* **embeddings:** wire embeddings into knowledge search with a persistent vector cache ([50bf994](https://github.com/mischuh/canonic/commit/50bf994c5fd8e3700b9fd06caa3488e40d49d484))
+
+
+### Bug Fixes
+
+* **embeddings:** resolve mypy errors from huggingface_hub logging suppression ([600de34](https://github.com/mischuh/canonic/commit/600de34eb46d5c67b6271630a442cafbbb00fd12))
+
 ## [0.6.0](https://github.com/mischuh/canonic/compare/v0.5.3...v0.6.0) (2026-07-12)
 
 
