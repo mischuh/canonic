@@ -53,6 +53,10 @@ Search fuses two arms via Reciprocal Rank Fusion:
 
 When embeddings aren't installed, search runs lexical-only and degrades gracefully rather than failing: the same query returns sensible, if less semantically fuzzy, hits. Result ordering is deterministic: the lexical arm and tie-breaking (by page id) never vary run to run.
 
+Each hit's `score` is the RRF-fused value, not a relevance percentage — see [`canonic knowledge search`](/cli-reference/knowledge#reading-score) for how to read it.
+
+Page vectors are cached under `.canonic/knowledge-index/`, keyed by a content fingerprint per page: a search only re-embeds pages whose `summary`/`body` changed since the last run, not the whole knowledge base every time. A model swap is detected the same way (via the embedder's identity fingerprint) and triggers a full rebuild rather than mixing vectors from two models.
+
 ## Graph traversal
 
 After a search returns seed hits, an agent can pull connected context by **traversing the reference graph without re-searching**: from each seed, `sl_refs` / `refs` / `[[links]]` are followed breadth-first up to a bounded depth, deduped, and returned as one connected subgraph: the pages reached plus the live semantic entities they bind. This is what lets one hit on "active customer" surface its bound caveats, the policy page it links to, and the semantic source it describes, in a single round trip.

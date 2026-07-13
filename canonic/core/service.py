@@ -16,7 +16,7 @@ from canonic.compiler import SemanticQuery, compile
 from canonic.compiler.dialect import adapter_for
 from canonic.compiler.joins import build_alias_tree, reachable_dimension_names
 from canonic.compiler.result import TrustInput
-from canonic.config import CanonicConfig, Connection, load_config
+from canonic.config import LOCAL_STATE_DIR, CanonicConfig, Connection, load_config
 from canonic.connectors.base import Capability, require_capability
 from canonic.connectors.factory import default_factory
 from canonic.contract import CONTRACT_SCHEMA
@@ -50,6 +50,7 @@ if TYPE_CHECKING:
     from canonic.connectors.base import ResultSet, SQLExecutable
     from canonic.contracts.assertions import AccuracyReport, AssertionOutcome
     from canonic.contracts.models import Assertion
+    from canonic.knowledge.embeddings import Embedder
     from canonic.knowledge.results import SearchResult
     from canonic.semantic.models import Dimension as _Dimension
     from canonic.semantic.models import SemanticSource
@@ -161,6 +162,11 @@ class CanonicService:
         self._connection_dialects: dict[str, str] = {
             c.id: _dialect_for_type(c.type) for c in config.connections
         }
+        # Lazily constructed on first knowledge search and memoized: loading the embedding
+        # backend can be slow, so it happens at most once per service instance, not once
+        # per search call (SPEC-E10 §5, SPEC-E6 §5.2).
+        self._embedder: Embedder | None = None
+        self._embedder_checked = False
 
     @classmethod
     def from_project(cls, root: Path) -> CanonicService:
@@ -799,9 +805,30 @@ class CanonicService:
         # Live entity index so a returned page whose bound measure definition drifted is
         # flagged for prose review (§7).
         entity_index = EntityIndex.from_sources(self._sources)
-        return KnowledgeSearch(pages, entity_index=entity_index).search(
-            query, requesting_user=user or "anonymous", limit=limit
-        )
+        embedder = self._get_embedder()
+        vectors = None
+        if embedder is not None:
+            from canonic.knowledge.vector_cache import VectorIndexCache
+
+            cache_path = self._project_root / LOCAL_STATE_DIR / "knowledge-index" / "vectors.json"
+            vectors = VectorIndexCache(cache_path).load_or_build(pages, embedder)
+        return KnowledgeSearch(
+            pages, embedder=embedder, vectors=vectors, entity_index=entity_index
+        ).search(query, requesting_user=user or "anonymous", limit=limit)
+
+    def _get_embedder(self) -> Embedder | None:
+        """Return the memoized embedding runtime, or ``None`` when unavailable (§5.2).
+
+        Constructed at most once per service instance — loading the local embedding
+        backend can be slow, so repeated searches must not reload it (SPEC-E10 §5).
+        """
+        if not self._embedder_checked:
+            from canonic.runtime.embeddings import EmbeddingRuntime
+
+            runtime = EmbeddingRuntime(self._config.embeddings)
+            self._embedder = runtime if runtime.is_available() else None
+            self._embedder_checked = True
+        return self._embedder
 
     def read_knowledge_page(self, page: str, *, user: str | None = None) -> dict[str, Any]:
         """Retrieve the full content of a knowledge page by page id with live rendering (E6, P1).
