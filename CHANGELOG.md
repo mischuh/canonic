@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.7.1](https://github.com/mischuh/canonic/compare/v0.7.0...v0.7.1) (2026-07-14)
+
+
+### Bug Fixes
+
+* **docker:** add QEMU setup step and specify platforms for Docker build ([7690baa](https://github.com/mischuh/canonic/commit/7690baab3f3b7441bd28ad078288889d46b98c81))
+* **docker:** add QEMU setup step and specify platforms for Docker build ([4c70af7](https://github.com/mischuh/canonic/commit/4c70af740774942318974b0fc066450dbead70d8))
+
 ## [0.7.0](https://github.com/mischuh/canonic/compare/v0.6.0...v0.7.0) (2026-07-13)
 
 
