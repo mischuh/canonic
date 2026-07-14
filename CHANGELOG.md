@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.7.3](https://github.com/mischuh/canonic/compare/v0.7.2...v0.7.3) (2026-07-14)
+
+
+### Documentation
+
+* fix docs review findings and back the intro example with real output ([#216](https://github.com/mischuh/canonic/issues/216)) ([5821097](https://github.com/mischuh/canonic/commit/582109767940594f2674bac38f6ffe2de8c7542d))
+
 ## [0.7.2](https://github.com/mischuh/canonic/compare/v0.7.1...v0.7.2) (2026-07-14)
 
 
