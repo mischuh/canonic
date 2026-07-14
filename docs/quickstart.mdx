@@ -34,17 +34,6 @@ See the [Rental guide](/guides/rental) for the full walkthrough behind this reco
   </Tab>
 </Tabs>
 
-<Warning>
-  If your source needs a password (Postgres) or your LLM provider needs an API key, set the corresponding environment variable **before** running `canonic setup`: canonic never stores secrets in `canonic.yaml` directly, only a `credentials_ref` like `env:WAREHOUSE_PASSWORD` pointing at it:
-
-  ```bash
-  export WAREHOUSE_PASSWORD=...      # for a Postgres/Redshift connection
-  export ANTHROPIC_API_KEY=...       # or OPENAI_API_KEY / CANONIC_LLM_API_KEY, if configuring an LLM
-  ```
-
-  See [Configuring an LLM](/configuring-an-llm) and [`canonic connection`](/cli-reference/connection) for the full credential reference formats (`env:`, `keyring:`, `file:`).
-</Warning>
-
 ## What the wizard does
 
 <Steps>
@@ -65,6 +54,17 @@ See the [Rental guide](/guides/rental) for the full walkthrough behind this reco
   </Step>
 </Steps>
 
+<Warning>
+  Connecting to Postgres, or configuring an LLM provider, needs a credential. Set the corresponding environment variable **before** running `canonic setup`: canonic never stores secrets in `canonic.yaml` directly, only a `credentials_ref` like `env:WAREHOUSE_PASSWORD` pointing at it:
+
+  ```bash
+  export WAREHOUSE_PASSWORD=...      # for a Postgres/Redshift connection
+  export ANTHROPIC_API_KEY=...       # or OPENAI_API_KEY / CANONIC_LLM_API_KEY, if configuring an LLM
+  ```
+
+  See [Configuring an LLM](/configuring-an-llm) and [`canonic connection`](/cli-reference/connection) for the full credential reference formats (`env:`, `keyring:`, `file:`).
+</Warning>
+
 ## Ask your own questions
 
 You now have a working context layer committed to your repo:
@@ -74,11 +74,9 @@ canonic query --metrics revenue --dimensions order_date
 canonic query --metrics revenue --filter "status=paid"
 ```
 
-For a query with more filters or joins than is comfortable inline, write a `SemanticQuery` JSON file and pass it with `-f` instead; see [`canonic query`](/cli-reference/query-sql-assert) for the full flag reference.
+Using your own data instead of a guide? Replace `revenue` with a metric that actually exists in your project; run `canonic status` to see what's available.
 
-<Note>
-  `canonic knowledge search "<question>"` runs hybrid search over `knowledge/**/*.md` — lexical (BM25) always, plus a vector arm when the optional `embeddings` extra is installed; see [CLI Reference: knowledge](/cli-reference/knowledge).
-</Note>
+For a query with more filters or joins than is comfortable inline, write a `SemanticQuery` JSON file and pass it with `-f` instead; see [`canonic query`](/cli-reference/query-sql-assert) for the full flag reference.
 
 ## Review what canonic drafted
 
