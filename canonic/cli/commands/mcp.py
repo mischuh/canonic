@@ -91,14 +91,23 @@ def start(
         bool,
         typer.Option("--suggestions", help="Enable follow-up suggestions in query responses."),
     ] = False,
+    child: Annotated[
+        bool,
+        typer.Option(
+            "--_child",
+            hidden=True,
+            help="Internal: marks the already-detached http daemon process spawned by "
+            "canonic.mcp.daemon.start_http. Do not pass this by hand.",
+        ),
+    ] = False,
 ) -> None:
     """Start the local MCP daemon.
 
     With ``--transport stdio`` (default): runs in the foreground (the MCP client
-    manages the process lifetime). With ``--transport http``: forks a background
-    uvicorn daemon bound to the given host/port; requires at least one bearer token
-    (``mcp.auth.tokens`` in canonic.yaml or ``--token-ref``) since the daemon becomes
-    network-reachable (AMENDMENT-remote-mcp-transport.md).
+    manages the process lifetime). With ``--transport http``: spawns a detached
+    background uvicorn daemon bound to the given host/port; requires at least one
+    bearer token (``mcp.auth.tokens`` in canonic.yaml or ``--token-ref``) since the
+    daemon becomes network-reachable (AMENDMENT-remote-mcp-transport.md).
     """
     root = _resolve_root(ctx, project)
     json_output = get_cli_context(ctx).json_output
@@ -164,7 +173,23 @@ def start(
                     _console.print(f"[red]error:[/red] {msg}")
                 raise typer.Exit(1)
 
-            start_http(service, root, host=host, port=port, auth=auth, suggestions=suggestions)
+            if child:
+                # Already the detached process spawned by start_http (via `--_child`):
+                # run in the foreground, don't spawn yet another child.
+                from canonic.mcp.daemon import serve_http_foreground
+
+                serve_http_foreground(service, root, host, port, auth=auth, suggestions=suggestions)
+                return
+
+            start_http(
+                service,
+                root,
+                host=host,
+                port=port,
+                auth=auth,
+                suggestions=suggestions,
+                token_ref=token_ref,
+            )
             if json_output:
                 typer.echo(
                     json.dumps(

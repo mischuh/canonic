@@ -4,10 +4,21 @@ State is written to ``.canonic/mcp.json`` in the project root. Two transports:
 
 - **stdio** (default) — the server runs in the foreground; the MCP client manages
   the process lifetime (``canonic mcp start`` blocks until the client disconnects).
-- **http** — a uvicorn-backed HTTP daemon is forked into the background; the PID
+- **http** — a uvicorn-backed HTTP daemon runs detached in the background; the PID
   file tracks the process so ``canonic mcp stop/status`` work. Network-reachable, so
   it requires a bearer-token verifier (AMENDMENT-remote-mcp-transport.md) — ``stdio``
   needs none.
+
+The background daemon is spawned via ``subprocess.Popen`` (fork+exec into a fresh
+``python -m canonic`` process), not a bare ``os.fork()``. Forking a multi-threaded
+interpreter and continuing to run Python in the child without an intervening ``exec()``
+is unsafe on macOS: system frameworks the child later touches (DNS resolution via
+Network.framework, TLS, ``os_log``-backed logging) may hold locks that belonged to
+threads which no longer exist post-fork, so any later call into them from the child
+can deadlock or crash with SIGSEGV — this is exactly what produced crash reports where
+a background asyncio thread died inside ``getaddrinfo`` with "crashed on child side of
+fork pre-exec". ``exec()`` replaces the process image and discards that stale state
+before any unsafe code runs, so re-launching via subprocess avoids the hazard entirely.
 
 Version compatibility: the running Canonic package version is stamped in the state
 file so a mismatch is surfaced immediately (SPEC §4.2 AC2).
@@ -19,6 +30,7 @@ import contextlib
 import json
 import os
 import signal
+import subprocess
 import sys
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
@@ -33,6 +45,7 @@ __all__ = [
     "DaemonState",
     "DaemonStatus",
     "read_state",
+    "serve_http_foreground",
     "start_http",
     "start_stdio",
     "status",
@@ -196,18 +209,25 @@ def start_http(
     *,
     auth: CanonicTokenVerifier | None,
     suggestions: bool = False,
+    token_ref: str | None = None,
 ) -> None:
-    """Fork a uvicorn HTTP daemon in the background and write the state file.
+    """Spawn a detached uvicorn HTTP daemon in the background and write the state file.
 
-    The parent process returns immediately; the child runs ``mcp.run_http_async``.
-    ``canonic mcp stop`` sends SIGTERM to the child via the recorded PID.
+    Re-launches ``python -m canonic mcp start ... --_child`` via ``subprocess.Popen``
+    (fork+exec) rather than calling ``os.fork()`` directly — see the module docstring
+    for why a bare fork-without-exec is unsafe here. The relaunched process rebuilds
+    its own ``CanonicService``/auth verifier from ``project_root``/``token_ref``, since
+    a fresh process cannot inherit live Python objects across ``exec()``.
+
+    ``canonic mcp stop`` sends SIGTERM to the daemon via the recorded PID.
 
     ``auth`` is required (not optional): ``http`` transport is network-reachable once
     bound, so an unauthenticated daemon would be exactly the gap
     AMENDMENT-remote-mcp-transport.md closes. Callers must resolve a token verifier
     (``canonic.mcp.auth.build_token_verifier``) before calling this function and raise
     their own user-facing error when none resolves — this function raises generically
-    for any caller that skips that step.
+    for any caller that skips that step. ``token_ref`` is passed through unchanged so
+    the relaunched child can resolve the same verifier itself.
     """
     if auth is None:
         raise RuntimeError(
@@ -226,40 +246,74 @@ def start_http(
     log_path = project_root / ".canonic" / "mcp.log"
     log_path.parent.mkdir(parents=True, exist_ok=True)
 
-    pid = os.fork()
-    if pid != 0:
-        # Parent: record state and return.  The child may still be starting up;
-        # give it a moment and confirm it is still alive before reporting success.
-        import time
+    cmd = [
+        sys.executable,
+        "-m",
+        "canonic",
+        "mcp",
+        "start",
+        "--transport",
+        "http",
+        "--project",
+        str(project_root),
+        "--host",
+        host,
+        "--port",
+        str(port),
+        "--_child",
+    ]
+    if token_ref is not None:
+        cmd += ["--token-ref", token_ref]
+    if suggestions:
+        cmd.append("--suggestions")
 
-        time.sleep(0.2)
-        if not _pid_alive(pid):
-            hint = f"check {log_path} for details"
-            raise RuntimeError(f"MCP daemon exited immediately after fork — {hint}")
-
-        state = DaemonState(
-            pid=pid,
-            version=_canonic_version(),
-            transport="http",
-            host=host,
-            port=port,
-            started_at=datetime.now(UTC).isoformat(),
-            auth_enabled=True,
+    with open(log_path, "ab") as log_fh:
+        proc = subprocess.Popen(  # noqa: S603 — fixed argv, no shell, no user-controlled parts
+            cmd,
+            stdin=subprocess.DEVNULL,
+            stdout=log_fh,
+            stderr=log_fh,
+            start_new_session=True,
+            close_fds=True,
         )
-        _write_state(project_root, state)
-        return
 
-    # Child: detach from the terminal and run the server.
-    # stdin → /dev/null; stdout+stderr → .canonic/mcp.log so crashes are diagnosable.
-    os.setsid()
-    _null_r = os.open(os.devnull, os.O_RDONLY)
-    _log_w = os.open(log_path, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o644)
-    os.dup2(_null_r, 0)
-    os.dup2(_log_w, 1)
-    os.dup2(_log_w, 2)
-    os.close(_null_r)
-    os.close(_log_w)
+    # The child may still be starting up; give it a moment and confirm it is still
+    # alive before reporting success.
+    import time
 
+    time.sleep(0.2)
+    if proc.poll() is not None:
+        hint = f"check {log_path} for details"
+        raise RuntimeError(f"MCP daemon exited immediately after starting — {hint}")
+
+    state = DaemonState(
+        pid=proc.pid,
+        version=_canonic_version(),
+        transport="http",
+        host=host,
+        port=port,
+        started_at=datetime.now(UTC).isoformat(),
+        auth_enabled=True,
+    )
+    _write_state(project_root, state)
+
+
+def serve_http_foreground(
+    service: object,
+    project_root: Path,
+    host: str,
+    port: int,
+    *,
+    auth: CanonicTokenVerifier,
+    suggestions: bool = False,
+) -> None:
+    """Run the uvicorn HTTP daemon in the current process (blocks until stopped).
+
+    Only meant to be called from the detached child process spawned by ``start_http``
+    (``canonic mcp start --transport http --_child``) — that process was created via
+    ``exec()``, not ``os.fork()``, so it is safe here to touch DNS/TLS/logging from any
+    thread. Do not call this directly from a long-lived multi-threaded process.
+    """
     from canonic.config import load_config
     from canonic.log import _effective_log_params, configure_logging
     from canonic.mcp.server import build_server
@@ -279,7 +333,6 @@ def start_http(
     # stateless_http=True: no session IDs are issued or expected, so restarting the
     # daemon never leaves MCP clients stuck with a stale session ID that returns 404.
     asyncio.run(mcp.run_http_async(host=host, port=port, show_banner=False, stateless_http=True))
-    sys.exit(0)
 
 
 def _check_version_on_start(project_root: Path) -> None:
