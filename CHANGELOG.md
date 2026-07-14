@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.7.2](https://github.com/mischuh/canonic/compare/v0.7.1...v0.7.2) (2026-07-14)
+
+
+### Bug Fixes
+
+* **mcp:** spawn http daemon via fork+exec instead of bare os.fork() ([#214](https://github.com/mischuh/canonic/issues/214)) ([c37abbf](https://github.com/mischuh/canonic/commit/c37abbf19867644f5b6a57a6b0a3caaca9a097f6))
+
 ## [0.7.1](https://github.com/mischuh/canonic/compare/v0.7.0...v0.7.1) (2026-07-14)
 
 
