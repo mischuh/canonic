@@ -5,10 +5,6 @@ description: "The context layer that lets AI agents query your data correctly."
 
 Point canonic at your database and it builds the context an agent needs to answer data questions accurately: definitions, relationships, business meaning, and the guardrails that stop confidently-wrong answers. It keeps that context up to date as your data changes, and it never touches your warehouse beyond reading it.
 
-<Note>
-  Package and image names shown throughout these docs illustrate the shape of each install channel; exact names are confirmed per release.
-</Note>
-
 ## The problem
 
 An AI agent connected straight to your warehouse sees **tables and columns**, not **meaning**. It doesn't know that `revenue` lives in `orders.amount` but excludes refunds, that "active customer" has a specific definition your finance team agreed on, or that summing a daily balance across a week is nonsense. So it guesses. A confidently-wrong answer is the worst kind of wrong: a confident, well-formatted, *incorrect* number that looks right.
@@ -17,27 +13,37 @@ Schema access makes an agent *fluent*. It doesn't make it *correct*.
 
 ## Why you need a context layer
 
-**❌ Without Canonic (the guess):**
-```
-Agent query: SELECT SUM(amount) FROM orders;
-Result: $1,450,320
+Real output, captured from a live run against the [ecommerce example](https://github.com/mischuh/canonic/tree/main/examples/ecommerce), not hand-written:
 
-The problem: The sum includes refunded orders and sales tax, making the 
-number wrong by 12%. The agent delivers a confident, well-formatted, 
-and completely incorrect metric.
+**❌ Without canonic (the guess):**
+```bash
+$ canonic sql "SELECT SUM(amount) FROM fct_orders"
+┏━━━━━━━━━┓
+┃ sum     ┃
+┡━━━━━━━━━┩
+│ 4050.50 │
+└─────────┘
+```
+The problem: this total includes two refunded orders ($260). Refunds are reversals, not revenue — a confident, well-formatted number that's off by 6.4%.
+
+**✅ With canonic (the truth):**
+```bash
+$ canonic --json query --metrics revenue
+```
+```json
+{
+  "result": { "rows": [["3790.50"]] },
+  "compiled": {
+    "sql": "SELECT SUM(\"orders\".\"amount\") AS \"total_revenue\" FROM \"fct_orders\" AS \"orders\" WHERE \"orders\".\"status\" <> 'refunded'"
+  },
+  "metadata": {
+    "resolved": { "metrics": { "revenue": "orders.total_revenue" } },
+    "guardrails_fired": [{ "id": "revenue-excludes-refunds", "kind": "mandatory_filter" }]
+  }
+}
 ```
 
-**✅ With Canonic (the truth):**
-```
-Agent request: "Give me revenue"
-Canonic compiles: SELECT SUM(amount) FROM orders 
-                  WHERE status = 'completed' AND type != 'tax';
-Result: $1,274,500 [certified fresh, excludes refunds and tax]
-
-The agent gets the exact right number, with the business logic and 
-caveats baked in—and it knows the data freshness and which guardrails 
-applied. Zero guessing.
-```
+canonic resolves "revenue" to its canonical definition, compiles the guardrail into the SQL whether or not anyone asked for it, and returns the right number with the reasoning attached. Zero guessing.
 
 ## What canonic does
 
@@ -45,9 +51,13 @@ canonic sits between your data and your agents as a **context layer**: an auto-b
 
 When canonic isn't sure, it **refuses and asks** instead of guessing. A confidently-wrong answer is the one outcome it's built to never produce.
 
+Connect Claude, Cursor, or any [MCP client](/mcp-integration/connecting-your-agent) and your agent resolves metrics through the same context layer, no separate integration to build.
+
+Every output in these docs is real, captured from a live run, not hand-written; see the [end-to-end example](/end-to-end-example) for the full loop with actual commands and diffs.
+
 ## Why canonic, not something else
 
-| Instead of… | You get… | canonic gives you… |
+| Alternative | What goes wrong | With canonic |
 | --- | --- | --- |
 | Giving the agent raw schema/SQL access | Fluency without correctness; it guesses definitions and picks wrong tables | Resolved canonical definitions, enforced guardrails, never a silent wrong number |
 | Hand-building a semantic layer from scratch | Months of modeling before any value | Context auto-drafted from your live schema on day one; you review, not author from zero |
@@ -55,6 +65,8 @@ When canonic isn't sure, it **refuses and asks** instead of guessing. A confiden
 | A hosted "AI analytics" SaaS | Your data and definitions leaving your environment | Local-first, fully **air-gapped-capable**: nothing has to leave your machine |
 
 What makes it different in one line: **canonic builds the context for you, keeps it honest, and refuses to lie when it isn't sure.**
+
+canonic is not a BI tool and not a chat interface: it's the layer that feeds the tools you already have (a BI dashboard, an agent, a notebook) correct, governed answers. If you want a place to explore data visually, or a standalone chatbot, canonic isn't that; it's the plumbing underneath one.
 
 ## The three layers
 
