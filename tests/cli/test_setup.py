@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING
 import pytest
 
 from canonic.cli.app import app
-from canonic.cli.commands.setup import _parse_index_ranges, _parse_table_tokens
+from canonic.cli.commands._schema_selection import parse_index_ranges, parse_table_tokens
 from canonic.config import load_config
 from canonic.connectors.base import Health
 
@@ -50,6 +50,7 @@ def _patch_connector(monkeypatch, *connectors: _FakeConnector) -> None:
             return next(seq)
 
     monkeypatch.setattr("canonic.cli.commands.setup.default_factory", _StubFactory())
+    monkeypatch.setattr("canonic.cli.commands._schema_selection.default_factory", _StubFactory())
 
 
 # Prompt answers for a happy-path fresh run using the Postgres path.
@@ -279,50 +280,50 @@ def test_narrow_schema_invalid_index_reprompts(
 
 class TestParseIndexRanges:
     def test_single_indices(self) -> None:
-        assert _parse_index_ranges("1,3", 5) == {1, 3}
+        assert parse_index_ranges("1,3", 5) == {1, 3}
 
     def test_range(self) -> None:
-        assert _parse_index_ranges("2-4", 5) == {2, 3, 4}
+        assert parse_index_ranges("2-4", 5) == {2, 3, 4}
 
     def test_mixed(self) -> None:
-        assert _parse_index_ranges("1,3-4", 5) == {1, 3, 4}
+        assert parse_index_ranges("1,3-4", 5) == {1, 3, 4}
 
     def test_blank_tokens_ignored(self) -> None:
-        assert _parse_index_ranges("1,,3", 5) == {1, 3}
+        assert parse_index_ranges("1,,3", 5) == {1, 3}
 
     def test_out_of_range_raises(self) -> None:
         with pytest.raises(ValueError, match="out of range"):
-            _parse_index_ranges("9", 5)
+            parse_index_ranges("9", 5)
 
     def test_non_numeric_raises(self) -> None:
         with pytest.raises(ValueError, match="invalid index"):
-            _parse_index_ranges("abc", 5)
+            parse_index_ranges("abc", 5)
 
     def test_backwards_range_raises(self) -> None:
         with pytest.raises(ValueError, match="invalid range"):
-            _parse_index_ranges("5-1", 5)
+            parse_index_ranges("5-1", 5)
 
 
 class TestParseTableTokens:
     def test_index_resolves_to_name(self) -> None:
         names = ["public.orders", "public.customers"]
-        assert _parse_table_tokens("1", names) == ["public.orders"]
+        assert parse_table_tokens("1", names) == ["public.orders"]
 
     def test_glob_token_kept_verbatim(self) -> None:
         names = ["public.orders", "public.customers"]
-        assert _parse_table_tokens("fact_*", names) == ["fact_*"]
+        assert parse_table_tokens("fact_*", names) == ["fact_*"]
 
     def test_mixed_index_and_glob(self) -> None:
         names = ["public.orders", "public.customers"]
-        assert _parse_table_tokens("2,fact_*", names) == ["public.customers", "fact_*"]
+        assert parse_table_tokens("2,fact_*", names) == ["public.customers", "fact_*"]
 
     def test_range_resolves_to_multiple_names(self) -> None:
         names = ["a.t1", "a.t2", "a.t3"]
-        assert _parse_table_tokens("1-2", names) == ["a.t1", "a.t2"]
+        assert parse_table_tokens("1-2", names) == ["a.t1", "a.t2"]
 
     def test_duplicate_tokens_deduplicated(self) -> None:
         names = ["a.t1", "a.t2"]
-        assert _parse_table_tokens("1,1,a.t1", names) == ["a.t1"]
+        assert parse_table_tokens("1,1,a.t1", names) == ["a.t1"]
 
 
 def test_resume_skips_completed_steps(runner: CliRunner, tmp_path: Path, monkeypatch) -> None:

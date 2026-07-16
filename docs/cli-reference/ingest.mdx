@@ -32,3 +32,20 @@ Headless mode (explicit `--headless`, or auto-detected when `CI=true`) pins the 
 ## After a run
 
 Review what was drafted with [`canonic review`](/cli-reference/review-apply), or batch-apply with [`canonic apply`](/cli-reference/review-apply).
+
+## `canonic ingest add-tables`
+
+A connection's `params.tables`/`params.schemas` filters (set during `canonic setup`) narrow discovery at the introspection level, so a plain `canonic ingest` never sees tables outside that filter, no matter how often it runs. `add-tables` widens the scope: it re-introspects the connection unfiltered, drops any table already curated under `semantics/` for that connection, and opens the same interactive schema/table picker used in `canonic setup` over what's left.
+
+```bash
+canonic ingest add-tables
+canonic ingest add-tables --connection warehouse
+canonic ingest add-tables --connection warehouse --dry-run
+```
+
+| Flag | Description |
+| --- | --- |
+| `--connection` / `-c` | Connection id to widen (default: the only one configured; required if there's more than one). |
+| `--dry-run` | Print proposed diffs and write nothing. |
+
+If the connection already had a `tables` filter, the picked tables are merged into it and persisted back to `canonic.yaml`. If the connection was unfiltered (all tables visible), nothing is persisted — the picked tables only scope this one run, so future ingests keep auto-discovering new tables. Either way, curated tables are never touched: the ingest that follows the picker is a normal propose-only run, so newly picked tables land as `ADD` proposals for [`canonic review`](/cli-reference/review-apply).

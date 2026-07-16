@@ -91,11 +91,11 @@ app.add_typer(mcp.app, name="mcp")
 app.add_typer(knowledge.app, name="knowledge")
 app.add_typer(evaluate.app, name="eval")
 app.add_typer(outcome.app, name="outcome")
+app.add_typer(ingest.app, name="ingest")
 
 # Top-level single commands.
 app.command("overview")(overview.overview)
 app.command("setup")(setup.setup)
-app.command("ingest")(ingest.ingest)
 app.command("review")(review.review)
 app.command("apply")(apply.apply)
 app.command("query")(query.query)
