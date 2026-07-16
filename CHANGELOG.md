@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.8.0](https://github.com/mischuh/canonic/compare/v0.7.3...v0.8.0) (2026-07-16)
+
+
+### Features
+
+* **cli:** add ingest add-tables subcommand ([72c5791](https://github.com/mischuh/canonic/commit/72c5791eaee765f6eaacc9d1812792c3dddc6356))
+
 ## [0.7.3](https://github.com/mischuh/canonic/compare/v0.7.2...v0.7.3) (2026-07-14)
 
 
