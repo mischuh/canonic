@@ -1,0 +1,258 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>canonic: The Open Context Layer for Data Agents</title>
+<meta name="description" content="canonic is the open context layer that lets AI agents query your data correctly: git-versioned semantics, knowledge, and contracts, served over MCP.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
+<style>
+  html, body { margin: 0; padding: 0; background: #faf9f7; }
+  body { font-family: 'IBM Plex Sans', sans-serif; color: #1c1b1a; -webkit-font-smoothing: antialiased; }
+  a { color: #157a5e; text-decoration: none; }
+  a:hover { color: #0e5c46; text-decoration: underline; }
+  ::selection { background: rgba(21,122,94,0.18); }
+  .nav-link:hover { text-decoration: none; opacity: 0.75; }
+  .btn-dark:hover { background: #000000 !important; }
+  .btn-light:hover { border-color: #b5b1aa !important; }
+  .btn-ghost:hover { border-color: #6b6862 !important; }
+  .tab-btn { font-family: 'IBM Plex Mono', monospace; font-size: 12.5px; font-weight: 600; padding: 7px 14px; border-radius: 7px; border: none; cursor: pointer; background: transparent; color: #a5a19a; }
+  .tab-btn.active { background: #2c2a27; color: #f2f0ec; }
+  @media (max-width: 720px) {
+    h1 { font-size: 38px !important; }
+    .grid-3 { grid-template-columns: 1fr !important; }
+    .grid-2 { grid-template-columns: 1fr !important; }
+    .qs-grid { grid-template-columns: 1fr !important; }
+    .cmp-row { grid-template-columns: 1fr !important; gap: 6px !important; }
+    nav .nav-links a:not(.gh) { display: none; }
+  }
+</style>
+</head>
+<body>
+<div style="min-height: 100vh; background: #faf9f7;">
+
+  <nav style="display: flex; align-items: center; justify-content: space-between; max-width: 1080px; margin: 0 auto; padding: 24px 32px;">
+    <div style="display: flex; align-items: center; gap: 10px;">
+      <svg width="26" height="26" viewBox="0 0 24 24" style="display: block;"><rect x="3" y="3.5" width="18" height="4.5" rx="2.25" fill="#1c1b1a"></rect><rect x="3" y="9.75" width="11" height="4.5" rx="2.25" fill="#157a5e"></rect><rect x="3" y="16" width="18" height="4.5" rx="2.25" fill="#1c1b1a"></rect></svg>
+      <span style="font-family: 'IBM Plex Mono', monospace; font-size: 16px; font-weight: 600; letter-spacing: -0.02em;">canonic</span>
+    </div>
+    <div class="nav-links" style="display: flex; align-items: center; gap: 28px; font-size: 14.5px; font-weight: 500;">
+      <a class="nav-link" href="https://docs.getcanonic.app/introduction" style="color: #55524e;">Docs</a>
+      <a class="nav-link" href="#quickstart" style="color: #55524e;">Quick start</a>
+      <a class="gh" href="https://github.com/mischuh/canonic" style="color: #1c1b1a; display: inline-flex; align-items: center; gap: 7px; border: 1px solid #dcd9d4; border-radius: 8px; padding: 7px 14px; background: #ffffff;">
+        <span style="font-family: 'IBM Plex Mono', monospace; font-size: 13px;">GitHub &#8599;</span>
+      </a>
+    </div>
+  </nav>
+
+  <header style="max-width: 1080px; margin: 0 auto; padding: 88px 32px 72px; text-align: center;">
+    <div style="display: inline-flex; align-items: center; gap: 8px; font-family: 'IBM Plex Mono', monospace; font-size: 12.5px; font-weight: 500; letter-spacing: 0.08em; text-transform: uppercase; color: #157a5e; border: 1px solid rgba(21,122,94,0.3); border-radius: 100px; padding: 6px 14px; background: rgba(21,122,94,0.06);">
+      <span style="width: 6px; height: 6px; border-radius: 50%; background: #157a5e;"></span>
+      Open context layer &middot; MCP-native
+    </div>
+    <h1 style="font-size: 58px; line-height: 1.08; font-weight: 700; letter-spacing: -0.03em; margin: 28px auto 0; max-width: 760px; text-wrap: balance;">AI agents that query your data <em style="font-style: normal; color: #157a5e;">correctly</em>.</h1>
+    <p style="font-size: 19px; line-height: 1.6; color: #55524e; max-width: 620px; margin: 22px auto 0; text-wrap: pretty;">canonic sits between your data stack and your agents: an auto-built, git-versioned description of what your data <em>means</em> and how to query it <em>safely</em>. No guessing. And when it isn't sure, it refuses and asks.</p>
+    <div style="display: flex; justify-content: center; gap: 14px; margin-top: 36px; flex-wrap: wrap;">
+      <a class="btn-dark" href="#quickstart" style="background: #1c1b1a; color: #faf9f7; font-size: 15px; font-weight: 600; padding: 13px 26px; border-radius: 10px;">Get started &rarr;</a>
+      <a class="btn-light" href="https://github.com/mischuh/canonic" style="background: #ffffff; color: #1c1b1a; font-size: 15px; font-weight: 600; padding: 13px 26px; border-radius: 10px; border: 1px solid #dcd9d4;">View on GitHub</a>
+    </div>
+    <div style="display: inline-block; margin-top: 20px; font-family: 'IBM Plex Mono', monospace; font-size: 13px; color: #8a867f;">uv tool install canonic</div>
+  </header>
+
+  <section style="max-width: 1080px; margin: 0 auto; padding: 48px 32px 80px;">
+    <div style="text-align: center; margin-bottom: 44px;">
+      <div style="font-family: 'IBM Plex Mono', monospace; font-size: 13px; font-weight: 500; letter-spacing: 0.1em; text-transform: uppercase; color: #157a5e;">The problem</div>
+      <h2 style="font-size: 34px; font-weight: 700; letter-spacing: -0.02em; margin: 12px auto 0; max-width: 640px; text-wrap: balance;">Schema access makes an agent fluent. It doesn't make it correct.</h2>
+      <p style="font-size: 16.5px; line-height: 1.6; color: #55524e; max-width: 580px; margin: 14px auto 0; text-wrap: pretty;">An agent pointed straight at your warehouse sees tables and columns, not meaning. So it guesses, and a confident, well-formatted, <em>wrong</em> number is the worst kind of wrong. Real output from a live run:</p>
+    </div>
+    <div class="grid-2" style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px; align-items: stretch;">
+      <div style="border: 1px solid #e6e3de; border-radius: 14px; background: #ffffff; overflow: hidden; display: flex; flex-direction: column;">
+        <div style="display: flex; align-items: center; justify-content: space-between; padding: 12px 18px; border-bottom: 1px solid #efece7;">
+          <span style="font-family: 'IBM Plex Mono', monospace; font-size: 12px; font-weight: 600; color: #93372e; background: rgba(179,66,58,0.12); padding: 4px 10px; border-radius: 6px;">&#10007; WITHOUT CANONIC: THE GUESS</span>
+          <span style="display: flex; gap: 5px;"><span style="width: 9px; height: 9px; border-radius: 50%; background: #e6e3de;"></span><span style="width: 9px; height: 9px; border-radius: 50%; background: #e6e3de;"></span><span style="width: 9px; height: 9px; border-radius: 50%; background: #e6e3de;"></span></span>
+        </div>
+        <pre style="margin: 0; padding: 20px 22px; font-family: 'IBM Plex Mono', monospace; font-size: 13.5px; line-height: 1.7; color: #3a3733; flex: 1; white-space: pre-wrap;">$ canonic sql "SELECT SUM(amount) FROM fct_orders"
+
+  sum
+ ─────────
+  <span style="font-weight: 600;">4050.50</span></pre>
+        <div style="padding: 14px 18px; border-top: 1px solid #efece7; font-size: 13.5px; line-height: 1.55; color: #93372e; background: rgba(179,66,58,0.09); min-height: 64px; display: flex; align-items: center;">Includes two refunded orders ($260). Refunds are reversals, not revenue. This number is off by 6.4%.</div>
+      </div>
+      <div style="border: 1px solid rgba(21,122,94,0.35); border-radius: 14px; background: #ffffff; overflow: hidden; display: flex; flex-direction: column; box-shadow: 0 6px 24px rgba(21,122,94,0.08);">
+        <div style="display: flex; align-items: center; justify-content: space-between; padding: 12px 18px; border-bottom: 1px solid rgba(21,122,94,0.15);">
+          <span style="font-family: 'IBM Plex Mono', monospace; font-size: 12px; font-weight: 600; color: #0f5843; background: rgba(21,122,94,0.14); padding: 4px 10px; border-radius: 6px;">&#10003; WITH CANONIC: THE TRUTH</span>
+          <span style="display: flex; gap: 5px;"><span style="width: 9px; height: 9px; border-radius: 50%; background: rgba(21,122,94,0.2);"></span><span style="width: 9px; height: 9px; border-radius: 50%; background: rgba(21,122,94,0.2);"></span><span style="width: 9px; height: 9px; border-radius: 50%; background: rgba(21,122,94,0.2);"></span></span>
+        </div>
+        <pre style="margin: 0; padding: 20px 22px; font-family: 'IBM Plex Mono', monospace; font-size: 13.5px; line-height: 1.7; color: #3a3733; flex: 1; white-space: pre-wrap;">$ canonic query --metrics revenue
+
+  total_revenue
+ ───────────────
+  <span style="font-weight: 600; color: #157a5e;">3790.50</span>
+
+  &#9656; resolved: revenue &rarr; orders.total_revenue
+  &#9656; guardrail: revenue-excludes-refunds</pre>
+        <div style="padding: 14px 18px; border-top: 1px solid rgba(21,122,94,0.15); font-size: 13.5px; line-height: 1.55; color: #0f5843; background: rgba(21,122,94,0.09); min-height: 64px; display: flex; align-items: center;">"revenue" resolves to its canonical definition; the guardrail is compiled into the SQL either way. Zero guessing.</div>
+      </div>
+    </div>
+  </section>
+
+  <section style="background: #131211; color: #f2f0ec;">
+    <div style="max-width: 1080px; margin: 0 auto; padding: 84px 32px;">
+      <div style="text-align: center; margin-bottom: 52px;">
+        <div style="font-family: 'IBM Plex Mono', monospace; font-size: 13px; font-weight: 500; letter-spacing: 0.1em; text-transform: uppercase; color: #4fbf98;">Three layers, plain files</div>
+        <h2 style="font-size: 34px; font-weight: 700; letter-spacing: -0.02em; margin: 12px auto 0; max-width: 620px; text-wrap: balance;">Context that lives in your git repo, reviewed like code.</h2>
+      </div>
+      <div class="grid-3" style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 18px;">
+        <div style="border: 1px solid rgba(79,191,152,0.4); border-radius: 14px; padding: 26px 24px; background: #1b1a18;">
+          <div style="font-family: 'IBM Plex Mono', monospace; font-size: 12.5px; color: #4fbf98; margin-bottom: 16px;">semantics/**/*.yaml</div>
+          <h3 style="font-size: 19px; font-weight: 600; margin: 0 0 8px;">Semantics</h3>
+          <p style="font-size: 14.5px; line-height: 1.6; color: #a5a19a; margin: 0;">"How do I query this safely?" Tables, types, grains, joins, measures: the executable semantic layer.</p>
+          <div style="margin-top: 18px; font-family: 'IBM Plex Mono', monospace; font-size: 11.5px; letter-spacing: 0.06em; text-transform: uppercase; color: #6b6862;">auto-maintained</div>
+        </div>
+        <div style="border: 1px solid rgba(79,191,152,0.4); border-radius: 14px; padding: 26px 24px; background: #1b1a18;">
+          <div style="font-family: 'IBM Plex Mono', monospace; font-size: 12.5px; color: #4fbf98; margin-bottom: 16px;">knowledge/**/*.md</div>
+          <h3 style="font-size: 19px; font-weight: 600; margin: 0 0 8px;">Knowledge</h3>
+          <p style="font-size: 14.5px; line-height: 1.6; color: #a5a19a; margin: 0;">"What does this mean to the business?" Definitions, caveats, policies: searchable prose a human can trust.</p>
+          <div style="margin-top: 18px; font-family: 'IBM Plex Mono', monospace; font-size: 11.5px; letter-spacing: 0.06em; text-transform: uppercase; color: #6b6862;">auto-maintained</div>
+        </div>
+        <div style="border: 1px solid rgba(79,191,152,0.4); border-radius: 14px; padding: 26px 24px; background: #1b1a18;">
+          <div style="font-family: 'IBM Plex Mono', monospace; font-size: 12.5px; color: #4fbf98; margin-bottom: 16px;">contracts/**/*.yaml</div>
+          <h3 style="font-size: 19px; font-weight: 600; margin: 0 0 8px;">Contracts</h3>
+          <p style="font-size: 14.5px; line-height: 1.6; color: #a5a19a; margin: 0;">"Which definition is canonical, and what must the answer obey?" Metrics, guardrails, assertions.</p>
+          <div style="margin-top: 18px; font-family: 'IBM Plex Mono', monospace; font-size: 11.5px; letter-spacing: 0.06em; text-transform: uppercase; color: #4fbf98;">human-owned</div>
+        </div>
+      </div>
+      <p style="text-align: center; font-size: 15px; line-height: 1.6; color: #a5a19a; max-width: 560px; margin: 40px auto 0; text-wrap: pretty;">A knowledge page <em>explains</em> why "amount includes refunds unless filtered." A contract <em>makes the SQL obey</em> it. Documented caveats become enforced guardrails.</p>
+    </div>
+  </section>
+
+  <section style="max-width: 1080px; margin: 0 auto; padding: 84px 32px;">
+    <div style="text-align: center; margin-bottom: 52px;">
+      <div style="font-family: 'IBM Plex Mono', monospace; font-size: 13px; font-weight: 500; letter-spacing: 0.1em; text-transform: uppercase; color: #157a5e;">What you can rely on</div>
+      <h2 style="font-size: 34px; font-weight: 700; letter-spacing: -0.02em; margin: 12px auto 0; max-width: 560px; text-wrap: balance;">Built to never produce a confidently-wrong answer.</h2>
+    </div>
+    <div class="grid-3" style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 18px;">
+      <div style="border: 1px solid #e6e3de; border-radius: 14px; padding: 24px; background: #ffffff;">
+        <div style="font-family: 'IBM Plex Mono', monospace; font-size: 18px; color: #157a5e; margin-bottom: 12px;">&#9186;</div>
+        <h3 style="font-size: 16.5px; font-weight: 600; margin: 0 0 7px;">Read-only by design</h3>
+        <p style="font-size: 14px; line-height: 1.6; color: #55524e; margin: 0;">canonic never mutates your warehouse. It reads. There is no write path back.</p>
+      </div>
+      <div style="border: 1px solid #e6e3de; border-radius: 14px; padding: 24px; background: #ffffff;">
+        <div style="font-family: 'IBM Plex Mono', monospace; font-size: 18px; color: #157a5e; margin-bottom: 12px;">&plusmn;</div>
+        <h3 style="font-size: 16.5px; font-weight: 600; margin: 0 0 7px;">Propose-only</h3>
+        <p style="font-size: 14px; line-height: 1.6; color: #55524e; margin: 0;">It never silently edits your context. Every change is a reviewable diff anchored to evidence.</p>
+      </div>
+      <div style="border: 1px solid #e6e3de; border-radius: 14px; padding: 24px; background: #ffffff;">
+        <div style="font-family: 'IBM Plex Mono', monospace; font-size: 18px; color: #157a5e; margin-bottom: 12px;">?</div>
+        <h3 style="font-size: 16.5px; font-weight: 600; margin: 0 0 7px;">Refuse-and-ask</h3>
+        <p style="font-size: 14px; line-height: 1.6; color: #55524e; margin: 0;">Ambiguous or unsafe? It returns a structured reason, not a guess.</p>
+      </div>
+      <div style="border: 1px solid #e6e3de; border-radius: 14px; padding: 24px; background: #ffffff;">
+        <div style="font-family: 'IBM Plex Mono', monospace; font-size: 18px; color: #157a5e; margin-bottom: 12px;">&equiv;</div>
+        <h3 style="font-size: 16.5px; font-weight: 600; margin: 0 0 7px;">No LLM in the answer path</h3>
+        <p style="font-size: 14px; line-height: 1.6; color: #55524e; margin: 0;">Queries compile deterministically: the same question always produces the same SQL. An LLM only drafts context, never computes an answer.</p>
+      </div>
+      <div style="border: 1px solid #e6e3de; border-radius: 14px; padding: 24px; background: #ffffff;">
+        <div style="font-family: 'IBM Plex Mono', monospace; font-size: 18px; color: #157a5e; margin-bottom: 12px;">&#8962;</div>
+        <h3 style="font-size: 16.5px; font-weight: 600; margin: 0 0 7px;">Local-first &amp; air-gapped</h3>
+        <p style="font-size: 14px; line-height: 1.6; color: #55524e; margin: 0;">Run entirely on your machine with a local model and local embeddings. Nothing has to leave your network.</p>
+      </div>
+      <div style="border: 1px solid #e6e3de; border-radius: 14px; padding: 24px; background: #ffffff;">
+        <div style="font-family: 'IBM Plex Mono', monospace; font-size: 18px; color: #157a5e; margin-bottom: 12px;">%</div>
+        <h3 style="font-size: 16.5px; font-weight: 600; margin: 0 0 7px;">Measurable trust</h3>
+        <p style="font-size: 14px; line-height: 1.6; color: #55524e; margin: 0;">A local event log tracks accuracy, freshness, and answer quality. "Trustworthy" is something you can check.</p>
+      </div>
+    </div>
+  </section>
+
+  <section style="max-width: 1080px; margin: 0 auto; padding: 12px 32px 84px;">
+    <div style="text-align: center; margin-bottom: 44px;">
+      <div style="font-family: 'IBM Plex Mono', monospace; font-size: 13px; font-weight: 500; letter-spacing: 0.1em; text-transform: uppercase; color: #157a5e;">Why canonic, not something else</div>
+      <h2 style="font-size: 34px; font-weight: 700; letter-spacing: -0.02em; margin: 12px auto 0; max-width: 620px; text-wrap: balance;">It feeds the stack you already have. It doesn't replace it.</h2>
+    </div>
+    <div style="border: 1px solid #e6e3de; border-radius: 14px; background: #ffffff; overflow: hidden;">
+      <div class="cmp-row" style="display: grid; grid-template-columns: 1.1fr 1.2fr 1.2fr; gap: 24px; padding: 14px 26px; border-bottom: 1px solid #efece7; font-family: 'IBM Plex Mono', monospace; font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase; color: #8a867f;">
+        <div>Alternative</div>
+        <div>What goes wrong</div>
+        <div style="color: #157a5e;">With canonic</div>
+      </div>
+      <div class="cmp-row" style="display: grid; grid-template-columns: 1.1fr 1.2fr 1.2fr; gap: 24px; padding: 20px 26px; border-bottom: 1px solid #efece7; font-size: 14.5px; line-height: 1.55;">
+        <div style="font-weight: 600; color: #1c1b1a;">Raw schema / SQL access for the agent</div>
+        <div style="color: #55524e;">Fluency without correctness; it guesses definitions and picks the wrong tables.</div>
+        <div style="color: #157a5e; font-weight: 500;">Resolved canonical definitions, enforced guardrails, never a silent wrong number.</div>
+      </div>
+      <div class="cmp-row" style="display: grid; grid-template-columns: 1.1fr 1.2fr 1.2fr; gap: 24px; padding: 20px 26px; border-bottom: 1px solid #efece7; font-size: 14.5px; line-height: 1.55;">
+        <div style="font-weight: 600; color: #1c1b1a;">Hand-building a semantic layer</div>
+        <div style="color: #55524e;">Months of modeling before any value.</div>
+        <div style="color: #157a5e; font-weight: 500;">Context auto-drafted from your live schema on day one; you review, not author from zero.</div>
+      </div>
+      <div class="cmp-row" style="display: grid; grid-template-columns: 1.1fr 1.2fr 1.2fr; gap: 24px; padding: 20px 26px; border-bottom: 1px solid #efece7; font-size: 14.5px; line-height: 1.55;">
+        <div style="font-weight: 600; color: #1c1b1a;">Adopting yet another metrics platform</div>
+        <div style="color: #55524e;">Definitions you already wrote in dbt / MetricFlow get re-modeled by hand.</div>
+        <div style="color: #157a5e; font-weight: 500;">canonic ingests existing semantic layers as evidence. Your dbt models become context, not a rebuild.</div>
+      </div>
+      <div class="cmp-row" style="display: grid; grid-template-columns: 1.1fr 1.2fr 1.2fr; gap: 24px; padding: 20px 26px; border-bottom: 1px solid #efece7; font-size: 14.5px; line-height: 1.55;">
+        <div style="font-weight: 600; color: #1c1b1a;">A hosted "AI analytics" SaaS</div>
+        <div style="color: #55524e;">Your data and definitions leave your environment.</div>
+        <div style="color: #157a5e; font-weight: 500;">Local-first, fully air-gapped-capable: nothing has to leave your machine.</div>
+      </div>
+      <div style="padding: 18px 26px; font-size: 14.5px; color: #55524e; background: #faf9f7;">In one line: <strong style="color: #1c1b1a;">canonic builds the context for you, keeps it honest, and refuses to lie when it isn't sure.</strong></div>
+    </div>
+  </section>
+
+  <section id="quickstart" style="background: #131211; color: #f2f0ec;">
+    <div class="qs-grid" style="max-width: 1080px; margin: 0 auto; padding: 84px 32px; display: grid; grid-template-columns: 1fr 1.1fr; gap: 64px; align-items: stretch;">
+      <div>
+        <div style="font-family: 'IBM Plex Mono', monospace; font-size: 13px; font-weight: 500; letter-spacing: 0.1em; text-transform: uppercase; color: #4fbf98;">Quick start</div>
+        <h2 style="font-size: 34px; font-weight: 700; letter-spacing: -0.02em; margin: 12px 0 0; text-wrap: balance;">Your first correct answer in minutes.</h2>
+        <p style="font-size: 16px; line-height: 1.65; color: #a5a19a; margin: 16px 0 0; text-wrap: pretty;">Point <span style="font-family: 'IBM Plex Mono', monospace; font-size: 14.5px; color: #f2f0ec;">canonic setup</span> at a local SQLite or DuckDB file. It introspects the schema, drafts your semantics, and ends by answering a real question from your data. Then connect Claude, Cursor, or any MCP client, no separate integration to build.</p>
+        <div style="display: flex; gap: 14px; margin-top: 28px; flex-wrap: wrap;">
+          <a class="btn-light" href="https://docs.getcanonic.app/introduction" style="background: #f2f0ec; color: #131211; font-size: 15px; font-weight: 600; padding: 12px 24px; border-radius: 10px;">Read the docs &rarr;</a>
+          <a class="btn-ghost" href="https://github.com/mischuh/canonic" style="color: #f2f0ec; font-size: 15px; font-weight: 600; padding: 12px 24px; border-radius: 10px; border: 1px solid #3a3733;">GitHub &#8599;</a>
+        </div>
+      </div>
+      <div style="border: 1px solid #2c2a27; border-radius: 14px; background: #1b1a18; overflow: hidden; display: flex; flex-direction: column;">
+        <div style="display: flex; gap: 4px; padding: 10px 12px; border-bottom: 1px solid #2c2a27;">
+          <button class="tab-btn active" data-tab="uv" onclick="selectTab('uv')">uv</button>
+          <button class="tab-btn" data-tab="pip" onclick="selectTab('pip')">pip</button>
+          <button class="tab-btn" data-tab="docker" onclick="selectTab('docker')">docker</button>
+        </div>
+        <pre id="install-snippet" style="margin: 0; padding: 24px 26px; font-family: 'IBM Plex Mono', monospace; font-size: 13.5px; line-height: 1.85; color: #d8d5cf; flex: 1; overflow-x: auto;">uvx canonic --version   # ephemeral, no install
+uv tool install canonic # persistent, global
+
+canonic setup           # point at a .db / .duckdb file
+canonic query --metrics revenue</pre>
+        <div style="padding: 14px 20px; border-top: 1px solid #2c2a27; font-family: 'IBM Plex Mono', monospace; font-size: 12.5px; color: #6b6862;">read-only &middot; local-first &middot; air-gapped-capable</div>
+      </div>
+    </div>
+  </section>
+
+  <footer style="max-width: 1080px; margin: 0 auto; padding: 40px 32px 56px; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 20px;">
+    <div style="display: flex; align-items: center; gap: 10px;">
+      <svg width="20" height="20" viewBox="0 0 24 24" style="display: block; opacity: 0.6;"><rect x="3" y="3.5" width="18" height="4.5" rx="2.25" fill="#55524e"></rect><rect x="3" y="9.75" width="11" height="4.5" rx="2.25" fill="#157a5e"></rect><rect x="3" y="16" width="18" height="4.5" rx="2.25" fill="#55524e"></rect></svg>
+      <span style="font-size: 14px; color: #8a867f;">canonic, the open context layer for data agents</span>
+    </div>
+    <div style="display: flex; gap: 26px; font-size: 14px; font-weight: 500;">
+      <a href="https://github.com/mischuh/canonic" style="color: #55524e;">GitHub</a>
+      <a href="https://docs.getcanonic.app/introduction" style="color: #55524e;">Documentation</a>
+      <a href="https://docs.getcanonic.app/quickstart" style="color: #55524e;">Quickstart</a>
+      <a href="https://docs.getcanonic.app/mcp-integration/connecting-your-agent" style="color: #55524e;">MCP integration</a>
+    </div>
+  </footer>
+</div>
+<script>
+  const snippets = {
+    uv: 'uvx canonic --version   # ephemeral, no install\nuv tool install canonic # persistent, global\n\ncanonic setup           # point at a .db / .duckdb file\ncanonic query --metrics revenue',
+    pip: 'pip install canonic\n\ncanonic setup           # point at a .db / .duckdb file\ncanonic query --metrics revenue',
+    docker: 'docker pull ghcr.io/mischuh/canonic:latest\n\n# for CI, headless, or air-gapped environments\ncanonic query --metrics revenue'
+  };
+  function selectTab(id) {
+    document.getElementById('install-snippet').textContent = snippets[id];
+    document.querySelectorAll('.tab-btn').forEach(b => b.classList.toggle('active', b.dataset.tab === id));
+  }
+</script>
+</body>
+</html>
