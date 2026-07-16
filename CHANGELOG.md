@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.8.3](https://github.com/mischuh/canonic/compare/v0.8.2...v0.8.3) (2026-07-16)
+
+
+### Documentation
+
+* add initial HTML structure and favicon for the canonic website to root ([#224](https://github.com/mischuh/canonic/issues/224)) ([c4720ec](https://github.com/mischuh/canonic/commit/c4720eca329857611002fe47c80db5f86f03447d))
+
 ## [0.8.2](https://github.com/mischuh/canonic/compare/v0.8.1...v0.8.2) (2026-07-16)
 
 
