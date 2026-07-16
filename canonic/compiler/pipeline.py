@@ -66,25 +66,47 @@ _FANOUT = frozenset({Relationship.ONE_TO_MANY, Relationship.MANY_TO_MANY})
 
 
 _SQLITE_DATE_MOD_RE = re.compile(r"^([+-]?)\s*(\d+)\s+(\w+)$")
+_SQLITE_DATE_TRUNC_RE = re.compile(r"^start of (day|week|month|year)$", re.IGNORECASE)
+
+
+def _apply_sqlite_date_modifier(base: exp.Expression, modifier: str) -> exp.Expression | None:
+    """Apply a single SQLite date() modifier to `base`; return None if unsupported."""
+    trunc = _SQLITE_DATE_TRUNC_RE.match(modifier.strip())
+    if trunc:
+        return _func("DATE_TRUNC", exp.Literal.string(trunc.group(1).lower()), base)
+    m = _SQLITE_DATE_MOD_RE.match(modifier.strip())
+    if m:
+        sign, num, unit = m.groups()
+        interval = exp.Interval(this=exp.Literal.string(num), unit=exp.Var(this=unit.upper()))
+        return (
+            exp.Sub(this=base, expression=interval)
+            if sign == "-"
+            else exp.Add(this=base, expression=interval)
+        )
+    return None
 
 
 def _rewrite_sqlite_date_modifiers(node: exp.Expression) -> exp.Expression:
-    """Rewrite SQLite DATE('now', modifier) → CURRENT_DATE ± INTERVAL 'N unit'."""
+    """Rewrite SQLite DATE('now', modifier, ...) → CURRENT_DATE with equivalent arithmetic.
+
+    SQLite applies modifiers left-to-right, e.g. DATE('now', 'start of month', '-1 month')
+    truncates to the current month, then subtracts one month.
+    """
     if not isinstance(node, exp.Date):
+        return node
+    if not isinstance(node.this, exp.Literal) or node.this.name != "now":
         return node
     zone = node.args.get("zone")
     if zone is None:
         return node
-    if not isinstance(node.this, exp.Literal) or node.this.name != "now":
-        return node
-    m = _SQLITE_DATE_MOD_RE.match(zone.name.strip())
-    if not m:
-        return node
-    sign, num, unit = m.groups()
-    interval = exp.Interval(this=exp.Literal.string(num), unit=exp.Var(this=unit.upper()))
-    if sign == "-":
-        return exp.Sub(this=exp.CurrentDate(), expression=interval)
-    return exp.Add(this=exp.CurrentDate(), expression=interval)
+    modifiers = [zone.name, *(e.name for e in node.args.get("expressions") or [])]
+    result: exp.Expression = exp.CurrentDate()
+    for modifier in modifiers:
+        applied = _apply_sqlite_date_modifier(result, modifier)
+        if applied is None:
+            return node
+        result = applied
+    return result
 
 
 # sqlglot builds many node classes dynamically, so mypy cannot see their inheritance
