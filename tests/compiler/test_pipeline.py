@@ -723,6 +723,59 @@ def test_filter_sqlite_date_addition(
     assert "INTERVAL" in result.sql.upper()
 
 
+def test_filter_sqlite_date_start_of_month(
+    resolver: ContractResolver, sources: list[SemanticSource]
+) -> None:
+    """DATE('now', 'start of month') truncates to the current month's first day."""
+    result = compile(
+        SemanticQuery(
+            metrics=["revenue"],
+            filters=["created_at < DATE('now', 'start of month')"],
+        ),
+        resolver,
+        sources,
+    )
+    _parse_ok(result.sql)
+    assert "DATE_TRUNC" in result.sql.upper()
+    assert "CURRENT_DATE" in result.sql.upper()
+
+
+def test_filter_sqlite_date_start_of_month_with_offset(
+    resolver: ContractResolver, sources: list[SemanticSource]
+) -> None:
+    """DATE('now', 'start of month', '-1 month') means 'start of last calendar month'."""
+    result = compile(
+        SemanticQuery(
+            metrics=["revenue"],
+            filters=["created_at >= DATE('now', 'start of month', '-1 month')"],
+        ),
+        resolver,
+        sources,
+    )
+    _parse_ok(result.sql)
+    assert "DATE_TRUNC" in result.sql.upper()
+    assert "CURRENT_DATE" in result.sql.upper()
+    assert "INTERVAL" in result.sql.upper()
+
+
+def test_filter_sqlite_date_unsupported_modifier_passthrough(
+    resolver: ContractResolver, sources: list[SemanticSource]
+) -> None:
+    """Unrecognized modifiers are left untouched rather than silently dropped."""
+    result = compile(
+        SemanticQuery(
+            metrics=["revenue"],
+            filters=["created_at >= DATE('now', 'weekday 0')"],
+        ),
+        resolver,
+        sources,
+    )
+    assert (
+        "DATE('now', 'weekday 0')" in result.sql
+        or "DATE('now', 'weekday 0')".upper() in result.sql.upper()
+    )
+
+
 # --- Dialect-aware emission ---------------------------------------------------
 
 
