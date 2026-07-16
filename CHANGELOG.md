@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.8.1](https://github.com/mischuh/canonic/compare/v0.8.0...v0.8.1) (2026-07-16)
+
+
+### Bug Fixes
+
+* **compiler:** rewrite SQLite 'start of X' date modifiers for Redshift/Postgres ([#220](https://github.com/mischuh/canonic/issues/220)) ([1d33dd9](https://github.com/mischuh/canonic/commit/1d33dd99c56fc58408ce8dff237ccdd2ee7023d4))
+
 ## [0.8.0](https://github.com/mischuh/canonic/compare/v0.7.3...v0.8.0) (2026-07-16)
 
 
