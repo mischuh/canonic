@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 import json
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import typer
 from rich.console import Console
+from ruamel.yaml import YAML
 
 from canonic.cli._errors import get_cli_context
 from canonic.compiler import SemanticQuery
@@ -18,6 +19,21 @@ if TYPE_CHECKING:
     from canonic.core.service import CanonicService
 
 _console = Console()
+
+
+def load_raw_config(path: Path) -> Any:
+    """Load ``canonic.yaml`` in ruamel round-trip mode, preserving comments/formatting."""
+    yaml = YAML()
+    with open(path) as f:
+        return yaml.load(f)
+
+
+def write_raw_config(path: Path, raw: Any) -> None:
+    """Write a ruamel round-trip document back to ``canonic.yaml``."""
+    yaml = YAML()
+    yaml.default_flow_style = False
+    with open(path, "w") as f:
+        yaml.dump(raw, f)
 
 
 def not_implemented(ctx: typer.Context, feature: str) -> None:

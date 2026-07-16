@@ -9,7 +9,7 @@ import pytest
 from typer.testing import CliRunner
 
 from canonic.cli.app import app
-from canonic.config import CanonicConfig, LLMConfig, ProjectConfig
+from canonic.config import CanonicConfig, Connection, LLMConfig, ProjectConfig, load_config
 from canonic.connectors.base import (
     Capability,
     ColumnInfo,
@@ -18,6 +18,7 @@ from canonic.connectors.base import (
     RelationSchema,
     compute_fingerprint,
 )
+from canonic.exc import ConnectionError as CanonicConnectionError
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -58,6 +59,40 @@ class _FakeConnector(ConnectorBase):
                 acquisition_tier="live",
                 source_fingerprint=compute_fingerprint(columns, ["order_id"], []),
             )
+        ]
+
+
+class _MultiRelationConnector(ConnectorBase):
+    """A connector exposing two relations: one already curated, one not yet imported."""
+
+    def capabilities(self) -> list[Capability]:
+        return [Capability.INTROSPECT_SCHEMA, Capability.TEST_CONNECTION]
+
+    async def test_connection(self) -> Health:
+        return Health(status="ok")
+
+    async def introspect_schema(self) -> list[RelationSchema]:
+        order_columns = [ColumnInfo(name="order_id", type="int", nullable=False)]
+        shipment_columns = [ColumnInfo(name="shipment_id", type="int", nullable=False)]
+        return [
+            RelationSchema(
+                connection="warehouse_pg",
+                relation="analytics.fct_orders",
+                kind="table",
+                columns=order_columns,
+                primary_key=["order_id"],
+                acquisition_tier="live",
+                source_fingerprint=compute_fingerprint(order_columns, ["order_id"], []),
+            ),
+            RelationSchema(
+                connection="warehouse_pg",
+                relation="analytics.fct_shipments",
+                kind="table",
+                columns=shipment_columns,
+                primary_key=["shipment_id"],
+                acquisition_tier="live",
+                source_fingerprint=compute_fingerprint(shipment_columns, ["shipment_id"], []),
+            ),
         ]
 
 
@@ -128,6 +163,26 @@ def project(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 
 
 @pytest.fixture
+def multi_relation_project(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """A project whose connection exposes two relations: fct_orders and fct_shipments.
+
+    ``add-tables`` discovers relations through ``_schema_selection.default_factory`` (its own
+    module-level import), separate from the pipeline's ``ingest.default_factory`` — both must
+    be stubbed for a full add-tables run.
+    """
+    (tmp_path / "canonic.yaml").write_text(_CONFIG)
+    monkeypatch.chdir(tmp_path)
+
+    class _StubFactory:
+        def create(self, _conn):
+            return _MultiRelationConnector()
+
+    monkeypatch.setattr("canonic.cli.commands.ingest.default_factory", _StubFactory())
+    monkeypatch.setattr("canonic.cli.commands._schema_selection.default_factory", _StubFactory())
+    return tmp_path
+
+
+@pytest.fixture
 def publisher(monkeypatch: pytest.MonkeyPatch) -> _RecordingPublisher:
     """Inject a recording publisher so the auto-PR step never shells out to git/gh."""
     pub = _RecordingPublisher()
@@ -140,6 +195,34 @@ def _seed_curated_orders(project: Path) -> None:
     target = project / "semantics" / "warehouse_pg" / "fct_orders.yaml"
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_text(_CURATED_ORDERS)
+
+
+def _seed_curated_orders_matching(project: Path) -> None:
+    """Commit a human_curated fct_orders whose fingerprint matches the live evidence (→ no-op).
+
+    Used where a test only cares that an already-curated table is excluded/left alone, not
+    about contradiction handling — a mismatched fingerprint would otherwise route the run
+    through the LLM-backed reconcile drafter.
+    """
+    fingerprint = compute_fingerprint(
+        [ColumnInfo(name="order_id", type="int", nullable=False)], ["order_id"], []
+    )
+    target = project / "semantics" / "warehouse_pg" / "fct_orders.yaml"
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(
+        "name: fct_orders\n"
+        "connection: warehouse_pg\n"
+        "table: analytics.fct_orders\n"
+        "grain:\n"
+        "  - order_id\n"
+        "columns:\n"
+        "  - name: order_id\n"
+        "    type: int\n"
+        "    nullable: false\n"
+        "meta:\n"
+        "  provenance: human_curated\n"
+        f"  source_fingerprint: {fingerprint}\n"
+    )
 
 
 def test_bootstrap_writes_semantic_files(project: Path) -> None:
@@ -240,6 +323,179 @@ def test_dry_run_never_publishes(project: Path, publisher: _RecordingPublisher) 
 
     assert result.exit_code == 0, result.output
     assert publisher.calls == []
+
+
+# ---------------------------------------------------------------------------
+# `canonic ingest add-tables` — widen a connection's table scope interactively,
+# excluding tables already curated under semantics/ for that connection.
+# ---------------------------------------------------------------------------
+
+_CURATED_SHIPMENTS = """\
+name: fct_shipments
+connection: warehouse_pg
+table: analytics.fct_shipments
+grain:
+  - shipment_id
+columns:
+  - name: shipment_id
+    type: int
+    nullable: false
+meta:
+  provenance: human_curated
+"""
+
+_CONFIG_FILTERED = """\
+version: 1
+project:
+  name: test-project
+  default_connection: warehouse_pg
+connections:
+  - id: warehouse_pg
+    type: postgres
+    params: {host: localhost, port: 5432, user: u, dbname: db, tables: [analytics.fct_orders]}
+    credentials_ref: env:CANONIC_PW
+llm:
+  provider: openai_compatible
+  base_url: http://localhost:11434/v1
+  model: llama3
+"""
+
+
+def test_add_tables_still_reachable_as_default_ingest(project: Path) -> None:
+    """Converting ingest into a Typer subapp must not break the bare `canonic ingest` run."""
+    result = CliRunner().invoke(app, ["ingest", "--bootstrap"])
+
+    assert result.exit_code == 0, result.output
+    assert (project / "semantics" / "warehouse_pg" / "fct_orders.yaml").exists()
+
+
+def test_add_tables_excludes_already_imported(
+    multi_relation_project: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A table already curated for this connection is excluded from the picker list."""
+    monkeypatch.setenv("CI", "true")  # deterministic drafting — join inference needs no live LLM
+    _seed_curated_orders_matching(multi_relation_project)
+
+    result = CliRunner().invoke(
+        app,
+        ["ingest", "add-tables", "--connection", "warehouse_pg", "--dry-run"],
+        input="all\nn\n",
+    )
+
+    assert result.exit_code == 0, result.output
+    assert "1 table(s) already in the semantic model" in result.output
+    assert "fct_shipments" in result.output
+
+
+def test_add_tables_nothing_to_add_when_all_curated(multi_relation_project: Path) -> None:
+    """Once every discovered table is curated, add-tables reports nothing to add."""
+    _seed_curated_orders(multi_relation_project)
+    target = multi_relation_project / "semantics" / "warehouse_pg" / "fct_shipments.yaml"
+    target.write_text(_CURATED_SHIPMENTS)
+
+    result = CliRunner().invoke(app, ["ingest", "add-tables", "--connection", "warehouse_pg"])
+
+    assert result.exit_code == 0, result.output
+    assert "nothing to add" in result.output
+
+
+def test_add_tables_merges_into_existing_filter_and_persists(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Widening an already-narrowed connection unions and persists the tables filter."""
+    monkeypatch.setenv("CI", "true")  # deterministic drafting — join inference needs no live LLM
+    (tmp_path / "canonic.yaml").write_text(_CONFIG_FILTERED)
+    monkeypatch.chdir(tmp_path)
+
+    class _StubFactory:
+        def create(self, _conn):
+            return _MultiRelationConnector()
+
+    monkeypatch.setattr("canonic.cli.commands.ingest.default_factory", _StubFactory())
+    monkeypatch.setattr("canonic.cli.commands._schema_selection.default_factory", _StubFactory())
+    _seed_curated_orders_matching(tmp_path)
+
+    result = CliRunner().invoke(
+        app,
+        ["ingest", "add-tables", "--connection", "warehouse_pg", "--dry-run"],
+        input="all\nn\n",
+    )
+
+    assert result.exit_code == 0, result.output
+    config = load_config(tmp_path / "canonic.yaml")
+    conn = next(c for c in config.connections if c.id == "warehouse_pg")
+    assert conn.params["tables"] == ["analytics.fct_orders", "analytics.fct_shipments"]
+
+
+def test_add_tables_unfiltered_connection_does_not_persist(
+    multi_relation_project: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An unfiltered connection's canonic.yaml stays untouched — the run is scoped transiently."""
+    monkeypatch.setenv("CI", "true")  # deterministic drafting — join inference needs no live LLM
+    _seed_curated_orders_matching(multi_relation_project)
+
+    result = CliRunner().invoke(
+        app,
+        ["ingest", "add-tables", "--connection", "warehouse_pg", "--dry-run"],
+        input="all\nn\n",
+    )
+
+    assert result.exit_code == 0, result.output
+    config = load_config(multi_relation_project / "canonic.yaml")
+    conn = next(c for c in config.connections if c.id == "warehouse_pg")
+    assert "tables" not in conn.params
+
+
+def test_resolve_one_connection_single_default() -> None:
+    from canonic.cli.commands.ingest import _resolve_one_connection
+
+    config = CanonicConfig(
+        version=1,
+        project=ProjectConfig(name="t"),
+        connections=[Connection(id="only", type="sqlite", params={})],
+    )
+    assert _resolve_one_connection(config, None).id == "only"
+
+
+def test_resolve_one_connection_explicit_id() -> None:
+    from canonic.cli.commands.ingest import _resolve_one_connection
+
+    config = CanonicConfig(
+        version=1,
+        project=ProjectConfig(name="t"),
+        connections=[
+            Connection(id="a", type="sqlite", params={}),
+            Connection(id="b", type="sqlite", params={}),
+        ],
+    )
+    assert _resolve_one_connection(config, "b").id == "b"
+
+
+def test_resolve_one_connection_unknown_id_raises() -> None:
+    from canonic.cli.commands.ingest import _resolve_one_connection
+
+    config = CanonicConfig(
+        version=1,
+        project=ProjectConfig(name="t"),
+        connections=[Connection(id="a", type="sqlite", params={})],
+    )
+    with pytest.raises(CanonicConnectionError):
+        _resolve_one_connection(config, "nope")
+
+
+def test_resolve_one_connection_ambiguous_without_flag_raises() -> None:
+    from canonic.cli.commands.ingest import _resolve_one_connection
+
+    config = CanonicConfig(
+        version=1,
+        project=ProjectConfig(name="t"),
+        connections=[
+            Connection(id="a", type="sqlite", params={}),
+            Connection(id="b", type="sqlite", params={}),
+        ],
+    )
+    with pytest.raises(CanonicConnectionError):
+        _resolve_one_connection(config, None)
 
 
 # ---------------------------------------------------------------------------

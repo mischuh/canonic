@@ -9,28 +9,15 @@ from typing import Annotated, Any
 import typer
 from rich.console import Console
 from rich.table import Table
-from ruamel.yaml import YAML
 
 from canonic.cli._errors import get_cli_context, handle_errors
+from canonic.cli.commands import load_raw_config, write_raw_config
 from canonic.config import ConfigError, find_project_root, load_config
 from canonic.connectors.factory import default_factory
 
 _console = Console()
 
 app = typer.Typer(name="connection", help="Manage source connections.")
-
-
-def _load_raw(path: Any) -> Any:
-    yaml = YAML()
-    with open(path) as f:
-        return yaml.load(f)
-
-
-def _write_raw(path: Any, raw: Any) -> None:
-    yaml = YAML()
-    yaml.default_flow_style = False
-    with open(path, "w") as f:
-        yaml.dump(raw, f)
 
 
 def _project_or_exit(ctx: typer.Context) -> Any:
@@ -222,7 +209,7 @@ def add(
             _console.print(f"[red]error:[/red] {msg}")
         raise typer.Exit(1)
 
-    raw = _load_raw(config_path)
+    raw = load_raw_config(config_path)
     new_entry: dict[str, Any] = {"id": id_, "type": type_}
     if params:
         new_entry["params"] = params
@@ -234,7 +221,7 @@ def add(
     if set_default:
         raw["project"]["default_connection"] = id_
 
-    _write_raw(config_path, raw)
+    write_raw_config(config_path, raw)
 
     if json_output:
         typer.echo(json.dumps({"added": id_, "default": set_default}))
@@ -272,12 +259,12 @@ def remove(
         raise typer.Exit(1)
 
     is_default = config.project.default_connection == id_
-    raw = _load_raw(config_path)
+    raw = load_raw_config(config_path)
     raw["connections"] = [c for c in raw.get("connections", []) if c["id"] != id_]
     if is_default:
         raw["project"].pop("default_connection", None)
 
-    _write_raw(config_path, raw)
+    write_raw_config(config_path, raw)
 
     if json_output:
         typer.echo(json.dumps({"removed": id_, "was_default": is_default}))

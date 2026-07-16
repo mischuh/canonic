@@ -22,7 +22,12 @@ from typing import TYPE_CHECKING, Annotated
 import typer
 
 from canonic.cli._errors import get_cli_context, handle_errors
-from canonic.cli.commands import _console
+from canonic.cli.commands import _console, load_raw_config, write_raw_config
+from canonic.cli.commands._schema_selection import (
+    discover_relations,
+    prompt_select_schemas,
+    prompt_select_tables,
+)
 from canonic.config import find_project_root, load_config
 from canonic.connectors.evidence import GenericEvidenceConnector, NullExtractionSkill
 from canonic.connectors.factory import default_factory
@@ -37,6 +42,7 @@ from canonic.instrumentation.events import emit_milestone_once
 from canonic.instrumentation.models import FunnelMilestone
 from canonic.runtime.drafter import make_drafter, make_reconcile_drafter
 from canonic.runtime.extraction import make_extraction_skill
+from canonic.semantic.loader import list_semantic_sources
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable
@@ -49,7 +55,14 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+app = typer.Typer(
+    name="ingest",
+    help="Reconcile configured sources into reviewable context diffs.",
+    invoke_without_command=True,
+)
 
+
+@app.callback(invoke_without_command=True)
 @handle_errors
 def ingest(
     ctx: typer.Context,
@@ -84,6 +97,9 @@ def ingest(
     ] = None,
 ) -> None:
     """Reconcile configured sources into reviewable context diffs."""
+    if ctx.invoked_subcommand is not None:
+        return
+
     root = find_project_root()
     if root is None:
         _console.print(
@@ -91,9 +107,39 @@ def ingest(
         )
         raise typer.Exit(1)
 
-    is_headless = _is_headless(headless)
     config = load_config(root / "canonic.yaml")
     targets = _select_connections(config, bootstrap=bootstrap, connection=connection)
+    _run_and_report(
+        ctx,
+        root,
+        config,
+        targets,
+        bootstrap=bootstrap,
+        dry_run=dry_run,
+        headless=headless,
+        strict=strict,
+        open_pr=open_pr,
+    )
+
+
+def _run_and_report(
+    ctx: typer.Context,
+    root: Path,
+    config: CanonicConfig,
+    targets: list[Connection],
+    *,
+    bootstrap: bool,
+    dry_run: bool,
+    headless: bool,
+    strict: bool,
+    open_pr: bool | None,
+) -> PipelineResult:
+    """Run the pipeline for ``targets`` and render/gate on the result.
+
+    Shared by the default ``canonic ingest`` run and ``canonic ingest add-tables`` so both
+    go through identical output rendering, milestone emission, auto-PR, and the strict gate.
+    """
+    is_headless = _is_headless(headless)
     logger.info(
         "ingest: connections=%s bootstrap=%s dry_run=%s headless=%s",
         [conn.id for conn in targets],
@@ -136,6 +182,130 @@ def ingest(
             raise ContradictionsFound(
                 f"{contradictions} contradiction(s) flagged; strict mode gates the run (E4 §5.4)"
             )
+
+    return result
+
+
+@app.command("add-tables")
+@handle_errors
+def add_tables(
+    ctx: typer.Context,
+    connection: Annotated[
+        str | None,
+        typer.Option(
+            "--connection", "-c", help="Connection id to widen (default: the only one configured)."
+        ),
+    ] = None,
+    dry_run: Annotated[
+        bool,
+        typer.Option("--dry-run", help="Print proposed diffs and write nothing."),
+    ] = False,
+) -> None:
+    """Pick new tables from a connection and propose them for the semantic model.
+
+    Reuses the schema/table picker from ``canonic setup``, excluding tables already
+    curated under ``semantics/`` for this connection, then runs a normal ingest scoped
+    to what was picked — curated tables are never touched (SPEC-E4 §5.5).
+    """
+    root = find_project_root()
+    if root is None:
+        _console.print(
+            "[red]error:[/red] no canonic project found — run from inside a project directory"
+        )
+        raise typer.Exit(1)
+
+    config = load_config(root / "canonic.yaml")
+    conn = _resolve_one_connection(config, connection)
+
+    imported = {
+        source.table for source in list_semantic_sources(root) if source.connection == conn.id
+    }
+
+    unfiltered = conn.model_copy(
+        update={"params": {k: v for k, v in conn.params.items() if k not in ("schemas", "tables")}}
+    )
+    relations = discover_relations(unfiltered)
+    if relations is None:
+        raise typer.Exit(1)
+
+    candidates = [r for r in relations if r.relation not in imported]
+    skipped = len(relations) - len(candidates)
+    if skipped:
+        _console.print(
+            f"[dim]{skipped} table(s) already in the semantic model — excluded from this list.[/dim]"
+        )
+    if not candidates:
+        _console.print("[green]nothing to add[/green] — every discovered table is already curated.")
+        return
+
+    schemas = sorted({r.relation.split(".", 1)[0] for r in candidates})
+    selected_schemas = prompt_select_schemas(schemas)
+    if selected_schemas is not None:
+        candidates = [r for r in candidates if r.relation.split(".", 1)[0] in selected_schemas]
+        if not candidates:
+            _console.print(
+                "[green]nothing to add[/green] — no not-yet-curated tables in the selected schema(s)."
+            )
+            return
+
+    selected_tables = prompt_select_tables(candidates)
+    chosen = selected_tables if selected_tables is not None else [r.relation for r in candidates]
+
+    existing_filter = conn.params.get("tables")
+    if existing_filter is not None:
+        merged = sorted(set(existing_filter) | set(chosen))
+        _persist_tables_filter(root / "canonic.yaml", conn.id, merged)
+        conn.params["tables"] = merged
+        run_conn = conn
+        _console.print(
+            f"[green]✓[/green] widened connection [bold]{conn.id}[/bold] tables filter "
+            f"to {len(merged)} pattern(s) in canonic.yaml"
+        )
+    else:
+        # Connection was already unfiltered (all tables visible); scope only this run to
+        # what was picked instead of persisting a filter that would narrow future ingests.
+        run_conn = conn.model_copy(update={"params": {**conn.params, "tables": chosen}})
+
+    _run_and_report(
+        ctx,
+        root,
+        config,
+        [run_conn],
+        bootstrap=False,
+        dry_run=dry_run,
+        headless=False,
+        strict=False,
+        open_pr=False,
+    )
+
+
+def _resolve_one_connection(config: CanonicConfig, connection: str | None) -> Connection:
+    """Resolve the single connection ``add-tables`` should widen (SPEC-E4 §7 style)."""
+    by_id = {conn.id: conn for conn in config.connections}
+    if connection is not None:
+        if connection not in by_id:
+            known = ", ".join(by_id) or "(none)"
+            raise ConnectionError(f"unknown connection {connection!r}; configured: {known}")
+        return by_id[connection]
+    if not config.connections:
+        raise ConnectionError("project has no configured connections")
+    if len(config.connections) > 1:
+        known = ", ".join(by_id)
+        raise ConnectionError(
+            f"multiple connections configured ({known}); pass --connection to pick one"
+        )
+    return config.connections[0]
+
+
+def _persist_tables_filter(config_path: Path, connection_id: str, tables: list[str]) -> None:
+    """Merge a widened ``tables`` filter into ``connection_id``'s entry in canonic.yaml."""
+    raw = load_raw_config(config_path)
+    for entry in raw.get("connections", []):
+        if entry.get("id") == connection_id:
+            entry.setdefault("params", {})
+            entry["params"]["tables"] = tables
+            break
+    write_raw_config(config_path, raw)
 
 
 def _is_headless(flag: bool) -> bool:
