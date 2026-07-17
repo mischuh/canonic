@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.8.4](https://github.com/mischuh/canonic/compare/v0.8.3...v0.8.4) (2026-07-17)
+
+
+### Documentation
+
+* add LICENSE and favicon ([#226](https://github.com/mischuh/canonic/issues/226)) ([68d7f58](https://github.com/mischuh/canonic/commit/68d7f580bfbd6ef0a7a9cc3e255dae7675762897))
+
 ## [0.8.3](https://github.com/mischuh/canonic/compare/v0.8.2...v0.8.3) (2026-07-16)
 
 
