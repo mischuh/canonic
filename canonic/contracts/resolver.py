@@ -15,6 +15,7 @@ import logging
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+from canonic.contracts.kinds import RECOMPUTE_KINDS, SOURCE_BOUND_KINDS, spec_for
 from canonic.contracts.loader import (
     load_assertions,
     load_finality,
@@ -170,13 +171,7 @@ class ContractResolver:
         for binding in bindings:
             if binding.status is not Status.ACTIVE:
                 continue
-            if binding.canonical.kind in {
-                BindingKind.SINGLE,
-                BindingKind.SEMI_ADDITIVE,
-                BindingKind.DISTINCT_COUNT,
-                BindingKind.PERCENTILE,
-                BindingKind.OPAQUE,
-            }:
+            if binding.canonical.kind in SOURCE_BOUND_KINDS:
                 metric_to_canonical[binding.metric] = binding.canonical
                 if binding.canonical.source:
                     source_to_metrics.setdefault(binding.canonical.source, []).append(
@@ -228,6 +223,34 @@ class ContractResolver:
     def metrics_for_source(self, source: str) -> list[str]:
         """Return active canonical metric names bound to *source*, sorted alphabetically."""
         return list(self._source_to_metrics.get(source, []))
+
+    def bindings_for(self, name: str) -> list[MetricBinding]:
+        """Return the bindings registered under a metric name or alias.
+
+        More than one entry means the name is ambiguous. Callers that only need a single
+        binding should prefer :meth:`resolve_metric`, which encodes the zero/one/many outcome.
+        """
+        return list(self._name_index.get(name, []))
+
+    def active_bindings(self) -> list[MetricBinding]:
+        """Every active binding exactly once, in load order.
+
+        The internal name index registers each binding under its metric name *and* every
+        alias, so a raw iteration would yield the same binding several times. This accessor
+        deduplicates by identity while preserving first-seen order, so discovery callers get
+        a clean, deterministic worklist without reaching into resolver internals.
+        """
+        seen: set[int] = set()
+        result: list[MetricBinding] = []
+        for bindings in self._name_index.values():
+            for binding in bindings:
+                if binding.status is not Status.ACTIVE:
+                    continue
+                if id(binding) in seen:
+                    continue
+                seen.add(id(binding))
+                result.append(binding)
+        return result
 
     def resolve_metric(self, name: str, context: str | None = None) -> MetricResolution:
         """Resolve a metric name/alias to its canonical binding (SPEC-E5-E15 §6, §4.1).
@@ -305,7 +328,7 @@ class ContractResolver:
                 ),
             )
 
-        if canonical.kind in {BindingKind.DISTINCT_COUNT, BindingKind.PERCENTILE}:
+        if canonical.kind in RECOMPUTE_KINDS:
             assert canonical.source is not None  # noqa: S101 — enforced by model_validator
             return Binding(
                 metric=binding.metric,
@@ -336,10 +359,8 @@ class ContractResolver:
                 opaque=OpaqueBinding(native_grain=list(canonical.native_grain)),
             )
 
-        if canonical.kind is BindingKind.RATIO:
-            num_name, den_name = canonical.numerator, canonical.denominator
-        else:  # WEIGHTED_AVG: weighted_sum → numerator, weight → denominator
-            num_name, den_name = canonical.weighted_sum, canonical.weight
+        # Composite (ratio / weighted_avg): first component → numerator, second → denominator.
+        num_name, den_name = spec_for(canonical.kind).component_names(canonical)
 
         assert num_name is not None and den_name is not None  # noqa: S101 — enforced by model_validator
 

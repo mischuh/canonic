@@ -10,6 +10,7 @@ from sqlglot.errors import ParseError
 
 from canonic.contracts.assertions import assertion_metrics, is_executable
 from canonic.contracts.finality import validate_finality_rule
+from canonic.contracts.kinds import RECOMPUTE_KINDS, SOURCE_BOUND_KINDS, spec_for
 from canonic.contracts.loader import (
     load_assertions,
     load_finality,
@@ -42,12 +43,10 @@ def _validate_composite_binding(
     }
     ref = binding.canonical
 
-    if ref.kind is BindingKind.RATIO:
-        component_names = [ref.numerator, ref.denominator]
-        labels = ["numerator", "denominator"]
-    else:  # WEIGHTED_AVG
-        component_names = [ref.weighted_sum, ref.weight]
-        labels = ["weighted_sum", "weight"]
+    spec = spec_for(ref.kind)
+    assert spec.component_attrs is not None  # noqa: S101 — composite kinds always have components
+    component_names = list(spec.component_names(ref))
+    labels = list(spec.component_attrs)  # attribute names double as human-facing labels
 
     for name, label in zip(component_names, labels, strict=True):
         assert name is not None  # noqa: S101 — enforced by CanonicalRef model_validator
@@ -79,10 +78,8 @@ def _check_composite_cycle(
     if ref.kind is BindingKind.SINGLE:
         return
 
-    if ref.kind is BindingKind.RATIO:
-        children = [ref.numerator, ref.denominator]
-    else:
-        children = [ref.weighted_sum, ref.weight]
+    # Non-composite kinds yield (None, None) and terminate the walk on the next iteration.
+    children = list(spec_for(ref.kind).component_names(ref))
 
     for child in children:
         if child is None:
@@ -152,8 +149,9 @@ def _validate_recompute_at_grain_binding(
             f"does not match any semantic source"
         )
 
-    col_field = "distinct_on" if ref.kind is BindingKind.DISTINCT_COUNT else "column"
-    col_name = ref.distinct_on if ref.kind is BindingKind.DISTINCT_COUNT else ref.column
+    spec = spec_for(ref.kind)
+    col_field = spec.column_attr  # "distinct_on" (distinct_count) or "column" (percentile)
+    col_name = spec.column_field(ref)
     assert col_name is not None  # noqa: S101 — enforced by model_validator
 
     all_names = source_columns.get(ref.source, set()) | source_dims.get(ref.source, set())
@@ -217,19 +215,10 @@ def _leaf_sources(
     _validate_composite_binding already raise for that case.
     """
     ref = binding.canonical
-    if ref.kind in {
-        BindingKind.SINGLE,
-        BindingKind.SEMI_ADDITIVE,
-        BindingKind.DISTINCT_COUNT,
-        BindingKind.PERCENTILE,
-        BindingKind.OPAQUE,
-    }:
+    if ref.kind in SOURCE_BOUND_KINDS:
         return {ref.source} if ref.source else set()
 
-    if ref.kind is BindingKind.RATIO:
-        num_name, den_name = ref.numerator, ref.denominator
-    else:  # WEIGHTED_AVG
-        num_name, den_name = ref.weighted_sum, ref.weight
+    num_name, den_name = spec_for(ref.kind).component_names(ref)
 
     result: set[str] = set()
     for name in (num_name, den_name):
@@ -325,7 +314,7 @@ def validate_contracts(project_root: Path) -> None:
             _validate_semi_additive_binding(
                 binding, source_measures, source_dims, source_measure_additivity
             )
-        elif ref.kind in {BindingKind.DISTINCT_COUNT, BindingKind.PERCENTILE}:
+        elif ref.kind in RECOMPUTE_KINDS:
             _validate_recompute_at_grain_binding(
                 binding, source_measures, source_dims, source_columns
             )
