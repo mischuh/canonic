@@ -84,7 +84,7 @@
   "navbar": {
     "links": [
       {
-        "type": "Home",
+        "label": "Home",
         "href": "https://www.getcanonic.app"
       },
       {
