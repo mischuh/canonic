@@ -12,8 +12,9 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
 from canonic.connectors.base import AcquisitionTier
+from canonic.contracts.kinds import spec_for
 from canonic.contracts.loader import load_metric_bindings
-from canonic.contracts.models import BindingKind, Status
+from canonic.contracts.models import Status
 from canonic.ingestion.models import EvidenceItem, EvidenceKind
 from canonic.instrumentation.models import _sha256_json
 
@@ -44,14 +45,10 @@ def _metric_for_binding(root: Path, binding: str) -> str | None:
         ref = mb.canonical
         if ref.source != source:
             continue
-        candidate: str | None
-        if ref.kind in {BindingKind.SINGLE, BindingKind.SEMI_ADDITIVE, BindingKind.OPAQUE}:
-            candidate = ref.measure
-        elif ref.kind is BindingKind.DISTINCT_COUNT:
-            candidate = ref.distinct_on
-        elif ref.kind is BindingKind.PERCENTILE:
-            candidate = ref.column
-        else:
+        # column_field is the physical column a source-bound kind reads (measure / distinct_on /
+        # column); None for composite kinds, which have no physical binding to match against.
+        candidate = spec_for(ref.kind).column_field(ref)
+        if candidate is None:
             continue
         if candidate == measure:
             return mb.metric

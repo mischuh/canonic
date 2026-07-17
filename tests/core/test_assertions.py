@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-import canonic.core.service as service_mod
+import canonic.core.context as context_mod
 from canonic.compiler.query import SemanticQuery
 from canonic.config import CanonicConfig
 from canonic.connectors.base import Capability, ConnectorBase, Health, ResultColumn, ResultSet
@@ -66,7 +66,7 @@ def _service(
 ) -> CanonicService:
     monkeypatch.setenv("PG_PASSWORD", "pw")
     monkeypatch.setattr(
-        service_mod.default_factory, "for_id", lambda *a, **k: _FakeConnector(result)
+        context_mod.default_factory, "for_id", lambda *a, **k: _FakeConnector(result)
     )
     resolver = ContractResolver(
         bindings=[

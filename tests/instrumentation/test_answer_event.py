@@ -139,7 +139,7 @@ async def test_ac1_event_written_on_served_answer(
         def for_id(self, _cfg, _cid):
             return _fake_connector(bytes_scanned=10485760)
 
-    monkeypatch.setattr("canonic.core.service.default_factory", _StubFactory())
+    monkeypatch.setattr("canonic.core.context.default_factory", _StubFactory())
 
     q = SemanticQuery(metrics=["revenue"])
     await svc.query(q)
@@ -174,7 +174,7 @@ async def test_query_caller_attributed_on_event(
         def for_id(self, _cfg, _cid):
             return _fake_connector()
 
-    monkeypatch.setattr("canonic.core.service.default_factory", _StubFactory())
+    monkeypatch.setattr("canonic.core.context.default_factory", _StubFactory())
 
     q = SemanticQuery(metrics=["revenue"])
     await svc.query(q, caller="alice")
@@ -192,7 +192,7 @@ async def test_run_sql_emits_event_with_caller(
         def for_id(self, _cfg, _cid):
             return _fake_connector(bytes_scanned=2048)
 
-    monkeypatch.setattr("canonic.core.service.default_factory", _StubFactory())
+    monkeypatch.setattr("canonic.core.context.default_factory", _StubFactory())
 
     await svc.run_sql("select 1", caller="bob")
 
@@ -216,7 +216,7 @@ async def test_run_sql_without_caller_leaves_user_none(
         def for_id(self, _cfg, _cid):
             return _fake_connector()
 
-    monkeypatch.setattr("canonic.core.service.default_factory", _StubFactory())
+    monkeypatch.setattr("canonic.core.context.default_factory", _StubFactory())
 
     await svc.run_sql("select 1")
 
@@ -238,7 +238,7 @@ async def test_ac2_log_contains_no_sql_or_rows(
         def for_id(self, _cfg, _cid):
             return _fake_connector()
 
-    monkeypatch.setattr("canonic.core.service.default_factory", _StubFactory())
+    monkeypatch.setattr("canonic.core.context.default_factory", _StubFactory())
 
     q = SemanticQuery(metrics=["revenue"])
     await svc.query(q)
@@ -362,7 +362,7 @@ async def test_append_only_two_queries_two_lines(
         def for_id(self, _cfg, _cid):
             return _fake_connector()
 
-    monkeypatch.setattr("canonic.core.service.default_factory", _StubFactory())
+    monkeypatch.setattr("canonic.core.context.default_factory", _StubFactory())
 
     q = SemanticQuery(metrics=["revenue"])
     await svc.query(q)
@@ -430,7 +430,7 @@ async def test_null_event_log_writes_nothing(
         def for_id(self, _cfg, _cid):
             return _fake_connector()
 
-    monkeypatch.setattr("canonic.core.service.default_factory", _StubFactory())
+    monkeypatch.setattr("canonic.core.context.default_factory", _StubFactory())
 
     await svc.query(SemanticQuery(metrics=["revenue"]))
 

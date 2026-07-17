@@ -102,7 +102,7 @@ def reachable_dimension_names(
     it is returned as ``"alias.dim"`` — the same string a caller can pass to ``query()``.
 
     Used by the compiler to compute ``metadata.related.unused_dimensions``; also used by
-    :meth:`canonic.core.service.CanonicService._reachable_dimensions` to avoid duplicating
+    :meth:`canonic.core.discovery.DiscoveryService._reachable_dimensions` to avoid duplicating
     the traversal logic.
     """
     alias_to_source = build_alias_tree(source_name, sources_by_name)

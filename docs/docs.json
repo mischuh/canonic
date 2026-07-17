@@ -8,7 +8,7 @@
     "light": "#14B8A6",
     "dark": "#0F766E"
   },
-  "favicon": "/favicon.png",
+  "favicon": "/favicon.svg",
   "navigation": {
     "groups": [
       {
@@ -83,6 +83,10 @@
   },
   "navbar": {
     "links": [
+      {
+        "label": "Home",
+        "href": "https://www.getcanonic.app"
+      },
       {
         "type": "github",
         "href": "https://github.com/mischuh/canonic"
