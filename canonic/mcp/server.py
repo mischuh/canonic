@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING, Any
 from fastmcp import FastMCP
 from fastmcp.server.dependencies import get_access_token
 
+from canonic import __version__ as CANONIC_VERSION
 from canonic.compiler.query import SemanticQuery
 from canonic.contract import CONTRACT_SCHEMA
 from canonic.core.models import CompileOutput
@@ -116,7 +117,9 @@ def build_server(
     always passes a resolved :class:`~canonic.mcp.auth.CanonicTokenVerifier` — see
     ``canonic.mcp.daemon.start_http``.
     """
-    mcp: FastMCP = FastMCP("canonic", instructions=_INSTRUCTIONS, auth=auth)
+    mcp: FastMCP = FastMCP(
+        "canonic", version=CANONIC_VERSION, instructions=_INSTRUCTIONS, auth=auth
+    )
 
     # ------------------------------------------------------------------
     # Tool: list_metrics
@@ -124,12 +127,13 @@ def build_server(
 
     @mcp.tool(
         description=(
-            "Return the serving contract version this daemon implements. "
-            "Call this at session start to confirm compatibility."
+            "Return the serving contract version and Canonic package version this daemon "
+            "runs. Call this at session start to confirm compatibility and check whether the "
+            "daemon is up to date (relevant when launched via uvx)."
         )
     )
     async def contract_info() -> dict[str, str]:
-        return {"contract_schema": CONTRACT_SCHEMA}
+        return {"contract_schema": CONTRACT_SCHEMA, "canonic_version": CANONIC_VERSION}
 
     # ------------------------------------------------------------------
     # Tool: negotiate_contract

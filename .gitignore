@@ -223,3 +223,4 @@ __marimo__/
 
 specs/
 .vscode/settings.json
+.claude/settings.json

@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING
 import pytest
 from fastmcp import Client
 
+from canonic import __version__ as CANONIC_VERSION
 from canonic.compiler.query import SemanticQuery
 from canonic.contract import CONTRACT_SCHEMA
 from canonic.core.models import CompileOutput
@@ -89,11 +90,14 @@ async def test_describe_metric_parity(canonic_service: CanonicService) -> None:
 
 @pytest.mark.asyncio
 async def test_contract_info_returns_schema(canonic_service: CanonicService) -> None:
-    """contract_info tool returns the current contract_schema version."""
+    """contract_info tool returns the contract_schema and running package version."""
     mcp = build_server(canonic_service)
     async with Client(mcp) as client:
         result = await client.call_tool("contract_info", {})
-    assert result.data == {"contract_schema": CONTRACT_SCHEMA}
+    assert result.data == {
+        "contract_schema": CONTRACT_SCHEMA,
+        "canonic_version": CANONIC_VERSION,
+    }
 
 
 @pytest.mark.asyncio
