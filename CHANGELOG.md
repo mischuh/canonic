@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.9.1](https://github.com/mischuh/canonic/compare/v0.9.0...v0.9.1) (2026-07-18)
+
+
+### Bug Fixes
+
+* **compiler:** partition semi-additive collapse by source grain ([#234](https://github.com/mischuh/canonic/issues/234)) ([2923fd1](https://github.com/mischuh/canonic/commit/2923fd1dd1f2275be5e76d6bd3dbd9a92d91165d))
+
+
+### Documentation
+
+* **examples:** add end-user labels and fleet inventory data to rental example ([#233](https://github.com/mischuh/canonic/issues/233)) ([8533c63](https://github.com/mischuh/canonic/commit/8533c63150d539159bebb29b899515c9b983c815))
+
 ## [0.9.0](https://github.com/mischuh/canonic/compare/v0.8.4...v0.9.0) (2026-07-18)
 
 
