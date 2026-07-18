@@ -833,6 +833,57 @@ def test_compile_postgres_date_filter_emits_postgres_interval(
     assert "INTERVAL '3 MONTHS'" in result.sql
 
 
+def test_compile_sqlite_date_filter_emits_sqlite_date_modifier(
+    resolver: ContractResolver, sources: list[SemanticSource]
+) -> None:
+    """SQLite has no INTERVAL literal; rolling-window filters must emit DATE(...) modifiers."""
+    result = compile(
+        SemanticQuery(
+            metrics=["revenue"],
+            filters=["created_at >= DATE('now', '-3 months')"],
+        ),
+        resolver,
+        sources,
+        connection_dialects={"warehouse_pg": "sqlite"},
+    )
+    assert result.dialect == "sqlite"
+    assert "INTERVAL" not in result.sql.upper()
+    assert "DATE(CURRENT_DATE, '-3 months')" in result.sql
+    sqlglot.parse_one(result.sql, dialect="sqlite")
+    import sqlite3
+
+    con = sqlite3.connect(":memory:")
+    con.execute(
+        'CREATE TABLE "fct_orders" (order_id text, customer_id text, status text, '
+        "amount real, created_at text)"
+    )
+    con.execute(result.sql.replace('"analytics"."fct_orders"', '"fct_orders"'))
+
+
+def test_compile_sqlite_month_bucket_emits_sqlite_date_modifier(
+    resolver: ContractResolver, sources: list[SemanticSource]
+) -> None:
+    """SQLite has no DATE_TRUNC function; granularity bucketing must use DATE(..., 'start of ...')."""
+    result = compile(
+        SemanticQuery(metrics=["revenue"], dimensions=["order_date"]),
+        resolver,
+        sources,
+        connection_dialects={"warehouse_pg": "sqlite"},
+    )
+    assert result.dialect == "sqlite"
+    assert "DATE_TRUNC" not in result.sql.upper()
+    assert 'DATE("orders"."created_at", \'start of day\')' in result.sql
+    sqlglot.parse_one(result.sql, dialect="sqlite")
+    import sqlite3
+
+    con = sqlite3.connect(":memory:")
+    con.execute(
+        'CREATE TABLE "fct_orders" (order_id text, customer_id text, status text, '
+        "amount real, created_at text)"
+    )
+    con.execute(result.sql.replace('"analytics"."fct_orders"', '"fct_orders"'))
+
+
 def test_compile_empty_connection_map_falls_back_to_postgres(
     resolver: ContractResolver, sources: list[SemanticSource]
 ) -> None:

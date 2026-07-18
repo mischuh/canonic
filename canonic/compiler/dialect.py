@@ -9,6 +9,7 @@ PostgreSQL; further dialects plug in behind the same interface.
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from typing import cast
 
 from sqlglot import exp
 
@@ -147,11 +148,65 @@ class PostgresDialectAdapter(_GenericDialectAdapter):
         super().__init__("postgres", _POSTGRES_TYPE_MAP)
 
 
+_SQLITE_TRUNC_MODIFIERS: dict[str, str] = {
+    "day": "start of day",
+    "month": "start of month",
+    "year": "start of year",
+}
+
+
+def _rewrite_interval_arithmetic_for_sqlite(node: exp.Expression) -> exp.Expression:
+    """Rewrite ``base +/- INTERVAL 'n' unit`` into SQLite's ``DATE(base, '+/-n unit')``.
+
+    SQLite has no ``INTERVAL`` literal, so sqlglot's sqlite generator emits it verbatim
+    (invalid SQL). The compiler's neutral AST always represents relative-date arithmetic
+    this way regardless of how the filter was originally written, so this rewrite is the
+    single place that needs to know SQLite's actual date-modifier syntax.
+    """
+    if not (isinstance(node, (exp.Add, exp.Sub)) and isinstance(node.expression, exp.Interval)):
+        return node
+    interval = node.expression
+    num = interval.this.name
+    unit = interval.args.get("unit")
+    unit_name = unit.name.lower() if unit is not None else ""
+    sign = "-" if isinstance(node, exp.Sub) else "+"
+    modifier = exp.Literal.string(f"{sign}{num} {unit_name}")
+    return cast("exp.Expression", exp.func("DATE", node.this, modifier))
+
+
+def _rewrite_date_trunc_for_sqlite(node: exp.Expression) -> exp.Expression:
+    """Rewrite ``DATE_TRUNC(unit, col)`` into SQLite's ``DATE(col, modifier)`` form.
+
+    SQLite has no ``DATE_TRUNC`` function; sqlglot's sqlite generator emits it verbatim
+    (invalid SQL). Used both for dimension granularity bucketing and for the SQLite
+    ``DATE('now', 'start of ...')`` filter-modifier rewrite in ``_helpers.py``.
+    """
+    if not isinstance(node, exp.DateTrunc):
+        return node
+    unit = node.args.get("unit")
+    unit_name = unit.name.lower() if unit is not None else ""
+    base = node.this
+    if unit_name == "week":
+        return cast(
+            "exp.Expression",
+            exp.func("DATE", base, exp.Literal.string("weekday 0"), exp.Literal.string("-6 days")),
+        )
+    modifier = _SQLITE_TRUNC_MODIFIERS.get(unit_name)
+    if modifier is None:
+        return node
+    return cast("exp.Expression", exp.func("DATE", base, exp.Literal.string(modifier)))
+
+
 class SQLiteDialectAdapter(_GenericDialectAdapter):
     """SQLite renderer — has no ordered-set aggregate for percentile queries."""
 
     def __init__(self) -> None:
         super().__init__("sqlite", _SQLITE_TYPE_MAP)
+
+    def emit(self, ast: exp.Expression, *, limit: int | None = None) -> str:
+        ast = ast.transform(_rewrite_interval_arithmetic_for_sqlite)
+        ast = ast.transform(_rewrite_date_trunc_for_sqlite)
+        return super().emit(ast, limit=limit)
 
     def supports_percentile_cont(self) -> bool:
         return False
