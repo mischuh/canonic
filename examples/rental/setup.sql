@@ -1,5 +1,5 @@
 -- Rental Service demo database for Canonic
--- 5 dimensions · 3 fact tables · 40 rentals · 32 payments · 8 damage records
+-- 5 dimensions · 4 fact tables · 40 rentals · 32 payments · 8 damage records · 43 inventory snapshots
 --
 -- Usage: sqlite3 rental.db < setup.sql
 
@@ -91,6 +91,14 @@ CREATE TABLE damages (
     description       TEXT,
     repair_cost       NUMERIC(10,2),
     at_fault_customer INTEGER NOT NULL DEFAULT 1  -- 1 = customer liable, 0 = no-fault
+);
+
+CREATE TABLE vehicle_inventory_snapshots (
+    vehicle_id      INTEGER NOT NULL REFERENCES vehicles(vehicle_id),
+    location_id     INTEGER NOT NULL REFERENCES locations(location_id),
+    snapshot_date   TEXT    NOT NULL,
+    inventory_level INTEGER NOT NULL,
+    PRIMARY KEY (vehicle_id, snapshot_date)
 );
 
 -- ============================================================
@@ -265,3 +273,61 @@ INSERT INTO damages VALUES
   (6, 24, 12, '2024-08-22', 'minor',    'Small paint chip on hood',      220.00, 0),
   (7, 28,  1, '2024-10-08', 'moderate', 'Damaged windshield',            800.00, 1),
   (8, 31, 10, '2024-11-08', 'minor',    'Scratched alloy wheel',         400.00, 1);
+
+-- ============================================================
+-- SEED DATA — FACT: vehicle_inventory_snapshots
+-- Daily-snapshot style fleet register, one row per vehicle per
+-- snapshot_date at its home location. Vehicle 14 (Mercedes Sprinter)
+-- was decommissioned after the major collision recorded in damages
+-- (rental 15, reported 2024-05-27), so later snapshots carry 14
+-- vehicles instead of 15 — this is why ending_inventory must use
+-- collapse_agg: last rather than summing across snapshot_date.
+-- ============================================================
+
+INSERT INTO vehicle_inventory_snapshots VALUES
+-- 2024-01-01 — full fleet of 15
+  ( 1, 1, '2024-01-01', 1),
+  ( 2, 1, '2024-01-01', 1),
+  ( 3, 1, '2024-01-01', 1),
+  ( 4, 2, '2024-01-01', 1),
+  ( 5, 2, '2024-01-01', 1),
+  ( 6, 2, '2024-01-01', 1),
+  ( 7, 3, '2024-01-01', 1),
+  ( 8, 3, '2024-01-01', 1),
+  ( 9, 3, '2024-01-01', 1),
+  (10, 4, '2024-01-01', 1),
+  (11, 4, '2024-01-01', 1),
+  (12, 4, '2024-01-01', 1),
+  (13, 5, '2024-01-01', 1),
+  (14, 5, '2024-01-01', 1),
+  (15, 5, '2024-01-01', 1),
+-- 2024-06-01 — vehicle 14 decommissioned after major damage
+  ( 1, 1, '2024-06-01', 1),
+  ( 2, 1, '2024-06-01', 1),
+  ( 3, 1, '2024-06-01', 1),
+  ( 4, 2, '2024-06-01', 1),
+  ( 5, 2, '2024-06-01', 1),
+  ( 6, 2, '2024-06-01', 1),
+  ( 7, 3, '2024-06-01', 1),
+  ( 8, 3, '2024-06-01', 1),
+  ( 9, 3, '2024-06-01', 1),
+  (10, 4, '2024-06-01', 1),
+  (11, 4, '2024-06-01', 1),
+  (12, 4, '2024-06-01', 1),
+  (13, 5, '2024-06-01', 1),
+  (15, 5, '2024-06-01', 1),
+-- 2026-07-01 — current snapshot, fleet stable at 14 since decommission
+  ( 1, 1, '2026-07-01', 1),
+  ( 2, 1, '2026-07-01', 1),
+  ( 3, 1, '2026-07-01', 1),
+  ( 4, 2, '2026-07-01', 1),
+  ( 5, 2, '2026-07-01', 1),
+  ( 6, 2, '2026-07-01', 1),
+  ( 7, 3, '2026-07-01', 1),
+  ( 8, 3, '2026-07-01', 1),
+  ( 9, 3, '2026-07-01', 1),
+  (10, 4, '2026-07-01', 1),
+  (11, 4, '2026-07-01', 1),
+  (12, 4, '2026-07-01', 1),
+  (13, 5, '2026-07-01', 1),
+  (15, 5, '2026-07-01', 1);

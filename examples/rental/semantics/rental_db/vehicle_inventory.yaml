@@ -20,5 +20,13 @@ dimensions:
   - { name: location_id,   column: location_id }
   - { name: snapshot_date, column: snapshot_date, granularity: day }
 
+joins:
+  - to: vehicles
+    on: 'vehicle_inventory.vehicle_id = vehicles.vehicle_id'
+    relationship: many_to_one
+  - to: locations
+    on: 'vehicle_inventory.location_id = locations.location_id'
+    relationship: many_to_one
+
 meta:
   provenance: human_curated
