@@ -151,16 +151,67 @@ def test_ac1_collapsed_uses_row_number(
 
 
 def test_ac1_scalar_no_dims(resolver: ContractResolver, inventory_source: SemanticSource) -> None:
-    """No dimensions: collapse across all rows, return the last snapshot's inventory."""
+    """No dimensions: still partition by the source grain (warehouse_id), sum the last
+    snapshot per warehouse — not a single arbitrary row across the whole table (GH-119
+    regression: an empty PARTITION BY let ROW_NUMBER() rank the entire table, so rn = 1
+    matched only one of several tied-latest rows instead of one per entity).
+    """
     result = compile(
         SemanticQuery(metrics=["ending_inventory"]),
         resolver,
         [inventory_source],
     )
     _parse_ok(result.sql)
-    assert "ROW_NUMBER()" in result.sql.upper()
+    sql_upper = result.sql.upper()
+    assert "ROW_NUMBER()" in sql_upper
+    assert "PARTITION BY" in sql_upper
+    assert '"WAREHOUSE_ID"' in sql_upper
     assert result.partial_additive is not None
     assert result.partial_additive.collapsed is True
+
+
+def test_ac1_scalar_no_dims_sums_across_entities(resolver: ContractResolver) -> None:
+    """Regression: scalar query over a multi-entity snapshot table must sum the latest
+    value per entity, not collapse to a single row (GH-119).
+    """
+    import duckdb
+
+    source = SemanticSource(
+        name="inventory_snapshots",
+        connection="warehouse_pg",
+        table="inventory_snapshots",
+        grain=["warehouse_id", "snapshot_date"],
+        columns=[
+            Column(name="warehouse_id", type="string", nullable=False),
+            Column(name="snapshot_date", type="date", nullable=False),
+            Column(name="inventory_level", type="int", nullable=False),
+        ],
+        measures=[
+            Measure(name="inventory_level", expr="sum(inventory_level)", additivity="additive")
+        ],
+        dimensions=[
+            Dimension(name="warehouse_id", column="warehouse_id"),
+            Dimension(name="snapshot_date", column="snapshot_date", granularity="day"),
+        ],
+    )
+    result = compile(
+        SemanticQuery(metrics=["ending_inventory"]),
+        resolver,
+        [source],
+    )
+
+    con = duckdb.connect()
+    con.execute(
+        "CREATE TABLE inventory_snapshots (warehouse_id TEXT, snapshot_date DATE, inventory_level INT)"
+    )
+    con.execute(
+        "INSERT INTO inventory_snapshots VALUES "
+        "('w1', '2024-01-01', 10), ('w2', '2024-01-01', 20), "
+        "('w1', '2024-02-01', 5),  ('w2', '2024-02-01', 8)"
+    )
+    sql = result.sql.replace('"inventory_snapshots"', "inventory_snapshots")
+    rows = con.execute(sql).fetchall()
+    assert rows == [(13,)]  # last-per-warehouse: w1=5 + w2=8, not a single tied row
 
 
 def test_ac1_resolved_by_alias(
