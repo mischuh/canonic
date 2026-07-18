@@ -34,9 +34,10 @@ import subprocess
 import sys
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
-from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path  # noqa: TC003 — used in function bodies, not just annotations
 from typing import TYPE_CHECKING
+
+from canonic import __version__ as CANONIC_VERSION
 
 if TYPE_CHECKING:
     from canonic.mcp.auth import CanonicTokenVerifier
@@ -55,13 +56,6 @@ __all__ = [
 _STATE_FILE = ".canonic/mcp.json"
 _DEFAULT_HOST = "127.0.0.1"
 _DEFAULT_PORT = 7474
-
-
-def _canonic_version() -> str:
-    try:
-        return version("canonic")
-    except PackageNotFoundError:
-        return "unknown"
 
 
 @dataclass
@@ -143,7 +137,7 @@ def status(project_root: Path) -> DaemonStatus:
         _remove_state(project_root)
         return DaemonStatus(running=False)
 
-    current = _canonic_version()
+    current = CANONIC_VERSION
     mismatch = state.version != current
     return DaemonStatus(
         running=True,
@@ -288,7 +282,7 @@ def start_http(
 
     state = DaemonState(
         pid=proc.pid,
-        version=_canonic_version(),
+        version=CANONIC_VERSION,
         transport="http",
         host=host,
         port=port,

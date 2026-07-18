@@ -7,7 +7,8 @@ from pathlib import Path  # noqa: TC003
 
 import pytest
 
-from canonic.mcp.daemon import DaemonState, _canonic_version, read_state, start_http, status, stop
+from canonic import __version__ as CANONIC_VERSION
+from canonic.mcp.daemon import DaemonState, read_state, start_http, status, stop
 
 
 @pytest.fixture
@@ -54,7 +55,7 @@ class TestStatus:
         assert s.pid is None
 
     def test_live_pid(self, project_root: Path) -> None:
-        _write_state_file(project_root, pid=os.getpid(), v=_canonic_version())
+        _write_state_file(project_root, pid=os.getpid(), v=CANONIC_VERSION)
         s = status(project_root)
         assert s.running
         assert s.pid == os.getpid()
@@ -77,7 +78,7 @@ class TestStatus:
 
     def test_auth_enabled_propagated(self, project_root: Path) -> None:
         _write_state_file(
-            project_root, pid=os.getpid(), v=_canonic_version(), transport="http", auth_enabled=True
+            project_root, pid=os.getpid(), v=CANONIC_VERSION, transport="http", auth_enabled=True
         )
         s = status(project_root)
         assert s.running
@@ -102,7 +103,7 @@ class TestStop:
         # Spawn a background sleep process we can safely kill.
         proc = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"])
         try:
-            _write_state_file(project_root, pid=proc.pid, v=_canonic_version())
+            _write_state_file(project_root, pid=proc.pid, v=CANONIC_VERSION)
             result = stop(project_root)
             assert result is True
             assert not (project_root / ".canonic" / "mcp.json").exists()

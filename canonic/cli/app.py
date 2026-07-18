@@ -5,11 +5,11 @@ selects output format (``--json``), and dispatches to capability commands. All
 real logic lives behind the core in later epics.
 """
 
-from importlib.metadata import PackageNotFoundError, version
 from typing import Annotated
 
 import typer
 
+from canonic import __version__ as CANONIC_VERSION
 from canonic.cli._errors import get_cli_context
 from canonic.cli.commands import (
     apply,
@@ -42,10 +42,7 @@ app = typer.Typer(
 def _version_callback(value: bool) -> None:
     if not value:
         return
-    try:
-        typer.echo(version("canonic"))
-    except PackageNotFoundError:  # pragma: no cover — only when running uninstalled
-        typer.echo("unknown")
+    typer.echo(CANONIC_VERSION)
     raise typer.Exit(0)
 
 
