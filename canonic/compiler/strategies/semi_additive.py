@@ -134,6 +134,23 @@ def _compile_semi_additive(
         )
     collapse_alias, collapse_dim = collapse_dim_result
 
+    # Resolve the source's natural grain (minus collapse_dimension) — this is the
+    # partition key for "last/first per entity". It must not be derived from the
+    # queried output dimensions: a scalar query (no dimensions) still needs to dedupe
+    # per grain entity before summing, otherwise ROW_NUMBER() ranks the whole table
+    # and only one arbitrary row survives (SPEC §4.2).
+    grain_dims: list[tuple[str, Dimension]] = []
+    for grain_col in source_obj.grain:
+        if grain_col == sa.collapse_dimension:
+            continue
+        grain_dim_result = _find_dimension(grain_col, sources_by_name, source_name, alias_to_source)
+        if grain_dim_result is None:
+            raise Unresolved(
+                f"semi_additive binding {queried_name!r}: grain column {grain_col!r} of "
+                f"source {source_name!r} is not declared as a dimension"
+            )
+        grain_dims.append(grain_dim_result)
+
     # Branch: is collapse_dimension among the grouped dimensions?
     grouped = {dim.name for _alias, dim in dimensions}
     collapsed = sa.collapse_dimension not in grouped
@@ -157,6 +174,7 @@ def _compile_semi_additive(
             collapse_alias=collapse_alias,
             collapse_dim=collapse_dim,
             dimensions=dimensions,
+            grain_dims=grain_dims,
             where_conditions=where_conditions,
             join_edges=join_edges,
             sources_by_name=sources_by_name,
@@ -190,6 +208,7 @@ def _build_semi_additive(
     collapse_alias: str,
     collapse_dim: Dimension,
     dimensions: list[tuple[str, Dimension]],
+    grain_dims: list[tuple[str, Dimension]],
     where_conditions: list[exp.Expression],
     join_edges: list[JoinEdge],
     sources_by_name: dict[str, SemanticSource],
@@ -206,14 +225,26 @@ def _build_semi_additive(
         order_dir = "DESC" if collapse_agg is CollapseAgg.LAST else "ASC"
 
         # Inner CTE: project grouped dimensions + raw input columns + ROW_NUMBER window.
+        # The window partitions by the source's grain (minus collapse_dimension), not by
+        # the requested output dimensions — those may be a strict subset (or unrelated,
+        # via a join) of the entity key needed to dedupe "last per entity" correctly.
         dim_names = _dimension_output_names(dimensions)
         inner = exp.Select()
         inner_projections: list[exp.Expression] = []
-        partition_exprs: list[exp.Expression] = []
+        seen_names: set[str] = set()
         for (src, dim), name in zip(dimensions, dim_names, strict=True):
             expr = _dimension_expr(src, dim)
             inner_projections.append(_alias(expr, name))
+            seen_names.add(name)
+
+        partition_exprs: list[exp.Expression] = []
+        grain_names = _dimension_output_names(grain_dims)
+        for (src, dim), name in zip(grain_dims, grain_names, strict=True):
+            expr = _dimension_expr(src, dim)
             partition_exprs.append(expr)
+            if name not in seen_names:
+                inner_projections.append(_alias(expr, name))
+                seen_names.add(name)
 
         for input_col in _input_columns(measure):
             inner_projections.append(_alias(exp.column(input_col, table=owner), input_col))
