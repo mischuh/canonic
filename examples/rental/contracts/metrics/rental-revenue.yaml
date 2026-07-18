@@ -3,5 +3,6 @@ canonical:
   source: payments
   measure: total_paid
 provenance: human_curated
+label: "Rental Revenue"
 aliases: ["revenue", "total revenue", "paid revenue", "settled revenue", "income"]
 status: active

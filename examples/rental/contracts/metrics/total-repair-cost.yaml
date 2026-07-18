@@ -3,5 +3,6 @@ canonical:
   source: damages
   measure: total_repair_cost
 provenance: human_curated
+label: "Total Repair Cost"
 aliases: ["total repair cost", "repair costs", "total repair costs"]
 status: active

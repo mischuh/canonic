@@ -3,5 +3,6 @@ canonical:
   source: rentals
   measure: completed_rental_count
 provenance: human_curated
+label: "Completed Rentals"
 aliases: ["number of rentals", "rentals completed", "completed rentals", "bookings"]
 status: active

@@ -5,5 +5,6 @@ canonical:
   column: total_amount
   quantile: 0.5
 provenance: human_curated
+label: "Median Rental Amount"
 aliases: ["median rental", "median order value"]
 status: active
