@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.9.2](https://github.com/mischuh/canonic/compare/v0.9.1...v0.9.2) (2026-07-18)
+
+
+### Bug Fixes
+
+* **compiler:** emit SQLite-native date arithmetic instead of INTERVAL/DATE_TRUNC ([#236](https://github.com/mischuh/canonic/issues/236)) ([661f4cd](https://github.com/mischuh/canonic/commit/661f4cd872d4ba1b04b7139ba5e8c0612b3fc953))
+
 ## [0.9.1](https://github.com/mischuh/canonic/compare/v0.9.0...v0.9.1) (2026-07-18)
 
 
