@@ -6,5 +6,6 @@ canonical:
   collapse_dimension: snapshot_date
   collapse_agg: last
 provenance: human_curated
+label: "Fleet Size"
 aliases: ["fleet size", "vehicles on hand"]
 status: active

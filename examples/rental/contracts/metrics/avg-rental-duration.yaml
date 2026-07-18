@@ -3,5 +3,6 @@ canonical:
   source: rentals
   measure: avg_rental_days
 provenance: human_curated
+label: "Average Rental Duration"
 aliases: ["average rental length", "average duration", "avg days", "mean rental days"]
 status: active
