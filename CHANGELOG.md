@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.9.0](https://github.com/mischuh/canonic/compare/v0.8.4...v0.9.0) (2026-07-18)
+
+
+### Features
+
+* **mcp:** report canonic package version ([#231](https://github.com/mischuh/canonic/issues/231)) ([3944cc8](https://github.com/mischuh/canonic/commit/3944cc8e16f156eea88a89366bcecb2943ab8180))
+
 ## [0.8.4](https://github.com/mischuh/canonic/compare/v0.8.3...v0.8.4) (2026-07-17)
 
 
