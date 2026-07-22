@@ -245,6 +245,19 @@ def _build_leaf_select(
     return select
 
 
+def _combine_population_filters(*filters: str | None) -> str | None:
+    """AND together a composite-level and a component-level population_filter (§4.5).
+
+    Both the ratio metric itself and each of its numerator/denominator building blocks
+    may declare a population_filter; a leaf must honor whichever of its own owner's
+    filter and the composite's filter are present, not just one of the two.
+    """
+    present = [f for f in filters if f]
+    if not present:
+        return None
+    return " AND ".join(f"({f})" for f in present)
+
+
 def _compile_composite(
     query: SemanticQuery,
     composite: ResolverBinding,
@@ -265,9 +278,19 @@ def _compile_composite(
     adapter = adapter_for(dialect)
     queried_name = query.metrics[0]
 
-    pop_filter = composite.binding.canonical.population_filter
-    num_plan = _plan_leaf(components.numerator, query, resolver, sources_by_name, "n", pop_filter)
-    den_plan = _plan_leaf(components.denominator, query, resolver, sources_by_name, "d", pop_filter)
+    composite_pop_filter = composite.binding.canonical.population_filter
+    num_pop_filter = _combine_population_filters(
+        composite_pop_filter, components.numerator.binding.canonical.population_filter
+    )
+    den_pop_filter = _combine_population_filters(
+        composite_pop_filter, components.denominator.binding.canonical.population_filter
+    )
+    num_plan = _plan_leaf(
+        components.numerator, query, resolver, sources_by_name, "n", num_pop_filter
+    )
+    den_plan = _plan_leaf(
+        components.denominator, query, resolver, sources_by_name, "d", den_pop_filter
+    )
 
     dim_names = num_plan.dim_names
 

@@ -222,5 +222,6 @@ __marimo__/
 .DS_Store
 
 specs/
+vids/
 .vscode/settings.json
 .claude/settings.json

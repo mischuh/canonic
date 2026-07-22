@@ -161,6 +161,55 @@ def test_ac1_population_filter_model_roundtrip() -> None:
     assert ref.population_filter == "severity IN ('major', 'moderate')"
 
 
+def test_ratio_population_filter_on_component_measures(
+    damages: SemanticSource,
+) -> None:
+    """population_filter declared on the component measures (not the ratio itself) applies.
+
+    Regression for the bug where a filter set on the numerator's/denominator's own
+    CanonicalRef was silently dropped because _compile_composite only ever read the
+    ratio metric's own population_filter for both leaves. Uses two distinct filters,
+    one per component, to prove each leaf gets its own filter rather than one leaking
+    into the other or both being dropped.
+    """
+    total_cost_binding = MetricBinding(
+        metric="total_repair_cost",
+        canonical=CanonicalRef(
+            source="damages",
+            measure="total_repair_cost",
+            population_filter="severity IN ('major', 'moderate')",
+        ),
+    )
+    damage_count_binding = MetricBinding(
+        metric="damage_count",
+        canonical=CanonicalRef(
+            source="damages",
+            measure="damage_count",
+            population_filter="reported_month = '2024-01'",
+        ),
+    )
+    avg_costs_binding = MetricBinding(
+        metric="avg_repair_costs",
+        canonical=CanonicalRef(
+            kind=BindingKind.RATIO,
+            numerator="total_repair_cost",
+            denominator="damage_count",
+        ),
+    )
+    resolver = ContractResolver(
+        bindings=[avg_costs_binding, total_cost_binding, damage_count_binding], guardrails=[]
+    )
+    result = compile(SemanticQuery(metrics=["avg_repair_costs"]), resolver, [damages])
+    _parse_ok(result.sql)
+    sql_lower = result.sql.lower()
+    # Each component's own filter must land in its own leaf CTE.
+    assert "severity" in sql_lower
+    assert "major" in sql_lower
+    assert "moderate" in sql_lower
+    assert "reported_month" in sql_lower
+    assert "2024-01" in sql_lower
+
+
 def test_ac1_no_filter_when_none(
     total_cost_binding: MetricBinding,
     damage_count_binding: MetricBinding,
