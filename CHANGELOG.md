@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.9.3](https://github.com/mischuh/canonic/compare/v0.9.2...v0.9.3) (2026-07-22)
+
+
+### Bug Fixes
+
+* **compiler:** thread each ratio component's own population_filter into its leaf ([#238](https://github.com/mischuh/canonic/issues/238)) ([bc2fd92](https://github.com/mischuh/canonic/commit/bc2fd9254e780ee05b3a091567c4d665c79d8804))
+
 ## [0.9.2](https://github.com/mischuh/canonic/compare/v0.9.1...v0.9.2) (2026-07-18)
 
 
