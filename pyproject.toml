@@ -1,6 +1,6 @@
 [project]
 name = "canonic"
-version = "0.9.3"
+version = "0.9.4"
 description = "The Open Context Layer for Data Agents"
 readme = "README.md"
 requires-python = ">=3.13"

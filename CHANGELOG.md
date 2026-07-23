@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.9.4](https://github.com/mischuh/canonic/compare/v0.9.3...v0.9.4) (2026-07-23)
+
+
+### Bug Fixes
+
+* **compiler:** scope population_filter/guardrails per metric in multi-metric queries ([#240](https://github.com/mischuh/canonic/issues/240)) ([781ae46](https://github.com/mischuh/canonic/commit/781ae46fa989c77c1596d662c44efdd57db52eb4))
+
 ## [0.9.3](https://github.com/mischuh/canonic/compare/v0.9.2...v0.9.3) (2026-07-22)
 
 
