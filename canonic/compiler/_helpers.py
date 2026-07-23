@@ -213,6 +213,39 @@ def _measure_expr(source: str, measure: Measure) -> exp.Expression:
     return _qualify_to(parsed, source)
 
 
+def _guard_aggregate(agg: exp.Expression, condition: exp.Expression) -> exp.Expression:
+    """Scope one metric's own aggregate to rows matching ``condition`` via conditional
+    aggregation (``SUM(CASE WHEN condition THEN x END)``), rather than ANDing the
+    condition into a WHERE shared with sibling metrics in the same flat SELECT — which
+    would drop rows those sibling metrics still need (GH multi-metric population_filter
+    collision).
+    """
+    inner = agg.this
+    if isinstance(inner, exp.Distinct):
+        guarded = [exp.Case(ifs=[exp.If(this=condition.copy(), true=e)]) for e in inner.expressions]
+        agg.set("this", exp.Distinct(expressions=guarded))
+    elif isinstance(inner, exp.Star):
+        agg.set("this", exp.Case(ifs=[exp.If(this=condition, true=exp.Literal.number(1))]))
+    else:
+        agg.set("this", exp.Case(ifs=[exp.If(this=condition, true=inner)]))
+    return agg
+
+
+def _requalify_all(expr: exp.Expression, new_alias: str) -> exp.Expression:
+    """Replace every qualified column's table with ``new_alias``, regardless of its
+    current table. Used to re-point a per-metric guard condition at a dedup subquery's
+    bare-named inner projection (``_DEDUP_ALIAS``), where the original source alias no
+    longer applies.
+    """
+
+    def _transform(node: exp.Expression) -> exp.Expression:
+        if isinstance(node, exp.Column) and node.table:
+            return exp.column(node.name, table=new_alias)
+        return node
+
+    return expr.transform(_transform)
+
+
 def _from_and_joins(
     select: exp.Select,
     owner: str,
@@ -239,8 +272,15 @@ def _build_simple(
     where_conditions: list[exp.Expression],
     join_edges: list[JoinEdge],
     sources_by_name: dict[str, SemanticSource],
+    metric_conditions: list[list[exp.Expression]] | None = None,
 ) -> exp.Select:
-    """Single-SELECT emission for the no-fanout case (SPEC §4 step 7)."""
+    """Single-SELECT emission for the no-fanout case (SPEC §4 step 7).
+
+    ``metric_conditions``, when given, holds one condition list per metric (its own
+    population_filter/guardrails) applied via conditional aggregation on that metric's
+    own projection — used when multiple metrics share this SELECT and a shared WHERE
+    would incorrectly apply one metric's restriction to every other metric's aggregate.
+    """
     select = exp.Select()
     projections: list[exp.Expression] = []
     group_exprs: list[exp.Expression] = []
@@ -248,8 +288,12 @@ def _build_simple(
         expr = _dimension_expr(src, dim)
         projections.append(_alias(expr, name))
         group_exprs.append(expr)
-    for m in metrics:
-        projections.append(_alias(_measure_expr(m.source, m.measure), m.measure.name))
+    for i, m in enumerate(metrics):
+        expr = _measure_expr(m.source, m.measure)
+        conditions = metric_conditions[i] if metric_conditions else []
+        if conditions:
+            expr = _guard_aggregate(expr, cast("exp.Expression", exp.and_(*conditions)))
+        projections.append(_alias(expr, m.measure.name))
     select = select.select(*projections)
     select = _from_and_joins(select, owner, join_edges, sources_by_name)
     if where_conditions:

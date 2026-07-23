@@ -38,10 +38,12 @@ from canonic.compiler._helpers import (
     _find_time_dim_name,
     _freshness,
     _from_and_joins,
+    _guard_aggregate,
     _input_columns,
     _parse,
     _population_filter_conditions,
     _qualify_to,
+    _requalify_all,
     _resolve_dimensions,
     _ResolvedMetric,
 )
@@ -154,18 +156,42 @@ def _compile_simple_additive(
     logger.debug("stage 5b: restrict_source enforcement")
     _enforce_restrict_source(query, metrics, resolver, finality_rule, sources_by_name)
 
-    # population_filter — defines the population the metric is about (§4.5); before guardrails.
-    for _, b in raw_bindings:
+    # population_filter — defines the population each metric is about (§4.5); before guardrails.
+    # With exactly one metric, its filter/guardrails fold into the single shared WHERE
+    # (unchanged, current SQL shape). With multiple metrics sharing this one flat SELECT,
+    # each metric's own filter/guardrails must scope only its own aggregate — ANDing them
+    # into one shared WHERE would apply metric A's restriction to metric B's aggregate too,
+    # and vice versa, silently collapsing all metrics to NULL when the restrictions differ.
+    logger.debug("stage 6: enforcing guardrails")
+    metric_conditions: list[list[exp.Expression]] | None = None
+    if len(metrics) == 1:
+        _, b = raw_bindings[0]
         where_conditions += _population_filter_conditions(
             b.binding.canonical.population_filter, sources_by_name, owner, alias_to_source
         )
-
-    # Stage 6 — enforce guardrails: AND mandatory filters into WHERE.
-    logger.debug("stage 6: enforcing guardrails")
-    guard_conditions, fired = _enforce_guardrails(metrics, resolver, query.context, sources_by_name)
+        guard_conditions, fired = _enforce_guardrails(
+            metrics, resolver, query.context, sources_by_name
+        )
+        where_conditions += guard_conditions
+    else:
+        metric_conditions = []
+        fired = []
+        fired_seen: set[str] = set()
+        for m, (_, b) in zip(metrics, raw_bindings, strict=True):
+            conds = _population_filter_conditions(
+                b.binding.canonical.population_filter, sources_by_name, owner, alias_to_source
+            )
+            guard_conds, m_fired = _enforce_guardrails(
+                [m], resolver, query.context, sources_by_name
+            )
+            conds += guard_conds
+            for g in m_fired:
+                if g.id not in fired_seen:
+                    fired_seen.add(g.id)
+                    fired.append(g)
+            metric_conditions.append(conds)
     if fired:
         logger.info("guardrails applied: count=%d ids=%s", len(fired), [g.id for g in fired])
-    where_conditions += guard_conditions
 
     # Stage 7 — emit SQL through the dialect adapter.
     logger.debug("stage 7: emitting SQL via dialect %s", dialect)
@@ -195,11 +221,23 @@ def _compile_simple_additive(
         )
     elif fanout:
         ast = _build_deduped(
-            owner, metrics, dimensions, where_conditions, join_edges, sources_by_name
+            owner,
+            metrics,
+            dimensions,
+            where_conditions,
+            join_edges,
+            sources_by_name,
+            metric_conditions,
         )
     else:
         ast = _build_simple(
-            owner, metrics, dimensions, where_conditions, join_edges, sources_by_name
+            owner,
+            metrics,
+            dimensions,
+            where_conditions,
+            join_edges,
+            sources_by_name,
+            metric_conditions,
         )
     sql = adapter.emit(ast, limit=query.limit)
 
@@ -231,12 +269,17 @@ def _build_deduped(
     where_conditions: list[exp.Expression],
     join_edges: list[JoinEdge],
     sources_by_name: dict[str, SemanticSource],
+    metric_conditions: list[list[exp.Expression]] | None = None,
 ) -> exp.Select:
     """Fanout-safe emission: dedup the measure grain in an inner ``DISTINCT ON`` subquery.
 
     A one→many / many→many join multiplies the measure source's rows; aggregating
     directly would inflate an additive sum. The inner query keeps one row per grain
     (Postgres ``DISTINCT ON``); the outer query aggregates over it (SPEC §4 step 4, S3 AC1).
+
+    ``metric_conditions``, when given, holds one condition list per metric applied via
+    conditional aggregation in the outer query (see ``_build_simple`` for why) — any
+    column such a condition references must also be projected by the inner subquery.
     """
     owner_source = sources_by_name[owner]
     grain_cols = [exp.column(g, table=owner) for g in owner_source.grain]
@@ -251,6 +294,11 @@ def _build_deduped(
     for m in metrics:
         for input_col in _input_columns(m.measure):
             measure_inputs.setdefault(input_col, exp.column(input_col, table=m.source))
+    for conds in metric_conditions or []:
+        for cond in conds:
+            for col in cond.find_all(exp.Column):
+                if col.table:
+                    measure_inputs.setdefault(col.name, exp.column(col.name, table=col.table))
     for col_name in sorted(measure_inputs):
         inner_projections.append(_alias(measure_inputs[col_name], col_name))
     inner = inner.select(*inner_projections).distinct(*grain_cols)
@@ -266,10 +314,13 @@ def _build_deduped(
         dim_col = exp.column(name, table=_DEDUP_ALIAS)
         projections.append(_alias(dim_col, name))
         group_exprs.append(dim_col)
-    for m in metrics:
-        projections.append(
-            _alias(_qualify_to(_parse(m.measure.expr), _DEDUP_ALIAS), m.measure.name)
-        )
+    for i, m in enumerate(metrics):
+        expr = _qualify_to(_parse(m.measure.expr), _DEDUP_ALIAS)
+        conditions = metric_conditions[i] if metric_conditions else []
+        if conditions:
+            requalified = [_requalify_all(c, _DEDUP_ALIAS) for c in conditions]
+            expr = _guard_aggregate(expr, cast("exp.Expression", exp.and_(*requalified)))
+        projections.append(_alias(expr, m.measure.name))
     outer = outer.select(*projections).from_(_alias(inner.subquery(), _DEDUP_ALIAS))
     if group_exprs:
         outer = outer.group_by(*group_exprs)
