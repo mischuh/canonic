@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.10.1](https://github.com/mischuh/canonic/compare/v0.10.0...v0.10.1) (2026-07-27)
+
+
+### Bug Fixes
+
+* **ingestion:** reconcile dbt companion evidence against its physical connection ([#245](https://github.com/mischuh/canonic/issues/245)) ([83c4b32](https://github.com/mischuh/canonic/commit/83c4b32ba018c4f390a8fd8ff73a6216cede9ab1))
+
 ## [0.10.0](https://github.com/mischuh/canonic/compare/v0.9.4...v0.10.0) (2026-07-27)
 
 
