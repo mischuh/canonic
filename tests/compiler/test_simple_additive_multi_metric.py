@@ -320,10 +320,18 @@ def test_fanout_dedup_path_conditional_aggregation(
 #
 # Fixing the missing join surfaced a second, more dangerous latent issue: once the
 # join *is* planned, a one_to_many/many_to_many or many_to_one relationship between
-# the two sources makes the existing owner-grain dedup / flat-SELECT emission produce
-# a *wrong* (not merely uncompilable) aggregate for the non-owner metric — confirmed by
-# direct reproduction. Only one_to_one is safe under the current single-flat-query
-# design, so anything else must raise FanoutUnsafe instead of silently corrupting data.
+# the two sources makes a flat-SELECT emission produce a *wrong* (not merely
+# uncompilable) aggregate for the non-owner metric — confirmed by direct reproduction.
+# Only one_to_one is safe for a single flat join.
+#
+# For any other relationship between two ADDITIVE metrics' sources, the compiler now
+# aggregates each source independently at its own grain (one CTE per metric source,
+# `_build_multi_source`/`_plan_metric_group` in `simple_additive.py`) and combines the
+# fully-aggregated leaves with a `FULL JOIN USING (<dims>)` — a leaf that's already
+# aggregated to one row per group can't be fanned out by the combining join, so this is
+# correct regardless of the relationship. Non-additive/semi-additive metrics reached via
+# a fanout edge still raise `FanoutUnsafe` — pre-aggregating those would mean invoking a
+# different compile strategy per leaf, out of scope here.
 # ---------------------------------------------------------------------------
 
 
@@ -415,21 +423,9 @@ def test_cross_source_metrics_no_join_path_raises_unreachable(
         compile(SemanticQuery(metrics=["revenue", "txn_amount"]), resolver, [orders, transactions])
 
 
-@pytest.mark.parametrize(
-    "relationship",
-    [Relationship.ONE_TO_MANY, Relationship.MANY_TO_ONE, Relationship.MANY_TO_MANY],
-)
-def test_cross_source_metrics_non_one_to_one_join_raises_fanout_unsafe(
-    orders: SemanticSource, relationship: Relationship
-) -> None:
-    """A non-one_to_one join between two metric sources must fail loud, not corrupt data.
-
-    A one_to_many join undercounts the many-side metric (owner-grain dedup collapses its
-    rows); a many_to_one join overcounts the one-side metric (its value is broadcast
-    across every matching owner row). Both were confirmed by direct reproduction against
-    real DuckDB data before this guard was added.
-    """
-    order_items = SemanticSource(
+@pytest.fixture
+def order_items() -> SemanticSource:
+    return SemanticSource(
         name="order_items",
         connection="warehouse_duckdb",
         table="fct_order_items",
@@ -442,6 +438,24 @@ def test_cross_source_metrics_non_one_to_one_join_raises_fanout_unsafe(
         measures=[Measure(name="units_sold", expr="sum(quantity)", additivity="additive")],
         dimensions=[],
     )
+
+
+@pytest.mark.parametrize(
+    "relationship",
+    [Relationship.ONE_TO_MANY, Relationship.MANY_TO_ONE, Relationship.MANY_TO_MANY],
+)
+def test_cross_source_metrics_non_one_to_one_join_aggregates_leaves_correctly(
+    orders: SemanticSource, order_items: SemanticSource, relationship: Relationship
+) -> None:
+    """A non-one_to_one join between two additive metrics' sources is aggregated per-leaf.
+
+    A flat single join would undercount the many-side metric (one_to_many: owner-grain
+    dedup collapses its rows) or overcount the one-side metric (many_to_one: its value is
+    broadcast across every matching owner row) — confirmed by direct reproduction against
+    real DuckDB data. Instead each source is aggregated independently at its own grain
+    (one CTE per source) and the fully-aggregated leaves are combined, so the relationship
+    between the sources can't corrupt either aggregate.
+    """
     orders_with_join = orders.model_copy(
         update={
             "joins": [
@@ -460,9 +474,180 @@ def test_cross_source_metrics_non_one_to_one_join_raises_fanout_unsafe(
         metric="units_sold", canonical=CanonicalRef(source="order_items", measure="units_sold")
     )
     resolver = ContractResolver(bindings=[revenue_b, units_b], guardrails=[])
+    result = compile(
+        SemanticQuery(metrics=["revenue", "units_sold"]),
+        resolver,
+        [orders_with_join, order_items],
+        connection_dialects={"warehouse_duckdb": "duckdb"},
+    )
+    _parse_ok(result.sql)
+    assert "WITH" in result.sql.upper()
+
+    con = duckdb.connect(":memory:")
+    con.execute("CREATE TABLE fct_orders (order_id VARCHAR, amount DECIMAL)")
+    con.execute(
+        "CREATE TABLE fct_order_items (item_id VARCHAR, order_id VARCHAR, quantity DECIMAL)"
+    )
+    con.execute("INSERT INTO fct_orders VALUES ('1', 100), ('2', 50)")
+    con.execute(
+        "INSERT INTO fct_order_items VALUES "
+        "('a', '1', 2), ('b', '1', 3), ('c', '1', 4), ('d', '2', 5)"
+    )
+    row = con.execute(result.sql).fetchone()
+    assert row is not None
+    revenue, units_sold = row
+    assert revenue == 150
+    assert units_sold == 14
+
+
+def test_cross_source_metrics_grouped_by_source_one_leaf_per_source(
+    orders: SemanticSource, order_items: SemanticSource
+) -> None:
+    """Two metrics sharing one non-owner source are combined into a single leaf CTE."""
+    order_items_with_second_measure = order_items.model_copy(
+        update={
+            "measures": [
+                *order_items.measures,
+                Measure(name="item_count", expr="count(item_id)", additivity="additive"),
+            ]
+        }
+    )
+    orders_with_join = orders.model_copy(
+        update={
+            "joins": [
+                Join(
+                    to="order_items",
+                    on="orders.order_id = order_items.order_id",
+                    relationship=Relationship.ONE_TO_MANY,
+                )
+            ]
+        }
+    )
+    revenue_b = MetricBinding(
+        metric="revenue", canonical=CanonicalRef(source="orders", measure="revenue")
+    )
+    units_b = MetricBinding(
+        metric="units_sold", canonical=CanonicalRef(source="order_items", measure="units_sold")
+    )
+    count_b = MetricBinding(
+        metric="item_count", canonical=CanonicalRef(source="order_items", measure="item_count")
+    )
+    resolver = ContractResolver(bindings=[revenue_b, units_b, count_b], guardrails=[])
+    result = compile(
+        SemanticQuery(metrics=["revenue", "units_sold", "item_count"]),
+        resolver,
+        [orders_with_join, order_items_with_second_measure],
+        connection_dialects={"warehouse_duckdb": "duckdb"},
+    )
+    _parse_ok(result.sql)
+    # Two metric sources total -> exactly two leaf CTEs, not three.
+    assert result.sql.count("_leaf0") > 0
+    assert result.sql.count("_leaf1") > 0
+    assert "_leaf2" not in result.sql
+
+    con = duckdb.connect(":memory:")
+    con.execute("CREATE TABLE fct_orders (order_id VARCHAR, amount DECIMAL)")
+    con.execute(
+        "CREATE TABLE fct_order_items (item_id VARCHAR, order_id VARCHAR, quantity DECIMAL)"
+    )
+    con.execute("INSERT INTO fct_orders VALUES ('1', 100), ('2', 50)")
+    con.execute(
+        "INSERT INTO fct_order_items VALUES "
+        "('a', '1', 2), ('b', '1', 3), ('c', '1', 4), ('d', '2', 5)"
+    )
+    row = con.execute(result.sql).fetchone()
+    assert row is not None
+    revenue, units_sold, item_count = row
+    assert revenue == 150
+    assert units_sold == 14
+    assert item_count == 4
+
+
+def test_cross_source_metrics_dimension_unreachable_from_one_leaf_raises_unreachable(
+    orders: SemanticSource, order_items: SemanticSource
+) -> None:
+    """A dimension reachable from only one metric's source fails loud, not silently.
+
+    Joins are declared one-directionally (SPEC §10 — never invented/reversed), so a
+    dimension declared only on ``orders`` genuinely can't be projected from a leaf rooted
+    at ``order_items`` unless a join back is explicitly declared.
+    """
+    orders_with_dim = orders.model_copy(
+        update={
+            "columns": [*orders.columns, Column(name="region", type="string", nullable=True)],
+            "dimensions": [Dimension(name="region", column="region")],
+            "joins": [
+                Join(
+                    to="order_items",
+                    on="orders.order_id = order_items.order_id",
+                    relationship=Relationship.ONE_TO_MANY,
+                )
+            ],
+        }
+    )
+    revenue_b = MetricBinding(
+        metric="revenue", canonical=CanonicalRef(source="orders", measure="revenue")
+    )
+    units_b = MetricBinding(
+        metric="units_sold", canonical=CanonicalRef(source="order_items", measure="units_sold")
+    )
+    resolver = ContractResolver(bindings=[revenue_b, units_b], guardrails=[])
+    with pytest.raises(Unreachable):
+        compile(
+            SemanticQuery(metrics=["revenue", "units_sold"], dimensions=["region"]),
+            resolver,
+            [orders_with_dim, order_items],
+        )
+
+
+def test_cross_source_metrics_non_additive_fanout_still_raises_fanout_unsafe(
+    orders: SemanticSource,
+) -> None:
+    """The per-leaf pre-aggregation fix is additive-only: non-additive fanout still fails loud.
+
+    Pre-aggregating a non-additive/semi-additive measure per leaf would mean invoking a
+    different compile strategy per leaf (semi_additive.py/recompute.py) — out of scope for
+    this fix, so the existing safety floor is unchanged.
+    """
+    order_items = SemanticSource(
+        name="order_items",
+        connection="warehouse_duckdb",
+        table="fct_order_items",
+        grain=["item_id"],
+        columns=[
+            Column(name="item_id", type="string", nullable=False),
+            Column(name="order_id", type="string", nullable=False),
+            Column(name="quantity", type="decimal", nullable=True),
+        ],
+        measures=[
+            Measure(
+                name="distinct_items", expr="count(distinct item_id)", additivity="non_additive"
+            )
+        ],
+        dimensions=[],
+    )
+    orders_with_join = orders.model_copy(
+        update={
+            "joins": [
+                Join(
+                    to="order_items",
+                    on="orders.order_id = order_items.order_id",
+                    relationship=Relationship.ONE_TO_MANY,
+                )
+            ]
+        }
+    )
+    revenue_b = MetricBinding(
+        metric="revenue", canonical=CanonicalRef(source="orders", measure="revenue")
+    )
+    distinct_b = MetricBinding(
+        metric="distinct_items",
+        canonical=CanonicalRef(source="order_items", measure="distinct_items"),
+    )
+    resolver = ContractResolver(bindings=[revenue_b, distinct_b], guardrails=[])
     with pytest.raises(FanoutUnsafe):
         compile(
-            SemanticQuery(metrics=["revenue", "units_sold"]),
+            SemanticQuery(metrics=["revenue", "distinct_items"]),
             resolver,
             [orders_with_join, order_items],
         )

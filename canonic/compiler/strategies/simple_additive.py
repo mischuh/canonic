@@ -19,6 +19,7 @@ from canonic.semantic.models import Additivity, Relationship
 
 if TYPE_CHECKING:
     from canonic.compiler.query import SemanticQuery
+    from canonic.compiler.result import FiredGuardrail
     from canonic.contracts.models import FinalityRule
     from canonic.contracts.resolver import Binding as ResolverBinding
     from canonic.contracts.resolver import ContractResolver
@@ -134,6 +135,12 @@ def _compile_simple_additive(
     fanout = any(edge.join.relationship in _FANOUT for edge in join_edges)
     grouped = {dim.name for _alias, dim in dimensions}
 
+    # True when at least one additive metric sits on a source reached from `owner` via a
+    # non-one_to_one join: the flat single-plan below is unsafe for it (broadcast/collapse
+    # risk), so stage 7 rebuilds the whole query as one CTE per metric source instead
+    # (aggregate each source at its own grain first, combine last — always correct).
+    needs_multi_leaf = False
+
     for m in metrics:
         add = m.measure.additivity
         if add is Additivity.ADDITIVE:
@@ -143,21 +150,14 @@ def _compile_simple_additive(
                     f"not supported at P0"
                 )
             if _cross_source_measure_unsafe(m.source, owner, join_edges):
-                logger.warning(
-                    "cross-source measure unsafe: %s.%s is reached from owner %s via a "
-                    "non-one_to_one join; combining it in this query would silently "
-                    "corrupt the aggregate",
+                logger.debug(
+                    "cross-source measure needs per-source pre-aggregation: %s.%s is "
+                    "reached from owner %s via a non-one_to_one join",
                     m.source,
                     m.measure.name,
                     owner,
                 )
-                raise FanoutUnsafe(
-                    f"measure {m.source}.{m.measure.name!r} is reached from {owner!r} via a "
-                    f"join that isn't one_to_one; combining it with the other requested "
-                    f"metrics in a single query would either broadcast or collapse its rows "
-                    f"and silently corrupt the aggregate; query it separately or at its "
-                    f"native grain"
-                )
+                needs_multi_leaf = True
             continue
 
         # Non-additive / semi-additive: safety floor — refuse corrupting aggregations.
@@ -262,6 +262,14 @@ def _compile_simple_additive(
             sources_used=[r.source for r in finality_rule.realizations],
             result_flag=finality_rule.result_flag or "per_row",
         )
+    elif needs_multi_leaf:
+        # Cross-source additive metrics via a non-one_to_one join: the flat single-plan
+        # `join_edges`/`dimensions`/`where_conditions` above are relative to the wrong
+        # (global) owner and unsafe here — rebuild from scratch as one CTE per metric
+        # source (SPEC follow-up: correct fanout aggregation via pre-aggregate-then-join).
+        ast, fired, multi_used_sources = _build_multi_source(
+            query, metrics, raw_bindings, resolver, sources_by_name
+        )
     elif fanout:
         ast = _build_deduped(
             owner,
@@ -288,6 +296,8 @@ def _compile_simple_additive(
     logger.debug("stage 8: attaching result metadata")
     if finality_meta is not None:
         used_sources = sorted(finality_meta.sources_used)
+    elif needs_multi_leaf:
+        used_sources = sorted(multi_used_sources)
     else:
         # Map aliases back to source names (deduplicated) for freshness metadata.
         used_source_names: set[str] = {owner}
@@ -303,6 +313,200 @@ def _compile_simple_additive(
         warnings=[],
         finality=finality_meta,
     )
+
+
+class _GroupPlan:
+    """A leaf SELECT for one metric-source group inside a multi-source query (§9 S4 follow-up)."""
+
+    __slots__ = ("dim_names", "select", "used_sources")
+
+    def __init__(self, select: exp.Select, dim_names: list[str], used_sources: set[str]) -> None:
+        self.select = select
+        self.dim_names = dim_names
+        self.used_sources = used_sources
+
+
+def _plan_metric_group(
+    owner: str,
+    metrics: list[_ResolvedMetric],
+    raw_bindings: list[tuple[str, ResolverBinding]],
+    query: SemanticQuery,
+    resolver: ContractResolver,
+    sources_by_name: dict[str, SemanticSource],
+) -> tuple[_GroupPlan, list[FiredGuardrail]]:
+    """Plan and build one metric-source group's SELECT at its own grain (stages 2-4, 6-7).
+
+    Every metric here shares ``owner`` as its source, so this is exactly the single-source
+    logic ``_compile_simple_additive`` runs stages 2-4/6-7 for, scoped down to one owner
+    and its own metrics so :func:`_build_multi_source` can reuse it per leaf.
+    """
+    alias_to_source = build_alias_tree(owner, sources_by_name)
+    dimensions = _resolve_dimensions(query, sources_by_name, owner, alias_to_source)
+    referenced = {alias for alias, _ in dimensions}
+    where_conditions, filter_sources = _bind_filters(
+        query.filters, sources_by_name, owner, alias_to_source
+    )
+    referenced |= filter_sources
+    referenced |= {owner}
+
+    join_edges = plan_joins(
+        owner, referenced - {owner}, sources_by_name, via=list(query.via) or None
+    )
+
+    fanout = any(edge.join.relationship in _FANOUT for edge in join_edges)
+    grouped = {dim.name for _alias, dim in dimensions}
+
+    for m in metrics:
+        add = m.measure.additivity
+        if add is Additivity.ADDITIVE:
+            if not m.measure.is_p0_compilable:
+                raise UnsupportedMeasure(
+                    f"measure {m.source}.{m.measure.name!r} uses an aggregate function "
+                    f"not supported at P0"
+                )
+            continue
+        if fanout:
+            raise FanoutUnsafe(
+                f"measure {m.source}.{m.measure.name!r} is {add.value} and a "
+                f"one_to_many/many_to_many join in this query would multiply its rows "
+                f"and corrupt the aggregate; request it without the fanning dimension "
+                f"or source, or query it at its native grain"
+            )
+        if add is Additivity.SEMI_ADDITIVE:
+            unsafe_dims = [d for d in m.measure.semi_additive_over if d not in grouped]
+            if unsafe_dims:
+                raise UnsupportedMeasure(
+                    f"measure {m.source}.{m.measure.name!r} is semi-additive over "
+                    f"{unsafe_dims} and cannot be collapsed across those dimensions "
+                    f"without the semi_additive strategy; group by {unsafe_dims} for "
+                    f"a correct result"
+                )
+
+    metric_conditions: list[list[exp.Expression]] | None = None
+    if len(metrics) == 1:
+        _, b = raw_bindings[0]
+        where_conditions += _population_filter_conditions(
+            b.binding.canonical.population_filter, sources_by_name, owner, alias_to_source
+        )
+        guard_conditions, fired = _enforce_guardrails(
+            metrics, resolver, query.context, sources_by_name
+        )
+        where_conditions += guard_conditions
+    else:
+        metric_conditions = []
+        fired = []
+        fired_seen: set[str] = set()
+        for m, (_, b) in zip(metrics, raw_bindings, strict=True):
+            conds = _population_filter_conditions(
+                b.binding.canonical.population_filter, sources_by_name, owner, alias_to_source
+            )
+            guard_conds, m_fired = _enforce_guardrails(
+                [m], resolver, query.context, sources_by_name
+            )
+            conds += guard_conds
+            for g in m_fired:
+                if g.id not in fired_seen:
+                    fired_seen.add(g.id)
+                    fired.append(g)
+            metric_conditions.append(conds)
+
+    if fanout:
+        select = _build_deduped(
+            owner,
+            metrics,
+            dimensions,
+            where_conditions,
+            join_edges,
+            sources_by_name,
+            metric_conditions,
+        )
+    else:
+        select = _build_simple(
+            owner,
+            metrics,
+            dimensions,
+            where_conditions,
+            join_edges,
+            sources_by_name,
+            metric_conditions,
+        )
+
+    used_sources = {owner} | {e.join.to for e in join_edges}
+    plan = _GroupPlan(
+        select=select, dim_names=_dimension_output_names(dimensions), used_sources=used_sources
+    )
+    return plan, fired
+
+
+def _build_multi_source(
+    query: SemanticQuery,
+    metrics: list[_ResolvedMetric],
+    raw_bindings: list[tuple[str, ResolverBinding]],
+    resolver: ContractResolver,
+    sources_by_name: dict[str, SemanticSource],
+) -> tuple[exp.Select, list[FiredGuardrail], set[str]]:
+    """Combine metrics from different, fanned-out-joined sources into one query.
+
+    Each distinct metric source is planned and aggregated independently, at its own grain
+    (:func:`_plan_metric_group` — the same single-source machinery
+    ``_compile_simple_additive`` already uses) *before* any cross-source join happens. A
+    fully-aggregated one-row-per-group leaf can't be fanned out by a later join, so this
+    is correct regardless of the relationship between the sources — no dedup trick, no
+    broadcast/collapse risk. Leaves are emitted as CTEs and combined with a
+    ``FULL JOIN USING (<dims>)`` chain (``CROSS JOIN`` when there are no dimensions),
+    generalizing ``composite.py``'s fixed two-leaf (numerator/denominator) CTE pattern to
+    N leaves grouped by metric source.
+    """
+    groups: dict[str, list[int]] = {}
+    for i, m in enumerate(metrics):
+        groups.setdefault(m.source, []).append(i)
+
+    plans: list[_GroupPlan] = []
+    leaf_metric_names: list[list[str]] = []
+    fired: list[FiredGuardrail] = []
+    fired_seen: set[str] = set()
+    used_sources: set[str] = set()
+
+    for owner, idxs in groups.items():
+        group_metrics = [metrics[i] for i in idxs]
+        group_bindings = [raw_bindings[i] for i in idxs]
+        plan, group_fired = _plan_metric_group(
+            owner, group_metrics, group_bindings, query, resolver, sources_by_name
+        )
+        plans.append(plan)
+        leaf_metric_names.append([m.measure.name for m in group_metrics])
+        used_sources |= plan.used_sources
+        for g in group_fired:
+            if g.id not in fired_seen:
+                fired_seen.add(g.id)
+                fired.append(g)
+
+    dim_names = plans[0].dim_names
+
+    outer = exp.Select()
+    projections: list[exp.Expression] = [
+        _alias(cast("exp.Expression", exp.column(name)), name) for name in dim_names
+    ]
+    for i, names in enumerate(leaf_metric_names):
+        for name in names:
+            projections.append(
+                _alias(cast("exp.Expression", exp.column(name, table=f"_leaf{i}")), name)
+            )
+    outer = outer.select(*projections)
+
+    outer = outer.from_(exp.to_table("_leaf0"))
+    for i in range(1, len(plans)):
+        target = exp.to_table(f"_leaf{i}")
+        if dim_names:
+            outer = outer.join(target, using=dim_names, join_type="FULL")  # type: ignore[arg-type]
+        else:
+            outer = outer.join(target, join_type="CROSS")
+
+    ast = outer
+    for i, plan in enumerate(plans):
+        ast = ast.with_(f"_leaf{i}", as_=plan.select)
+
+    return ast, fired, used_sources
 
 
 def _build_deduped(
