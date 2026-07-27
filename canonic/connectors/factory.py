@@ -32,7 +32,14 @@ __all__ = ["ConnectorFactory", "default_factory"]
 
 def _make_dbt(conn: Connection) -> DbtConnector:
     manifest_path = conn.params.get("manifest_path", "manifest.json")
-    return DbtConnector(manifest_path, source=conn.id)
+    # A dbt connection is definitions-only (no run_read_only_sql); its RelationSchemas
+    # must be stamped with the *physical* connection they describe, not this connection's
+    # own id, so the builder proposes them at the same semantics/<connection>/<name>.yaml
+    # target as that connection's live introspection and reconciliation's existing
+    # tier-preference (_resolve_group/_CURATION_RANK) actually engages instead of the two
+    # colliding on the global source-name uniqueness check.
+    physical_connection = conn.params.get("target_connection", conn.id)
+    return DbtConnector(manifest_path, source=physical_connection)
 
 
 def _make_notion(conn: Connection) -> GenericEvidenceConnector:

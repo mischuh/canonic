@@ -155,6 +155,38 @@ class TestLoadConfig:
         assert cfg.project.default_connection == "warehouse_pg"
 
 
+class TestTargetConnectionValidation:
+    """``connections[].params.target_connection`` must name a configured connection id."""
+
+    def _with_dbt_connection(self, params_line: str) -> str:
+        dbt_connection = (
+            "  - id: jaffle_dbt\n"
+            "    type: dbt\n"
+            "    params:\n"
+            "      manifest_path: manifest.json\n"
+            f"{params_line}"
+        )
+        return _VALID.replace(
+            "    credentials_ref: env:CANONIC_PG_DSN\n",
+            f"    credentials_ref: env:CANONIC_PG_DSN\n{dbt_connection}",
+        )
+
+    def test_target_connection_matching_configured_id_loads(self, tmp_path: Path) -> None:
+        content = self._with_dbt_connection("      target_connection: warehouse_pg\n")
+        cfg = load_config(_canonic_yaml(tmp_path, content))
+        assert cfg.connections[1].params["target_connection"] == "warehouse_pg"
+
+    def test_target_connection_naming_unknown_id_raises(self, tmp_path: Path) -> None:
+        content = self._with_dbt_connection("      target_connection: does_not_exist\n")
+        with pytest.raises(ConfigError, match="target_connection"):
+            load_config(_canonic_yaml(tmp_path, content))
+
+    def test_missing_target_connection_loads_unaffected(self, tmp_path: Path) -> None:
+        content = self._with_dbt_connection("")
+        cfg = load_config(_canonic_yaml(tmp_path, content))
+        assert "target_connection" not in cfg.connections[1].params
+
+
 class TestMcpAuthConfig:
     """``mcp.auth`` block (AMENDMENT-remote-mcp-transport.md)."""
 

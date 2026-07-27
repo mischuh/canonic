@@ -45,7 +45,17 @@ canonic mcp start                                        # expose metrics to any
 
 ## What canonic extracts from the dbt manifest
 
-The `jaffle_dbt` connection parses `manifest.json` (schema v11, dbt 1.7, MetricFlow) as modeling-tier evidence, which ranks higher than live DuckDB introspection during reconciliation. From it, canonic extracts:
+The `jaffle_dbt` connection parses `manifest.json` (schema v11, dbt 1.7, MetricFlow) as modeling-tier evidence, which ranks higher than live DuckDB introspection during reconciliation:
+
+```yaml
+  - id: jaffle_dbt
+    type: dbt
+    params:
+      manifest_path: dbt/manifest.json
+      target_connection: jaffle_duckdb   # the physical connection these models describe
+```
+
+`target_connection` is what makes this a companion to `jaffle_duckdb` rather than an independent source: it attributes the dbt-derived evidence to `jaffle_duckdb`'s connection id, so it enriches `semantics/jaffle_duckdb/*.yaml` instead of proposing separate, same-named files under `semantics/jaffle_dbt/` (see [Connectors](/concepts/connectors#definition)). From the manifest, canonic extracts:
 
 - **5 model nodes** → `RelationSchema` with named columns, types, primary keys, and foreign-key paths.
 - **2 semantic models** → entity (grain), foreign-join paths, named measure and dimension definitions.

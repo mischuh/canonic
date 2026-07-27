@@ -47,6 +47,14 @@ class Connection(BaseModel):
     from ``pg_stats`` into the returned schema (used to improve LLM grain inference).
     Requesting ``fetch_column_stats`` on SQLite/DuckDB connections is a no-op (logged as
     a warning) — neither engine exposes queryable planner statistics without a data scan.
+    A ``dbt`` connection additionally recognizes ``manifest_path`` (path to the compiled
+    ``manifest.json``, default ``manifest.json``) and ``target_connection`` (the id of the
+    physical, queryable connection whose tables this manifest describes — its
+    ``RelationSchema`` evidence is stamped with that id, not this connection's own, so it
+    reconciles against that connection's live-introspected sources instead of proposing
+    independent ones; defaults to this connection's own id when omitted, matching a
+    standalone dbt-only project with no paired physical connection). Validated against the
+    configured connection ids by :meth:`CanonicConfig._validate_target_connections`.
     """
 
     id: str
@@ -302,6 +310,24 @@ class CanonicConfig(BaseSettings):
             if conn.credentials_ref is not None:
                 policy.check_ref_local(
                     conn.credentials_ref, what=f"connections[{conn.id}].credentials_ref"
+                )
+        return self
+
+    @model_validator(mode="after")
+    def _validate_target_connections(self) -> CanonicConfig:
+        """A connection's ``params.target_connection`` must name a configured connection.
+
+        Catches a typo'd or dangling reference at load time (fail fast) rather than
+        letting it silently fall back to the connection's own id or misattribute a
+        proposed source to a connection that doesn't exist.
+        """
+        ids = {c.id for c in self.connections}
+        for conn in self.connections:
+            target = conn.params.get("target_connection")
+            if target is not None and target not in ids:
+                raise ValueError(
+                    f"connections[{conn.id}].params.target_connection={target!r} does not "
+                    f"match any configured connection id; configured: {sorted(ids)}"
                 )
         return self
 

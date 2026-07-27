@@ -21,9 +21,13 @@ from canonic.config import (
     scaffold_project,
 )
 from canonic.connectors.base import (
+    AcquisitionTier,
     Capability,
     ColumnInfo,
     ConnectorBase,
+    DefinitionEntityType,
+    DefinitionEvidence,
+    DefinitionExtract,
     ForeignKey,
     ForeignKeyRef,
     Health,
@@ -33,9 +37,10 @@ from canonic.connectors.base import (
 from canonic.exc import ValidationFailed
 from canonic.ingestion.models import DraftedBy, ProposalOp, ReconciliationDecision
 from canonic.ingestion.pipeline import IngestionPipeline, first_run_auto_acceptable
-from canonic.ingestion.source import evidence_from_introspection
+from canonic.ingestion.source import evidence_from_definitions, evidence_from_introspection
 from canonic.runtime.drafter import make_drafter
 from canonic.semantic.loader import load_semantic_source
+from canonic.semantic.models import Additivity
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -463,6 +468,129 @@ async def test_first_run_excludes_relation_with_drafted_join(tmp_path: Path) -> 
     assert customers_diff.drafted_by is DraftedBy.LLM
     assert customers_diff.confidence < 1.0
     assert not first_run_auto_acceptable(customers_diff)
+
+
+# ---------------------------------------------------------------------------
+# Companion definitions connector (e.g. dbt) reconciling against its physical
+# connection, once configured with target_connection (canonic/connectors/factory.py).
+# ---------------------------------------------------------------------------
+
+_DBT_CONN = "jaffle_dbt"
+
+
+class FakeDefinitionConnector(ConnectorBase):
+    """A connector whose ``extract_definitions`` returns canned modeling-tier evidence.
+
+    Stands in for a dbt manifest connector once its factory-constructed ``RelationSchema``
+    is stamped with the *physical* connection's id (mirrors ``factory._make_dbt`` reading
+    ``target_connection``), rather than its own connection id.
+    """
+
+    def __init__(
+        self, relations: list[RelationSchema], definitions: list[DefinitionEvidence] | None = None
+    ) -> None:
+        self._relations = relations
+        self._definitions = definitions or []
+
+    def capabilities(self) -> list[Capability]:
+        return [Capability.EXTRACT_DEFINITIONS, Capability.TEST_CONNECTION]
+
+    async def test_connection(self) -> Health:
+        return Health(status="ok")
+
+    async def extract_definitions(self) -> DefinitionExtract:
+        return DefinitionExtract(
+            relations=list(self._relations), definitions=list(self._definitions)
+        )
+
+
+def _dbt_orders(*, connection: str) -> RelationSchema:
+    """A dbt-shaped ``RelationSchema`` describing the same table as ``_orders()``."""
+    columns = [
+        ColumnInfo(name="order_id", type="int", nullable=True),
+        ColumnInfo(name="customer_id", type="int", nullable=True),
+        ColumnInfo(name="amount", type="decimal", nullable=True),
+    ]
+    return RelationSchema(
+        connection=connection,
+        relation="analytics.fct_orders",
+        kind="table",
+        columns=columns,
+        primary_key=["order_id"],
+        foreign_keys=[],
+        acquisition_tier=AcquisitionTier.MODELING,
+        source_fingerprint=compute_fingerprint(columns, ["order_id"], []),
+    )
+
+
+def _revenue_measure() -> DefinitionEvidence:
+    return DefinitionEvidence(
+        source=_DBT_CONN,
+        entity="revenue",
+        entity_type=DefinitionEntityType.MEASURE,
+        expr="sum(amount)",
+        additivity=Additivity.ADDITIVE,
+        references=["analytics.fct_orders"],
+        native_ref="model.jaffle_shop.orders#revenue",
+        acquisition_tier=AcquisitionTier.MODELING,
+        source_fingerprint="sha256:revenue-measure-v1",
+    )
+
+
+async def test_companion_evidence_edits_existing_source_instead_of_colliding(
+    tmp_path: Path,
+) -> None:
+    """The reported bug: re-ingesting a definitions-only connector after the physical
+    connection is already accepted must reconcile against the same file (EDIT), not
+    propose a same-named source under a different connection (which the global
+    source-name uniqueness gate would then reject for the whole batch)."""
+    pipeline = _pipeline(tmp_path, [_orders()])
+    await pipeline.bootstrap(_CONN)
+    assert (tmp_path / "semantics" / _CONN / "fct_orders.yaml").exists()
+
+    dbt_connector = FakeDefinitionConnector([_dbt_orders(connection=_CONN)], [_revenue_measure()])
+    evidence = await evidence_from_definitions(dbt_connector, _DBT_CONN)
+
+    pipeline2 = _pipeline_no_scaffold(tmp_path, [_orders()])
+    result = await pipeline2.run(evidence)
+
+    assert not (tmp_path / "semantics" / _DBT_CONN).exists()
+    (diff,) = result.emission.diffs
+    assert diff.op is ProposalOp.EDIT
+    assert diff.target == f"semantics/{_CONN}/fct_orders.yaml"
+    entry = next(e for e in result.report.entries if e.target == diff.target)
+    assert any(m["name"] == "revenue" for m in entry.proposal.content["measures"])
+    # measures is a structural "never" field — never silently auto-applied.
+    assert entry.auto_apply is False
+
+
+async def test_bootstrap_folds_companion_evidence_into_the_physical_source(
+    tmp_path: Path,
+) -> None:
+    """`bootstrap()`'s companion-connector inclusion (pipeline.py:186-234) must resolve to a
+    single proposal per table via the existing modeling-tier tie-break, never a second
+    semantics/<dbt-connection>/<name>.yaml file."""
+    scaffold_project(tmp_path)
+    pipeline = IngestionPipeline(
+        tmp_path,
+        {
+            _CONN: FakeConnector([_orders()]),
+            _DBT_CONN: FakeDefinitionConnector(
+                [_dbt_orders(connection=_CONN)], [_revenue_measure()]
+            ),
+        },
+        ReconcileConfig(),
+    )
+
+    result = await pipeline.bootstrap(_CONN)
+
+    assert (tmp_path / "semantics" / _CONN / "fct_orders.yaml").exists()
+    assert not (tmp_path / "semantics" / _DBT_CONN).exists()
+    (diff,) = result.emission.diffs
+    assert diff.target == f"semantics/{_CONN}/fct_orders.yaml"
+    entry = next(e for e in result.report.entries if e.target == diff.target)
+    assert entry.proposal.acquisition_tier is AcquisitionTier.MODELING
+    assert any(m["name"] == "revenue" for m in entry.proposal.content["measures"])
 
 
 async def test_no_models_configured_headless_is_deterministic(tmp_path: Path) -> None:
