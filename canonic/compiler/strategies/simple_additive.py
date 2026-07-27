@@ -15,7 +15,7 @@ from canonic.compiler.result import (
     FinalityMetadata,
 )
 from canonic.exc import FanoutUnsafe, GuardrailBlock, Unresolved, UnsupportedMeasure
-from canonic.semantic.models import Additivity
+from canonic.semantic.models import Additivity, Relationship
 
 if TYPE_CHECKING:
     from canonic.compiler.query import SemanticQuery
@@ -51,6 +51,32 @@ from canonic.compiler._helpers import (
 logger = logging.getLogger(__name__)
 
 _DEDUP_ALIAS = "_base"
+
+
+def _cross_source_measure_unsafe(target: str, owner: str, join_edges: list[JoinEdge]) -> bool:
+    """True unless every join edge from ``owner`` to ``target`` is one_to_one.
+
+    A flat single-SELECT (or the owner-grain ``DISTINCT ON`` dedup used for fanout) is
+    only guaranteed correct for a measure whose columns live on ``owner`` itself. A
+    non-``owner`` measure source reached through a one_to_many/many_to_many edge gets its
+    rows collapsed by the owner-grain dedup and silently undercounted; reached through a
+    many_to_one edge, its values get broadcast across every matching owner row and
+    silently overcounted (confirmed by direct reproduction against real data, both
+    directions). one_to_one edges duplicate nothing in either direction, so they're the
+    only relationship safe for combining a non-owner measure into this query today.
+    """
+    if target == owner:
+        return False
+    by_alias = {edge.alias: edge for edge in join_edges}
+    cur = target
+    while cur != owner:
+        edge = by_alias.get(cur)
+        if edge is None:
+            return True
+        if edge.join.relationship is not Relationship.ONE_TO_ONE:
+            return True
+        cur = edge.from_alias
+    return False
 
 
 def _bindings_to_resolved(
@@ -90,6 +116,7 @@ def _compile_simple_additive(
     alias_to_source = build_alias_tree(owner, sources_by_name)
     dimensions = _resolve_dimensions(query, sources_by_name, owner, alias_to_source)
     referenced = {alias for alias, _ in dimensions}
+    referenced |= {m.source for m in metrics}
     where_conditions, filter_sources = _bind_filters(
         query.filters, sources_by_name, owner, alias_to_source
     )
@@ -114,6 +141,22 @@ def _compile_simple_additive(
                 raise UnsupportedMeasure(
                     f"measure {m.source}.{m.measure.name!r} uses an aggregate function "
                     f"not supported at P0"
+                )
+            if _cross_source_measure_unsafe(m.source, owner, join_edges):
+                logger.warning(
+                    "cross-source measure unsafe: %s.%s is reached from owner %s via a "
+                    "non-one_to_one join; combining it in this query would silently "
+                    "corrupt the aggregate",
+                    m.source,
+                    m.measure.name,
+                    owner,
+                )
+                raise FanoutUnsafe(
+                    f"measure {m.source}.{m.measure.name!r} is reached from {owner!r} via a "
+                    f"join that isn't one_to_one; combining it with the other requested "
+                    f"metrics in a single query would either broadcast or collapse its rows "
+                    f"and silently corrupt the aggregate; query it separately or at its "
+                    f"native grain"
                 )
             continue
 
