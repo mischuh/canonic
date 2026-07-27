@@ -12,11 +12,14 @@ connections:
 
   # E3 definition connector: compiled dbt manifest.json — modeling-tier evidence
   # (semantic models, metrics, grain, joins) that outranks raw introspection during
-  # reconciliation. No live database required for this connector.
+  # reconciliation. No live database required for this connector. target_connection
+  # names the physical connection these models describe, so its evidence reconciles
+  # against jaffle_duckdb's sources instead of proposing independent ones.
   - id: jaffle_dbt
     type: dbt
     params:
       manifest_path: dbt/manifest.json   # relative to this canonic.yaml
+      target_connection: jaffle_duckdb
 
 llm:
   provider: openai_compatible

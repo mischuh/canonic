@@ -33,6 +33,13 @@ connections:
 
 - `credentials_ref` (and `llm.api_key_ref`) must be a reference, one of `env:`, `keyring:`, or `file:`, never a literal secret; config validation rejects a literal outright.
 - Postgres/Redshift connections additionally recognize `schema`/`schemas` (search path) and `tables` (glob patterns narrowing introspection), plus `fetch_column_stats: true` to merge zero-scan cardinality/null-ratio stats into the returned schema (a no-op on SQLite/DuckDB).
+- `dbt` connections recognize `manifest_path` (path to the compiled `manifest.json`, default `manifest.json`) and `target_connection` (the id of the physical, queryable connection whose tables this manifest describes — see [Connectors](/concepts/connectors#definition)). `target_connection` must name a connection actually declared in `connections[]`; an unknown id fails config validation at load time. Omitting it falls back to the dbt connection's own id.
+
+```yaml
+  - id: jaffle_dbt
+    type: dbt
+    params: { manifest_path: dbt/manifest.json, target_connection: warehouse_pg }
+```
 
 ## `llm`
 

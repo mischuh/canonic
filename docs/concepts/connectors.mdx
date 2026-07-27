@@ -39,6 +39,8 @@ Implement `extract_definitions`: feed the semantic layer and canonical-binding c
 | --- | --- |
 | `dbt` | Parses a compiled `manifest.json`: models → typed columns/grain, measures, joins, descriptions. |
 
+A definition connector is its own connection entry (own `id`) but describes tables that live in a *different*, queryable connection. `params.target_connection` names that connection's id, so the evidence is attributed to it rather than to the definition connector's own id — this is what lets its `RelationSchema` proposals land on the same `semantics/<connection>/<name>.yaml` target as that connection's live introspection and reconcile against it (see the [worked example](/concepts/ingestion-and-reconciliation#example-adding-a-definition-connector-after-an-initial-apply)), instead of colliding on the project-wide unique source `name`. Omitting it falls back to the definition connector's own id — fine for a definitions-only project with no paired physical connection, but such sources can never actually be queried (no `run_read_only_sql`).
+
 ### Evidence
 
 Implement `extract_evidence`: feed [knowledge pages](/concepts/knowledge-layer) and reconciliation signal from docs and BI usage. Also never queryable.
