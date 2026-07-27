@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.11.0](https://github.com/mischuh/canonic/compare/v0.10.2...v0.11.0) (2026-07-27)
+
+
+### Features
+
+* **compiler:** aggregate fanned-out metric sources independently before combining ([#249](https://github.com/mischuh/canonic/issues/249)) ([0cfa313](https://github.com/mischuh/canonic/commit/0cfa31313dfc8d1518b3cfbf4df51ae1f46c0a02))
+
 ## [0.10.2](https://github.com/mischuh/canonic/compare/v0.10.1...v0.10.2) (2026-07-27)
 
 
