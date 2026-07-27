@@ -525,3 +525,71 @@ class TestApplyEntry:
         report = engine.reconcile([conflicting_proposal], accepted_store)
 
         assert any(e.decision is ReconciliationDecision.CONTRADICTION for e in report.entries)
+
+    def test_curate_writes_human_curated_provenance(self, tmp_path: Path) -> None:
+        """S17: curate writes meta.provenance=human_curated (AMENDMENT-provenance-promotion)."""
+        from canonic.config import scaffold_project
+        from canonic.semantic.loader import load_semantic_source
+
+        scaffold_project(tmp_path)
+        emission = _emission_with_valid_source()
+        run_dir = PendingDiffStore(tmp_path).write("run1", emission)
+        run = PendingRun.load(run_dir)
+
+        apply_entry(tmp_path, run, run.proposals[0], curate=True)
+
+        target = tmp_path / run.proposals[0].target
+        assert target.exists()
+        source = load_semantic_source(target)
+        assert source.meta.provenance is Provenance.HUMAN_CURATED
+        assert source.meta.frozen is False
+
+    def test_curated_fact_flags_contradiction_on_reingest(self, tmp_path: Path) -> None:
+        """S18: after curate, conflicting inferred evidence yields CONTRADICTION not EDIT."""
+        from canonic.config import ReconcileConfig, scaffold_project
+        from canonic.ingestion.models import ReconciliationDecision
+        from canonic.ingestion.reconciliation import (
+            DiskAcceptedStore,
+            NullReconcileDrafter,
+            ReconciliationEngine,
+        )
+
+        scaffold_project(tmp_path)
+        emission = _emission_with_valid_source()
+        run_dir = PendingDiffStore(tmp_path).write("run1", emission)
+        run = PendingRun.load(run_dir)
+
+        apply_entry(tmp_path, run, run.proposals[0], curate=True)
+
+        target_str = run.proposals[0].target
+        accepted_store = DiskAcceptedStore(tmp_path)
+        fact = accepted_store.get(target_str)
+        assert fact is not None
+        assert fact.provenance is Provenance.HUMAN_CURATED
+
+        conflicting_proposal = _proposal(
+            target=target_str,
+            op=ProposalOp.EDIT,
+            content={**_VALID_SOURCE_CONTENT, "name": "different_orders"},
+        )
+        engine = ReconciliationEngine(ReconcileConfig(), NullReconcileDrafter())
+        report = engine.reconcile([conflicting_proposal], accepted_store)
+
+        assert any(e.decision is ReconciliationDecision.CONTRADICTION for e in report.entries)
+
+    def test_curate_and_freeze_compose(self, tmp_path: Path) -> None:
+        """S19: curate and freeze are independent and may both be set in one apply."""
+        from canonic.config import scaffold_project
+        from canonic.semantic.loader import load_semantic_source
+
+        scaffold_project(tmp_path)
+        emission = _emission_with_valid_source()
+        run_dir = PendingDiffStore(tmp_path).write("run1", emission)
+        run = PendingRun.load(run_dir)
+
+        apply_entry(tmp_path, run, run.proposals[0], curate=True, freeze=True)
+
+        target = tmp_path / run.proposals[0].target
+        source = load_semantic_source(target)
+        assert source.meta.provenance is Provenance.HUMAN_CURATED
+        assert source.meta.frozen is True

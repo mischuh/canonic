@@ -120,7 +120,7 @@ class TestReviewMenuRendering:
         result = CliRunner().invoke(app, ["review"], input="q\n")
 
         assert result.exit_code == 0, result.output
-        assert "[a]ccept / [r]eject / [s]kip / [f]reeze / [q]uit" in result.output
+        assert "[a]ccept / [r]eject / [s]kip / [f]reeze / [c]urate / [q]uit" in result.output
 
     def test_proposal_line_renders_literal_brackets(self, project: Path) -> None:
         _write_run(project)
@@ -234,6 +234,28 @@ class TestReviewFreeze:
 
         run = PendingRun.load(run_dir)
         assert run.proposals[0].status is ProposalStatus.FROZEN
+
+
+class TestReviewCurate:
+    def test_curate_writes_human_curated_provenance(self, project: Path) -> None:
+        """S17: curate writes the file and sets meta.provenance=human_curated."""
+        from canonic.semantic.loader import load_semantic_source
+
+        _write_run(project)
+        result = CliRunner().invoke(app, ["review"], input="c\n")
+
+        assert result.exit_code == 0, result.output
+        target = project / "semantics" / "warehouse_pg" / "table_1.yaml"
+        assert target.exists()
+        source = load_semantic_source(target)
+        assert source.meta.provenance is Provenance.HUMAN_CURATED
+
+    def test_curate_updates_status_to_curated(self, project: Path) -> None:
+        run_dir = _write_run(project)
+        CliRunner().invoke(app, ["review"], input="c\n")
+
+        run = PendingRun.load(run_dir)
+        assert run.proposals[0].status is ProposalStatus.CURATED
 
 
 class TestReviewNothingPending:
