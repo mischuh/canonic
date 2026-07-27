@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.10.0](https://github.com/mischuh/canonic/compare/v0.9.4...v0.10.0) (2026-07-27)
+
+
+### Features
+
+* **review:** add curate action to promote a fact's provenance ([#243](https://github.com/mischuh/canonic/issues/243)) ([ecb7f7e](https://github.com/mischuh/canonic/commit/ecb7f7eaaaf80f5c2ddcdfa3fe8ebafbfea8a1d4))
+
 ## [0.9.4](https://github.com/mischuh/canonic/compare/v0.9.3...v0.9.4) (2026-07-23)
 
 
