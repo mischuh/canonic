@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.10.2](https://github.com/mischuh/canonic/compare/v0.10.1...v0.10.2) (2026-07-27)
+
+
+### Bug Fixes
+
+* **compiler:** plan joins across all requested metrics' sources ([#247](https://github.com/mischuh/canonic/issues/247)) ([392015d](https://github.com/mischuh/canonic/commit/392015d061623af8278a978ffcbddd91f3dad54f))
+
 ## [0.10.1](https://github.com/mischuh/canonic/compare/v0.10.0...v0.10.1) (2026-07-27)
 
 
