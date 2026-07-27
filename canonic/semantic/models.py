@@ -189,7 +189,11 @@ class FinalityMeta(BaseModel):
 
 
 class SourceMeta(BaseModel):
-    """System-managed provenance metadata, not hand-edited."""
+    """System-managed provenance metadata.
+
+    Written only by ``canonic ingest`` (sets ``inferred``) or ``canonic review``/``apply``
+    via ``curate``/``freeze`` (AMENDMENT-provenance-promotion) — never edited directly.
+    """
 
     model_config = ConfigDict(frozen=True)
 

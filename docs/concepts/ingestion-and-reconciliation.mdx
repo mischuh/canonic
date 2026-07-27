@@ -51,13 +51,15 @@ Merges each proposal against the currently accepted file with a deterministic de
 
 **Provenance tiers:** `board_approved > human_curated > inferred`. Higher always wins: since new evidence is always `inferred`, it can never silently displace a curated or approved fact. A **frozen** fact is never edited by reconciliation regardless of the incoming tier or confidence; conflicting evidence is flagged, not applied.
 
+Provenance only ever rises through a deliberate human action: [`canonic review curate`](/cli-reference/review-apply) sets `meta.provenance: human_curated` on the resulting fact. Accepting a proposal never does this on its own — an accepted fact stays `inferred` until explicitly curated. (`canonic apply`, the batch path, doesn't expose `curate` yet — same as it doesn't expose `freeze`.)
+
 The `answer_outcome` row is a deliberate exception to that tier logic: it always reconciles to a contradiction, never to an add or edit, no matter how low-confidence or high-tier the target binding is. This is an attribution safeguard, feedback should never silently rewrite a definition; a human always reviews it. See [Feedback loop (E11)](#feedback-loop-e11) below.
 
 A conflict is never resolved by silent overwrite. The worst case is a flagged contradiction a human resolves: contradictions ride into the review surface (a PR comment in headless mode) and don't fail a run by default.
 
 ### Example: adding a definition connector after an initial apply
 
-Say a connection starts out queryable-only. `canonic ingest` runs [live introspection](/concepts/connectors#schema-acquisition-ladder) and proposes semantic sources at provenance `inferred`, the tier every new proposal starts at. `canonic apply` accepts them into `semantics/*.yaml`. Accepting a file this way commits it, but doesn't curate it: it's still `inferred`.
+Say a connection starts out queryable-only. `canonic ingest` runs [live introspection](/concepts/connectors#schema-acquisition-ladder) and proposes semantic sources at provenance `inferred`, the tier every new proposal starts at. `canonic apply` accepts them into `semantics/*.yaml`. Accepting a file this way commits it, but doesn't curate it: it's still `inferred` — promoting it to `human_curated` takes an explicit [`canonic review curate`](/cli-reference/review-apply).
 
 Now a `dbt` connector is added to the same connection and `canonic ingest` runs again. `extract_definitions` produces definition evidence from the compiled manifest, an acquisition tier above raw introspection, but it still enters reconciliation at provenance `inferred`, same as the existing fact. Provenance and acquisition tier are independent: the two proposals disagreeing on the same relation is not a "existing tier higher" case and not a silent win either way. Instead, the modeling-code evidence is preferred as the tie-break within the `inferred` band, so the run resolves to the "conflicts, tier ≤ proposal" row above: propose an **edit**. That diff lands under `.canonic/pending-diffs/<run-id>/` and goes through [`canonic review`](/cli-reference/review-apply) / [`canonic apply`](/cli-reference/review-apply) exactly like the first round. If the edit touches `grain`, `joins`, or `measures`, it's ineligible for auto-apply no matter how confident the proposal is, per the `never` list under [Propose-only by default](#propose-only-by-default) below.
 
@@ -95,4 +97,4 @@ Re-running `canonic ingest` refreshes from all configured sources, but a source 
 
 ## After a run
 
-Diffs land under `.canonic/pending-diffs/<run-id>/`. Walk through them interactively with [`canonic review`](/cli-reference/review-apply), or batch-apply everything still pending with [`canonic apply`](/cli-reference/review-apply).
+Diffs land under `.canonic/pending-diffs/<run-id>/`. Walk through them interactively with [`canonic review`](/cli-reference/review-apply) — accept, reject, skip, freeze, or curate each one — or batch-apply everything still pending with [`canonic apply`](/cli-reference/review-apply).

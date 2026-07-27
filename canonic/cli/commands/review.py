@@ -31,7 +31,7 @@ logger = logging.getLogger(__name__)
 
 _PENDING_DIFFS_DIR = "pending-diffs"
 
-_ACTIONS = r"\[a]ccept / \[r]eject / \[s]kip / \[f]reeze / \[q]uit"
+_ACTIONS = r"\[a]ccept / \[r]eject / \[s]kip / \[f]reeze / \[c]urate / \[q]uit"
 
 
 def _resolve_run_dir(project_root: Path, run_id: str | None) -> Path | None:
@@ -56,7 +56,7 @@ def review(
 ) -> None:
     """Interactively review pending proposals one by one.
 
-    Accepts, rejects, skips, or freezes each proposal.  Resumable after quit or crash.
+    Accepts, rejects, skips, freezes, or curates each proposal.  Resumable after quit or crash.
     """
     root = find_project_root()
     if root is None:
@@ -115,8 +115,8 @@ def review(
 
         while True:
             raw = typer.prompt(">", prompt_suffix=" ").strip().lower()
-            if raw not in {"a", "r", "s", "f", "q"}:
-                _console.print(f"[red]unknown action {raw!r}[/red]; choose a/r/s/f/q")
+            if raw not in {"a", "r", "s", "f", "c", "q"}:
+                _console.print(f"[red]unknown action {raw!r}[/red]; choose a/r/s/f/c/q")
                 continue
             break
 
@@ -134,6 +134,10 @@ def review(
             apply_entry(root, run, proposal, freeze=True)
             new_status = ProposalStatus.FROZEN
             _console.print(f"[green]frozen[/green] → {proposal.target}")
+        elif raw == "c":
+            apply_entry(root, run, proposal, curate=True)
+            new_status = ProposalStatus.CURATED
+            _console.print(f"[green]curated[/green] → {proposal.target}")
         elif raw == "r":
             new_status = ProposalStatus.REJECTED
             _console.print(f"[red]rejected[/red] → {proposal.target}")

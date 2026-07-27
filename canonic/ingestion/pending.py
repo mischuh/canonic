@@ -74,6 +74,7 @@ class ProposalStatus(StrEnum):
     ACCEPTED = "accepted"
     REJECTED = "rejected"
     FROZEN = "frozen"
+    CURATED = "curated"
 
 
 class PendingProposalEntry(BaseModel):
@@ -253,6 +254,7 @@ def apply_entry(
     entry: PendingProposalEntry,
     *,
     freeze: bool = False,
+    curate: bool = False,
 ) -> None:
     """Apply one proposal from ``run`` to the working directory.
 
@@ -260,19 +262,28 @@ def apply_entry(
     :func:`~canonic.ingestion.pipeline.write_emitted_diffs` function the pipeline uses.
     When ``freeze=True`` the written file additionally gets ``meta.frozen: true`` set so a
     subsequent ``canonic ingest`` flags conflicts instead of editing the fact (AC5 / E4 §5.3).
-    ``freeze`` is silently ignored for PRUNE ops (there is no file left to annotate).
+    When ``curate=True`` the written file gets ``meta.provenance: human_curated`` set — the
+    only system-mediated way for a fact to be promoted out of ``inferred``
+    (AMENDMENT-provenance-promotion, S17). ``curate`` and ``freeze`` are independent and may
+    both be set. Both are silently ignored for PRUNE ops (there is no file left to annotate).
     """
     from canonic.ingestion.models import ProposalOp
     from canonic.ingestion.pipeline import write_emitted_diffs
     from canonic.semantic.loader import dump_semantic_source, load_semantic_source
+    from canonic.semantic.models import Provenance
 
     diff = run.diff_for(entry)
     write_emitted_diffs(project_root, [diff])
 
-    if freeze and diff.op is not ProposalOp.PRUNE:
+    if (freeze or curate) and diff.op is not ProposalOp.PRUNE:
         path = project_root / diff.target
         if path.exists() and diff.target.endswith(".yaml"):
             source = load_semantic_source(path)
-            updated_meta = source.meta.model_copy(update={"frozen": True})
-            frozen_source = source.model_copy(update={"meta": updated_meta})
-            path.write_text(dump_semantic_source(frozen_source))
+            meta_updates: dict[str, object] = {}
+            if freeze:
+                meta_updates["frozen"] = True
+            if curate:
+                meta_updates["provenance"] = Provenance.HUMAN_CURATED
+            updated_meta = source.meta.model_copy(update=meta_updates)
+            updated_source = source.model_copy(update={"meta": updated_meta})
+            path.write_text(dump_semantic_source(updated_source))

@@ -21,8 +21,11 @@ canonic review --run-id 2024-05-01T12-00-00
 For each pending proposal you're shown the diff and prompted:
 
 ```
-[a]ccept / [r]eject / [s]kip / [f]reeze / [q]uit
+[a]ccept / [r]eject / [s]kip / [f]reeze / [c]urate / [q]uit
 ```
+
+- **freeze** writes the file and sets `meta.frozen: true` — a subsequent `canonic ingest` flags any conflicting evidence instead of editing the fact, regardless of tier.
+- **curate** writes the file and sets `meta.provenance: human_curated` — the only way a fact gets promoted out of `inferred`. A curated fact is protected from future `inferred` evidence the same way any other `human_curated` fact is (see [provenance tiers](/concepts/ingestion-and-reconciliation#reconciliation)), but unlike `freeze` it isn't an unconditional lock: equally-or-more-authoritative future evidence can still propose an edit.
 
 Resumable; quitting or crashing mid-review picks back up at the first still-pending item on the next invocation.
 
@@ -38,4 +41,4 @@ canonic apply .canonic/pending-diffs/2024-05-01T12-00-00
 | --- | --- |
 | `run_dir` | Path to the pending-diff run directory to apply (positional). |
 
-Proposals already in a terminal state (accepted / rejected / frozen), or whose diff file was deleted, are silently skipped. No git interaction; applied files appear as unstaged changes in your working tree.
+Proposals already in a terminal state (accepted / rejected / frozen / curated), or whose diff file was deleted, are silently skipped. No git interaction; applied files appear as unstaged changes in your working tree. `canonic apply` doesn't expose `freeze` or `curate` — every applied proposal resolves to `accepted`; use `canonic review` for either.
