@@ -28,6 +28,7 @@ from canonic.compiler._helpers import (
     _FANOUT,
     _alias,
     _bind_filters,
+    _build_deduped,
     _build_finality_union,
     _dimension_expr,
     _dimension_output_names,
@@ -196,6 +197,22 @@ def _plan_leaf(
             result_flag=finality_rule.result_flag or "per_row",
         )
         used = {r.source for r in finality_rule.realizations}
+    elif fanout and add is Additivity.ADDITIVE:
+        # Same fanout-safe dedup simple_additive.py applies to a bare additive metric
+        # (SPEC §4 step 4, S3 AC1): a one_to_many/many_to_many join to reach the
+        # requested dimension multiplies this leaf's rows, so a flat SUM/COUNT here
+        # would inflate the numerator/denominator exactly like an un-deduped `revenue`
+        # query would.
+        leaf_select = _build_deduped(
+            source_name,
+            [_ResolvedMetric(name=component.metric, source=source_name, measure=measure_obj)],
+            dimensions,
+            where_conditions,
+            join_edges,
+            sources_by_name,
+            measure_aliases=[measure_alias],
+        )
+        used = {source_name} | {e.join.to for e in join_edges}
     else:
         leaf_select = _build_leaf_select(
             source_name,
