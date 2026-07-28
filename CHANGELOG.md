@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.11.1](https://github.com/mischuh/canonic/compare/v0.11.0...v0.11.1) (2026-07-28)
+
+
+### Bug Fixes
+
+* **compiler:** dedup fanned-out additive leaves in composite metrics ([#251](https://github.com/mischuh/canonic/issues/251)) ([51e424a](https://github.com/mischuh/canonic/commit/51e424ab9548550317a4a51a038bdfdb8a6396ee))
+* **compiler:** dedup fanned-out finality UNION branches ([#252](https://github.com/mischuh/canonic/issues/252)) ([97523dd](https://github.com/mischuh/canonic/commit/97523dd5b5f33d03d6f4badc9042fdb679f4214b))
+
 ## [0.11.0](https://github.com/mischuh/canonic/compare/v0.10.2...v0.11.0) (2026-07-27)
 
 
