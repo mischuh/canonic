@@ -23,35 +23,28 @@ if TYPE_CHECKING:
     from canonic.contracts.models import FinalityRule
     from canonic.contracts.resolver import Binding as ResolverBinding
     from canonic.contracts.resolver import ContractResolver
-    from canonic.semantic.models import Dimension, SemanticSource
+    from canonic.semantic.models import SemanticSource
 
 from canonic.compiler._helpers import (
     _FANOUT,
     _TIME_TYPES,
     _alias,
     _bind_filters,
+    _build_deduped,
     _build_finality_union,
     _build_simple,
-    _dimension_expr,
     _dimension_output_names,
     _enforce_guardrails,
     _find_measure,
     _find_time_dim_name,
     _freshness,
-    _from_and_joins,
-    _guard_aggregate,
-    _input_columns,
     _parse,
     _population_filter_conditions,
-    _qualify_to,
-    _requalify_all,
     _resolve_dimensions,
     _ResolvedMetric,
 )
 
 logger = logging.getLogger(__name__)
-
-_DEDUP_ALIAS = "_base"
 
 
 def _cross_source_measure_unsafe(target: str, owner: str, join_edges: list[JoinEdge]) -> bool:
@@ -507,71 +500,6 @@ def _build_multi_source(
         ast = ast.with_(f"_leaf{i}", as_=plan.select)
 
     return ast, fired, used_sources
-
-
-def _build_deduped(
-    owner: str,
-    metrics: list[_ResolvedMetric],
-    dimensions: list[tuple[str, Dimension]],
-    where_conditions: list[exp.Expression],
-    join_edges: list[JoinEdge],
-    sources_by_name: dict[str, SemanticSource],
-    metric_conditions: list[list[exp.Expression]] | None = None,
-) -> exp.Select:
-    """Fanout-safe emission: dedup the measure grain in an inner ``DISTINCT ON`` subquery.
-
-    A one→many / many→many join multiplies the measure source's rows; aggregating
-    directly would inflate an additive sum. The inner query keeps one row per grain
-    (Postgres ``DISTINCT ON``); the outer query aggregates over it (SPEC §4 step 4, S3 AC1).
-
-    ``metric_conditions``, when given, holds one condition list per metric applied via
-    conditional aggregation in the outer query (see ``_build_simple`` for why) — any
-    column such a condition references must also be projected by the inner subquery.
-    """
-    owner_source = sources_by_name[owner]
-    grain_cols = [exp.column(g, table=owner) for g in owner_source.grain]
-
-    # Inner: DISTINCT ON (grain) projecting dimensions + each measure's input columns.
-    dim_names = _dimension_output_names(dimensions)
-    inner = exp.Select()
-    inner_projections: list[exp.Expression] = []
-    measure_inputs: dict[str, exp.Expression] = {}
-    for (src, dim), name in zip(dimensions, dim_names, strict=True):
-        inner_projections.append(_alias(_dimension_expr(src, dim), name))
-    for m in metrics:
-        for input_col in _input_columns(m.measure):
-            measure_inputs.setdefault(input_col, exp.column(input_col, table=m.source))
-    for conds in metric_conditions or []:
-        for cond in conds:
-            for col in cond.find_all(exp.Column):
-                if col.table:
-                    measure_inputs.setdefault(col.name, exp.column(col.name, table=col.table))
-    for col_name in sorted(measure_inputs):
-        inner_projections.append(_alias(measure_inputs[col_name], col_name))
-    inner = inner.select(*inner_projections).distinct(*grain_cols)
-    inner = _from_and_joins(inner, owner, join_edges, sources_by_name)
-    if where_conditions:
-        inner = inner.where(exp.and_(*where_conditions))
-
-    # Outer: aggregate the deduped rows.
-    outer = exp.Select()
-    projections: list[exp.Expression] = []
-    group_exprs: list[exp.Expression] = []
-    for name in dim_names:
-        dim_col = exp.column(name, table=_DEDUP_ALIAS)
-        projections.append(_alias(dim_col, name))
-        group_exprs.append(dim_col)
-    for i, m in enumerate(metrics):
-        expr = _qualify_to(_parse(m.measure.expr), _DEDUP_ALIAS)
-        conditions = metric_conditions[i] if metric_conditions else []
-        if conditions:
-            requalified = [_requalify_all(c, _DEDUP_ALIAS) for c in conditions]
-            expr = _guard_aggregate(expr, cast("exp.Expression", exp.and_(*requalified)))
-        projections.append(_alias(expr, m.measure.name))
-    outer = outer.select(*projections).from_(_alias(inner.subquery(), _DEDUP_ALIAS))
-    if group_exprs:
-        outer = outer.group_by(*group_exprs)
-    return outer
 
 
 def _parse_datetime_literal(lit: str) -> datetime | None:

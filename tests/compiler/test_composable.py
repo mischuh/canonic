@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import re
 
+import duckdb
 import pytest
 import sqlglot
 
@@ -61,7 +62,12 @@ def damages() -> SemanticSource:
                 to="vehicles",
                 on="damages.vehicle_id = vehicles.vehicle_id",
                 relationship=Relationship.MANY_TO_ONE,
-            )
+            ),
+            Join(
+                to="repair_line_items",
+                on="damages.damage_id = repair_line_items.damage_id",
+                relationship=Relationship.ONE_TO_MANY,
+            ),
         ],
     )
 
@@ -83,8 +89,27 @@ def vehicles() -> SemanticSource:
 
 
 @pytest.fixture
-def sources(damages: SemanticSource, vehicles: SemanticSource) -> list[SemanticSource]:
-    return [damages, vehicles]
+def repair_line_items() -> SemanticSource:
+    """Child table joined one_to_many from damages — fans out the damage grain."""
+    return SemanticSource(
+        name="repair_line_items",
+        connection="warehouse_pg",
+        table="fct_repair_line_items",
+        grain=["line_item_id"],
+        columns=[
+            Column(name="line_item_id", type="string", nullable=False),
+            Column(name="damage_id", type="string", nullable=False),
+            Column(name="part_name", type="string", nullable=False),
+        ],
+        dimensions=[Dimension(name="part_name", column="part_name")],
+    )
+
+
+@pytest.fixture
+def sources(
+    damages: SemanticSource, vehicles: SemanticSource, repair_line_items: SemanticSource
+) -> list[SemanticSource]:
+    return [damages, vehicles, repair_line_items]
 
 
 @pytest.fixture
@@ -226,6 +251,69 @@ def test_ac1_sql_structure_numerator_denominator(
     result = compile(SemanticQuery(metrics=["avg_repair_costs"]), resolver, sources)
     assert re.search(r"sum\(.+repair_cost.+\)", result.sql, re.IGNORECASE)
     assert re.search(r"count\(.+damage_id.+\)", result.sql, re.IGNORECASE)
+
+
+# ---------------------------------------------------------------------------
+# Fanout regression — additive leaves must dedup like simple_additive.py does
+# (a one_to_many join to reach the requested dimension must not inflate the
+# numerator/denominator sums; see the jaffle_shop bug report).
+# ---------------------------------------------------------------------------
+
+
+def test_fanout_composite_ratio_leaves_use_distinct_on_dedup(
+    resolver: ContractResolver, sources: list[SemanticSource]
+) -> None:
+    """Grouping by a one_to_many-reached dimension: both leaves dedup before aggregating."""
+    result = compile(
+        SemanticQuery(metrics=["avg_repair_costs"], dimensions=["part_name"]),
+        resolver,
+        sources,
+    )
+    _parse_ok(result.sql)
+    sql_upper = result.sql.upper()
+    assert sql_upper.count("DISTINCT ON") == 2
+    assert '"damages"."damage_id"' in result.sql
+
+
+def test_fanout_composite_ratio_numeric_correctness(
+    resolver: ContractResolver, sources: list[SemanticSource]
+) -> None:
+    """Executed regression: a multi-line-item damage must not inflate the ratio.
+
+    damage 'd1' costs 100 and has two repair line items (both 'bumper'), 'd2' costs
+    40 and has one. Correct: total_repair_cost=140, damage_count=2 -> ratio=70. A
+    flat (un-deduped) join fans d1's row out twice, so the buggy numerator sums
+    100+100+40=240 and the buggy denominator counts 3 -> ratio=80 — wrong on both
+    sides, and not just wrong but not even reduced to the correct value.
+    """
+    result = compile(
+        SemanticQuery(metrics=["avg_repair_costs"], dimensions=["part_name"]),
+        resolver,
+        sources,
+        connection_dialects={"warehouse_pg": "duckdb"},
+    )
+    con = duckdb.connect(":memory:")
+    con.execute(
+        "CREATE TABLE fct_damages (damage_id VARCHAR, vehicle_id VARCHAR, "
+        "repair_cost DECIMAL, reported_month VARCHAR, warranty_claim INT)"
+    )
+    con.execute(
+        "CREATE TABLE fct_repair_line_items (line_item_id VARCHAR, damage_id VARCHAR, "
+        "part_name VARCHAR)"
+    )
+    con.execute(
+        "INSERT INTO fct_damages VALUES "
+        "('d1', 'v1', 100, '2024-01', 0), ('d2', 'v1', 40, '2024-01', 0)"
+    )
+    con.execute(
+        "INSERT INTO fct_repair_line_items VALUES "
+        "('l1', 'd1', 'bumper'), ('l2', 'd1', 'bumper'), ('l3', 'd2', 'bumper')"
+    )
+    rows = {r[0]: r[1] for r in con.execute(result.sql).fetchall()}
+    # Correct: total_repair_cost=140, damage_count=2 -> 70. The fanout bug would
+    # sum repair_cost once per line item (100*2 + 40 = 240) and inflate the count
+    # (3), landing on 80 instead of 70.
+    assert rows["bumper"] == pytest.approx(70.0)
 
 
 # ---------------------------------------------------------------------------
