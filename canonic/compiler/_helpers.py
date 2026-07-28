@@ -17,9 +17,9 @@ from canonic.compiler.result import (
     FiredGuardrail,
     SourceFreshness,
 )
-from canonic.exc import Ambiguous, Unresolved
+from canonic.exc import Ambiguous, FanoutUnsafe, Unresolved
 from canonic.exc import Unreachable as UnreachableError
-from canonic.semantic.models import Measure, NormalizedType, Relationship
+from canonic.semantic.models import Additivity, Measure, NormalizedType, Relationship
 
 if TYPE_CHECKING:
     from datetime import datetime
@@ -306,6 +306,47 @@ def _build_simple(
 _DEDUP_ALIAS = "_base"
 
 
+def _build_dedup_inner(
+    owner: str,
+    dimensions: list[tuple[str, Dimension]],
+    metrics: list[_ResolvedMetric],
+    where_conditions: list[exp.Expression],
+    join_edges: list[JoinEdge],
+    sources_by_name: dict[str, SemanticSource],
+    metric_conditions: list[list[exp.Expression]] | None = None,
+) -> exp.Select:
+    """Inner half of the fanout-safe dedup: ``DISTINCT ON (owner grain)`` projecting
+    dimensions + each measure's raw input columns, before any aggregation.
+
+    Shared by :func:`_build_deduped` (single flat aggregate) and
+    :func:`_build_finality_union` (one dedup per UNION branch) — SPEC §4 step 4, S3 AC1.
+    """
+    owner_source = sources_by_name[owner]
+    grain_cols = [exp.column(g, table=owner) for g in owner_source.grain]
+
+    dim_names = _dimension_output_names(dimensions)
+    inner = exp.Select()
+    inner_projections: list[exp.Expression] = []
+    measure_inputs: dict[str, exp.Expression] = {}
+    for (src, dim), name in zip(dimensions, dim_names, strict=True):
+        inner_projections.append(_alias(_dimension_expr(src, dim), name))
+    for m in metrics:
+        for input_col in _input_columns(m.measure):
+            measure_inputs.setdefault(input_col, exp.column(input_col, table=m.source))
+    for conds in metric_conditions or []:
+        for cond in conds:
+            for col in cond.find_all(exp.Column):
+                if col.table:
+                    measure_inputs.setdefault(col.name, exp.column(col.name, table=col.table))
+    for col_name in sorted(measure_inputs):
+        inner_projections.append(_alias(measure_inputs[col_name], col_name))
+    inner = inner.select(*inner_projections).distinct(*grain_cols)
+    inner = _from_and_joins(inner, owner, join_edges, sources_by_name)
+    if where_conditions:
+        inner = inner.where(exp.and_(*where_conditions))
+    return inner
+
+
 def _build_deduped(
     owner: str,
     metrics: list[_ResolvedMetric],
@@ -330,30 +371,16 @@ def _build_deduped(
     metric (by index) instead of the default ``m.measure.name`` — used by composite.py's
     ratio/weighted_avg leaves, which alias their single measure to ``"n"``/``"d"``.
     """
-    owner_source = sources_by_name[owner]
-    grain_cols = [exp.column(g, table=owner) for g in owner_source.grain]
-
-    # Inner: DISTINCT ON (grain) projecting dimensions + each measure's input columns.
     dim_names = _dimension_output_names(dimensions)
-    inner = exp.Select()
-    inner_projections: list[exp.Expression] = []
-    measure_inputs: dict[str, exp.Expression] = {}
-    for (src, dim), name in zip(dimensions, dim_names, strict=True):
-        inner_projections.append(_alias(_dimension_expr(src, dim), name))
-    for m in metrics:
-        for input_col in _input_columns(m.measure):
-            measure_inputs.setdefault(input_col, exp.column(input_col, table=m.source))
-    for conds in metric_conditions or []:
-        for cond in conds:
-            for col in cond.find_all(exp.Column):
-                if col.table:
-                    measure_inputs.setdefault(col.name, exp.column(col.name, table=col.table))
-    for col_name in sorted(measure_inputs):
-        inner_projections.append(_alias(measure_inputs[col_name], col_name))
-    inner = inner.select(*inner_projections).distinct(*grain_cols)
-    inner = _from_and_joins(inner, owner, join_edges, sources_by_name)
-    if where_conditions:
-        inner = inner.where(exp.and_(*where_conditions))
+    inner = _build_dedup_inner(
+        owner,
+        dimensions,
+        metrics,
+        where_conditions,
+        join_edges,
+        sources_by_name,
+        metric_conditions,
+    )
 
     # Outer: aggregate the deduped rows.
     outer = exp.Select()
@@ -734,22 +761,61 @@ def _build_finality_union(
         ]
         branch_where.append(gate)
 
-        # Build the branch SELECT.
+        # Fanout analysis is per branch: each realization plans its own joins above
+        # (branch_join_edges), and a realization's join topology to the requested
+        # dimensions can differ from the other realizations' — and from the caller's
+        # already-checked owner topology — so a branch can fan out even when the outer
+        # query didn't (SPEC §4 step 4, S3 AC1).
+        branch_fanout = any(edge.join.relationship in _FANOUT for edge in branch_join_edges)
+        if branch_fanout:
+            non_additive = [
+                m for m in branch_metrics if m.measure.additivity is not Additivity.ADDITIVE
+            ]
+            if non_additive:
+                bad = non_additive[0]
+                raise FanoutUnsafe(
+                    f"measure {bad.source}.{bad.measure.name!r} is "
+                    f"{bad.measure.additivity.value} and a one_to_many/many_to_many join "
+                    f"needed to reach the requested dimensions on realization {src_name!r} "
+                    f"would multiply its rows and corrupt the aggregate"
+                )
+
         select = exp.Select()
         projections: list[exp.Expression] = []
         group_exprs: list[exp.Expression] = []
-        for (b_src, dim), name in zip(branch_dims, dim_names, strict=True):
-            expr = _dimension_expr(b_src, dim)
-            projections.append(_alias(expr, name))
-            group_exprs.append(expr)
-        for m in branch_metrics:
-            col_alias = measure_alias if measure_alias is not None else m.measure.name
-            projections.append(_alias(_measure_expr(m.source, m.measure), col_alias))
-        projections.append(_alias(is_final_val, "is_final"))
-        select = select.select(*projections)
-        select = _from_and_joins(select, src_name, branch_join_edges, sources_by_name)
-        if branch_where:
-            select = select.where(exp.and_(*branch_where))
+        if branch_fanout:
+            # Dedup this branch's own grain before aggregating (mirrors _build_deduped).
+            inner = _build_dedup_inner(
+                src_name,
+                branch_dims,
+                branch_metrics,
+                branch_where,
+                branch_join_edges,
+                sources_by_name,
+            )
+            for name in dim_names:
+                dim_col = exp.column(name, table=_DEDUP_ALIAS)
+                projections.append(_alias(dim_col, name))
+                group_exprs.append(dim_col)
+            for m in branch_metrics:
+                col_alias = measure_alias if measure_alias is not None else m.measure.name
+                expr = _qualify_to(_parse(m.measure.expr), _DEDUP_ALIAS)
+                projections.append(_alias(expr, col_alias))
+            projections.append(_alias(is_final_val, "is_final"))
+            select = select.select(*projections).from_(_alias(inner.subquery(), _DEDUP_ALIAS))
+        else:
+            for (b_src, dim), name in zip(branch_dims, dim_names, strict=True):
+                expr = _dimension_expr(b_src, dim)
+                projections.append(_alias(expr, name))
+                group_exprs.append(expr)
+            for m in branch_metrics:
+                col_alias = measure_alias if measure_alias is not None else m.measure.name
+                projections.append(_alias(_measure_expr(m.source, m.measure), col_alias))
+            projections.append(_alias(is_final_val, "is_final"))
+            select = select.select(*projections)
+            select = _from_and_joins(select, src_name, branch_join_edges, sources_by_name)
+            if branch_where:
+                select = select.where(exp.and_(*branch_where))
         if group_exprs:
             select = select.group_by(*group_exprs)
         branches.append(select)
