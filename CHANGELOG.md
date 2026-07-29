@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.12.0](https://github.com/mischuh/canonic/compare/v0.11.1...v0.12.0) (2026-07-29)
+
+
+### Features
+
+* **cli:** make setup's connection/LLM steps skippable, add --minimal ([#254](https://github.com/mischuh/canonic/issues/254)) ([bba5977](https://github.com/mischuh/canonic/commit/bba5977e6be16b39c3b2fe4e19b57ee20efa2921))
+
 ## [0.11.1](https://github.com/mischuh/canonic/compare/v0.11.0...v0.11.1) (2026-07-28)
 
 
