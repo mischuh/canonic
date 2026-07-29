@@ -111,6 +111,36 @@ def test_write_inferred_contracts_empty_sources(tmp_path):
     assert write_inferred_contracts(tmp_path, []) == 0
 
 
+def test_write_inferred_contracts_qualifies_cross_source_collision(tmp_path, caplog):
+    """Two sources sharing a measure name both get contracts, not a silent drop."""
+    customers = _source(name="customers", measures=[_additive("row_count", "id")])
+    products = _source(name="products", measures=[_additive("row_count", "id")])
+
+    with caplog.at_level("WARNING"):
+        count = write_inferred_contracts(tmp_path, [customers, products])
+
+    assert count == 2
+    plain = tmp_path / "contracts" / "metrics" / "row-count.yaml"
+    qualified = tmp_path / "contracts" / "metrics" / "products-row-count.yaml"
+    assert plain.exists()
+    assert qualified.exists()
+    assert "metric: row_count" in plain.read_text()
+    assert "source: customers" in plain.read_text()
+    assert "metric: products_row_count" in qualified.read_text()
+    assert "source: products" in qualified.read_text()
+    assert "measure: row_count" in qualified.read_text()  # canonical.measure stays unqualified
+    assert any("collides with an existing contract" in msg for msg in caplog.messages)
+
+
+def test_write_inferred_contracts_same_source_rerun_is_idempotent_not_qualified(tmp_path):
+    """Re-running for the *same* source is a no-op, not a qualified duplicate."""
+    source = _source(name="orders", measures=[_additive("revenue")])
+    write_inferred_contracts(tmp_path, [source])
+    count = write_inferred_contracts(tmp_path, [source])
+    assert count == 0
+    assert not (tmp_path / "contracts" / "metrics" / "orders-revenue.yaml").exists()
+
+
 def test_write_inferred_contracts_slug_uses_hyphens(tmp_path):
     source = _source(measures=[_additive("total_order_revenue", "amount")])
     write_inferred_contracts(tmp_path, [source])

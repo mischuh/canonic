@@ -57,6 +57,7 @@ def _patch_connector(monkeypatch, *connectors: _FakeConnector) -> None:
 _FRESH_INPUT = "\n".join(
     [
         "",  # project name → default (cwd name)
+        "",  # configure a connection now? → default yes
         "3",  # connection type → postgres (1=sqlite, 2=duckdb, 3=postgres)
         "",  # connection id → warehouse_pg
         "",  # host → localhost
@@ -65,6 +66,7 @@ _FRESH_INPUT = "\n".join(
         "analytics",  # database
         "",  # env var → CANONIC_WAREHOUSE_PG_PASSWORD
         "n",  # narrow schemas/tables? → No
+        "",  # configure an llm now? → default yes
         "",  # llm provider → openai_compatible
         "",  # base url
         "llama3",  # model
@@ -116,6 +118,7 @@ def test_connection_test_gates_recording(runner: CliRunner, tmp_path: Path, monk
     retry_input = "\n".join(
         [
             "",  # project name
+            "",  # configure a connection now? → default yes
             # attempt 1
             "3",  # type → postgres (1=sqlite, 2=duckdb, 3=postgres)
             "",  # id
@@ -135,6 +138,7 @@ def test_connection_test_gates_recording(runner: CliRunner, tmp_path: Path, monk
             "",  # env var
             "n",  # narrow schemas/tables? → No
             # llm
+            "",  # configure an llm now? → default yes
             "",  # provider
             "",  # base url
             "m",  # model
@@ -178,6 +182,7 @@ def test_narrow_to_one_schema(runner: CliRunner, tmp_path: Path, monkeypatch) ->
     narrow_input = "\n".join(
         [
             "",  # project name
+            "",  # configure a connection now? → default yes
             "3",  # connection type → postgres
             "",  # connection id
             "",  # host
@@ -188,6 +193,7 @@ def test_narrow_to_one_schema(runner: CliRunner, tmp_path: Path, monkeypatch) ->
             "",  # narrow schemas/tables? → default Yes
             "2",  # select schemas → schema #2 (sorted: finance=1, public=2)
             "",  # narrow tables too? → default No
+            "",  # configure an llm now? → default yes
             "",  # llm provider
             "",  # base url
             "m",  # model
@@ -216,6 +222,7 @@ def test_narrow_tables_with_index_and_glob(runner: CliRunner, tmp_path: Path, mo
     narrow_input = "\n".join(
         [
             "",  # project name
+            "",  # configure a connection now? → default yes
             "3",  # connection type → postgres
             "",  # connection id
             "",  # host
@@ -227,6 +234,7 @@ def test_narrow_tables_with_index_and_glob(runner: CliRunner, tmp_path: Path, mo
             "all",  # select schemas → all
             "y",  # narrow tables too? → Yes
             "1,fact_*",  # index 1 + a literal glob token
+            "",  # configure an llm now? → default yes
             "",  # llm provider
             "",  # base url
             "m",  # model
@@ -253,6 +261,7 @@ def test_narrow_schema_invalid_index_reprompts(
     narrow_input = "\n".join(
         [
             "",  # project name
+            "",  # configure a connection now? → default yes
             "3",  # connection type → postgres
             "",  # connection id
             "",  # host
@@ -264,6 +273,7 @@ def test_narrow_schema_invalid_index_reprompts(
             "99",  # out of range → reprompt
             "1",  # valid index
             "",  # narrow tables too? → default No
+            "",  # configure an llm now? → default yes
             "",  # llm provider
             "",  # base url
             "m",  # model
@@ -346,7 +356,9 @@ def test_resume_skips_completed_steps(runner: CliRunner, tmp_path: Path, monkeyp
     (dotcanonic / "setup-state.json").write_text(json.dumps(state))
     # default_factory.create must NOT be called — leave it unpatched to catch a stray call.
 
-    resume_input = "\n".join(["", "", "m", "", ""])  # provider, url, model, api key, preview
+    resume_input = "\n".join(
+        ["", "", "", "m", "", ""]
+    )  # configure llm?, provider, url, model, api key, preview
     result = runner.invoke(app, ["setup"], input=resume_input + "\n")
 
     assert result.exit_code == 0, result.output
@@ -362,7 +374,7 @@ def test_existing_project_menu_exit_does_not_overwrite(
     runner: CliRunner, project_dir: Path
 ) -> None:
     before = (project_dir / "canonic.yaml").read_bytes()
-    result = runner.invoke(app, ["setup"], input="4\n")  # exit immediately
+    result = runner.invoke(app, ["setup"], input="5\n")  # exit immediately
     assert result.exit_code == 0, result.output
     assert "project menu" in result.output
     assert (project_dir / "canonic.yaml").read_bytes() == before
@@ -383,7 +395,7 @@ def test_existing_project_menu_adds_connection(
             "db",  # database
             "",  # env var
             "n",  # narrow schemas/tables? → No
-            "4",  # exit
+            "5",  # exit
         ]
     )
     result = runner.invoke(app, ["setup"], input=menu_input + "\n")
@@ -401,9 +413,11 @@ def test_sqlite_connection_path(runner: CliRunner, tmp_path: Path, monkeypatch) 
     sqlite_input = "\n".join(
         [
             "",  # project name
+            "",  # configure a connection now? → default yes
             "1",  # connection type → sqlite
             "local_sqlite",  # id
             str(db_file),  # path to .db file
+            "",  # configure an llm now? → default yes
             "",  # llm provider
             "",  # base url
             "m",  # model
@@ -438,11 +452,153 @@ def test_existing_project_menu_generates_contracts(runner: CliRunner, project_di
         "dimensions: []\n"
     )
 
-    result = runner.invoke(app, ["setup"], input="3\n4\n")
+    result = runner.invoke(app, ["setup"], input="3\n5\n")
     assert result.exit_code == 0, result.output
     assert "wrote" in result.output
     assert (project_dir / "contracts" / "metrics" / "row-count.yaml").exists()
     assert (project_dir / "contracts" / "metrics" / "total-amount.yaml").exists()
+
+
+def test_skip_connection_only(runner: CliRunner, tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.chdir(tmp_path)
+    skip_conn_input = "\n".join(
+        [
+            "",  # project name
+            "n",  # configure a connection now? → No
+            "",  # configure an llm now? → default yes
+            "",  # llm provider
+            "",  # base url
+            "m",  # model
+            "",  # api key env
+        ]
+    )
+    result = runner.invoke(app, ["setup"], input=skip_conn_input + "\n")
+
+    assert result.exit_code == 0, result.output
+    config = load_config(tmp_path / "canonic.yaml")
+    assert config.connections == []
+    assert config.project.default_connection is None
+    assert config.llm is not None
+    assert config.llm.model == "m"
+
+
+def test_skip_llm_only(runner: CliRunner, tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.chdir(tmp_path)
+    db_file = tmp_path / "data.db"
+    _patch_connector(monkeypatch, _FakeConnector(Health(status="ok")))
+    skip_llm_input = "\n".join(
+        [
+            "",  # project name
+            "",  # configure a connection now? → default yes
+            "1",  # connection type → sqlite
+            "local_sqlite",  # id
+            str(db_file),  # path to .db file
+            "n",  # configure an llm now? → No
+            "",  # preview schema?
+        ]
+    )
+    result = runner.invoke(app, ["setup"], input=skip_llm_input + "\n")
+
+    assert result.exit_code == 0, result.output
+    config = load_config(tmp_path / "canonic.yaml")
+    assert config.connections[0].id == "local_sqlite"
+    assert config.llm is None
+
+
+def test_skip_both_writes_bare_config(runner: CliRunner, tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.chdir(tmp_path)
+    skip_both_input = "\n".join(
+        [
+            "",  # project name
+            "n",  # configure a connection now? → No
+            "n",  # configure an llm now? → No
+        ]
+    )
+    result = runner.invoke(app, ["setup"], input=skip_both_input + "\n")
+
+    assert result.exit_code == 0, result.output
+    config = load_config(tmp_path / "canonic.yaml")
+    assert config.connections == []
+    assert config.llm is None
+    assert "no connection configured" in result.output
+    assert "naming/prose enrichment" in result.output
+
+
+def test_resume_after_skipped_connection_and_llm_does_not_reprompt(
+    runner: CliRunner, tmp_path: Path, monkeypatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    dotcanonic = tmp_path / ".canonic"
+    dotcanonic.mkdir()
+    state = {
+        "project_name": "resumed",
+        "connection": None,
+        "llm": None,
+        "schema_previewed": False,
+        "completed_steps": ["name", "connection", "llm"],
+    }
+    (dotcanonic / "setup-state.json").write_text(json.dumps(state))
+
+    result = runner.invoke(app, ["setup"], input="\n")
+
+    assert result.exit_code == 0, result.output
+    assert "Configure a data connection now?" not in result.output
+    assert "Configure an LLM now?" not in result.output
+    config = load_config(tmp_path / "canonic.yaml")
+    assert config.project.name == "resumed"
+    assert config.connections == []
+    assert config.llm is None
+
+
+@pytest.mark.parametrize("flag", ["--minimal", "--bare"])
+def test_minimal_flag_scaffolds_without_prompts(
+    runner: CliRunner, tmp_path: Path, monkeypatch, flag: str
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    result = runner.invoke(app, ["setup", flag], input="")
+
+    assert result.exit_code == 0, result.output
+    config = load_config(tmp_path / "canonic.yaml")
+    assert config.project.name == tmp_path.name
+    assert config.connections == []
+    assert config.llm is None
+    for name in ("semantics", "knowledge", "contracts", "raw-sources"):
+        assert (tmp_path / name).exists(), name
+    assert (tmp_path / ".canonic").is_dir()
+    assert (tmp_path / ".gitignore").exists()
+    assert not (tmp_path / ".canonic" / "setup-state.json").exists()
+
+
+def test_minimal_on_existing_project_refuses(runner: CliRunner, project_dir: Path) -> None:
+    before = (project_dir / "canonic.yaml").read_bytes()
+    result = runner.invoke(app, ["setup", "--minimal"])
+
+    assert result.exit_code == 1
+    assert "already exists" in result.output
+    assert (project_dir / "canonic.yaml").read_bytes() == before
+
+
+def test_existing_project_menu_configures_llm(
+    runner: CliRunner, tmp_path: Path, monkeypatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "canonic.yaml").write_text("version: 1\nproject:\n  name: bare-project\n")
+    menu_input = "\n".join(
+        [
+            "4",  # configure LLM
+            "",  # provider
+            "",  # base url
+            "gpt-x",  # model
+            "",  # api key env
+            "5",  # exit
+        ]
+    )
+    result = runner.invoke(app, ["setup"], input=menu_input + "\n")
+
+    assert result.exit_code == 0, result.output
+    config = load_config(tmp_path / "canonic.yaml")
+    assert config.llm is not None
+    assert config.llm.model == "gpt-x"
 
 
 def test_json_mode_rejected(runner: CliRunner, tmp_path: Path, monkeypatch) -> None:
