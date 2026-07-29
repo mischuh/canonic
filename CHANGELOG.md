@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.12.1](https://github.com/mischuh/canonic/compare/v0.12.0...v0.12.1) (2026-07-29)
+
+
+### Bug Fixes
+
+* **ingestion:** propagate dbt model description into semantic YAML ([#256](https://github.com/mischuh/canonic/issues/256)) ([9d8c0ed](https://github.com/mischuh/canonic/commit/9d8c0ed32130df37e9e23e7ebb6c3b28dea98731))
+
 ## [0.12.0](https://github.com/mischuh/canonic/compare/v0.11.1...v0.12.0) (2026-07-29)
 
 
