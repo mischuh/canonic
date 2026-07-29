@@ -19,6 +19,7 @@ A semantic source (`semantics/<connection-id>/<name>.yaml`) is validated against
 | `dimensions` | `list[Dimension]` | `[]` | Grouping/filtering columns; see below. |
 | `joins` | `list[Join]` | `[]` | Declared join paths to other semantic sources; see below. |
 | `filters` | `list[Filter]` | `[]` | Named reusable predicates; see below. |
+| `segments` | `list[Any]` | `[]` | Reserved for named, reusable row subsets. Not yet populated by ingestion or read by the compiler — always empty today. |
 | `finality` | `FinalityMeta` | `{watermark: null}` | Per-source finality watermark; see below. |
 | `meta` | `SourceMeta` | `{provenance: inferred}` | System-managed provenance metadata; see below. |
 
