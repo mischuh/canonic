@@ -264,6 +264,11 @@ class ContextBuilder:
         (``total_amount``, ``row_count``).  The short relation name (last dotted segment)
         is used as the lookup key so both ``main.orders`` and ``orders`` hit the same entry.
 
+        Modeling-tier MODEL DefinitionEvidence (e.g. a dbt model's manifest description)
+        is pre-collected the same way, keyed by its own ``entity`` (the relation itself,
+        not a ``references`` list), so the matching RELATION_SCHEMA's proposal carries the
+        source's description instead of leaving it blank.
+
         Every ``RelationSchema`` in the batch is also pre-collected the same way, so a
         relation with no declared FK constraints can be matched against the other tables
         introspected in this same run when guessing FK-less joins (SPEC-E4 §4 bootstrap
@@ -272,6 +277,7 @@ class ContextBuilder:
         """
         named_measures: dict[str, list[dict[str, Any]]] = {}
         named_grains: dict[str, list[str]] = {}
+        named_descriptions: dict[str, str] = {}
         all_relations: dict[str, RelationSchema] = {}
         for item in evidence:
             if item.kind == EvidenceKind.RELATION_SCHEMA:
@@ -297,6 +303,10 @@ class ContextBuilder:
                 if grain:
                     for ref in payload.get("references", []):
                         named_grains.setdefault(ref.split(".")[-1], grain)
+            elif entity_type == DefinitionEntityType.MODEL:
+                description = payload.get("description")
+                if description:
+                    named_descriptions[payload["entity"].split(".")[-1]] = description
 
         proposals: list[Proposal] = []
         skipped: list[SkippedEvidence] = []
@@ -318,6 +328,7 @@ class ContextBuilder:
                         named_measures.get(rel_key),
                         named_grains.get(rel_key),
                         all_relations,
+                        named_descriptions.get(rel_key),
                     )
                 )
             elif item.kind == EvidenceKind.USAGE_EVIDENCE:
@@ -343,6 +354,7 @@ class ContextBuilder:
         named_measures: list[dict[str, Any]] | None = None,
         named_grain: list[str] | None = None,
         all_relations: dict[str, RelationSchema] | None = None,
+        named_description: str | None = None,
     ) -> Proposal:
         """Map one ``RelationSchema`` to a ``semantics/<conn>/<name>.yaml`` draft proposal.
 
@@ -357,6 +369,10 @@ class ContextBuilder:
         DefinitionEvidence), those measures replace the generic column-inferred ones so
         the emitted semantic source carries business-meaningful names from a dbt semantic
         model rather than ``total_amount`` / ``row_count`` fallbacks.
+
+        When ``named_description`` is supplied (pre-collected from modeling-tier MODEL
+        DefinitionEvidence, e.g. a dbt model's manifest description), it's carried onto
+        the proposal's ``description`` field instead of being left blank.
         """
         schema = RelationSchema.model_validate(item.payload)
         name = schema.relation.split(".")[-1]
@@ -426,6 +442,8 @@ class ContextBuilder:
             "joins": self._build_joins(name, schema.foreign_keys, join_drafts),
             "meta": meta,
         }
+        if named_description:
+            content["description"] = named_description
 
         return Proposal(
             target=f"semantics/{schema.connection}/{name}.yaml",

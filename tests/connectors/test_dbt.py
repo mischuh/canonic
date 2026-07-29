@@ -247,6 +247,13 @@ class TestExtractDefinitions:
         orders_def = next(d for d in model_defs if "fct_orders" in d.entity)
         assert orders_def.native_ref == "model.analytics.fct_orders"
 
+    async def test_ac1_model_description_from_manifest(self, dbt_manifest_path: Path) -> None:
+        connector = DbtConnector(dbt_manifest_path)
+        result = await connector.extract_definitions()
+        model_defs = [d for d in result.definitions if d.entity_type == DefinitionEntityType.MODEL]
+        orders_def = next(d for d in model_defs if "fct_orders" in d.entity)
+        assert orders_def.description == "One row per order."
+
     async def test_ac1_no_dbt_specific_keys_in_definition(self, dbt_manifest_path: Path) -> None:
         connector = DbtConnector(dbt_manifest_path)
         result = await connector.extract_definitions()

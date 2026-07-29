@@ -230,6 +230,37 @@ class TestNoPrimaryKey:
         assert p.drafted_by is DraftedBy.DETERMINISTIC
 
 
+class TestModelDescription:
+    async def test_description_absent_without_model_evidence(self) -> None:
+        schema = _relation_schema()
+        p = (await ContextBuilder().build([_evidence(schema)])).proposals[0]
+
+        assert "description" not in p.content
+
+    async def test_model_description_carried_onto_content(self) -> None:
+        """Modeling-tier MODEL evidence (e.g. a dbt model's manifest description)
+        is threaded through to the proposal's ``description`` field."""
+        schema = _relation_schema()
+        model_item = EvidenceItem(
+            source="dbt_prod",
+            kind=EvidenceKind.DEFINITION,
+            acquisition_tier=AcquisitionTier.MODELING,
+            payload={
+                "entity": "analytics.fct_orders",
+                "entity_type": DefinitionEntityType.MODEL,
+                "description": "One row per order.",
+                "native_ref": "model.analytics.fct_orders",
+                "source": "dbt_prod",
+                "acquisition_tier": AcquisitionTier.MODELING,
+            },
+            source_fingerprint="sha256:model-stub",
+            observed_at=_NOW,
+        )
+        p = (await ContextBuilder().build([_evidence(schema), model_item])).proposals[0]
+
+        assert p.content["description"] == "One row per order."
+
+
 # ---------------------------------------------------------------------------
 # LLM-drafted dimension labels/aliases (bootstrap task expansion)
 # ---------------------------------------------------------------------------
