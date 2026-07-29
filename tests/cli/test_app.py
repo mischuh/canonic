@@ -42,7 +42,7 @@ def test_version_prints_package_version(runner: CliRunner) -> None:
 
 
 def test_bare_invocation_shows_project_menu(runner: CliRunner, project_dir: None) -> None:
-    result = runner.invoke(app, [], input="4\n")
+    result = runner.invoke(app, [], input="5\n")
     assert result.exit_code == 0, result.output
     assert result.exception is None or isinstance(result.exception, SystemExit)
 

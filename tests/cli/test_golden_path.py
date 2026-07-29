@@ -267,6 +267,66 @@ def test_run_golden_path_no_sources_after_bootstrap(tmp_path, capsys):
     assert "demo" in out
 
 
+def test_run_golden_path_no_connection_shows_distinct_message(tmp_path, capsys):
+    """No connection at all gets an honest, distinct message — not the bootstrap-attempt one."""
+    from canonic.config import CanonicConfig
+
+    config = CanonicConfig.model_validate(
+        {
+            "version": 1,
+            "project": {"name": "bare"},
+            "connections": [],
+            "llm": {"provider": "openai_compatible", "base_url": "http://x/v1", "model": "m"},
+        }
+    )
+    _run_golden_path(tmp_path, config, [])
+    out = capsys.readouterr().out
+    assert "no connection configured" in out
+    assert "step 5: bootstrapping connection" not in out
+    assert "bare" in out  # completion panel still renders
+
+
+def test_confirm_generate_contracts_declined_writes_no_contracts(tmp_path, monkeypatch, capsys):
+    """Declining the metric-contract prompt writes nothing but the demo query still runs."""
+    import canonic.cli.commands.setup as setup_mod
+    from canonic.compiler.query import SemanticQuery
+    from canonic.config import CanonicConfig
+    from canonic.connectors.base import ResultSet
+    from canonic.core.models import Compiled, QueryMetadata, QueryResult
+
+    config = CanonicConfig.model_validate(
+        {
+            "version": 1,
+            "project": {"name": "demo"},
+            "connections": [],
+            "llm": {"provider": "openai_compatible", "base_url": "http://x/v1", "model": "m"},
+        }
+    )
+    source = _source(measures=[_additive()], dimensions=[_dim("d", "created_at")])
+    monkeypatch.setattr(setup_mod, "_bootstrap_connection", lambda *_: None)
+    monkeypatch.setattr(setup_mod, "list_semantic_sources", lambda _: [source])
+    monkeypatch.setattr(setup_mod, "_confirm_generate_contracts", lambda: False)
+
+    fake_rs = ResultSet(columns=[], rows=[], truncated=False)
+    fake_result = QueryResult(
+        result=fake_rs,
+        compiled=Compiled(sql="SELECT 1", dialect="ansi"),
+        metadata=QueryMetadata(resolved={}, guardrails_fired=[], freshness=[]),
+    )
+    fake_sq = SemanticQuery(metrics=["revenue"])
+    monkeypatch.setattr(
+        setup_mod, "_run_demo_query", AsyncMock(return_value=(fake_result, fake_sq))
+    )
+
+    _run_golden_path(tmp_path, config, [])
+    out = capsys.readouterr().out
+
+    assert "skipping metric contracts" in out
+    contracts_dir = tmp_path / "contracts" / "metrics"
+    assert not contracts_dir.exists() or not list(contracts_dir.glob("*.yaml"))
+    assert "revenue" in out  # demo query still rendered
+
+
 def test_run_golden_path_sources_no_compilable_measure(tmp_path, monkeypatch, capsys):
     """Sources with no p0-compilable measures fall back to the source listing."""
     import canonic.cli.commands.setup as setup_mod
@@ -283,6 +343,7 @@ def test_run_golden_path_sources_no_compilable_measure(tmp_path, monkeypatch, ca
     source = _source(measures=[_non_additive()])
     monkeypatch.setattr(setup_mod, "_bootstrap_connection", lambda *_: None)
     monkeypatch.setattr(setup_mod, "list_semantic_sources", lambda _: [source])
+    monkeypatch.setattr(setup_mod, "_confirm_generate_contracts", lambda: True)
 
     _run_golden_path(tmp_path, config, [])
     out = capsys.readouterr().out
@@ -305,6 +366,7 @@ def test_run_golden_path_demo_query_error_falls_back(tmp_path, monkeypatch, caps
     source = _source(measures=[_additive()], dimensions=[_dim("d", "created_at")])
     monkeypatch.setattr(setup_mod, "_bootstrap_connection", lambda *_: None)
     monkeypatch.setattr(setup_mod, "list_semantic_sources", lambda _: [source])
+    monkeypatch.setattr(setup_mod, "_confirm_generate_contracts", lambda: True)
     monkeypatch.setattr(
         setup_mod, "_run_demo_query", AsyncMock(side_effect=RuntimeError("db down"))
     )
@@ -350,6 +412,27 @@ def test_write_bootstrap_contracts_idempotent(tmp_path):
     count = _write_bootstrap_contracts(tmp_path, [source])
     assert count == 0  # file already exists → not overwritten
     assert "custom: content" in (tmp_path / "contracts" / "metrics" / "revenue.yaml").read_text()
+
+
+def test_write_bootstrap_contracts_qualifies_cross_source_collision(tmp_path, caplog):
+    """Same-named measures from two different sources both get contracts (no silent drop)."""
+    customers = _source(name="customers", measures=[_additive("row_count", "id")])
+    products = _source(name="products", measures=[_additive("row_count", "id")])
+
+    with caplog.at_level("WARNING"):
+        count = _write_bootstrap_contracts(tmp_path, [customers, products])
+
+    assert count == 2
+    plain = tmp_path / "contracts" / "metrics" / "row-count.yaml"
+    qualified = tmp_path / "contracts" / "metrics" / "products-row-count.yaml"
+    assert plain.exists()
+    assert qualified.exists()
+    assert "metric: row_count" in plain.read_text()
+    assert "source: customers" in plain.read_text()
+    assert "metric: products_row_count" in qualified.read_text()
+    assert "source: products" in qualified.read_text()
+    assert "measure: row_count" in qualified.read_text()  # canonical.measure stays unqualified
+    assert any("collides with an existing contract" in msg for msg in caplog.messages)
 
 
 def test_write_bootstrap_contracts_slug_uses_hyphens(tmp_path):
@@ -655,6 +738,7 @@ def test_ob_s5_ac2_demo_canonic_error_falls_back_to_describe(tmp_path, monkeypat
     source = _source(measures=[_additive()], dimensions=[_dim("d", "created_at")])
     monkeypatch.setattr(setup_mod, "_bootstrap_connection", lambda *_: None)
     monkeypatch.setattr(setup_mod, "list_semantic_sources", lambda _: [source])
+    monkeypatch.setattr(setup_mod, "_confirm_generate_contracts", lambda: True)
     monkeypatch.setattr(
         setup_mod,
         "_run_demo_query",
@@ -791,6 +875,7 @@ def test_ob_s6_first_answer_served_emitted_on_success(tmp_path, monkeypatch):
 
     monkeypatch.setattr(setup_mod, "_bootstrap_connection", lambda *_: pipeline_result)
     monkeypatch.setattr(setup_mod, "list_semantic_sources", lambda _: [source])
+    monkeypatch.setattr(setup_mod, "_confirm_generate_contracts", lambda: True)
     monkeypatch.setattr(
         setup_mod,
         "_run_demo_query",
@@ -813,6 +898,7 @@ def test_ob_s6_first_answer_served_not_emitted_on_demo_error(tmp_path, monkeypat
     source = _source(measures=[_additive()], dimensions=[_dim("d", "created_at")])
     monkeypatch.setattr(setup_mod, "_bootstrap_connection", lambda *_: None)
     monkeypatch.setattr(setup_mod, "list_semantic_sources", lambda _: [source])
+    monkeypatch.setattr(setup_mod, "_confirm_generate_contracts", lambda: True)
     monkeypatch.setattr(
         setup_mod, "_run_demo_query", AsyncMock(side_effect=RuntimeError("db down"))
     )

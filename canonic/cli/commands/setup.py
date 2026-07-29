@@ -22,7 +22,7 @@ import os
 from collections import Counter
 from enum import IntEnum
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Annotated, Any
 
 import typer
 from rich.panel import Panel
@@ -162,7 +162,21 @@ def _classify_withheld(
 
 
 @handle_errors
-def setup(ctx: typer.Context) -> None:
+def setup(
+    ctx: typer.Context,
+    minimal: Annotated[
+        bool,
+        typer.Option(
+            "--minimal",
+            "--bare",
+            help=(
+                "Zero-prompt scaffold-only setup: writes canonic.yaml (name only, no "
+                "connections/LLM) plus the project directories, skips every prompt and "
+                "the golden path. Add a connection/LLM later."
+            ),
+        ),
+    ] = False,
+) -> None:
     """Run the interactive project setup wizard."""
     if get_cli_context(ctx).json_output:
         _console.print(
@@ -172,7 +186,16 @@ def setup(ctx: typer.Context) -> None:
 
     root = Path.cwd()
     if (root / "canonic.yaml").exists():
+        if minimal:
+            _console.print(
+                "[yellow]canonic.yaml already exists[/yellow]; "
+                "--minimal only scaffolds a new project."
+            )
+            raise typer.Exit(1)
         _existing_project_menu(root)
+        return
+    if minimal:
+        _run_minimal_setup(root)
         return
     _run_wizard(root)
 
@@ -207,21 +230,24 @@ def _run_wizard(root: Path) -> None:
         logger.debug("setup: step name complete: %s", state.project_name)
 
     if not state.done(STEP_CONNECTION):
-        state.connection = _prompt_connection(root)
+        state.connection = _prompt_connection_or_skip(root)
         state.mark(STEP_CONNECTION)
         save_state(root, state)
-        logger.debug(
-            "setup: step connection complete: id=%s type=%s",
-            state.connection.id,
-            state.connection.type,
-        )
-        emit_milestone(DiskAnswerEventLog(root), FunnelMilestone.CONNECTION_ADDED)
+        if state.connection is not None:
+            logger.debug(
+                "setup: step connection complete: id=%s type=%s",
+                state.connection.id,
+                state.connection.type,
+            )
+            emit_milestone(DiskAnswerEventLog(root), FunnelMilestone.CONNECTION_ADDED)
+        else:
+            logger.debug("setup: step connection skipped")
 
     if not state.done(STEP_LLM):
-        state.llm = _prompt_llm()
+        state.llm = _prompt_llm_or_skip()
         state.mark(STEP_LLM)
         save_state(root, state)
-        logger.debug("setup: step llm complete")
+        logger.debug("setup: step llm complete: configured=%s", state.llm is not None)
 
     if not state.done(STEP_SCHEMA):
         state.schema_previewed = _maybe_preview_schema(state.connection)
@@ -229,11 +255,14 @@ def _run_wizard(root: Path) -> None:
         save_state(root, state)
         logger.debug("setup: step schema preview complete: previewed=%s", state.schema_previewed)
 
-    assert state.project_name and state.connection and state.llm  # guarded by steps
+    assert state.project_name  # guarded by STEP_NAME
     config = CanonicConfig(
         version=1,
-        project=ProjectConfig(name=state.project_name, default_connection=state.connection.id),
-        connections=[state.connection],
+        project=ProjectConfig(
+            name=state.project_name,
+            default_connection=state.connection.id if state.connection else None,
+        ),
+        connections=[state.connection] if state.connection else [],
         llm=state.llm,
         telemetry=TelemetryConfig(),
     )
@@ -245,13 +274,43 @@ def _run_wizard(root: Path) -> None:
     _run_golden_path(root, config, created)
 
 
+def _run_minimal_setup(root: Path) -> None:
+    """Zero-prompt scaffold-only setup (``--minimal``/``--bare``).
+
+    Skips every prompt and the golden path (bootstrap/demo query) entirely: writes a bare
+    ``canonic.yaml`` (project name only — no connections, no LLM) plus the scaffolded
+    directories, then reuses the same completion panel the full wizard ends with so the
+    next steps (add a connection, add an LLM) are discoverable in one place. Bypasses
+    ``SetupState``/checkpointing entirely — there is nothing to resume.
+    """
+    logger.info("setup: running --minimal scaffold-only setup at %s", root)
+    config = CanonicConfig(
+        version=1, project=ProjectConfig(name=root.name), telemetry=TelemetryConfig()
+    )
+    created = scaffold_project(root)
+    dump_config(config, root / "canonic.yaml")
+    load_config(root / "canonic.yaml")  # assert the written file round-trips
+    clear_state(root)  # defensive: drop any stale checkpoint from a prior interrupted full run
+    logger.info("setup: --minimal wrote canonic.yaml, scaffolded %d path(s)", len(created))
+    _render_setup_complete(config, created, demo_ok=False, withheld_count=0)
+
+
 # --- golden path (OB-S1) ---------------------------------------------------
+
+
+def _confirm_generate_contracts() -> bool:
+    """Ask whether to write inferred metric contracts now (isolated so tests can stub it)."""
+    return typer.confirm("Generate metric contracts now?", default=True)
 
 
 def _run_golden_path(root: Path, config: CanonicConfig, scaffolded: list[Path]) -> None:
     """Steps 5–7: bootstrap → first answer → handoff + completion panel."""
-    _console.print("\n[dim]step 5: bootstrapping connection…[/dim]")
-    logger.info("setup: golden path step 5: bootstrapping connection")
+    if config.connections:
+        _console.print("\n[dim]step 5: bootstrapping connection…[/dim]")
+        logger.info("setup: golden path step 5: bootstrapping connection")
+    else:
+        _console.print("\n[dim]no connection configured — skipping bootstrap and demo query.[/dim]")
+        logger.info("setup: golden path: no connection configured, skipping bootstrap")
     pipeline_result = _bootstrap_connection(root, config)
     if pipeline_result is not None:
         emit_milestone(DiskAnswerEventLog(root), FunnelMilestone.BOOTSTRAP_COMPLETED)
@@ -262,7 +321,7 @@ def _run_golden_path(root: Path, config: CanonicConfig, scaffolded: list[Path]) 
     except Exception:  # noqa: BLE001 — loading errors must not abort setup
         logger.warning("setup: failed to load semantic sources after bootstrap", exc_info=True)
 
-    if sources:
+    if sources and _confirm_generate_contracts():
         contract_count = _write_bootstrap_contracts(root, sources)
         if contract_count:
             logger.info("setup: wrote %d inferred metric contract(s)", contract_count)
@@ -270,6 +329,12 @@ def _run_golden_path(root: Path, config: CanonicConfig, scaffolded: list[Path]) 
                 f"[green]✓[/green] wrote {contract_count} inferred metric contract(s) "
                 "— MCP server will list them immediately"
             )
+    elif sources:
+        logger.info("setup: metric contract generation skipped")
+        _console.print(
+            "[dim]skipping metric contracts — generate them later via `canonic setup` "
+            "→ [3] generate contracts.[/dim]"
+        )
 
     demo_ok = False
     if sources:
@@ -585,7 +650,12 @@ def _render_setup_complete(
         "[bold]canonic query --metrics <m> --dimensions <d>[/bold]  : run your own query\n"
         "[bold]canonic mcp start[/bold]              : connect an agent via MCP"
     )
-    if not demo_ok:
+    if not config.connections:
+        next_steps += (
+            "\n\n[dim]tip:[/dim] no connection configured — run [bold]canonic setup[/bold] "
+            "again to add one, or edit canonic.yaml directly"
+        )
+    elif not demo_ok:
         next_steps += (
             "\n\n[dim]tip:[/dim] add doc sources or a richer connection to unlock richer answers"
         )
@@ -609,8 +679,9 @@ def _existing_project_menu(root: Path) -> None:
     _print_status(root)
     while True:
         choice = typer.prompt(
-            "Select  [1] status  [2] add connection  [3] generate contracts  [4] exit",
-            default="4",
+            "Select  [1] status  [2] add connection  [3] generate contracts  "
+            "[4] configure LLM  [5] exit",
+            default="5",
         )
         if choice == "1":
             _print_status(root)
@@ -619,9 +690,11 @@ def _existing_project_menu(root: Path) -> None:
         elif choice == "3":
             _generate_contracts_for_existing(root)
         elif choice == "4":
+            _add_llm_to_existing(root)
+        elif choice == "5":
             return
         else:
-            _console.print("[red]invalid choice[/red]; enter 1, 2, 3 or 4")
+            _console.print("[red]invalid choice[/red]; enter 1, 2, 3, 4 or 5")
 
 
 def _generate_contracts_for_existing(root: Path) -> None:
@@ -675,7 +748,41 @@ def _add_connection_to_existing(root: Path) -> None:
     _console.print(f"[green]✓[/green] connection [bold]{conn.id}[/bold] added to canonic.yaml")
 
 
+def _add_llm_to_existing(root: Path) -> None:
+    """Configure or replace the LLM block on an existing project (mirrors _add_connection_to_existing)."""
+    llm = _prompt_llm()
+    config = load_config(root / "canonic.yaml")
+    if config.llm is not None and not typer.confirm(
+        "an LLM is already configured — replace it?", default=False
+    ):
+        _console.print("[dim]kept existing LLM config; nothing written.[/dim]")
+        return
+    config.llm = llm
+    dump_config(config, root / "canonic.yaml")
+    logger.info("setup: llm provider=%s model=%s added to canonic.yaml", llm.provider, llm.model)
+    _console.print(
+        f"[green]✓[/green] LLM [bold]{llm.provider}/{llm.model}[/bold] added to canonic.yaml"
+    )
+
+
 # --- shared prompts --------------------------------------------------------
+
+
+def _prompt_connection_or_skip(root: Path) -> Connection | None:
+    """Offer to configure a data connection now, or skip it.
+
+    Declining leaves ``connections: []`` in canonic.yaml; the golden path degrades to a
+    scaffold-only completion. A connection can be added later via the existing-project
+    menu's "add connection" option (``_add_connection_to_existing``) or by editing
+    canonic.yaml directly.
+    """
+    if not typer.confirm("Configure a data connection now?", default=True):
+        _console.print(
+            "[dim]skipping connection — add one later via `canonic setup` "
+            "or by editing canonic.yaml.[/dim]"
+        )
+        return None
+    return _prompt_connection(root)
 
 
 def _prompt_connection(root: Path) -> Connection:
@@ -815,6 +922,21 @@ async def _probe(conn: Connection) -> Health:
         return await connector.test_connection()
     finally:
         await connector.aclose()
+
+
+def _prompt_llm_or_skip() -> LLMConfig | None:
+    """Offer to configure an LLM now, or skip it.
+
+    The deterministic core and demo query need no model; declining leaves ``llm: null``.
+    An LLM can be added later via the existing-project menu's "configure LLM" option
+    (``_add_llm_to_existing``) or by editing canonic.yaml directly.
+    """
+    if not typer.confirm("Configure an LLM now?", default=True):
+        _console.print(
+            "[dim]skipping LLM — the deterministic core and first answer don't need one.[/dim]"
+        )
+        return None
+    return _prompt_llm()
 
 
 def _prompt_llm() -> LLMConfig:
