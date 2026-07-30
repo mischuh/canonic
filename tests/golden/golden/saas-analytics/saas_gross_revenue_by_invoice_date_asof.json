@@ -1,0 +1,80 @@
+{
+  "case": "saas_gross_revenue_by_invoice_date_asof",
+  "columns": [
+    {
+      "name": "invoice_date",
+      "type": "timestamp"
+    },
+    {
+      "name": "total_amount",
+      "type": "decimal"
+    },
+    {
+      "name": "is_final",
+      "type": "bool"
+    }
+  ],
+  "dialect": "duckdb",
+  "finality": {
+    "final_rows": 3,
+    "provisional_rows": 1,
+    "sources_used": [
+      "fct_invoices",
+      "fct_invoices_rt"
+    ],
+    "watermark": "2025-03-13T23:59:59-04:00"
+  },
+  "guardrails_fired": [
+    {
+      "id": "board-reporting-final-only",
+      "kind": "restrict_source",
+      "severity": "error"
+    },
+    {
+      "id": "board-reporting-trusted-only",
+      "kind": "min_trust",
+      "severity": "error"
+    },
+    {
+      "id": "revenue-excludes-refunds",
+      "kind": "mandatory_filter",
+      "severity": "error"
+    },
+    {
+      "id": "revenue-excludes-trials",
+      "kind": "mandatory_filter",
+      "severity": "error"
+    }
+  ],
+  "project": "saas-analytics",
+  "resolved": {
+    "metrics": {
+      "gross_revenue": "fct_invoices.total_amount"
+    }
+  },
+  "row_count": 4,
+  "rows": [
+    [
+      "2025-01-01T00:00:00",
+      "5938.00",
+      true
+    ],
+    [
+      "2025-02-01T00:00:00",
+      "5938.00",
+      true
+    ],
+    [
+      "2025-03-01T00:00:00",
+      "5938.00",
+      true
+    ],
+    [
+      "2025-12-31T00:00:00",
+      "2997.00",
+      false
+    ]
+  ],
+  "trust_tier": "provisional",
+  "warnings": []
+}

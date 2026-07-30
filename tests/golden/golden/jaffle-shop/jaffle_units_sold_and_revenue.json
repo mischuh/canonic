@@ -1,0 +1,32 @@
+{
+  "case": "jaffle_units_sold_and_revenue",
+  "columns": [
+    {
+      "name": "units_sold",
+      "type": "int"
+    },
+    {
+      "name": "revenue",
+      "type": "decimal"
+    }
+  ],
+  "dialect": "duckdb",
+  "finality": null,
+  "guardrails_fired": [],
+  "project": "jaffle-shop",
+  "resolved": {
+    "metrics": {
+      "revenue": "orders.revenue",
+      "units_sold": "order_items.units_sold"
+    }
+  },
+  "row_count": 1,
+  "rows": [
+    [
+      37,
+      "165.04"
+    ]
+  ],
+  "trust_tier": "provisional",
+  "warnings": []
+}

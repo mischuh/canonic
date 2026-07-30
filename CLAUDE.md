@@ -39,3 +39,4 @@ pytest tests/ -x --tb=short
 
 ## Considerations
 - If I come up with errors from examples please check first if the semantics are correct (especially joins) before changing code base
+- `tests/golden/` locks the compiled SQL and the executed numbers for the shipped example projects. If a golden fails, first decide whether the *number* is now right or wrong. Only after that run `pytest tests/golden --regen-golden` and review `git diff tests/golden/golden/`.

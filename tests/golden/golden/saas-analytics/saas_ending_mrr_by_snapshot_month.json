@@ -1,0 +1,81 @@
+{
+  "case": "saas_ending_mrr_by_snapshot_month",
+  "columns": [
+    {
+      "name": "snapshot_month",
+      "type": "timestamp"
+    },
+    {
+      "name": "mrr_sum",
+      "type": "decimal"
+    }
+  ],
+  "dialect": "duckdb",
+  "finality": null,
+  "guardrails_fired": [
+    {
+      "id": "ending-mrr-requires-month",
+      "kind": "required_dimension",
+      "severity": "warn"
+    }
+  ],
+  "project": "saas-analytics",
+  "resolved": {
+    "metrics": {
+      "ending_mrr": "fct_mrr_snapshot.mrr_sum"
+    }
+  },
+  "row_count": 12,
+  "rows": [
+    [
+      "2025-01-01T00:00:00",
+      "5938.00"
+    ],
+    [
+      "2025-02-01T00:00:00",
+      "5938.00"
+    ],
+    [
+      "2025-03-01T00:00:00",
+      "5938.00"
+    ],
+    [
+      "2025-04-01T00:00:00",
+      "5938.00"
+    ],
+    [
+      "2025-05-01T00:00:00",
+      "5889.00"
+    ],
+    [
+      "2025-06-01T00:00:00",
+      "6689.00"
+    ],
+    [
+      "2025-07-01T00:00:00",
+      "6689.00"
+    ],
+    [
+      "2025-08-01T00:00:00",
+      "6640.00"
+    ],
+    [
+      "2025-09-01T00:00:00",
+      "6640.00"
+    ],
+    [
+      "2025-10-01T00:00:00",
+      "6591.00"
+    ],
+    [
+      "2025-11-01T00:00:00",
+      "6591.00"
+    ],
+    [
+      "2025-12-01T00:00:00",
+      "6591.00"
+    ]
+  ],
+  "trust_tier": "provisional",
+  "warnings": []
+}

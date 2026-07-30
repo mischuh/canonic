@@ -1,0 +1,32 @@
+{
+  "case": "railway_service_count",
+  "columns": [
+    {
+      "name": "service_count",
+      "type": "int"
+    }
+  ],
+  "dialect": "duckdb",
+  "finality": null,
+  "guardrails_fired": [
+    {
+      "id": "exclude-cancelled-arrivals",
+      "kind": "mandatory_filter",
+      "severity": "error"
+    }
+  ],
+  "project": "dutch-railway",
+  "resolved": {
+    "metrics": {
+      "service_count": "fact_services.service_count"
+    }
+  },
+  "row_count": 1,
+  "rows": [
+    [
+      58302
+    ]
+  ],
+  "trust_tier": "provisional",
+  "warnings": []
+}

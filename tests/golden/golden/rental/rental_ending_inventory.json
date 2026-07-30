@@ -1,0 +1,26 @@
+{
+  "case": "rental_ending_inventory",
+  "columns": [
+    {
+      "name": "ending_inventory",
+      "type": "int"
+    }
+  ],
+  "dialect": "sqlite",
+  "finality": null,
+  "guardrails_fired": [],
+  "project": "rental",
+  "resolved": {
+    "metrics": {
+      "ending_inventory": "vehicle_inventory.inventory_level"
+    }
+  },
+  "row_count": 1,
+  "rows": [
+    [
+      15
+    ]
+  ],
+  "trust_tier": "provisional",
+  "warnings": []
+}

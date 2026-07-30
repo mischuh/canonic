@@ -1,0 +1,42 @@
+{
+  "case": "jaffle_revenue_and_customers_by_customer_type",
+  "columns": [
+    {
+      "name": "customer_type",
+      "type": "string"
+    },
+    {
+      "name": "revenue",
+      "type": "decimal"
+    },
+    {
+      "name": "row_count",
+      "type": "int"
+    }
+  ],
+  "dialect": "duckdb",
+  "finality": null,
+  "guardrails_fired": [],
+  "project": "jaffle-shop",
+  "resolved": {
+    "metrics": {
+      "num_customers": "customers.row_count",
+      "revenue": "orders.revenue"
+    }
+  },
+  "row_count": 2,
+  "rows": [
+    [
+      "business",
+      "43.00",
+      5
+    ],
+    [
+      "personal",
+      "122.04",
+      15
+    ]
+  ],
+  "trust_tier": "provisional",
+  "warnings": []
+}

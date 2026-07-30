@@ -1,0 +1,26 @@
+{
+  "case": "rental_rental_revenue",
+  "columns": [
+    {
+      "name": "total_paid",
+      "type": "float"
+    }
+  ],
+  "dialect": "sqlite",
+  "finality": null,
+  "guardrails_fired": [],
+  "project": "rental",
+  "resolved": {
+    "metrics": {
+      "rental_revenue": "payments.total_paid"
+    }
+  },
+  "row_count": 1,
+  "rows": [
+    [
+      17468.19
+    ]
+  ],
+  "trust_tier": "provisional",
+  "warnings": []
+}

@@ -1,0 +1,103 @@
+{
+  "case": "railway_service_count_vs_scheduled_stops_by_service_type",
+  "columns": [
+    {
+      "name": "service_type",
+      "type": "string"
+    },
+    {
+      "name": "service_count",
+      "type": "int"
+    },
+    {
+      "name": "scheduled_stop_count",
+      "type": "int"
+    }
+  ],
+  "dialect": "duckdb",
+  "finality": null,
+  "guardrails_fired": [
+    {
+      "id": "exclude-cancelled-arrivals",
+      "kind": "mandatory_filter",
+      "severity": "error"
+    }
+  ],
+  "project": "dutch-railway",
+  "resolved": {
+    "metrics": {
+      "scheduled_stops": "fact_services.scheduled_stop_count",
+      "service_count": "fact_services.service_count"
+    }
+  },
+  "row_count": 13,
+  "rows": [
+    [
+      "Eurostar",
+      89,
+      90
+    ],
+    [
+      "ICE International",
+      54,
+      56
+    ],
+    [
+      "Intercity direct",
+      422,
+      462
+    ],
+    [
+      "Intercity",
+      11976,
+      15259
+    ],
+    [
+      "Nightjet",
+      13,
+      13
+    ],
+    [
+      "Snelbus ipv trein",
+      1728,
+      1728
+    ],
+    [
+      "Sneltrein",
+      1119,
+      1179
+    ],
+    [
+      "Speciale Trein",
+      32,
+      32
+    ],
+    [
+      "Sprinter",
+      28947,
+      30958
+    ],
+    [
+      "Stoomtrein",
+      2,
+      2
+    ],
+    [
+      "Stopbus ipv trein",
+      933,
+      933
+    ],
+    [
+      "Stoptrein",
+      12683,
+      12930
+    ],
+    [
+      "Taxibus ipv trein",
+      304,
+      304
+    ]
+  ],
+  "trust_tier": "provisional",
+  "warnings": []
+}
