@@ -259,6 +259,75 @@ class TestMinTrustFor:
         assert [r.id for r in result] == ["a-guard", "z-guard"]
 
 
+def _required_dimension_guardrail(
+    gid: str, *, metric: str, dimension: str, context: str | None = None
+) -> Guardrail:
+    return Guardrail(
+        id=gid,
+        applies_to=AppliesTo(metric=metric),
+        kind=GuardrailKind.REQUIRED_DIMENSION,
+        dimension=dimension,
+        context=context,
+        rationale="test required_dimension",
+    )
+
+
+class TestRequiredDimensionFor:
+    def test_returns_guardrail_on_matching_context(self) -> None:
+        revenue = _binding("revenue")
+        g = _required_dimension_guardrail(
+            "ending-mrr-requires-month",
+            metric="revenue",
+            dimension="month",
+            context="board_reporting",
+        )
+        resolver = ContractResolver(bindings=[revenue], guardrails=[g])
+        result = resolver.required_dimension_for("orders", "total_revenue", "board_reporting")
+        assert [r.id for r in result] == ["ending-mrr-requires-month"]
+
+    def test_returns_empty_on_wrong_context(self) -> None:
+        revenue = _binding("revenue")
+        g = _required_dimension_guardrail(
+            "ending-mrr-requires-month",
+            metric="revenue",
+            dimension="month",
+            context="board_reporting",
+        )
+        resolver = ContractResolver(bindings=[revenue], guardrails=[g])
+        result = resolver.required_dimension_for("orders", "total_revenue", "internal_dashboard")
+        assert result == []
+
+    def test_context_none_on_guardrail_applies_to_every_query_context(self) -> None:
+        """Unlike restrict_source/min_trust, no declared context means "always applies"."""
+        revenue = _binding("revenue")
+        g = _required_dimension_guardrail(
+            "ending-mrr-requires-month", metric="revenue", dimension="month"
+        )
+        resolver = ContractResolver(bindings=[revenue], guardrails=[g])
+        assert [r.id for r in resolver.required_dimension_for("orders", "total_revenue", None)] == [
+            "ending-mrr-requires-month"
+        ]
+        assert [
+            r.id for r in resolver.required_dimension_for("orders", "total_revenue", "some_context")
+        ] == ["ending-mrr-requires-month"]
+
+    def test_does_not_return_min_trust_guardrails(self) -> None:
+        revenue = _binding("revenue")
+        mt = _min_trust_guardrail("board-trusted-only", metric="revenue", context="board_reporting")
+        resolver = ContractResolver(bindings=[revenue], guardrails=[mt])
+        result = resolver.required_dimension_for("orders", "total_revenue", "board_reporting")
+        assert result == []
+
+    @pytest.mark.release_gate
+    def test_stable_sort_by_id(self) -> None:
+        revenue = _binding("revenue")
+        g1 = _required_dimension_guardrail("z-guard", metric="revenue", dimension="month")
+        g2 = _required_dimension_guardrail("a-guard", metric="revenue", dimension="month")
+        resolver = ContractResolver(bindings=[revenue], guardrails=[g1, g2])
+        result = resolver.required_dimension_for("orders", "total_revenue", None)
+        assert [r.id for r in result] == ["a-guard", "z-guard"]
+
+
 class TestP0Stubs:
     def test_finality_for_returns_none(self) -> None:
         resolver = ContractResolver(bindings=[_binding("revenue")], guardrails=[])

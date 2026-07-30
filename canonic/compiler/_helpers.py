@@ -7,6 +7,7 @@ both the router in :mod:`canonic.compiler.pipeline` and every per-kind strategy.
 from __future__ import annotations
 
 import re
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, cast
 
 import sqlglot
@@ -17,15 +18,17 @@ from canonic.compiler.result import (
     FiredGuardrail,
     SourceFreshness,
 )
-from canonic.exc import Ambiguous, FanoutUnsafe, Unresolved
+from canonic.contracts.models import Severity
+from canonic.exc import Ambiguous, FanoutUnsafe, GuardrailBlock, Unresolved
 from canonic.exc import Unreachable as UnreachableError
 from canonic.semantic.models import Additivity, Measure, NormalizedType, Relationship
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
     from datetime import datetime
 
     from canonic.compiler.query import SemanticQuery
-    from canonic.contracts.models import FinalityRule
+    from canonic.contracts.models import FinalityRule, Guardrail
     from canonic.contracts.resolver import ContractResolver
     from canonic.semantic.models import Dimension, SemanticSource
 
@@ -177,14 +180,64 @@ def _population_filter_conditions(
     return [bound]
 
 
+def _block_or_warn(guardrail: Guardrail, *, candidates: Sequence[str] | None = None) -> str:
+    """Raise GuardrailBlock for an error-severity guardrail; return a warning line for warn.
+
+    Shared by the guardrail kinds whose enforcement is a genuine block-or-warn decision
+    (min_trust, restrict_source, required_dimension): each calls this once its own condition
+    for firing is met, and ``severity`` decides whether that is a hard stop or an entry
+    appended to ``CompileResult.warnings``. ``mandatory_filter`` does not use this — its
+    predicate is always injected regardless of severity; see :func:`_enforce_guardrails`.
+    """
+    if guardrail.severity is Severity.ERROR:
+        raise GuardrailBlock(guardrail.rationale, candidates=candidates)
+    return f"{guardrail.id}: {guardrail.rationale}"
+
+
+def _query_references_dimension(
+    entry_name: str,
+    used_dims: set[str],
+    filter_tokens: set[str],
+) -> bool:
+    """True when *entry_name* (bare, or ``alias.dim`` qualified) is grouped by or filtered on.
+
+    The one definition of "referenced by the query" shared between the unused-dimension scan
+    (``canonic.compiler.pipeline._related``) and required_dimension guardrail enforcement
+    (``canonic.compiler.pipeline._enforce_required_dimension``), so the two checks cannot
+    silently drift apart.
+    """
+    bare = entry_name.split(".")[-1]
+    return entry_name in used_dims or bare in used_dims or bare in filter_tokens
+
+
+@dataclass(frozen=True, slots=True)
+class _GuardrailEnforcement:
+    """Conditions, fired entries, and warnings from applying guardrails to one metric group."""
+
+    conditions: list[exp.Expression] = field(default_factory=list)
+    fired: list[FiredGuardrail] = field(default_factory=list)
+    warnings: list[str] = field(default_factory=list)
+
+
 def _enforce_guardrails(
     metrics: list[_ResolvedMetric],
     resolver: ContractResolver,
     context: str | None,
     sources_by_name: dict[str, SemanticSource],
-) -> tuple[list[exp.Expression], list[FiredGuardrail]]:
+) -> _GuardrailEnforcement:
+    """Stage 6: apply every guardrail matched by (source, measure) across ``metrics``.
+
+    Only ``mandatory_filter`` guardrails act here, via ``guardrail.filter``: the predicate is
+    always AND-ed into the WHERE regardless of severity, since mandatory_filter has no "block"
+    action of its own, only "apply the filter" or "apply the filter and say so louder" —
+    ``severity: warn`` adds a ``warnings[]`` entry, ``severity: error`` (the default) stays
+    silent about it. Guardrails of other kinds matched here by source/measure (restrict_source,
+    min_trust, required_dimension) are still recorded in ``fired`` for visibility, but are
+    actually enforced by their own dedicated, context-gated checks elsewhere in the pipeline.
+    """
     conditions: list[exp.Expression] = []
     fired: list[FiredGuardrail] = []
+    warnings: list[str] = []
     seen: set[str] = set()
     for m in metrics:
         for guardrail in resolver.guardrails_for(m.source, m.measure.name, context):
@@ -195,8 +248,14 @@ def _enforce_guardrails(
                 parsed = _parse(guardrail.filter)
                 bound, _ = _qualify_columns(parsed, sources_by_name, m.source)
                 conditions.append(bound)
-            fired.append(FiredGuardrail(id=guardrail.id, kind=str(guardrail.kind)))
-    return conditions, fired
+                if guardrail.severity is Severity.WARN:
+                    warnings.append(f"{guardrail.id}: {guardrail.rationale}")
+            fired.append(
+                FiredGuardrail(
+                    id=guardrail.id, kind=str(guardrail.kind), severity=guardrail.severity.value
+                )
+            )
+    return _GuardrailEnforcement(conditions=conditions, fired=fired, warnings=warnings)
 
 
 def _dimension_expr(source: str, dim: Dimension) -> exp.Expression:

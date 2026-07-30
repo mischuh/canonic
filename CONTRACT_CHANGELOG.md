@@ -30,6 +30,19 @@ CI (`.github/workflows/contract-schema-guard.yml`,
 
 ## History
 
+## 2.4 (2026-07-30) - MINOR
+
+- ADR/PR: this PR (feat(compiler): enforce required_dimension guardrails and honor severity)
+- Summary: `required_dimension` guardrails (previously declared and reported in
+  `guardrails_fired` but never enforced) now block or warn when their dimension is
+  neither grouped by nor filtered on. `severity: warn` now actually downgrades
+  `min_trust`, `restrict_source`, and `required_dimension` guardrail blocks to a
+  `warnings[]` entry instead of raising `GUARDRAIL_BLOCK`; `mandatory_filter` still
+  always injects its predicate but now also warns at `severity: warn`. Additive:
+  `FiredGuardrail`/`FiredGuardrailOut` gain a `severity` field (defaults to `"error"`),
+  and the `Guardrail` contract model gains a `dimension` field (required only for
+  `required_dimension`). No existing consumer's shape changes.
+
 ## 2.3 (2026-07-11) - MINOR
 
 - ADR/PR: specs/AMENDMENT-remote-mcp-transport.md (feat(mcp): remote http transport with bearer-token auth)

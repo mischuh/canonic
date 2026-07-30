@@ -346,6 +346,7 @@ class Guardrail(BaseModel):
     filter: str | None = None
     restrict_to: RestrictTo | None = None
     level: str | None = None
+    dimension: str | None = None
     context: str | None = None
     severity: Severity = Severity.ERROR
     rationale: str
@@ -357,6 +358,11 @@ class Guardrail(BaseModel):
             raise ContractValidationError(
                 ("filter",),
                 "mandatory_filter guardrail requires a non-empty 'filter' expression",
+            )
+        if self.kind is GuardrailKind.REQUIRED_DIMENSION and not self.dimension:
+            raise ContractValidationError(
+                ("dimension",),
+                "required_dimension guardrail requires a non-empty 'dimension' name",
             )
         if self.kind is GuardrailKind.RESTRICT_SOURCE:
             if self.restrict_to is None:

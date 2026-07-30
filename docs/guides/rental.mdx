@@ -68,7 +68,7 @@ canonic eval baseline \                    # (optional) grain-inference accuracy
 `contracts/guardrails/` ships **one** enforced guardrail — **`completed-rentals-only`**: `rentals.total_base_revenue` must never be summed without a `status = 'completed'` filter: active and cancelled rows have `NULL` in `total_amount`. Use `payments.total_paid` for financial reporting instead.
 
 <Note>
-  **Cross-fact fanout** (documented in a knowledge caveat, not a guardrail; `required_dimension`/cross-fact fanout guarding isn't an enforced guardrail kind yet, see [Contracts & guardrails](/concepts/contracts-and-guardrails#guardrails)): joining `damages` to `payments` in a single query fans out both facts. Always bridge each independently through `rentals`.
+  **Cross-fact fanout** (documented in a knowledge caveat, not a guardrail; none of the four guardrail kinds cover "reject a join between two fanning fact tables", see [Contracts & guardrails](/concepts/contracts-and-guardrails#guardrails)): joining `damages` to `payments` in a single query fans out both facts. Always bridge each independently through `rentals`.
 </Note>
 
 ## Files

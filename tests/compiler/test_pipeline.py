@@ -7,7 +7,14 @@ import sqlglot
 
 from canonic import exc
 from canonic.compiler import SemanticQuery, compile
-from canonic.contracts.models import CanonicalRef, MetricBinding
+from canonic.contracts.models import (
+    AppliesTo,
+    CanonicalRef,
+    Guardrail,
+    GuardrailKind,
+    MetricBinding,
+    Severity,
+)
 from canonic.contracts.resolver import ContractResolver
 from canonic.semantic.models import Column, Dimension, Measure, SemanticSource
 
@@ -89,6 +96,37 @@ def test_s2_ac2_guardrail_anded_alongside_user_filter(
     assert "= 'completed'" in result.sql
     assert "<> 'refunded'" in result.sql
     assert " AND " in result.sql.upper()
+
+
+def test_s2_mandatory_filter_error_severity_produces_no_warning(
+    resolver: ContractResolver, sources: list[SemanticSource]
+) -> None:
+    """severity: error (the default) is applied silently — no warnings[] entry."""
+    result = compile(SemanticQuery(metrics=["revenue"]), resolver, sources)
+    assert result.warnings == []
+    assert result.guardrails_fired[0].severity == "error"
+
+
+def test_s2_mandatory_filter_warn_severity_still_injects_and_warns(
+    sources: list[SemanticSource],
+) -> None:
+    """severity: warn never skips the filter — it only adds a warnings[] entry (SPEC S2)."""
+    binding = MetricBinding(
+        metric="revenue", canonical=CanonicalRef(source="orders", measure="total_revenue")
+    )
+    guardrail = Guardrail(
+        id="revenue-excludes-refunds",
+        applies_to=AppliesTo(source="orders", measure="total_revenue"),
+        kind=GuardrailKind.MANDATORY_FILTER,
+        filter="status != 'refunded'",
+        severity=Severity.WARN,
+        rationale="Refunds are reversals, not revenue.",
+    )
+    warn_resolver = ContractResolver(bindings=[binding], guardrails=[guardrail])
+    result = compile(SemanticQuery(metrics=["revenue"]), warn_resolver, sources)
+    assert "<> 'refunded'" in result.sql
+    assert any("revenue-excludes-refunds" in w for w in result.warnings)
+    assert result.guardrails_fired[0].severity == "warn"
 
 
 # --- S3: fanout handling ----------------------------------------------------

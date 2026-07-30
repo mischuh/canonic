@@ -98,10 +98,9 @@ def _compile_opaque(
     )
 
     # Stage 6 — guardrails.
-    guard_conditions, fired = _enforce_guardrails(
-        [resolved_metric], resolver, query.context, sources_by_name
-    )
-    where_conditions += guard_conditions
+    guard_result = _enforce_guardrails([resolved_metric], resolver, query.context, sources_by_name)
+    where_conditions += guard_result.conditions
+    fired = guard_result.fired
 
     # Stage 7 — emit raw lookup (no aggregate, no GROUP BY).
     ast = _build_opaque(
@@ -122,7 +121,7 @@ def _compile_opaque(
         resolved={queried_name: f"opaque({source_name}.{binding.measure})"},
         guardrails_fired=fired,
         freshness=[_freshness(sources_by_name[s]) for s in used_sources],
-        warnings=[],
+        warnings=guard_result.warnings,
         opaque=OpaqueMetadata(
             source=source_name,
             measure=binding.measure,

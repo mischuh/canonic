@@ -53,6 +53,7 @@ class FiredGuardrailOut(BaseModel):
 
     id: str
     kind: str
+    severity: str = "error"
 
 
 class SourceFreshnessOut(BaseModel):
@@ -259,7 +260,8 @@ class QueryMetadata(BaseModel):
         return cls(
             resolved={"metrics": dict(compiled.resolved)},
             guardrails_fired=[
-                FiredGuardrailOut(id=g.id, kind=g.kind) for g in compiled.guardrails_fired
+                FiredGuardrailOut(id=g.id, kind=g.kind, severity=g.severity)
+                for g in compiled.guardrails_fired
             ],
             freshness=[
                 SourceFreshnessOut(

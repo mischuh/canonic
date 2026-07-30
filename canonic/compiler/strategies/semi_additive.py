@@ -118,10 +118,9 @@ def _compile_semi_additive(
 
     # Stage 6 — guardrails.
     resolved_metric = _ResolvedMetric(name=queried_name, source=source_name, measure=measure_obj)
-    guard_conditions, fired = _enforce_guardrails(
-        [resolved_metric], resolver, query.context, sources_by_name
-    )
-    where_conditions += guard_conditions
+    guard_result = _enforce_guardrails([resolved_metric], resolver, query.context, sources_by_name)
+    where_conditions += guard_result.conditions
+    fired = guard_result.fired
 
     # Resolve collapse_dimension to (alias, Dimension).
     collapse_dim_result = _find_dimension(
@@ -191,7 +190,7 @@ def _compile_semi_additive(
         resolved={queried_name: f"{source_name}.{measure_obj.name}"},
         guardrails_fired=fired,
         freshness=[_freshness(sources_by_name[s]) for s in used_sources],
-        warnings=[],
+        warnings=guard_result.warnings,
         partial_additive=PartialAdditiveMetadata(
             kind="semi_additive",
             collapse_dimension=sa.collapse_dimension,

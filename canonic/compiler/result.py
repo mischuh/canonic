@@ -51,10 +51,17 @@ class RelatedMetadata:
 
 @dataclass(frozen=True, slots=True)
 class FiredGuardrail:
-    """A guardrail that the compiler enforced on this query."""
+    """A guardrail that the compiler enforced on this query.
+
+    ``severity`` reports which enforcement actually applied: ``"error"`` guardrails block
+    the query (the compile call raises before this value would ever be reported), ``"warn"``
+    guardrails still fire but only annotate ``CompileResult.warnings``. Defaults to
+    ``"error"`` so existing direct-construction call sites (tests, fixtures) keep working.
+    """
 
     id: str
     kind: str
+    severity: str = "error"
 
 
 @dataclass(frozen=True, slots=True)
