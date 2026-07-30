@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.14.1](https://github.com/mischuh/canonic/compare/v0.14.0...v0.14.1) (2026-07-30)
+
+
+### Bug Fixes
+
+* **core:** intersect dimensions for composite metrics in describe ([#268](https://github.com/mischuh/canonic/issues/268)) ([9dd0fab](https://github.com/mischuh/canonic/commit/9dd0fab4c387f1f9be2463242a8f47f0e95ae615))
+
 ## [0.14.0](https://github.com/mischuh/canonic/compare/v0.13.0...v0.14.0) (2026-07-30)
 
 
