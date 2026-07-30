@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.12.2](https://github.com/mischuh/canonic/compare/v0.12.1...v0.12.2) (2026-07-30)
+
+
+### Documentation
+
+* **reference:** describe schema options in reference pages ([#258](https://github.com/mischuh/canonic/issues/258)) ([f2c547f](https://github.com/mischuh/canonic/commit/f2c547fb1c39d5adf32d7d9f57570e2d1efc0397))
+
 ## [0.12.1](https://github.com/mischuh/canonic/compare/v0.12.0...v0.12.1) (2026-07-29)
 
 
