@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.14.0](https://github.com/mischuh/canonic/compare/v0.13.0...v0.14.0) (2026-07-30)
+
+
+### Features
+
+* **cli:** add canonic validate to check contracts against semantics ([#266](https://github.com/mischuh/canonic/issues/266)) ([d085aa8](https://github.com/mischuh/canonic/commit/d085aa87539f42c974dbe5da146c44b19c78ad7f))
+
+
+### Bug Fixes
+
+* **compiler:** exclude NULLs from the SQLite percentile fallback population ([#264](https://github.com/mischuh/canonic/issues/264)) ([34af668](https://github.com/mischuh/canonic/commit/34af6684567f06766991fa38fb76f87e668bb6ca))
+
 ## [0.13.0](https://github.com/mischuh/canonic/compare/v0.12.3...v0.13.0) (2026-07-30)
 
 
