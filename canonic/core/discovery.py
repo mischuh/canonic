@@ -148,14 +148,27 @@ class DiscoveryService:
             assert binding.components is not None  # noqa: S101
             all_dims: list[DimensionInfo] = []
             all_measures: list[str] = []
-            seen_dim_names: set[str] = set()
+
+            num_dims_by_name = {}
+            denom_dims_by_name = {}
+
+            if binding.components.numerator.source is not None:
+                num_dims_by_name = {
+                    d.name: d
+                    for d in self._reachable_dimensions(binding.components.numerator.source)
+                }
+
+            if binding.components.denominator.source is not None:
+                denom_dims_by_name = {
+                    d.name: d
+                    for d in self._reachable_dimensions(binding.components.denominator.source)
+                }
+
+            common_dim_names = set(num_dims_by_name.keys()) & set(denom_dims_by_name.keys())
+            for dim_name in common_dim_names:
+                all_dims.append(num_dims_by_name[dim_name])
+
             for component in (binding.components.numerator, binding.components.denominator):
-                if component.source is None:
-                    continue
-                for d in self._reachable_dimensions(component.source):
-                    if d.name not in seen_dim_names:
-                        seen_dim_names.add(d.name)
-                        all_dims.append(d)
                 comp_src = self._ctx.source_by_name.get(component.source)
                 if comp_src is not None:
                     for m in comp_src.measures:
