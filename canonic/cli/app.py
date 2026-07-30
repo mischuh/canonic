@@ -29,6 +29,7 @@ from canonic.cli.commands import (
     sl,
     sql,
     status,
+    validate,
 )
 
 app = typer.Typer(
@@ -100,4 +101,5 @@ app.command("assert")(assertions.assert_)
 app.command("sql")(sql.sql)
 app.command("status")(status.status)
 app.command("report")(report.report)
+app.command("validate")(validate.validate)
 app.command("completion")(completion.completion)

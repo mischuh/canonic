@@ -36,6 +36,14 @@ jobs:
       - name: Type check
         run: uv run mypy canonic/
 
+      - name: Validate example projects
+        run: |
+          for project in examples/*/; do
+            echo "::group::validate $project"
+            (cd "$project" && uv run --project "$GITHUB_WORKSPACE" canonic validate)
+            echo "::endgroup::"
+          done
+
       - name: Tests
         run: uv run pytest
 
