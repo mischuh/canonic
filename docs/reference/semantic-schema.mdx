@@ -25,6 +25,10 @@ A semantic source (`semantics/<connection-id>/<name>.yaml`) is validated against
 
 Cross-field rules enforced at write time: column, measure, dimension, and join-alias names must each be unique within the file; every `grain` entry and every `dimensions[].column` must reference a declared column; every column a measure's `expr` touches must be declared. Violations raise a located `SemanticValidationError` (file + YAML path), not a silent drop.
 
+`name` is how every other file in the project refers to this source, in joins, metric bindings, and guardrails. `connection` ties the source to a connection defined in your project config, and `table` is the physical table or view the compiler queries at runtime. `grain` lists the columns that make each row unique. Get this wrong and join fanout can silently double-count measures, so the compiler treats it as a required declaration, not a guess.
+
+`columns`, `measures`, `dimensions`, `joins`, and `filters` are where the actual modeling happens, and each gets its own section below. `segments` is reserved for a future feature and currently ignored by both ingestion and the compiler. `finality` tells the compiler how fresh this source's data is, and `meta` is written by reconciliation rather than by hand.
+
 ## `columns[]`
 
 ```yaml
@@ -37,6 +41,8 @@ columns:
 | `name` | `str` | n/a (required) | Column name as it appears in `table`. |
 | `type` | `NormalizedType` | n/a (required) | Dialect-neutral type: `string`, `int`, `decimal`, `float`, `bool`, `date`, `timestamp`, `json`. The [compiler's dialect adapter](/concepts/compiler#dialect-adapter) maps this to each connector's native type. |
 | `nullable` | `bool` | `true` | Whether the column may be `NULL`. |
+
+Each entry declares one physical column so the compiler knows its name and type without querying the warehouse at compile time. `type` uses canonic's normalized type set instead of a dialect-specific one, so the same semantic source compiles correctly whether it points at Postgres, Snowflake, or BigQuery. `nullable` defaults to `true`, set it to `false` when you know the column can never be empty, since some compiler optimizations rely on that guarantee.
 
 ## `measures[]`
 
@@ -54,7 +60,9 @@ measures:
 | `additivity` | `Additivity` | `additive` | `additive` \| `semi_additive` \| `non_additive`; see [Additivity](/concepts/semantics#additivity). |
 | `semi_additive_over` | `list[str]` | `[]` | Dimensions the measure is *not* additive over (semi-additive measures only). |
 
-A measure is `is_p0_compilable` only if it's `additive` and its `expr` parses to a single `sum`/`count`/`min`/`max` (not `count(distinct …)`); measures outside that set are valid YAML but rejected at compile time with `UNSUPPORTED_MEASURE`, never at load time.
+A measure defines one aggregation the compiler can compute over the source. `expr` is a small SQL aggregate expression and it can only reference columns declared above, anything else fails validation. `additivity` tells the compiler whether a measure's value can still be safely summed after it has already been aggregated once, for example when re-aggregating at a coarser grain or across a join fanout. Set it to `semi_additive` for values like account balances or inventory snapshots that sum correctly across every dimension except one (usually time), and list that dimension in `semi_additive_over`. Set it to `non_additive` for anything that can't be derived from a partial sum, such as distinct counts, ratios, or percentiles.
+
+A measure is `is_p0_compilable` only if it's `additive` and its `expr` parses to a single `sum`/`count`/`min`/`max` (not `count(distinct …)`). Measures outside that set are valid YAML but rejected at compile time with `UNSUPPORTED_MEASURE`, never at load time. In practice this means a measure can pass validation on save and still fail the first time someone actually queries it, so it's worth checking `additivity` and `expr` together rather than assuming any aggregate expression will compile.
 
 ## `dimensions[]`
 
@@ -72,6 +80,8 @@ dimensions:
 | `description` | `str \| null` | `null` | Free-text explanation. |
 | `aliases` | `list[str]` | `[]` | Alternate lookup names. |
 
+A dimension exposes a column for grouping or filtering. `column` must point at a column declared in `columns`, canonic won't infer or guess it. `granularity` only applies to time columns and controls how they get bucketed, for example `day` or `month`. Leave it `null` for non-time dimensions. `label` and `description` are for humans and agents reading the schema and don't affect compilation. `aliases` lets a dimension resolve under more than one name, useful when different teams call the same column by different names.
+
 ## `joins[]`
 
 ```yaml
@@ -88,6 +98,8 @@ joins:
 | `relationship` | `Relationship` | n/a (required) | `one_to_one` \| `many_to_one` \| `one_to_many` \| `many_to_many`. |
 | `name` | `str \| null` | `null` | SQL alias for the target table; defaults to `to` (the join's effective alias must be unique within the file). |
 
+A join declares how this source relates to another semantic source, by name, not by physical table. `on` is the SQL join predicate, and `relationship` tells the compiler which side of the join can fan out rows, which in turn determines whether measures need deduplication before they're safe to sum. Get the relationship wrong and an additive measure can silently double count across the join. `name` only matters when you join the same target more than once or want a specific SQL alias, otherwise it defaults to the target's own name.
+
 ## `filters[]`
 
 ```yaml
@@ -100,6 +112,8 @@ filters:
 | `name` | `str` | n/a (required) | Filter identifier. |
 | `expr` | `str` | n/a (required) | Reusable SQL predicate. |
 
+A filter is a named SQL predicate you can reuse across measures, guardrails, and queries instead of repeating the same `WHERE` clause everywhere. Keeping something like "completed orders only" defined in one place means a change to the definition doesn't require hunting down every place it was inlined.
+
 ## `finality`
 
 ```yaml
@@ -110,6 +124,8 @@ finality:
 | Field | Type | Default | Governs |
 | --- | --- | --- | --- |
 | `watermark` | `str \| null` | `null` | Cutoff expression before which rows are considered final; `null` means the source is always final. See [Finality](/concepts/contracts-and-guardrails#finality) for how this combines with a contract's `FinalityRule`. |
+
+`watermark` tells the compiler the point before which this source's rows are considered final and won't change anymore. Leave it `null` if the source never gets late-arriving updates or corrections. In that case canonic treats it as always final. A non-null watermark is a relative expression, like `business_day - 1 day`, evaluated against the current query window. This combines with a contract's `FinalityRule` when a metric can be served from more than one realization of the same data.
 
 ## `meta`
 
@@ -129,3 +145,5 @@ meta:
 | `source_fingerprint` | `str \| null` | `null` | sha256 of the introspected/declared schema; drives drift detection. |
 | `last_validated_at` | `datetime \| null` | `null` | When this source was last checked against live evidence. |
 | `frozen` | `bool` | `false` | Human-owned freeze marker; reconciliation flags conflicts but never edits a frozen source. |
+
+These fields are written by ingestion and reconciliation, not by a human editing YAML. `provenance` tracks how much a fact can be trusted. `board_approved` and `human_curated` facts are locked and never silently overwritten. `inferred` facts can be revised automatically, always through a reviewable diff rather than a direct rewrite. `source_fingerprint` is a hash of the introspected schema, used to detect drift between what's declared here and what the warehouse actually looks like. `last_validated_at` records when that check last ran, and `frozen` is a manual override you can set to stop reconciliation from touching a source at all, even one that's only `inferred`.
