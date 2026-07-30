@@ -15,6 +15,16 @@ Prints the project root, `canonic.yaml` config version (or a config error if inv
 
 The serving contract schema is currently `2.2`. It moved from `2.0` across two additive bumps: `2.1` added the E14 trust tier to `QueryMetadata`, and `2.2` added the trust tier to every logged `AnswerEvent` plus the new `answer_outcome` event kind.
 
+## `canonic validate`
+
+Validate every contract against the project's semantic sources — read-only, no connection required.
+
+```bash
+canonic validate
+```
+
+Checks that every metric binding's `canonical.source`/`measure`, every guardrail's `applies_to`, every finality rule, and every assertion resolve against `semantics/` and `contracts/`. These are the same cross-surface checks `canonic ingest` already runs before writing a diff; `canonic validate` makes them available as a standalone check, so a broken contract — for example a `semi_additive` binding whose source `grain` column isn't declared as a dimension — is caught before it reaches a query instead of failing the next time an agent asks for that metric. Exits non-zero with a structured error (`--json` supported) on the first violation found.
+
 ## `canonic report`
 
 Show event-log figures from the local `.canonic/` store: counts, error distribution, latency, bytes scanned, and freshness.
