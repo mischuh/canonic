@@ -25,6 +25,7 @@ measures:
     additivity: non_additive
 
 dimensions:
+  - { name: snapshot_id,    column: snapshot_id,    label: "Snapshot ID" }
   - { name: customer_id,    column: customer_id,    label: "Customer ID" }
   - { name: snapshot_month, column: snapshot_month, label: "Snapshot Month", granularity: month }
   - { name: is_active,      column: is_active,       label: "Active Flag" }

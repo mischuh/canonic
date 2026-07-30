@@ -514,3 +514,48 @@ def test_validate_rejects_missing_collapse_dimension() -> None:
 
         with pytest.raises(ContractError, match="collapse_dimension"):
             validate_contracts(root)
+
+
+def test_validate_rejects_undeclared_grain_dimension() -> None:
+    """validate_contracts rejects semi_additive binding whose grain column isn't a dimension.
+
+    Regression: this shape shipped undetected in examples/saas-analytics — grain: [snapshot_id]
+    declared snapshot_id as a column but not as a dimension, so validate_contracts passed while
+    every query against ending_mrr raised Unresolved at compile time (the compiler resolves
+    every non-collapse grain column to a dimension to build the "last per entity" partition key).
+    """
+    import tempfile
+    from pathlib import Path
+
+    from canonic.contracts.validate import validate_contracts
+    from canonic.exc import ContractError
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        root = Path(tmpdir)
+        (root / "contracts" / "metrics").mkdir(parents=True)
+        (root / "semantics" / "db").mkdir(parents=True)
+
+        (root / "semantics" / "db" / "src.yaml").write_text(
+            "name: src\nconnection: db\ntable: src\n"
+            "grain: [snapshot_id]\n"
+            "columns:\n"
+            "  - {name: snapshot_id, type: int, nullable: false}\n"
+            "  - {name: snapshot_date, type: date, nullable: false}\n"
+            "  - {name: val, type: decimal, nullable: true}\n"
+            "measures:\n"
+            "  - {name: total, expr: 'sum(val)', additivity: additive}\n"
+            "dimensions:\n"
+            "  - {name: snapshot_date, column: snapshot_date}\n"
+        )
+        (root / "contracts" / "metrics" / "m.yaml").write_text(
+            "metric: snap_m\ncanonical:\n"
+            "  kind: semi_additive\n"
+            "  source: src\n"
+            "  measure: total\n"
+            "  collapse_dimension: snapshot_date\n"
+            "  collapse_agg: last\n"
+            "status: active\n"
+        )
+
+        with pytest.raises(ContractError, match="grain column 'snapshot_id'"):
+            validate_contracts(root)

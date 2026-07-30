@@ -317,6 +317,31 @@ def test_percentile_sqlite_fallback_scalar(
     assert "GROUP BY" not in sql_upper
 
 
+def test_percentile_sqlite_fallback_excludes_nulls_from_population(
+    rg_resolver: ContractResolver,
+    orders_rg: SemanticSource,
+) -> None:
+    """Regression: the CUME_DIST() ranked population must exclude NULL measure values.
+
+    PERCENTILE_CONT/QUANTILE_CONT (the native aggregates this fallback stands in for) ignore
+    NULLs. Before this fix, NULLs were ranked into the CUME_DIST() ordering (sorted last),
+    inflating the population size and shifting which row the quantile threshold lands on.
+    """
+    result = compile(
+        SemanticQuery(metrics=["median_order_value"]),
+        rg_resolver,
+        [orders_rg],
+        connection_dialects={"warehouse_pg": "sqlite"},
+    )
+    parsed = sqlglot.parse_one(result.sql, dialect="sqlite")
+    ranked_cte = next(cte for cte in parsed.find_all(sqlglot.exp.CTE) if cte.alias == "_ranked")
+    where = ranked_cte.this.args.get("where")
+    assert where is not None
+    where_sql = where.sql(dialect="sqlite").upper()
+    assert "IS NULL" in where_sql
+    assert "NOT" in where_sql
+
+
 def test_percentile_sqlite_fallback_role_qualified_dims_distinct() -> None:
     """Regression: percentile fallback must not collide same-named dims from different roles.
 

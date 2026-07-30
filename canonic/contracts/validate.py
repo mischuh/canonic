@@ -97,10 +97,16 @@ def _validate_semi_additive_binding(
     source_measures: dict[str, set[str]],
     source_dims: dict[str, set[str]],
     source_measure_additivity: dict[str, dict[str, Additivity]],
+    source_grain: dict[str, list[str]],
 ) -> None:
     """Validate a semi_additive binding (SPEC-Fuller-E15 §8).
 
-    Checks: source exists; base measure exists and is additive; collapse_dimension exists.
+    Checks: source exists; base measure exists and is additive; collapse_dimension exists;
+    every other grain column of the source is declared as a dimension. The last check mirrors
+    the compiler's own requirement (``_compile_semi_additive`` resolves every grain column
+    except ``collapse_dimension`` to a dimension to build the "last per entity" partition key,
+    and raises ``Unresolved`` at query time if one is missing) — catching it here means a
+    misconfigured semi_additive metric fails at write time instead of on every future query.
     """
     ref = binding.canonical
     assert ref.source is not None and ref.measure is not None  # noqa: S101 — enforced by model_validator
@@ -127,6 +133,16 @@ def _validate_semi_additive_binding(
             f"metric {binding.metric!r}: collapse_dimension {ref.collapse_dimension!r} "
             f"is not declared as a dimension on source {ref.source!r}"
         )
+    declared_dims = source_dims.get(ref.source, set())
+    for grain_col in source_grain.get(ref.source, []):
+        if grain_col == ref.collapse_dimension:
+            continue
+        if grain_col not in declared_dims:
+            raise ContractError(
+                f"metric {binding.metric!r}: grain column {grain_col!r} of source "
+                f"{ref.source!r} is not declared as a dimension (required to build the "
+                f"'last/first per entity' partition key for every query, including scalar ones)"
+            )
 
 
 def _validate_recompute_at_grain_binding(
@@ -283,6 +299,7 @@ def validate_contracts(project_root: Path) -> None:
     source_measure_additivity: dict[str, dict[str, Additivity]] = {
         s.name: {m.name: m.additivity for m in s.measures} for s in sources
     }
+    source_grain: dict[str, list[str]] = {s.name: list(s.grain) for s in sources}
     source_names = set(source_measures)
 
     bindings = load_metric_bindings(project_root)
@@ -312,7 +329,7 @@ def validate_contracts(project_root: Path) -> None:
                 )
         elif ref.kind is BindingKind.SEMI_ADDITIVE:
             _validate_semi_additive_binding(
-                binding, source_measures, source_dims, source_measure_additivity
+                binding, source_measures, source_dims, source_measure_additivity, source_grain
             )
         elif ref.kind in RECOMPUTE_KINDS:
             _validate_recompute_at_grain_binding(

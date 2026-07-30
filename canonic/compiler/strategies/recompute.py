@@ -272,8 +272,11 @@ def _build_percentile_fallback(
     inner_projections.append(_alias(cume_dist, _CD))
     inner = inner.select(*inner_projections)
     inner = _from_and_joins(inner, owner, join_edges, sources_by_name)
-    if where_conditions:
-        inner = inner.where(exp.and_(*where_conditions))
+    # PERCENTILE_CONT/QUANTILE_CONT (the native aggregates this fallback stands in for) ignore
+    # NULLs; CUME_DIST must exclude them too or the quantile threshold lands on the wrong rank.
+    not_null = _qualify_to(_parse(f"{col_phys} IS NOT NULL"), col_alias)
+    inner_where = [*where_conditions, not_null]
+    inner = inner.where(exp.and_(*inner_where))
 
     outer = exp.Select()
     outer_projections: list[exp.Expression] = []
