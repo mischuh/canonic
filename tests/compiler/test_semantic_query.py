@@ -121,6 +121,26 @@ def test_parse_filter_flag_value_with_equals_sign() -> None:
     assert parse_filter_flag("email=a=b@example.com") == "email = 'a=b@example.com'"
 
 
+def test_parse_filter_flag_bare_greater_than_or_equal() -> None:
+    assert parse_filter_flag("units_sold>=3") == "units_sold >= 3"
+
+
+def test_parse_filter_flag_bare_less_than_or_equal() -> None:
+    assert parse_filter_flag("units_sold<=3") == "units_sold <= 3"
+
+
+def test_parse_filter_flag_bare_not_equal() -> None:
+    assert parse_filter_flag("status!=paid") == "status != 'paid'"
+
+
+def test_parse_filter_flag_bare_greater_than() -> None:
+    assert parse_filter_flag("amount>100") == "amount > 100"
+
+
+def test_parse_filter_flag_bare_less_than() -> None:
+    assert parse_filter_flag("amount<100") == "amount < 100"
+
+
 def test_parse_filter_flag_no_separator_raises() -> None:
     with pytest.raises(ValueError, match="field=value or field:op:value"):
         parse_filter_flag("status")

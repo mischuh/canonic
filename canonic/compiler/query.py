@@ -7,6 +7,7 @@ resolved by the compiler against bindings and semantic sources.
 
 from __future__ import annotations
 
+import re
 from datetime import datetime  # noqa: TC003 — Pydantic resolves field annotations at runtime
 from typing import Any
 
@@ -79,14 +80,25 @@ def _coerce_scalar(text: str) -> Any:
         return text
 
 
+_BARE_OP_PATTERN = re.compile(r">=|<=|!=|<>|==|>|<|=")
+
+
 def parse_filter_flag(raw: str) -> str:
     """Parse a CLI ``--filter`` value into a SQL predicate string.
 
-    Accepts ``field=value`` (operator ``=``) or ``field:op:value`` where ``op`` is
-    one of the keys in :data:`_OPERATOR_MAP` (e.g. ``amount:>:100``,
-    ``status:!=:refunded``, ``status:in:paid,refunded``). Both forms build the same
-    dict shape the JSON-file path already accepts and go through
-    :func:`_dict_to_predicate`, so there is exactly one filter grammar.
+    Accepts ``field<op>value`` with ``<op>`` inlined (e.g. ``units_sold>=3``,
+    ``status=paid``) or ``field:op:value`` where ``op`` is one of the keys in
+    :data:`_OPERATOR_MAP` (e.g. ``amount:>:100``, ``status:!=:refunded``,
+    ``status:in:paid,refunded``). Both forms build the same dict shape the
+    JSON-file path already accepts and go through :func:`_dict_to_predicate`,
+    so there is exactly one filter grammar.
+
+    The inline form matches the *leftmost* operator occurrence, preferring
+    two-character operators (``>=``, ``<=``, ``!=``, ``<>``, ``==``) over their
+    single-character prefix so ``field>=value`` isn't misread as ``field>`` ``=``
+    ``value``. A bare value containing ``=`` (e.g. an email address) still
+    round-trips: none of the two-character operators match at that position, so
+    it falls back to splitting on the lone ``=``.
     """
     head, sep, tail = raw.partition(":")
     if sep:
@@ -100,11 +112,13 @@ def parse_filter_flag(raw: str) -> str:
             )
             return _dict_to_predicate({"field": head.strip(), "operator": op, "value": value})
 
-    field, sep, value_str = raw.partition("=")
-    if not sep:
+    match = _BARE_OP_PATTERN.search(raw)
+    if not match:
         raise ValueError(f"filter must be field=value or field:op:value, got {raw!r}")
+    field = raw[: match.start()].strip()
+    value_str = raw[match.end() :]
     return _dict_to_predicate(
-        {"field": field.strip(), "operator": "=", "value": _coerce_scalar(value_str)}
+        {"field": field, "operator": match.group(), "value": _coerce_scalar(value_str)}
     )
 
 
