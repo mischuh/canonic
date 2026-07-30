@@ -40,11 +40,13 @@ status: active
 | `examples` | `list[Example]` | `[]` | Usage-backed example queries (from assertions, observed queries, or usage evidence). |
 | `status` | `Status` | `active` | `active` \| `deprecated`. Only `active` bindings are checked for duplicate names/aliases across the project. |
 
+A metric binding is what turns a name like `revenue` into something the compiler can actually run. `metric` is the name callers ask for, `canonical` is the recipe for computing it, and `owner`/`aliases`/`examples` exist to keep the binding discoverable and accountable rather than a bare formula nobody can trace back to a person or a prior query. `status: deprecated` lets you keep an old binding around for history without it competing for a name a newer binding now owns.
+
 **Ambiguity rule:** if a requested name matches zero or more than one active binding, the compiler returns a structured `AMBIGUOUS`/`UNRESOLVED` error rather than guessing.
 
 ### `canonical` (`CanonicalRef`) — one shape per `kind`
 
-`kind` selects a compilation strategy; each kind requires a different subset of fields (validated at load time — missing a required field for the chosen `kind` raises a located error):
+`kind` selects a compilation strategy, and each kind needs a different subset of the fields below. Missing a required field for the chosen `kind` raises a located error at load time rather than failing later at query time. Most metrics are `single`, a direct pointer at one measure on one source. The other kinds exist for shapes a plain source-and-measure pair can't express on its own: `ratio` and `weighted_avg` combine two other metrics after they're each aggregated independently, `semi_additive` handles point-in-time values like balances that can't just be summed across every dimension, `distinct_count` and `percentile` recompute their value at whatever grain the query asks for instead of pre-aggregating, and `opaque` is the escape hatch for a measure that's only trustworthy at the exact grain it was computed at.
 
 | `kind` | Required fields | Compiles as |
 | --- | --- | --- |
@@ -121,6 +123,8 @@ rationale: "Refunds are reversals, not revenue."
 | `required_dimension` | The query must group by or filter on a given dimension or be rejected. | Declarable in the schema; not yet enforced by the compiler |
 | `min_trust` | In a given `context`, blocks (`severity: error`) or warns if the computed trust tier is below `level`. | Enforced |
 
+A guardrail attaches a rule to either a specific `(source, measure)` pair or a whole `metric`, chosen by which shape you fill in under `applies_to`. Which fields besides `kind` are required depends entirely on that `kind`: a `mandatory_filter` needs `filter`, a `restrict_source` needs `restrict_to` and `context`, a `min_trust` needs `level` and `context`. `severity` decides how hard the rule bites, `error` stops the query outright while `warn` lets it through with an annotation, and `rationale` is what actually gets shown to whoever hit the block, so it's worth writing for a person, not just as a code comment.
+
 ## `contracts/guardrails/finality-*.yaml` — `FinalityRule`
 
 ```yaml
@@ -150,6 +154,8 @@ board_only_final: true
 | `watermark` | `str \| null` | `null` | Cutoff expression for this realization. |
 | `tz` | `str \| null` | `null` | Timezone the watermark is evaluated in. |
 
+A finality rule exists for a metric that can be served from more than one physical realization of the same data, typically a slower, fully-reconciled table and a faster, real-time one. `realizations` lists each candidate source along with its `role`, `final` or `provisional`, and `coalescing` is the expression that decides which realization actually backs a given time window in the result. `board_only_final` is the piece that ties this to a guardrail: pair it with a `restrict_source` guardrail so a sensitive context (board reporting, say) only ever sees the `final` realization, never the faster but not-yet-settled one.
+
 ## `contracts/assertions/*.yaml` — `Assertion`
 
 ```yaml
@@ -173,5 +179,7 @@ source_of_truth: "Finance close, FY25 Q1"
 | `rows` | `int \| null` | `null` | Expected row count. |
 | `values` | `dict[str, Any]` | `{}` | Expected value per output column. |
 | `tolerance` | `float \| null` | `null` | Relative tolerance for numeric comparison (e.g. `0.01` = 1%); `null` means exact match. |
+
+An assertion is a known-good query paired with the answer it should produce, usually sourced from a finance close or another trusted report. `query` is run through the exact same compiler path a real caller would hit, so an assertion tests the whole stack, not just the metric definition in isolation. `source_of_truth` matters more than it looks: it's the thing that lets a reviewer trust the expected value in the first place, an assertion with no traceable origin is just a number someone typed in.
 
 [`canonic assert`](/cli-reference/query-sql-assert) runs every assertion through the compiler and gates on the result; `canonic query --harness` runs matching assertions inline against a single query.

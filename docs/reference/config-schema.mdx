@@ -19,6 +19,9 @@ description: "Every top-level field in the project config file, and what it gove
 | `feedback` | `FeedbackConfig` | see [below](#feedback) | Pattern-gate and trust-cap thresholds for the E11 feedback loop; see [Feedback loop (E11)](/concepts/ingestion-and-reconciliation#feedback-loop-e11). |
 | `runtime` | `RuntimeConfig` | `air_gapped: false` | Air-gapped enforcement; see [LLM & embeddings runtime](/concepts/llm-runtime#air-gapped-mode--enforced-not-advisory). |
 | `logging` | `LoggingConfig` | `level: WARNING`, `format: text` | Log level, optional file, and text/json format. |
+| `mcp` | `McpConfig` | `auth: { tokens: [] }` | Bearer-token auth for the MCP daemon's `http` transport, see [below](#mcp). |
+
+`version` and `project` are the only fields canonic actually needs to boot. Everything else configures a specific subsystem and can be left out entirely for a local, single-user setup: `connections` is empty until you add a data source, `llm` is `null` until you configure a provider, and the rest fall back to safe local defaults. `embeddings` and `telemetry` rarely need touching, they exist mostly for opt-in tuning and privacy control rather than day-to-day project setup.
 
 ## `connections[]`
 
@@ -30,6 +33,16 @@ connections:
     credentials_ref: env:CANONIC_PG_PASSWORD
     read_only_role: null
 ```
+
+| Field | Type | Default | Governs |
+| --- | --- | --- | --- |
+| `id` | `str` | n/a (required) | Unique identifier for this connection. Referenced from `semantics/<connection-id>/`, `project.default_connection`, and a dbt connection's `target_connection`. |
+| `type` | `str` | n/a (required) | Connector type, e.g. `postgres`, `snowflake`, `bigquery`, `sqlite`, `duckdb`, `dbt`. Must match a registered connector or the connection fails to load with `connection_error`. |
+| `params` | `dict[str, Any]` | `{}` | Connector-specific settings such as `host`, `port`, `database`, or `schema`. What's valid here depends entirely on `type`. |
+| `credentials_ref` | `str \| null` | `null` | Where to resolve this connection's secret from, never the secret itself. See below. |
+| `read_only_role` | `str \| null` | `null` | Reserved for a future read-only enforcement mode. Accepted and stored today but not yet consulted by any connector. |
+
+A connection is how canonic reaches an actual data source. `id` is the name every other file uses to point back at it, `type` picks which connector implementation handles it, and `params` carries whatever that connector needs to connect, host and port for a warehouse, a manifest path for dbt. `credentials_ref` keeps the secret itself out of `canonic.yaml` entirely, instead of a password you write a pointer to where the password actually lives.
 
 - `credentials_ref` (and `llm.api_key_ref`) must be a reference, one of `env:`, `keyring:`, or `file:`, never a literal secret; config validation rejects a literal outright.
 - Postgres/Redshift connections additionally recognize `schema`/`schemas` (search path) and `tables` (glob patterns narrowing introspection), plus `fetch_column_stats: true` to merge zero-scan cardinality/null-ratio stats into the returned schema (a no-op on SQLite/DuckDB).
@@ -52,7 +65,15 @@ llm:
   tasks: { reconcile: claude-opus-4-8 }   # per-task overrides: draft, reconcile, extract
 ```
 
-Each provider has a fixed credential requirement, enforced at load: `openai_compatible` requires `base_url`; `openai`/`anthropic` require `api_key_ref`; `github_copilot` forbids one (device-code auth, outside `canonic.yaml`).
+| Field | Type | Default | Governs |
+| --- | --- | --- | --- |
+| `provider` | `str` | n/a (required) | `openai_compatible` \| `anthropic` \| `openai` \| `github_copilot`. Picks which credential rule below applies and how the call is routed. |
+| `base_url` | `str \| null` | `null` | Endpoint to call. Required for `openai_compatible`, since there's no default host to fall back to. Optional for the hosted providers, which otherwise reach their own default endpoint. |
+| `model` | `str` | n/a (required) | Model identifier passed straight through to the provider, e.g. `claude-opus-4-8`. |
+| `api_key_ref` | `str \| null` | `null` | Reference to the API key, never the key itself. Required for `openai`/`anthropic`, forbidden for `github_copilot` since that provider authenticates itself outside `canonic.yaml`. |
+| `tasks` | `dict[str, str]` | `{}` | Per-task model overrides keyed by task name (`draft`, `reconcile`, `extract`), letting you route a cheaper or more capable model to a specific step instead of using `model` everywhere. |
+
+Each provider has a fixed credential requirement, enforced at load. `openai_compatible` requires `base_url`, `openai` and `anthropic` require `api_key_ref`, and `github_copilot` forbids one entirely since it authenticates through a device-code flow that never touches `canonic.yaml`. Getting this wrong fails config validation immediately rather than surfacing as a runtime error the first time canonic tries to call the model.
 
 ## `reconcile`
 
@@ -65,6 +86,16 @@ reconcile:
     never: [grain, joins, measures]
   strict_contradictions: false
 ```
+
+| Field | Type | Default | Governs |
+| --- | --- | --- | --- |
+| `auto_apply.enabled` | `bool` | `false` | Whether `canonic ingest` may apply a proposal automatically instead of leaving it for review. Off by default, ingestion is propose-only until you opt in. |
+| `auto_apply.min_confidence` | `float` (0 to 1) | `0.95` | The minimum confidence score a proposal needs before it's eligible for auto-apply. Anything below this threshold is always left for manual review, regardless of `enabled`. |
+| `auto_apply.max_provenance` | `Provenance` | `inferred` | The highest existing provenance tier auto-apply is allowed to overwrite. Since it's capped at `inferred`, a fact already marked `human_curated` or `board_approved` can never be silently rewritten, no matter how confident the new proposal is. |
+| `auto_apply.never` | `list[str]` | `[grain, joins, measures]` | Field categories that always require human review, even if they'd otherwise pass the confidence and provenance checks. These are the structural fields most likely to break a query silently if an automated proposal gets them wrong. |
+| `strict_contradictions` | `bool` | `false` | When `true`, a run that surfaces any flagged contradiction fails with exit code 14 instead of just recording it. Meant for CI, where you want ingestion to gate on data-model disagreements rather than pass through them. |
+
+`reconcile` only governs how eagerly `canonic ingest` is allowed to write changes back to `semantics/`. It has no effect on what evidence gets collected, only on whether a resulting proposal can be applied without a human looking at it first. See [Ingestion & reconciliation](/concepts/ingestion-and-reconciliation#propose-only-by-default) for how proposals are generated in the first place.
 
 ## `feedback`
 
@@ -93,7 +124,32 @@ runtime:
   allow_cidrs: []   # explicit private/LAN ranges for an on-prem inference host
 ```
 
-When `air_gapped: true`, load-time validation additionally rejects: a public `llm.base_url`, `telemetry.enabled: true`, and any `credentials_ref`/`api_key_ref` using a non-local scheme.
+| Field | Type | Default | Governs |
+| --- | --- | --- | --- |
+| `air_gapped` | `bool` | `false` | Turns on the enforced privacy guarantee: every model endpoint must resolve locally or to an allowlisted range, and no context may leave the machine. This is checked at load time, not just documented behavior, so a misconfigured project refuses to start rather than silently phoning home. |
+| `allow_cidrs` | `list[str]` | `[]` | Additional private/LAN CIDR ranges to trust under `air_gapped`, for a setup where inference runs on a separate on-prem host rather than the local machine. Only consulted when `air_gapped` is `true`. By default, air-gapped mode trusts localhost only. |
+
+When `air_gapped: true`, load-time validation additionally rejects a public `llm.base_url`, `telemetry.enabled: true`, and any `credentials_ref`/`api_key_ref` using a non-local scheme. The check runs once, at config load, so there's no window where a project starts up in a state that could leak context off the machine.
+
+## `mcp`
+
+```yaml
+mcp:
+  auth:
+    tokens:
+      - client_id: alice
+        token_ref: env:CANONIC_MCP_TOKEN_ALICE
+      - client_id: bob
+        token_ref: env:CANONIC_MCP_TOKEN_BOB
+```
+
+| Field | Type | Default | Governs |
+| --- | --- | --- | --- |
+| `auth.tokens` | `list[McpTokenEntry]` | `[]` | Bearer tokens accepted by the MCP daemon's `http` transport, one entry per client. |
+| `auth.tokens[].client_id` | `str` | n/a (required) | Name attributed to that token's caller in `.canonic/events.jsonl`, so usage can be traced per user rather than per daemon instance. |
+| `auth.tokens[].token_ref` | `str` | n/a (required) | Reference to the token's value, never the token itself, resolved the same way as `credentials_ref`. |
+
+This block only matters for `canonic mcp start --transport http`. The default `stdio` transport is a local subprocess and needs no auth, process-level trust is enough. `http` transport is network-reachable, though, so it refuses to start unless at least one token resolves here (or via the `--token-ref` CLI override). See [Connecting your agent](/mcp-integration/connecting-your-agent#remote-enterprise-deployment) for the full remote-deployment walkthrough.
 
 ## Reserved directories
 

@@ -36,6 +36,8 @@ meta:
 
 `id`, `path`, and `scope` are **derived from the filesystem path**, never accepted from frontmatter — `knowledge/global/<id>.md` gives `scope: global`; `knowledge/user/<user-id>/<id>.md` gives `scope: user`. The Markdown body after the frontmatter fence is stored verbatim as `body`.
 
+`summary` and `tags` exist to make a page findable, they're what search matches against before it ever looks at the body. `sl_refs` is what actually connects a page to the data model: because each ref has to resolve to a real semantic entity, a page can't drift into describing a measure or dimension that no longer exists without the write itself being rejected. `refs` does the same job for links between pages. `usage_mode` decides how a page behaves once it's found, whether it just sits there for search to surface or actively attaches itself to query results.
+
 ## `usage_mode`
 
 | Mode | Behavior |
@@ -55,5 +57,7 @@ System-managed — not hand-edited; reconciliation and the loader write these fi
 | `last_validated_at` | `datetime \| null` | `null` | When this page's references were last checked against live entities; drives a staleness signal at query time. |
 | `bound_fingerprints` | `dict[str, str]` | `{}` | Measure-definition fingerprints this page's prose depends on, keyed by fully-qualified entity name. When a bound fingerprint changes, the page is flagged for review. |
 | `frozen` | `bool` | `false` | Human-owned freeze marker; reconciliation flags conflicts but never edits a frozen page. |
+
+`provenance` on a knowledge page works the same way it does on a semantic source: a `human_curated` or `board_approved` page is never silently rewritten, only `inferred` pages get touched automatically. `bound_fingerprints` is what catches a page going stale. If a page's prose depends on how `orders.total_revenue` is defined and that definition later changes, the stored fingerprint no longer matches the live one and the page gets flagged for review instead of quietly going wrong. `frozen` gives you a manual escape hatch to stop that flagging on a page you don't want touched at all.
 
 Inline `{{ sl:<entity>.expr }}` in the body renders the *live* value of a semantic field at read time, so prose can't fall out of sync with the definition it describes; `[[slug]]` or `[[slug|alias]]` resolves an inline link the same way `refs` does.
