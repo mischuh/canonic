@@ -169,11 +169,12 @@ class DiscoveryService:
                 all_dims.append(num_dims_by_name[dim_name])
 
             for component in (binding.components.numerator, binding.components.denominator):
-                comp_src = self._ctx.source_by_name.get(component.source)
-                if comp_src is not None:
-                    for m in comp_src.measures:
-                        if m.name not in all_measures:
-                            all_measures.append(m.name)
+                if component.source is not None:
+                    comp_src = self._ctx.source_by_name.get(component.source)
+                    if comp_src is not None:
+                        for m in comp_src.measures:
+                            if m.name not in all_measures:
+                                all_measures.append(m.name)
             return MetricDetail(
                 metric=binding.metric,
                 source=None,
