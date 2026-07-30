@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.12.3](https://github.com/mischuh/canonic/compare/v0.12.2...v0.12.3) (2026-07-30)
+
+
+### Bug Fixes
+
+* **compiler:** parse bare &gt;=, &lt;=, != operators in inline filter shorthand ([#260](https://github.com/mischuh/canonic/issues/260)) ([4c03c94](https://github.com/mischuh/canonic/commit/4c03c944ae5888f0caf983f27607569178ac0ece))
+
 ## [0.12.2](https://github.com/mischuh/canonic/compare/v0.12.1...v0.12.2) (2026-07-30)
 
 
