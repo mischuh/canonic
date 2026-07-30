@@ -14,7 +14,7 @@ from canonic.compiler.result import (
     CompileResult,
     FinalityMetadata,
 )
-from canonic.exc import FanoutUnsafe, GuardrailBlock, Unresolved, UnsupportedMeasure
+from canonic.exc import FanoutUnsafe, Unresolved, UnsupportedMeasure
 from canonic.semantic.models import Additivity, Relationship
 
 if TYPE_CHECKING:
@@ -30,6 +30,7 @@ from canonic.compiler._helpers import (
     _TIME_TYPES,
     _alias,
     _bind_filters,
+    _block_or_warn,
     _build_deduped,
     _build_finality_union,
     _build_simple,
@@ -188,9 +189,13 @@ def _compile_simple_additive(
         if time_dim_name is None:
             finality_rule = None  # no time dimension → all rows implicitly final
 
-    # Stage 5b — restrict_source: block queries that would pull provisional rows in guarded contexts.
+    # Stage 5b — restrict_source: block (or warn on) queries that would pull provisional rows
+    # in guarded contexts. Independent of the flat-plan-vs-multi-leaf split below, so its
+    # warning (if any) is merged into the result regardless of which branch builds the SQL.
     logger.debug("stage 5b: restrict_source enforcement")
-    _enforce_restrict_source(query, metrics, resolver, finality_rule, sources_by_name)
+    restrict_source_warnings = _enforce_restrict_source(
+        query, metrics, resolver, finality_rule, sources_by_name
+    )
 
     # population_filter — defines the population each metric is about (§4.5); before guardrails.
     # With exactly one metric, its filter/guardrails fold into the single shared WHERE
@@ -200,31 +205,35 @@ def _compile_simple_additive(
     # and vice versa, silently collapsing all metrics to NULL when the restrictions differ.
     logger.debug("stage 6: enforcing guardrails")
     metric_conditions: list[list[exp.Expression]] | None = None
+    warnings: list[str] = []
     if len(metrics) == 1:
         _, b = raw_bindings[0]
         where_conditions += _population_filter_conditions(
             b.binding.canonical.population_filter, sources_by_name, owner, alias_to_source
         )
-        guard_conditions, fired = _enforce_guardrails(
-            metrics, resolver, query.context, sources_by_name
-        )
-        where_conditions += guard_conditions
+        guard_result = _enforce_guardrails(metrics, resolver, query.context, sources_by_name)
+        where_conditions += guard_result.conditions
+        fired = guard_result.fired
+        warnings = guard_result.warnings
     else:
         metric_conditions = []
         fired = []
         fired_seen: set[str] = set()
+        warnings_seen: set[str] = set()
         for m, (_, b) in zip(metrics, raw_bindings, strict=True):
             conds = _population_filter_conditions(
                 b.binding.canonical.population_filter, sources_by_name, owner, alias_to_source
             )
-            guard_conds, m_fired = _enforce_guardrails(
-                [m], resolver, query.context, sources_by_name
-            )
-            conds += guard_conds
-            for g in m_fired:
+            guard_result = _enforce_guardrails([m], resolver, query.context, sources_by_name)
+            conds += guard_result.conditions
+            for g in guard_result.fired:
                 if g.id not in fired_seen:
                     fired_seen.add(g.id)
                     fired.append(g)
+            for w in guard_result.warnings:
+                if w not in warnings_seen:
+                    warnings_seen.add(w)
+                    warnings.append(w)
             metric_conditions.append(conds)
     if fired:
         logger.info("guardrails applied: count=%d ids=%s", len(fired), [g.id for g in fired])
@@ -260,7 +269,7 @@ def _compile_simple_additive(
         # `join_edges`/`dimensions`/`where_conditions` above are relative to the wrong
         # (global) owner and unsafe here — rebuild from scratch as one CTE per metric
         # source (SPEC follow-up: correct fanout aggregation via pre-aggregate-then-join).
-        ast, fired, multi_used_sources = _build_multi_source(
+        ast, fired, warnings, multi_used_sources = _build_multi_source(
             query, metrics, raw_bindings, resolver, sources_by_name
         )
     elif fanout:
@@ -303,7 +312,7 @@ def _compile_simple_additive(
         resolved={m.name: f"{m.source}.{m.measure.name}" for m in metrics},
         guardrails_fired=fired,
         freshness=[_freshness(sources_by_name[s]) for s in used_sources],
-        warnings=[],
+        warnings=restrict_source_warnings + warnings,
         finality=finality_meta,
     )
 
@@ -326,7 +335,7 @@ def _plan_metric_group(
     query: SemanticQuery,
     resolver: ContractResolver,
     sources_by_name: dict[str, SemanticSource],
-) -> tuple[_GroupPlan, list[FiredGuardrail]]:
+) -> tuple[_GroupPlan, list[FiredGuardrail], list[str]]:
     """Plan and build one metric-source group's SELECT at its own grain (stages 2-4, 6-7).
 
     Every metric here shares ``owner`` as its source, so this is exactly the single-source
@@ -376,31 +385,35 @@ def _plan_metric_group(
                 )
 
     metric_conditions: list[list[exp.Expression]] | None = None
+    warnings: list[str] = []
     if len(metrics) == 1:
         _, b = raw_bindings[0]
         where_conditions += _population_filter_conditions(
             b.binding.canonical.population_filter, sources_by_name, owner, alias_to_source
         )
-        guard_conditions, fired = _enforce_guardrails(
-            metrics, resolver, query.context, sources_by_name
-        )
-        where_conditions += guard_conditions
+        guard_result = _enforce_guardrails(metrics, resolver, query.context, sources_by_name)
+        where_conditions += guard_result.conditions
+        fired = guard_result.fired
+        warnings = guard_result.warnings
     else:
         metric_conditions = []
         fired = []
         fired_seen: set[str] = set()
+        warnings_seen: set[str] = set()
         for m, (_, b) in zip(metrics, raw_bindings, strict=True):
             conds = _population_filter_conditions(
                 b.binding.canonical.population_filter, sources_by_name, owner, alias_to_source
             )
-            guard_conds, m_fired = _enforce_guardrails(
-                [m], resolver, query.context, sources_by_name
-            )
-            conds += guard_conds
-            for g in m_fired:
+            guard_result = _enforce_guardrails([m], resolver, query.context, sources_by_name)
+            conds += guard_result.conditions
+            for g in guard_result.fired:
                 if g.id not in fired_seen:
                     fired_seen.add(g.id)
                     fired.append(g)
+            for w in guard_result.warnings:
+                if w not in warnings_seen:
+                    warnings_seen.add(w)
+                    warnings.append(w)
             metric_conditions.append(conds)
 
     if fanout:
@@ -428,7 +441,7 @@ def _plan_metric_group(
     plan = _GroupPlan(
         select=select, dim_names=_dimension_output_names(dimensions), used_sources=used_sources
     )
-    return plan, fired
+    return plan, fired, warnings
 
 
 def _build_multi_source(
@@ -437,7 +450,7 @@ def _build_multi_source(
     raw_bindings: list[tuple[str, ResolverBinding]],
     resolver: ContractResolver,
     sources_by_name: dict[str, SemanticSource],
-) -> tuple[exp.Select, list[FiredGuardrail], set[str]]:
+) -> tuple[exp.Select, list[FiredGuardrail], list[str], set[str]]:
     """Combine metrics from different, fanned-out-joined sources into one query.
 
     Each distinct metric source is planned and aggregated independently, at its own grain
@@ -458,12 +471,14 @@ def _build_multi_source(
     leaf_metric_names: list[list[str]] = []
     fired: list[FiredGuardrail] = []
     fired_seen: set[str] = set()
+    warnings: list[str] = []
+    warnings_seen: set[str] = set()
     used_sources: set[str] = set()
 
     for owner, idxs in groups.items():
         group_metrics = [metrics[i] for i in idxs]
         group_bindings = [raw_bindings[i] for i in idxs]
-        plan, group_fired = _plan_metric_group(
+        plan, group_fired, group_warnings = _plan_metric_group(
             owner, group_metrics, group_bindings, query, resolver, sources_by_name
         )
         plans.append(plan)
@@ -473,6 +488,10 @@ def _build_multi_source(
             if g.id not in fired_seen:
                 fired_seen.add(g.id)
                 fired.append(g)
+        for w in group_warnings:
+            if w not in warnings_seen:
+                warnings_seen.add(w)
+                warnings.append(w)
 
     dim_names = plans[0].dim_names
 
@@ -499,7 +518,7 @@ def _build_multi_source(
     for i, plan in enumerate(plans):
         ast = ast.with_(f"_leaf{i}", as_=plan.select)
 
-    return ast, fired, used_sources
+    return ast, fired, warnings, used_sources
 
 
 def _parse_datetime_literal(lit: str) -> datetime | None:
@@ -628,11 +647,17 @@ def _enforce_restrict_source(
     resolver: ContractResolver,
     finality_rule: FinalityRule | None,
     sources_by_name: dict[str, SemanticSource],
-) -> None:
-    """Stage 5b: raise GuardrailBlock if a restrict_source guardrail is violated (SPEC §2.4)."""
-    if not query.context:
-        return
+) -> list[str]:
+    """Stage 5b: block or warn when a restrict_source guardrail is violated (SPEC §2.4).
 
+    ``severity: error`` (the default) raises GuardrailBlock; ``severity: warn`` returns a
+    warning line instead of blocking the query.
+    """
+    warnings: list[str] = []
+    if not query.context:
+        return warnings
+
+    seen: set[str] = set()
     for m in metrics:
         for guardrail in resolver.restrict_source_for(m.source, m.measure.name, query.context):
             if guardrail.restrict_to is None or guardrail.restrict_to.role != "final":
@@ -648,8 +673,12 @@ def _enforce_restrict_source(
 
             watermark_dt = evaluate_watermark(final_r.watermark, final_r.tz, query.as_of)
             time_names = _time_column_names(rule, sources_by_name)
-            if _window_exceeds_watermark(query.filters, time_names, watermark_dt, sources_by_name):
+            if guardrail.id not in seen and _window_exceeds_watermark(
+                query.filters, time_names, watermark_dt, sources_by_name
+            ):
                 logger.warning(
                     "restrict_source enforced: guardrail=%s watermark exceeded", guardrail.id
                 )
-                raise GuardrailBlock(guardrail.rationale)
+                seen.add(guardrail.id)
+                warnings.append(_block_or_warn(guardrail))
+    return warnings

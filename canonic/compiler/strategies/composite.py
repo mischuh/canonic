@@ -151,13 +151,14 @@ def _plan_leaf(
     )
 
     # Stage 6 — guardrails for this leaf.
-    guard_conditions, fired = _enforce_guardrails(
+    guard_result = _enforce_guardrails(
         [_ResolvedMetric(name=component.metric, source=source_name, measure=measure_obj)],
         resolver,
         query.context,
         sources_by_name,
     )
-    where_conditions += guard_conditions
+    where_conditions += guard_result.conditions
+    fired = guard_result.fired
 
     # Stage 5 — finality per leaf (§7, S6): build a UNION ALL when the component metric
     # has a finality rule and the query includes a time dimension, so the compose step
@@ -229,7 +230,7 @@ def _plan_leaf(
         select=leaf_select,
         fired=fired,
         used_sources=used,
-        warnings=[],
+        warnings=guard_result.warnings,
         dim_names=_dimension_output_names(dimensions),
         finality=leaf_finality,
     )
@@ -418,7 +419,7 @@ def _compile_composite(
         resolved={queried_name: resolved_str},
         guardrails_fired=fired,
         freshness=freshness,
-        warnings=zero_warnings,
+        warnings=num_plan.warnings + den_plan.warnings + zero_warnings,
         finality=composite_finality,
         composition=CompositionMetadata(
             kind=composite.kind,

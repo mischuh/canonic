@@ -75,6 +75,11 @@
         "kind": {
           "title": "Kind",
           "type": "string"
+        },
+        "severity": {
+          "default": "error",
+          "title": "Severity",
+          "type": "string"
         }
       },
       "required": [
@@ -120,7 +125,7 @@
           "type": "array"
         },
         "contract_schema": {
-          "default": "2.3",
+          "default": "2.4",
           "title": "Contract Schema",
           "type": "string"
         },

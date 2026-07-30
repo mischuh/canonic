@@ -116,10 +116,9 @@ def _compile_recompute_at_grain(
         # Create a minimal Measure-like stand-in using the physical column.
         measure=_make_synthetic_measure(col_phys),
     )
-    guard_conditions, fired = _enforce_guardrails(
-        [dummy_metric], resolver, query.context, sources_by_name
-    )
-    where_conditions += guard_conditions
+    guard_result = _enforce_guardrails([dummy_metric], resolver, query.context, sources_by_name)
+    where_conditions += guard_result.conditions
+    fired = guard_result.fired
 
     # Stage 7 — emit SQL.
     ast = _build_recompute(
@@ -135,7 +134,7 @@ def _compile_recompute_at_grain(
         adapter=adapter,
     )
     sql = adapter.emit(ast, limit=query.limit)
-    warnings: list[str] = []
+    warnings: list[str] = list(guard_result.warnings)
     if rg.kind is BindingKind.PERCENTILE and not adapter.supports_percentile_cont():
         warnings.append(
             f"metric {queried_name!r}: dialect {adapter.dialect!r} has no native percentile "

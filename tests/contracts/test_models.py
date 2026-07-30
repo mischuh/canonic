@@ -136,9 +136,19 @@ class TestGuardrail:
             id="dim-guard",
             applies_to=AppliesTo(metric="revenue"),
             kind=GuardrailKind.REQUIRED_DIMENSION,
+            dimension="currency",
             rationale="Must group by currency.",
         )
         assert g.filter is None
+
+    def test_required_dimension_requires_dimension_name(self) -> None:
+        with pytest.raises(ValidationError, match="requires a non-empty 'dimension'"):
+            Guardrail(
+                id="dim-guard",
+                applies_to=AppliesTo(metric="revenue"),
+                kind=GuardrailKind.REQUIRED_DIMENSION,
+                rationale="Must group by currency.",
+            )
 
     def test_restrict_source_valid(self) -> None:
         g = Guardrail(

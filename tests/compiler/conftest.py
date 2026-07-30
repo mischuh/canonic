@@ -289,3 +289,25 @@ def min_trust_resolver(
         bindings=[revenue_binding],
         guardrails=[refund_guardrail, min_trust_trusted_guardrail, min_trust_provisional_guardrail],
     )
+
+
+@pytest.fixture
+def required_dimension_guardrail() -> Guardrail:
+    """SPEC-E5-E15 §9 S9: revenue must be grouped by or filtered on status."""
+    return Guardrail(
+        id="revenue-requires-status",
+        applies_to=AppliesTo(metric="revenue"),
+        kind=GuardrailKind.REQUIRED_DIMENSION,
+        dimension="status",
+        severity=Severity.ERROR,
+        rationale="Revenue must be grouped by or filtered on status, to avoid mixing "
+        "paid and refunded totals.",
+    )
+
+
+@pytest.fixture
+def required_dimension_resolver(
+    revenue_binding: MetricBinding, required_dimension_guardrail: Guardrail
+) -> ContractResolver:
+    """Resolver with a required_dimension guardrail on revenue requiring `status`."""
+    return ContractResolver(bindings=[revenue_binding], guardrails=[required_dimension_guardrail])

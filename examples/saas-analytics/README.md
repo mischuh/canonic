@@ -1,6 +1,6 @@
 # Canonic SaaS Analytics demo
 
-The broadest example in the set: a SaaS subscription business modeled Kimball-style as a Business Vault + Data Mart, all in a single bundled DuckDB file. Exercises every metric binding kind canonic supports, all three guardrail kinds, finality/restrict-source, and query-based assertions. Ships fully hand-curated — there's no bootstrap step.
+The broadest example in the set: a SaaS subscription business modeled Kimball-style as a Business Vault + Data Mart, all in a single bundled DuckDB file. Exercises every metric binding kind canonic supports, all four guardrail kinds, finality/restrict-source, and query-based assertions. Ships fully hand-curated — there's no bootstrap step.
 
 Full walkthrough, the all-7-binding-kinds metric catalogue, and guardrail breakdown: **[`docs/guides/saas-analytics.mdx`](../../docs/guides/saas-analytics.mdx)**.
 
@@ -30,7 +30,7 @@ saas.duckdb                  ← bundled pre-built warehouse (8 dims, 10 facts, 
 setup.sql                    ← DDL + seed data (idempotent, rebuild with scripts/build.sh)
 semantics/saas_duckdb/       ← hand-curated dimensions + facts
 contracts/metrics/           ← 30 metric contracts (12 showcase + helper metrics for ratios)
-contracts/guardrails/        ← 4 guardrails + 1 finality rule (all 3 guardrail kinds)
+contracts/guardrails/        ← 5 guardrails + 1 finality rule (all 4 guardrail kinds)
 contracts/assertions/        ← 2 query-based assertions, seed-derived expected values
 knowledge/global/            ← 6 definition/caveat/policy/reference pages
 ```

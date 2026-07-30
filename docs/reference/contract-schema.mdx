@@ -111,19 +111,20 @@ rationale: "Refunds are reversals, not revenue."
 | `filter` | `str \| null` | `null` | Required (non-empty) when `kind: mandatory_filter`. |
 | `restrict_to` | `RestrictTo \| null` | `null` | Required when `kind: restrict_source`; `{ role: "final" \| "provisional" }`. |
 | `level` | `str \| null` | `null` | Required when `kind: min_trust`, one of `caution` \| `provisional` \| `trusted`, the minimum trust tier the query must meet. See [Trust score](/concepts/contracts-and-guardrails#trust-score). |
-| `context` | `str \| null` | `null` | Required (non-empty) when `kind: restrict_source` or `kind: min_trust`, the named context the restriction applies in (e.g. `board_reporting`). |
-| `severity` | `Severity` | `error` | `error` blocks the query; `warn` annotates the result without blocking it. |
+| `dimension` | `str \| null` | `null` | Required (non-empty) when `kind: required_dimension`, the dimension name the query must group by or filter on. |
+| `context` | `str \| null` | `null` | Required (non-empty) when `kind: restrict_source` or `kind: min_trust`; optional for `required_dimension` (omit to apply in every context, including no context at all). The named context the restriction applies in (e.g. `board_reporting`). |
+| `severity` | `Severity` | `error` | `error` blocks the query; `warn` lets it through with a `warnings[]` entry instead. See below for how this applies per `kind`. |
 | `rationale` | `str` | n/a (required) | Why the rule exists, surfaced to the caller. |
 | `phase` | `str \| null` | `null` | Optional compiler-pipeline phase hint. |
 
 | `kind` | Behavior | Status |
 | --- | --- | --- |
-| `mandatory_filter` | The predicate is always AND-ed into the compiled `WHERE`. | Enforced |
+| `mandatory_filter` | The predicate is always AND-ed into the compiled `WHERE`, regardless of `severity`; `severity: warn` additionally adds a `warnings[]` entry. | Enforced |
 | `restrict_source` | In a given `context`, only the source matching `restrict_to.role` is permitted. | Enforced |
-| `required_dimension` | The query must group by or filter on a given dimension or be rejected. | Declarable in the schema; not yet enforced by the compiler |
+| `required_dimension` | The query must group by or filter on `dimension` (by its canonical name, a qualified `alias.dim` form, or a declared alias) or be rejected. | Enforced |
 | `min_trust` | In a given `context`, blocks (`severity: error`) or warns if the computed trust tier is below `level`. | Enforced |
 
-A guardrail attaches a rule to either a specific `(source, measure)` pair or a whole `metric`, chosen by which shape you fill in under `applies_to`. Which fields besides `kind` are required depends entirely on that `kind`: a `mandatory_filter` needs `filter`, a `restrict_source` needs `restrict_to` and `context`, a `min_trust` needs `level` and `context`. `severity` decides how hard the rule bites, `error` stops the query outright while `warn` lets it through with an annotation, and `rationale` is what actually gets shown to whoever hit the block, so it's worth writing for a person, not just as a code comment.
+A guardrail attaches a rule to either a specific `(source, measure)` pair or a whole `metric`, chosen by which shape you fill in under `applies_to`. Which fields besides `kind` are required depends entirely on that `kind`: a `mandatory_filter` needs `filter`, a `restrict_source` needs `restrict_to` and `context`, a `min_trust` needs `level` and `context`, a `required_dimension` needs `dimension`. `severity` decides how hard the rule bites: for `restrict_source`, `min_trust`, and `required_dimension`, `error` stops the query outright while `warn` lets it through with a `warnings[]` entry instead; `mandatory_filter` has no "block" action to gate; its predicate is always injected; `severity: warn` there only adds the `warnings[]` entry. `rationale` is what actually gets shown to whoever hit the block (or the warning), so it's worth writing for a person, not just as a code comment.
 
 ## `contracts/guardrails/finality-*.yaml` — `FinalityRule`
 

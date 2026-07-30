@@ -7,10 +7,12 @@ from typing import TYPE_CHECKING
 import pytest
 
 from canonic.compiler import SemanticQuery, compile
+from canonic.contracts.models import AppliesTo, Guardrail, GuardrailKind, Severity
+from canonic.contracts.resolver import ContractResolver
 from canonic.exc import GuardrailBlock
 
 if TYPE_CHECKING:
-    from canonic.contracts.resolver import ContractResolver
+    from canonic.contracts.models import MetricBinding
     from canonic.semantic.models import SemanticSource
 
 
@@ -83,3 +85,38 @@ class TestTrustInputsCarried:
         assert result.trust_inputs[0].metric == "revenue"
         assert result.trust_inputs[0].provenance == "human_curated"
         assert result.trust_inputs[0].has_assertion is False
+
+
+class TestMinTrustSeverityWarn:
+    """severity: warn does not block; it annotates warnings[] and guardrails_fired instead."""
+
+    @pytest.fixture
+    def warn_resolver(self, revenue_binding: MetricBinding) -> ContractResolver:
+        guardrail = Guardrail(
+            id="board-reporting-trusted-only",
+            applies_to=AppliesTo(metric="revenue"),
+            kind=GuardrailKind.MIN_TRUST,
+            level="trusted",
+            context="board_reporting",
+            severity=Severity.WARN,
+            rationale="Board figures should come from human-approved, final definitions.",
+        )
+        return ContractResolver(bindings=[revenue_binding], guardrails=[guardrail])
+
+    def test_warns_instead_of_blocking(
+        self, warn_resolver: ContractResolver, sources: list[SemanticSource]
+    ) -> None:
+        result = compile(
+            SemanticQuery(metrics=["revenue"], context="board_reporting"), warn_resolver, sources
+        )
+        assert result.sql
+        assert any("board-reporting-trusted-only" in w for w in result.warnings)
+
+    def test_guardrails_fired_reports_warn_severity(
+        self, warn_resolver: ContractResolver, sources: list[SemanticSource]
+    ) -> None:
+        result = compile(
+            SemanticQuery(metrics=["revenue"], context="board_reporting"), warn_resolver, sources
+        )
+        fired = [g for g in result.guardrails_fired if g.id == "board-reporting-trusted-only"]
+        assert fired and fired[0].severity == "warn"

@@ -11,6 +11,7 @@ import dataclasses
 import logging
 from typing import TYPE_CHECKING
 
+from canonic.compiler._helpers import _block_or_warn, _find_dimension, _query_references_dimension
 from canonic.compiler.joins import build_alias_tree, reachable_dimension_names
 from canonic.compiler.result import (
     CompileResult,
@@ -23,7 +24,7 @@ from canonic.contracts.models import BindingKind
 from canonic.contracts.resolver import Ambiguous as ResolverAmbiguous
 from canonic.contracts.resolver import Binding as ResolverBinding
 from canonic.contracts.resolver import Unresolved as ResolverUnresolved
-from canonic.exc import Ambiguous, GuardrailBlock, Unresolved, UnsupportedMeasure
+from canonic.exc import Ambiguous, Unresolved, UnsupportedMeasure
 from canonic.trust.models import TrustTier, tier_meets
 from canonic.trust.scorer import TrustScorer
 from canonic.trust.signals import static_signals_for
@@ -98,17 +99,19 @@ def _enforce_min_trust(
     resolver: ContractResolver,
     context: str | None,
     trust_inputs: list[TrustInput],
-) -> None:
-    """Stage 6b: raise GuardrailBlock when a min_trust guardrail's floor is not met (SPEC-E14 §7).
+) -> list[str]:
+    """Stage 6b: block or warn when a min_trust guardrail's floor is not met (SPEC-E14 §7).
 
     Enforced from the static signal set only (provenance, assertion coverage) — the signals
     known before SQL is generated. Only metrics with a single resolved (source, measure) are
     matched (SINGLE/SEMI_ADDITIVE/OPAQUE kinds); composite (ratio/weighted_avg) and
     recompute_at_grain metrics have no single source/measure pair to match against
-    ``applies_to``, the same limitation ``restrict_source`` already has.
+    ``applies_to``, the same limitation ``restrict_source`` already has. ``severity: error``
+    (the default) raises GuardrailBlock; ``severity: warn`` returns a warning line instead.
     """
+    warnings: list[str] = []
     if context is None:
-        return
+        return warnings
     score = TrustScorer.score(static_signals_for(trust_inputs))
     for _name, binding in raw_bindings:
         if binding.source is None or binding.measure is None:
@@ -123,7 +126,64 @@ def _enforce_min_trust(
                     score.tier.value,
                     floor.value,
                 )
-                raise GuardrailBlock(guardrail.rationale)
+                warnings.append(_block_or_warn(guardrail))
+    return warnings
+
+
+def _enforce_required_dimension(
+    query: SemanticQuery,
+    raw_bindings: list[tuple[str, ResolverBinding]],
+    resolver: ContractResolver,
+    sources_by_name: dict[str, SemanticSource],
+) -> list[str]:
+    """Stage 6c: block or warn when a required_dimension's dimension is neither grouped by
+    nor filtered on (SPEC-E5-E15 §9 S9).
+
+    Only metrics with a single resolved (source, measure) are matched (SINGLE/SEMI_ADDITIVE/
+    OPAQUE kinds); composite (ratio/weighted_avg) and recompute_at_grain metrics have no
+    single source/measure pair to match against ``applies_to``, the same limitation
+    ``restrict_source`` and ``min_trust`` already have. Unlike those two, ``context`` is
+    optional for this kind: a guardrail with no declared context applies to every query,
+    including one with no ``query.context`` at all (see
+    :meth:`ContractResolver.required_dimension_for`). ``severity: error`` (the default)
+    raises GuardrailBlock; ``severity: warn`` returns a warning line instead.
+    """
+    warnings: list[str] = []
+    used_dims = set(query.dimensions)
+    filter_tokens = {tok for f in query.filters for tok in f.split()}
+    seen: set[str] = set()
+    for _name, binding in raw_bindings:
+        if binding.source is None or binding.measure is None:
+            continue
+        for guardrail in resolver.required_dimension_for(
+            binding.source, binding.measure, query.context
+        ):
+            assert guardrail.dimension is not None  # noqa: S101 — enforced by model_validator
+            alias_to_source = build_alias_tree(binding.source, sources_by_name)
+            found = _find_dimension(
+                guardrail.dimension,
+                sources_by_name,
+                owner=binding.source,
+                alias_to_source=alias_to_source,
+            )
+            satisfied = False
+            if found is not None:
+                alias, dim = found
+                for cand in (dim.name, *dim.aliases):
+                    entry_name = cand if alias == binding.source else f"{alias}.{cand}"
+                    if _query_references_dimension(entry_name, used_dims, filter_tokens):
+                        satisfied = True
+                        break
+            if satisfied or guardrail.id in seen:
+                continue
+            seen.add(guardrail.id)
+            logger.warning(
+                "required_dimension enforced: guardrail=%s dimension=%s missing",
+                guardrail.id,
+                guardrail.dimension,
+            )
+            warnings.append(_block_or_warn(guardrail, candidates=[guardrail.dimension]))
+    return warnings
 
 
 def compile(  # noqa: A001 — the public verb for this capability is "compile"
@@ -166,7 +226,9 @@ def compile(  # noqa: A001 — the public verb for this capability is "compile"
     queried_metric_names = {name for name, _ in raw_bindings}
     related = _related(queried_sources, queried_metric_names, query, resolver, sources_by_name)
     trust_inputs = _trust_inputs_for(raw_bindings, resolver)
-    _enforce_min_trust(raw_bindings, resolver, query.context, trust_inputs)
+    pipeline_warnings = _enforce_min_trust(
+        raw_bindings, resolver, query.context, trust_inputs
+    ) + _enforce_required_dimension(query, raw_bindings, resolver, sources_by_name)
 
     composite_indices = [
         i
@@ -194,10 +256,14 @@ def compile(  # noqa: A001 — the public verb for this capability is "compile"
             )
         _, composite = raw_bindings[0]
         logger.info("compile path: composite metric=%s", query.metrics[0])
+        composite_result = _compile_composite(
+            query, composite, resolver, sources_by_name, dialect=dialect
+        )
         return dataclasses.replace(
-            _compile_composite(query, composite, resolver, sources_by_name, dialect=dialect),
+            composite_result,
             related=related,
             trust_inputs=trust_inputs,
+            warnings=pipeline_warnings + composite_result.warnings,
         )
     if semi_additive_indices:
         if len(query.metrics) > 1:
@@ -207,10 +273,14 @@ def compile(  # noqa: A001 — the public verb for this capability is "compile"
             )
         _, sa_binding = raw_bindings[0]
         logger.info("compile path: semi_additive metric=%s", query.metrics[0])
+        semi_additive_result = _compile_semi_additive(
+            query, sa_binding, resolver, sources_by_name, dialect=dialect
+        )
         return dataclasses.replace(
-            _compile_semi_additive(query, sa_binding, resolver, sources_by_name, dialect=dialect),
+            semi_additive_result,
             related=related,
             trust_inputs=trust_inputs,
+            warnings=pipeline_warnings + semi_additive_result.warnings,
         )
     if recompute_indices:
         if len(query.metrics) > 1:
@@ -220,12 +290,14 @@ def compile(  # noqa: A001 — the public verb for this capability is "compile"
             )
         _, rg_binding = raw_bindings[0]
         logger.info("compile path: recompute_at_grain metric=%s", query.metrics[0])
+        recompute_result = _compile_recompute_at_grain(
+            query, rg_binding, resolver, sources_by_name, dialect=dialect
+        )
         return dataclasses.replace(
-            _compile_recompute_at_grain(
-                query, rg_binding, resolver, sources_by_name, dialect=dialect
-            ),
+            recompute_result,
             related=related,
             trust_inputs=trust_inputs,
+            warnings=pipeline_warnings + recompute_result.warnings,
         )
     if opaque_indices:
         if len(query.metrics) > 1:
@@ -235,17 +307,25 @@ def compile(  # noqa: A001 — the public verb for this capability is "compile"
             )
         _, opaque_binding = raw_bindings[0]
         logger.info("compile path: opaque metric=%s", query.metrics[0])
+        opaque_result = _compile_opaque(
+            query, opaque_binding, resolver, sources_by_name, dialect=dialect
+        )
         return dataclasses.replace(
-            _compile_opaque(query, opaque_binding, resolver, sources_by_name, dialect=dialect),
+            opaque_result,
             related=related,
             trust_inputs=trust_inputs,
+            warnings=pipeline_warnings + opaque_result.warnings,
         )
 
     logger.info("compile path: simple/additive metrics=%s", query.metrics)
+    simple_additive_result = _compile_simple_additive(
+        query, raw_bindings, resolver, sources_by_name, dialect=dialect
+    )
     return dataclasses.replace(
-        _compile_simple_additive(query, raw_bindings, resolver, sources_by_name, dialect=dialect),
+        simple_additive_result,
         related=related,
         trust_inputs=trust_inputs,
+        warnings=pipeline_warnings + simple_additive_result.warnings,
     )
 
 
@@ -274,9 +354,9 @@ def _related(
     raw_dims: list[RelatedDimension] = []
     for src_name in sorted(queried_sources):
         for entry_name, alias in reachable_dimension_names(src_name, sources_by_name):
-            bare = entry_name.split(".")[-1]
-            if entry_name in used_dims or bare in used_dims or bare in filter_tokens:
+            if _query_references_dimension(entry_name, used_dims, filter_tokens):
                 continue
+            bare = entry_name.split(".")[-1]
             if entry_name not in seen_dims:
                 seen_dims.add(entry_name)
                 actual_src = alias_to_src.get(alias, alias)

@@ -58,10 +58,10 @@ rationale: "Refunds are reversals, not revenue."
 | --- | --- | --- |
 | `mandatory_filter` | The predicate is always AND-ed into the compiled `WHERE`, even if the request already filters differently. | Enforced |
 | `restrict_source` | In a given `context` (e.g. board reporting), only a specific source is permitted. | Enforced |
-| `required_dimension` | The query must group by or filter on a given dimension or be rejected. | Declarable in the schema; not yet enforced by the compiler |
+| `required_dimension` | The query must group by or filter on a given `dimension` (by canonical name, qualified `alias.dim` form, or declared alias) or be rejected. | Enforced |
 | `min_trust` | In a given `context`, blocks (or warns) if the answer's trust tier is below `level`. | Enforced |
 
-`severity: error` blocks the query; `severity: warn` annotates the result without blocking it.
+`severity: error` (the default) blocks the query; `severity: warn` lets it through with a `warnings[]` entry instead. `mandatory_filter` has no "block" outcome to gate this way — its predicate is always injected regardless of severity, and `severity: warn` there only adds the `warnings[]` entry on top.
 
 ## Trust score
 

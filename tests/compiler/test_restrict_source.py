@@ -8,10 +8,19 @@ from typing import TYPE_CHECKING
 import pytest
 
 from canonic.compiler import SemanticQuery, compile
+from canonic.contracts.models import (
+    AppliesTo,
+    FinalityRule,
+    Guardrail,
+    GuardrailKind,
+    RestrictTo,
+    Severity,
+)
+from canonic.contracts.resolver import ContractResolver
 from canonic.exc import GuardrailBlock
 
 if TYPE_CHECKING:
-    from canonic.contracts.resolver import ContractResolver
+    from canonic.contracts.models import MetricBinding
     from canonic.semantic.models import SemanticSource
 
 
@@ -195,3 +204,58 @@ class TestS2RestrictSourceDeterminism:
         with pytest.raises(GuardrailBlock) as e2:
             compile(q, board_resolver, sources)
         assert str(e1.value) == str(e2.value)
+
+
+class TestS2RestrictSourceSeverityWarn:
+    """severity: warn does not block; it annotates warnings[] and guardrails_fired instead."""
+
+    @pytest.fixture
+    def warn_resolver(
+        self, revenue_binding: MetricBinding, finality_rule: FinalityRule
+    ) -> ContractResolver:
+        guardrail = Guardrail(
+            id="board-final-only",
+            applies_to=AppliesTo(metric="revenue"),
+            kind=GuardrailKind.RESTRICT_SOURCE,
+            restrict_to=RestrictTo(role="final"),
+            context="board_reporting",
+            severity=Severity.WARN,
+            rationale="Board reporting should use authoritative data through T-1.",
+        )
+        return ContractResolver(
+            bindings=[revenue_binding], guardrails=[guardrail], finality=[finality_rule]
+        )
+
+    def test_warns_instead_of_blocking(
+        self, warn_resolver: ContractResolver, sources: list[SemanticSource]
+    ) -> None:
+        result = compile(
+            SemanticQuery(
+                metrics=["revenue"],
+                dimensions=["order_date"],
+                filters=["order_date <= '2026-06-20'"],
+                context="board_reporting",
+                as_of=_AS_OF,
+            ),
+            warn_resolver,
+            sources,
+        )
+        assert result.sql
+        assert any("board-final-only" in w for w in result.warnings)
+
+    def test_guardrails_fired_reports_warn_severity(
+        self, warn_resolver: ContractResolver, sources: list[SemanticSource]
+    ) -> None:
+        result = compile(
+            SemanticQuery(
+                metrics=["revenue"],
+                dimensions=["order_date"],
+                filters=["order_date <= '2026-06-20'"],
+                context="board_reporting",
+                as_of=_AS_OF,
+            ),
+            warn_resolver,
+            sources,
+        )
+        fired = [g for g in result.guardrails_fired if g.id == "board-final-only"]
+        assert fired and fired[0].severity == "warn"

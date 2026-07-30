@@ -1,11 +1,11 @@
 ---
 title: "Guide: SaaS Analytics (all 7 binding kinds)"
-description: "The broadest example: every metric binding kind, all three guardrail kinds, finality, and assertions."
+description: "The broadest example: every metric binding kind, all four guardrail kinds, finality, and assertions."
 ---
 
 A complete, self-contained data-warehouse example: a SaaS subscription business modeled Kimball-style as a Business Vault (dimensions + facts, including a monthly snapshot fact) with a condensed Data Mart layer on top, all in a single bundled DuckDB file.
 
-This is the broadest example in the set: it exercises every [metric binding kind](/concepts/contracts-and-guardrails#beyond-single-composable-metrics) canonic supports, all three guardrail kinds, finality/restrict-source, query-based assertions, and a global knowledge base, in one project.
+This is the broadest example in the set: it exercises every [metric binding kind](/concepts/contracts-and-guardrails#beyond-single-composable-metrics) canonic supports, all four guardrail kinds, finality/restrict-source, query-based assertions, and a global knowledge base, in one project.
 
 <Info>Full source: [`examples/saas-analytics/`](https://github.com/mischuh/canonic/tree/main/examples/saas-analytics)</Info>
 
@@ -67,11 +67,12 @@ No LLM is required for any of these commands: this example ships hand-curated se
 
 Ratio and weighted-avg components must themselves be `single`-kind metrics, so a set of small helper metrics (`mrr_total`, `active_accounts`, `churned_customers`, `new_customers`, `won_opportunities`, `total_opportunities`, `campaign_spend`, `discount_value_sum`, `total_contract_value`, `nps_net`, `nps_responses`) provide those building blocks. See [The semantic compiler](/concepts/compiler#fanout--additivity) for how each kind actually compiles.
 
-## Guardrails: all three kinds
+## Guardrails: all four kinds
 
 - **`revenue-excludes-refunds`** / **`revenue-excludes-trials`**: `mandatory_filter` (`error`). Injects `status != 'refunded'` and `is_trial = false` into every `gross_revenue` query.
 - **`board-reporting-final-only`**: `restrict_source` (`error`). In the `board_reporting` context, confines `gross_revenue` to the final `fct_invoices` source, paired with a finality rule (`finality-revenue`) that declares the final/provisional realizations and coalescing rule.
-- **`ending-mrr-requires-month`**: `required_dimension` (`warn`). Declared and surfaced, but (as noted in [Contracts & guardrails](/concepts/contracts-and-guardrails#guardrails)) `required_dimension` isn't yet enforced by the compiler.
+- **`board-reporting-trusted-only`**: `min_trust` (`error`). In the `board_reporting` context, blocks the query unless the answer's trust tier meets the declared floor.
+- **`ending-mrr-requires-month`**: `required_dimension` (`warn`). Requires grouping `ending_mrr` by `snapshot_month`; unlike the guardrails above, `warn` means an omitted `snapshot_month` doesn't block the query, only adds a `warnings[]` entry.
 
 ```json
 // refunds + trials silently excluded; provisional rows excluded under board_reporting

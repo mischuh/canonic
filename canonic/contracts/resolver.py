@@ -433,6 +433,28 @@ class ContractResolver:
         ]
         return sorted(matched, key=lambda g: g.id)
 
+    def required_dimension_for(
+        self,
+        source: str,
+        measure: str,
+        context: str | None,
+    ) -> list[Guardrail]:
+        """Return required_dimension guardrails active for this (source, measure) and context.
+
+        Unlike :meth:`restrict_source_for` and :meth:`min_trust_for`, ``context`` is optional
+        for this kind (the contract schema does not require it). A guardrail with no declared
+        ``context`` applies in every context, including ``context=None``; a guardrail with a
+        declared ``context`` only applies when it matches. Stable-sorted by ``id``.
+        """
+        matched = [
+            g
+            for g in self._guardrails
+            if g.kind is GuardrailKind.REQUIRED_DIMENSION
+            and (g.context is None or g.context == context)
+            and self._guardrail_applies(g, source, measure)
+        ]
+        return sorted(matched, key=lambda g: g.id)
+
     def min_trust_for(
         self,
         source: str,
