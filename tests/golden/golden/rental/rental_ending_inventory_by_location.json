@@ -1,0 +1,47 @@
+{
+  "case": "rental_ending_inventory_by_location",
+  "columns": [
+    {
+      "name": "location_id",
+      "type": "int"
+    },
+    {
+      "name": "ending_inventory",
+      "type": "int"
+    }
+  ],
+  "dialect": "sqlite",
+  "finality": null,
+  "guardrails_fired": [],
+  "project": "rental",
+  "resolved": {
+    "metrics": {
+      "ending_inventory": "vehicle_inventory.inventory_level"
+    }
+  },
+  "row_count": 5,
+  "rows": [
+    [
+      1,
+      3
+    ],
+    [
+      2,
+      3
+    ],
+    [
+      3,
+      3
+    ],
+    [
+      4,
+      3
+    ],
+    [
+      5,
+      3
+    ]
+  ],
+  "trust_tier": "provisional",
+  "warnings": []
+}

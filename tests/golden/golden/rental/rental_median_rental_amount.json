@@ -1,0 +1,28 @@
+{
+  "case": "rental_median_rental_amount",
+  "columns": [
+    {
+      "name": "median_rental_amount",
+      "type": "float"
+    }
+  ],
+  "dialect": "sqlite",
+  "finality": null,
+  "guardrails_fired": [],
+  "project": "rental",
+  "resolved": {
+    "metrics": {
+      "median_rental_amount": "recompute_at_grain(rentals.total_amount)"
+    }
+  },
+  "row_count": 1,
+  "rows": [
+    [
+      489.93
+    ]
+  ],
+  "trust_tier": "provisional",
+  "warnings": [
+    "metric 'median_rental_amount': dialect 'sqlite' has no native percentile aggregate \u2014 computed via nearest-rank window function, which returns an actual row value rather than a linearly interpolated one (differs from PERCENTILE_CONT on even-sized groups)"
+  ]
+}

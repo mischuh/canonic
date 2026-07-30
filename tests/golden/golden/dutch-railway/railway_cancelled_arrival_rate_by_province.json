@@ -1,0 +1,81 @@
+{
+  "case": "railway_cancelled_arrival_rate_by_province",
+  "columns": [
+    {
+      "name": "province_name",
+      "type": "string"
+    },
+    {
+      "name": "cancelled_arrival_rate",
+      "type": "float"
+    }
+  ],
+  "dialect": "duckdb",
+  "finality": null,
+  "guardrails_fired": [],
+  "project": "dutch-railway",
+  "resolved": {
+    "metrics": {
+      "cancelled_arrival_rate": "ratio(cancelled_arrivals, scheduled_stops)"
+    }
+  },
+  "row_count": 13,
+  "rows": [
+    [
+      "Drenthe",
+      0.00566893424036
+    ],
+    [
+      "Flevoland",
+      0.0527306967985
+    ],
+    [
+      "Frysl\u00e2n",
+      0.0
+    ],
+    [
+      "Gelderland",
+      0.00555041628122
+    ],
+    [
+      "Groningen",
+      0.027884900623
+    ],
+    [
+      "Limburg",
+      0.0691879866518
+    ],
+    [
+      "Noord-Brabant",
+      0.060438434747
+    ],
+    [
+      "Noord-Holland",
+      0.0857321163897
+    ],
+    [
+      "Overijssel",
+      0.0123565754634
+    ],
+    [
+      "Utrecht",
+      0.0132102272727
+    ],
+    [
+      "Zeeland",
+      0.342477140482
+    ],
+    [
+      "Zuid-Holland",
+      0.252568218299
+    ],
+    [
+      "unknown",
+      0.0
+    ]
+  ],
+  "trust_tier": "provisional",
+  "warnings": [
+    "zero denominator for metric 'cancelled_arrival_rate' yields NULL (on_zero_denominator=null)"
+  ]
+}

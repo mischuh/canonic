@@ -1,0 +1,26 @@
+{
+  "case": "jaffle_revenue_total",
+  "columns": [
+    {
+      "name": "revenue",
+      "type": "decimal"
+    }
+  ],
+  "dialect": "duckdb",
+  "finality": null,
+  "guardrails_fired": [],
+  "project": "jaffle-shop",
+  "resolved": {
+    "metrics": {
+      "revenue": "orders.revenue"
+    }
+  },
+  "row_count": 1,
+  "rows": [
+    [
+      "165.04"
+    ]
+  ],
+  "trust_tier": "provisional",
+  "warnings": []
+}

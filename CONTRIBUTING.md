@@ -36,6 +36,27 @@ BREAKING CHANGE: compile_output.legacy_shape has been removed. Consumers
 must migrate to compile_output.shape, which has been stable since v1.4.
 ```
 
+## Golden suite
+
+`tests/golden/` locks the compiled SQL **and** the executed numbers for a set of
+queries against the shipped example projects (jaffle-shop, dutch-railway,
+saas-analytics, rental -- no Docker, no network). Each case reproduces the shape of
+a past `fix(compiler)` bug, so a regression shows up as a golden diff instead of
+someone noticing a wrong number by hand.
+
+If a golden fails, first decide whether the *number* is now right or wrong. Only
+after that, regenerate and review the diff:
+
+```
+uv run pytest tests/golden -x                 # see what moved
+uv run pytest tests/golden --regen-golden      # rewrite the locked artifacts
+git diff tests/golden/golden/                   # THE review artifact
+```
+
+Adding a case: append one line to the relevant `tests/golden/cases/*.jsonl` file
+with a `why` naming the commit/bug it pins, then run `--regen-golden` to generate
+its `.sql`/`.json` artifacts.
+
 ## `contract_schema` changes
 
 Changes to `CONTRACT_SCHEMA` (`canonic/contract.py`) are a special case and
