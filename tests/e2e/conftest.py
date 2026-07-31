@@ -31,46 +31,19 @@ except ImportError:  # pragma: no cover - exercised only without the optional de
 
 _FIXTURE_PROJECT = Path(__file__).parent / "fixture_project"
 
-# Schema + data mirroring examples/ecommerce/setup.sql. Revenue after the
-# revenue-excludes-refunds guardrail (status != 'refunded'):
-#   500 + 350 + 125.50 + 780 + 430 + 1200 + 310 + 95 = 3790.50
-_SEED_SQL = """
-CREATE SCHEMA IF NOT EXISTS analytics;
+# The e2e fixture project's semantic sources (customers, orders — see
+# fixture_project/semantics/warehouse_pg/) only declare the columns/tables they need,
+# so seeding with the *actual* shipped example SQL is safe even though it also creates
+# dim_products/dim_channels/fct_orders_rt/fct_order_items and an extra fct_orders.channel_id
+# column: those are simply unreferenced by this fixture's semantics. Executing the real
+# file (rather than a hand-copied subset) means this test can never silently drift from
+# the example a user actually runs (GH-14 follow-up).
+_ECOMMERCE_SETUP_SQL = (
+    Path(__file__).parents[2] / "examples" / "ecommerce" / "setup.sql"
+).read_text()
 
-CREATE TABLE analytics.dim_customers (
-    customer_id bigint PRIMARY KEY,
-    email       text   NOT NULL,
-    country     text   NOT NULL
-);
-
-INSERT INTO analytics.dim_customers (customer_id, email, country) VALUES
-    (1, 'alice@example.com', 'DE'),
-    (2, 'bob@example.com',   'US'),
-    (3, 'carol@example.com', 'DE'),
-    (4, 'dave@example.com',  'FR'),
-    (5, 'eve@example.com',   'US');
-
-CREATE TABLE analytics.fct_orders (
-    order_id    bigint         PRIMARY KEY,
-    customer_id bigint         NOT NULL REFERENCES analytics.dim_customers,
-    amount      numeric(12, 2) NOT NULL,
-    status      text           NOT NULL,
-    created_at  timestamp      NOT NULL
-);
-
-INSERT INTO analytics.fct_orders (order_id, customer_id, amount, status, created_at) VALUES
-    (1,  1, 500.00,  'completed', '2025-01-10 09:15:00'),
-    (3,  1, 350.00,  'completed', '2025-01-12 14:30:00'),
-    (4,  3, 125.50,  'completed', '2025-01-13 11:00:00'),
-    (5,  4, 780.00,  'completed', '2025-01-14 16:45:00'),
-    (7,  2, 430.00,  'completed', '2025-01-16 08:20:00'),
-    (9,  4, 1200.00, 'completed', '2025-01-18 13:10:00'),
-    (10, 5, 310.00,  'completed', '2025-01-19 17:55:00'),
-    (2,  2, 200.00,  'refunded',  '2025-01-11 10:00:00'),
-    (8,  3,  60.00,  'refunded',  '2025-01-17 09:30:00'),
-    (6,  5,  95.00,  'pending',   '2025-01-15 12:00:00');
-"""
-
+# Revenue after the revenue-excludes-refunds guardrail (status != 'refunded'), per
+# examples/ecommerce/setup.sql: 500 + 350 + 125.50 + 780 + 430 + 1200 + 310 + 95 = 3790.50
 EXPECTED_REVENUE = "3790.50"
 
 
@@ -79,7 +52,7 @@ async def _seed(dsn: str) -> None:
 
     conn = await asyncpg.connect(dsn)
     try:
-        await conn.execute(_SEED_SQL)
+        await conn.execute(_ECOMMERCE_SETUP_SQL)
     finally:
         await conn.close()
 

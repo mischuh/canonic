@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import contextlib
 import json
+from pathlib import Path  # noqa: TC003 — used in the --bundle typer.Option annotation (runtime)
 from typing import TYPE_CHECKING, Annotated
 
 import typer
@@ -11,8 +12,7 @@ from rich.console import Console
 from rich.table import Table
 
 if TYPE_CHECKING:
-    from pathlib import Path
-
+    from canonic.config import CanonicConfig
     from canonic.trust.models import TrustScore
 
 from canonic.cli._errors import get_cli_context, handle_errors
@@ -21,6 +21,7 @@ from canonic.core.service import CanonicService
 from canonic.exc import ContractError
 from canonic.feedback.history import BindingOutcomeHistory
 from canonic.feedback.report import FeedbackReport, build_feedback_report
+from canonic.instrumentation.bundle import build_diagnostic_bundle
 from canonic.instrumentation.models import FunnelMilestone
 from canonic.instrumentation.report import (
     CalibrationReport,
@@ -171,6 +172,15 @@ def report(
             "without sending it (SPEC-E16 Part 2 §5).",
         ),
     ] = False,
+    bundle: Annotated[
+        Path | None,
+        typer.Option(
+            "--bundle",
+            help="Write a diagnostic bundle (versions, redacted config, funnel and event "
+            "summary) to PATH for attaching to a bug report. No query results, no "
+            "credentials — connection params are redacted defensively.",
+        ),
+    ] = None,
 ) -> None:
     """Show event-log figures: counts, error distribution, latency, bytes scanned, and freshness."""
     json_output = get_cli_context(ctx).json_output
@@ -186,11 +196,26 @@ def report(
     telemetry_enabled: bool = False
     air_gapped: bool = False
     feedback_config = FeedbackConfig()
-    with contextlib.suppress(ConfigError):
+    cfg: CanonicConfig | None = None
+    config_error: str | None = None
+    try:
         cfg = load_config(root / "canonic.yaml")
         telemetry_enabled = cfg.telemetry.enabled
         air_gapped = cfg.runtime.air_gapped
         feedback_config = cfg.feedback
+    except ConfigError as exc:
+        config_error = str(exc)
+
+    if bundle is not None:
+        payload = build_diagnostic_bundle(root, cfg, config_error)
+        bundle.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n")
+        _console.print(f"[bold]diagnostic bundle written to[/bold] {bundle}")
+        _console.print(
+            "contains no query results or credentials — connection secrets are "
+            "referenced (env:/keyring:/file:), never literal, and free-form connector "
+            "params are redacted; review the file before sharing it"
+        )
+        return
 
     events = read_events(root, last=last, kind="served_answer")
     rep = build_report(events, recent=recent)

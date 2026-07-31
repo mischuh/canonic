@@ -10,14 +10,9 @@ from canonic.cli.app import app
 
 _GROUPS = ["setup", "connection", "sl", "query", "sql", "knowledge", "status", "mcp", "completion"]
 
-# Capability stubs that must exit 0 with a "not implemented yet" notice.
-# (``setup`` is now a real interactive command — see tests/cli/test_setup.py.)
-_STUBS = [
-    ["completion"],
-]
-
 # Real capability commands (E5/E6/E7/E8/E2) that require a project directory and exit
-# non-zero when run outside one. Excluded from the stub test.
+# non-zero when run outside one. ``completion`` needs no project, so it's excluded here
+# and covered separately in tests/cli/test_completion.py.
 _MCP_COMMANDS = [
     ["mcp", "start"],
     ["mcp", "stop"],
@@ -51,20 +46,6 @@ def test_bare_invocation_json_exits_2(runner: CliRunner) -> None:
     result = runner.invoke(app, ["--json"])
     assert result.exit_code == 2
     assert result.exception is None or isinstance(result.exception, SystemExit)
-
-
-@pytest.mark.parametrize("argv", _STUBS, ids=lambda a: " ".join(a))
-def test_stub_commands_exit_zero(runner: CliRunner, argv: list[str]) -> None:
-    result = runner.invoke(app, argv)
-    assert result.exit_code == 0, result.output
-    assert "not implemented yet" in result.output
-
-
-@pytest.mark.parametrize("argv", _STUBS, ids=lambda a: " ".join(a))
-def test_stub_commands_json_mode(runner: CliRunner, argv: list[str]) -> None:
-    result = runner.invoke(app, ["--json", *argv])
-    assert result.exit_code == 0, result.output
-    assert '"status": "not_implemented"' in result.output
 
 
 @pytest.mark.parametrize("argv", _MCP_COMMANDS, ids=lambda a: " ".join(a))

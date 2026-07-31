@@ -447,3 +447,49 @@ def test_telemetry_preview_does_not_send_anything(runner: CliRunner, project_dir
     runner.invoke(app, ["report", "--telemetry-preview"])
     after = (project_dir / ".canonic" / "events.jsonl").read_text()
     assert before == after
+
+
+# ---------------------------------------------------------------------------
+# --bundle diagnostic export
+# ---------------------------------------------------------------------------
+
+
+def test_bundle_writes_json_file(runner: CliRunner, project_dir: Path) -> None:
+    _write_events(project_dir / ".canonic", [_event(latency_ms=42)])
+    out = project_dir / "diag.json"
+    result = runner.invoke(app, ["report", "--bundle", str(out)])
+    assert result.exit_code == 0
+    assert out.exists()
+    payload = json.loads(out.read_text())
+    assert payload["report"]["count"] == 1
+    assert "canonic_version" in payload
+    assert "written to" in result.output
+
+
+def test_bundle_message_notes_no_credentials(runner: CliRunner, project_dir: Path) -> None:
+    out = project_dir / "diag.json"
+    result = runner.invoke(app, ["report", "--bundle", str(out)])
+    assert result.exit_code == 0
+    assert "no query results or credentials" in result.output
+
+
+def test_bundle_does_not_write_normal_report_output(runner: CliRunner, project_dir: Path) -> None:
+    """--bundle short-circuits before the on-screen report tables are rendered."""
+    _write_events(
+        project_dir / ".canonic",
+        [_event(), _event(error="unresolved")],
+    )
+    out = project_dir / "diag.json"
+    result = runner.invoke(app, ["report", "--bundle", str(out)])
+    assert result.exit_code == 0
+    assert "Error distribution" not in result.output
+
+
+def test_bundle_outside_project_reports_no_project(
+    runner: CliRunner, tmp_path: Path, monkeypatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    result = runner.invoke(app, ["report", "--bundle", str(tmp_path / "diag.json")])
+    assert result.exit_code == 0
+    assert "no canonic project found" in result.output
+    assert not (tmp_path / "diag.json").exists()

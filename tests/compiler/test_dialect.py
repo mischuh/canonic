@@ -86,6 +86,7 @@ def test_registry_exposes_postgres() -> None:
 
 def test_adapter_for_registered_dialects() -> None:
     assert adapter_for("postgres").dialect == "postgres"
+    assert adapter_for("redshift").dialect == "redshift"
     assert adapter_for("duckdb").dialect == "duckdb"
     assert adapter_for("sqlite").dialect == "sqlite"
 
@@ -95,14 +96,24 @@ def test_adapter_for_type_aliases() -> None:
     assert adapter_for("pg").dialect == "postgres"
 
 
-def test_adapter_for_unregistered_sqlglot_dialect() -> None:
-    a = adapter_for("bigquery")
-    assert a.dialect == "bigquery"
+def test_adapter_for_redshift_uses_postgres_type_map() -> None:
+    """Redshift is Postgres wire-compatible (spec-drift A1) — same type map, own dialect name."""
+    a = adapter_for("redshift")
+    assert a.map_type(NormalizedType.DECIMAL) == "NUMERIC"
 
 
-def test_adapter_for_unknown_falls_back_to_postgres() -> None:
-    a = adapter_for("nosuchthing")
-    assert a.dialect == "postgres"
+def test_adapter_for_unregistered_sqlglot_dialect_raises() -> None:
+    """A dialect sqlglot happens to know (e.g. bigquery) still has no canonic adapter."""
+    with pytest.raises(exc.UnsupportedDialectError) as ei:
+        adapter_for("bigquery")
+    assert ei.value.code is exc.ErrorCode.CONNECTION_ERROR
+    assert "bigquery" in str(ei.value)
+
+
+def test_adapter_for_unknown_dialect_raises() -> None:
+    with pytest.raises(exc.UnsupportedDialectError) as ei:
+        adapter_for("nosuchthing")
+    assert "postgres" in ei.value.supported
 
 
 def test_duckdb_adapter_emits_duckdb_interval() -> None:

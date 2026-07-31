@@ -347,6 +347,47 @@ class TestCompileQuery:
             canonic_service.compile_query(q)
 
 
+class TestConnectionDialects:
+    """A definitions/evidence-only companion connection (dbt, looker, ...) must not break
+    service construction or dialect resolution for the real query connection (see
+    examples/dutch-railway, jaffle-shop, ecommerce, which all pair a query connector
+    with a dbt connection this way).
+    """
+
+    def test_dbt_companion_connection_does_not_break_construction(
+        self,
+        revenue_binding: MetricBinding,
+        refund_guardrail: Guardrail,
+        orders_source: SemanticSource,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.setenv("PG_PASSWORD", "testpassword")
+        resolver = ContractResolver(bindings=[revenue_binding], guardrails=[refund_guardrail])
+        config = CanonicConfig.model_validate(
+            {
+                "version": 1,
+                "project": {"name": "test", "default_connection": "warehouse_pg"},
+                "connections": [
+                    {
+                        "id": "warehouse_pg",
+                        "type": "postgres",
+                        "params": {"host": "localhost", "port": 5432, "dbname": "testdb"},
+                        "credentials_ref": "env:PG_PASSWORD",
+                    },
+                    {
+                        "id": "warehouse_dbt",
+                        "type": "dbt",
+                        "params": {"manifest_path": "manifest.json"},
+                    },
+                ],
+            }
+        )
+        service = CanonicService(config=config, resolver=resolver, sources=[orders_source])
+        q = SemanticQuery(metrics=["revenue"])
+        result = service.compile_query(q)
+        assert "SELECT" in result.sql.upper()
+
+
 class TestSearchKnowledge:
     """search_knowledge's embedder/cache wiring (SPEC-E6 §5.1-§5.3)."""
 

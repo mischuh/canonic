@@ -19,13 +19,15 @@ canonic query --file query.json --harness
 | `--metrics` | Metric name(s): comma-separated and/or repeatable (`--metrics a,b` == `--metrics a --metrics b`). |
 | `--dimensions` | Dimension name(s): same comma/repeat rules as `--metrics`. |
 | `--filter` | A filter as `field=value` or `field:op:value` (repeatable), e.g. `amount:>:100`, `status:!=:refunded`, `status:in:paid,refunded`. |
+| `--via` | Join-path alias prefix (comma-separated and/or repeatable) to disambiguate an `ambiguous_join_path` error. |
+| `--limit` | Row cap injected by the dialect adapter. |
 | `--file`, `-f` | Semantic query JSON file. |
 | `--harness` | Benchmark/CI mode: run matching assertions and exit `10` (`ASSERTION_FAILED`) on a mismatch. |
 
-`--metrics`/`--dimensions`/`--filter` and `-f` are mutually exclusive; pick one way to build the query per invocation; passing both is a usage error. The flags build the identical `SemanticQuery` a JSON file would deserialize: `{"metrics": [...], "dimensions": [...], "filters": [...], "limit": null}`. Use `-f` once a query grows more filters or joins than is comfortable inline. Without `--harness`, any matching assertions are informational only and never block. With `--json`, the output matches the MCP `query` tool's payload byte-for-byte.
+`--metrics`/`--dimensions`/`--filter`/`--via`/`--limit` and `-f` are mutually exclusive; pick one way to build the query per invocation; passing both is a usage error. The flags build the identical `SemanticQuery` a JSON file would deserialize: `{"metrics": [...], "dimensions": [...], "filters": [...], "via": [...], "limit": null}`. Use `-f` once a query grows more filters or joins than is comfortable inline. Without `--harness`, any matching assertions are informational only and never block. With `--json`, the output matches the MCP `query` tool's payload byte-for-byte.
 
 <Note>
-  If a `--dimensions` name exists on more than one join-reachable source, the query fails with `ambiguous` and a `candidates` list of `alias.dimension` values to qualify with; see [Resolving `ambiguous`](/reference/error-codes#resolving-ambiguous).
+  If a `--dimensions` name exists on more than one join-reachable source, the query fails with `ambiguous` and a `candidates` list of `alias.dimension` values to qualify with; see [Resolving `ambiguous`](/reference/error-codes#resolving-ambiguous). If a metric's join path to a dimension's source is itself ambiguous (more than one route through declared `joins`), the query instead fails with `ambiguous_join_path` and a `candidates` list of alias sequences — pass one as `--via` (e.g. `--via dim_customer,dim_sales_rep`) to select that path.
 </Note>
 
 ## `canonic sql`

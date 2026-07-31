@@ -69,17 +69,29 @@ def compile_(
         list[str] | None,
         typer.Option("--filter", help="Filter as field=value or field:op:value (repeatable)."),
     ] = None,
+    via: Annotated[
+        list[str] | None,
+        typer.Option(
+            "--via",
+            help="Join-path alias prefix (comma-separated and/or repeatable) to disambiguate "
+            "an ambiguous_join_path error.",
+        ),
+    ] = None,
+    limit: Annotated[
+        int | None,
+        typer.Option("--limit", help="Row cap injected by the dialect adapter."),
+    ] = None,
 ) -> None:
     """Compile a semantic query to SQL + metadata without executing.
 
-    Either ``-f``/``--file`` or the inline ``--metrics``/``--dimensions``/``--filter``
-    flags — never both.
+    Either ``-f``/``--file`` or the inline
+    ``--metrics``/``--dimensions``/``--filter``/``--via``/``--limit`` flags — never both.
 
     With ``--json`` the output matches the MCP ``compile_query`` tool payload byte-for-byte.
     """
     from canonic.core.models import CompileOutput
 
-    sq = build_semantic_query(file, metrics, dimensions, filter_)
+    sq = build_semantic_query(file, metrics, dimensions, filter_, via, limit)
     result = load_service(ctx).compile_query(sq)
     payload = CompileOutput.from_compile_result(result).model_dump(mode="json")
 

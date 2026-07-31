@@ -2,12 +2,9 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from pathlib import Path
 
 import pytest
-
-if TYPE_CHECKING:
-    from pathlib import Path
 
 from canonic.eval.candidates import load_candidates
 from canonic.eval.dataset import (
@@ -17,6 +14,8 @@ from canonic.eval.dataset import (
     load_reconcile_cases,
 )
 from canonic.exc import EvalDatasetError
+
+_EXAMPLES_ROOT = Path(__file__).parents[2] / "examples"
 
 
 def test_shipped_dataset_loads_into_schemas() -> None:
@@ -125,3 +124,31 @@ def test_load_candidates_rejects_literal_api_key(tmp_path: Path) -> None:
 
     with pytest.raises(EvalDatasetError, match="invalid llm config"):
         load_candidates(path)
+
+
+# ---------------------------------------------------------------------------
+# Per-example eval/grain_cases.jsonl (referenced only in a comment inside the
+# file itself, pointing operators at "canonic eval baseline --dataset ..." —
+# never previously exercised by anything, so they could rot silently).
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("project", ["rental", "ecommerce"])
+def test_example_grain_cases_are_well_formed(project: str) -> None:
+    path = _EXAMPLES_ROOT / project / "eval" / "grain_cases.jsonl"
+    cases = load_grain_cases(path)
+
+    assert len(cases) >= 5
+    relations = [c.relation for c in cases]
+    assert len(relations) == len(set(relations)), "duplicate relation in example grain cases"
+    for case in cases:
+        assert case.expected_grain, f"{case.relation}: expected_grain must not be empty"
+        # The drafter is only ever asked to choose among the *given* columns (SPEC-E10
+        # §7 — "a minimal uniquely-identifying set" of existing columns), never to invent
+        # a column name that isn't in the schema. A label naming a column absent from
+        # `columns` could never be produced by any drafter, correct or not.
+        column_names = {c.name for c in case.columns}
+        assert column_names >= set(case.expected_grain), (
+            f"{case.relation}: expected_grain {case.expected_grain} must be a subset of "
+            f"the case's own columns {sorted(column_names)}"
+        )

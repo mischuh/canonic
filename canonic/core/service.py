@@ -15,7 +15,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from canonic.compiler.dialect import adapter_for
+from canonic.compiler.dialect import DIALECT_ADAPTERS, adapter_for
 from canonic.config import CanonicConfig, Connection, load_config
 from canonic.contracts import ContractResolver
 from canonic.core.assertions import AssertionService
@@ -43,18 +43,25 @@ if TYPE_CHECKING:
 __all__ = ["CanonicService"]
 
 
-def _dialect_for_type(connector_type: str) -> str:
-    """Map a connector type string to a sqlglot dialect name.
+_TYPE_ALIASES: dict[str, str] = {
+    "postgresql": "postgres",
+    "pg": "postgres",
+}
 
-    Most connector types are already valid sqlglot dialect names (duckdb, sqlite, postgres).
-    This function normalises the few that are not and validates unknown types via adapter_for.
+
+def _dialect_for_type(connector_type: str) -> str | None:
+    """Map a query connector's type string to a sqlglot dialect name.
+
+    Returns ``None`` for a definitions/evidence-only connector type (dbt, looker,
+    metabase, notion, url) — those never serve a compiled query, so they get no entry
+    in ``connection_dialects`` at all rather than a meaningless placeholder dialect.
+    A project pairing a query connector with, say, a dbt companion connection (see
+    examples/dutch-railway, jaffle-shop, ecommerce) is the normal case this must not
+    break: only the query connector's type reaches :func:`adapter_for`.
     """
-    _OVERRIDES: dict[str, str] = {
-        "postgresql": "postgres",
-        "pg": "postgres",
-    }
-    dialect = _OVERRIDES.get(connector_type, connector_type)
-    # Validate via adapter_for so unknown types silently fall back to postgres.
+    dialect = _TYPE_ALIASES.get(connector_type, connector_type)
+    if dialect not in DIALECT_ADAPTERS:
+        return None
     return adapter_for(dialect).dialect
 
 
@@ -103,9 +110,13 @@ class CanonicService:
         self._event_log: AnswerEventLog = (
             event_log if event_log is not None else NullAnswerEventLog()
         )
-        # connection id → sqlglot dialect name, derived from connection types in config
+        # connection id → sqlglot dialect name, derived from connection types in config.
+        # Definitions/evidence-only connections (dbt, looker, ...) get no entry — see
+        # _dialect_for_type.
         connection_dialects: dict[str, str] = {
-            c.id: _dialect_for_type(c.type) for c in config.connections
+            c.id: dialect
+            for c in config.connections
+            if (dialect := _dialect_for_type(c.type)) is not None
         }
         ctx = ServiceContext(
             config=config,

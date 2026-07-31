@@ -36,20 +36,6 @@ def write_raw_config(path: Path, raw: Any) -> None:
         yaml.dump(raw, f)
 
 
-def not_implemented(ctx: typer.Context, feature: str) -> None:
-    """Print a uniform ``not implemented yet`` notice and exit 0 (no traceback).
-
-    Stub for capability commands not yet wired up: currently just ``completion``
-    (no backing implementation).
-    """
-    json_output = get_cli_context(ctx).json_output
-    if json_output:
-        typer.echo(json.dumps({"status": "not_implemented", "feature": feature}))
-    else:
-        _console.print(f"[yellow]{feature}[/yellow]: not implemented yet")
-    raise typer.Exit(0)
-
-
 def load_service(ctx: typer.Context) -> CanonicService:
     """Locate the enclosing canonic project and build its :class:`CanonicService`.
 
@@ -94,6 +80,8 @@ def build_semantic_query(
     metrics: list[str] | None,
     dimensions: list[str] | None,
     filters: list[str] | None,
+    via: list[str] | None = None,
+    limit: int | None = None,
 ) -> SemanticQuery:
     """Build a :class:`SemanticQuery` from ``-f``/``--file`` or the inline flag set.
 
@@ -101,10 +89,10 @@ def build_semantic_query(
     this so both commands resolve flags to the identical object the JSON-file path
     would deserialize (SPEC-E7-E8 §3, S14).
     """
-    flags_given = bool(metrics or dimensions or filters)
+    flags_given = bool(metrics or dimensions or filters or via)
     if file is not None and flags_given:
         raise typer.BadParameter(
-            "-f/--file and --metrics/--dimensions/--filter are mutually exclusive"
+            "-f/--file and --metrics/--dimensions/--filter/--via are mutually exclusive"
         )
     if file is None and not flags_given:
         raise typer.BadParameter("either -f/--file or --metrics is required")
@@ -118,5 +106,9 @@ def build_semantic_query(
         raise typer.BadParameter(str(exc)) from exc
 
     return SemanticQuery(
-        metrics=_expand_csv(metrics), dimensions=_expand_csv(dimensions), filters=parsed_filters
+        metrics=_expand_csv(metrics),
+        dimensions=_expand_csv(dimensions),
+        filters=parsed_filters,
+        via=_expand_csv(via),
+        limit=limit,
     )

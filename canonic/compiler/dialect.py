@@ -13,7 +13,7 @@ from typing import cast
 
 from sqlglot import exp
 
-from canonic.exc import ReadOnlyViolation
+from canonic.exc import ReadOnlyViolation, UnsupportedDialectError
 from canonic.semantic.models import NormalizedType
 
 __all__ = [
@@ -212,9 +212,13 @@ class SQLiteDialectAdapter(_GenericDialectAdapter):
         return False
 
 
-# Pre-built adapters for the three supported query connectors.
+# Pre-built adapters for the four supported query connectors. Redshift is Postgres
+# wire-compatible, so it reuses the Postgres type map (spec-drift A1) rather than getting
+# its own — but it's a first-class registry entry, not the "any sqlglot dialect works"
+# fallback that used to construct it on the fly.
 DIALECT_ADAPTERS: dict[str, DialectAdapter] = {
     "postgres": PostgresDialectAdapter(),
+    "redshift": _GenericDialectAdapter("redshift", _POSTGRES_TYPE_MAP),
     "duckdb": _GenericDialectAdapter("duckdb", _DUCKDB_TYPE_MAP),
     "sqlite": SQLiteDialectAdapter(),
 }
@@ -227,22 +231,23 @@ _TYPE_TO_DIALECT: dict[str, str] = {
 
 
 def adapter_for(dialect: str) -> DialectAdapter:
-    """Return the adapter for *dialect*, constructing a generic one for unknown dialects.
+    """Return the adapter for *dialect*.
 
-    *dialect* is a sqlglot dialect name or a connector ``type`` string. Unknown dialects
-    fall back to postgres to preserve existing behaviour.
+    *dialect* is a sqlglot dialect name or a connector ``type`` string. Raises
+    :class:`~canonic.exc.UnsupportedDialectError` for anything not in
+    ``DIALECT_ADAPTERS`` — compiling a query in the wrong SQL flavor and returning it
+    successfully is worse than a clear error, since e.g. ``sl compile`` has no later
+    execution-time check that would otherwise catch the mismatch. Only called with a
+    query-connector's dialect (see ``core.service._dialect_for_type``, which never
+    resolves a dialect for definitions/evidence-only connector types such as dbt/looker/
+    metabase/notion/url in the first place), so this never fires for a normally
+    configured project.
     """
     normalised = _TYPE_TO_DIALECT.get(dialect, dialect)
-    if normalised in DIALECT_ADAPTERS:
-        return DIALECT_ADAPTERS[normalised]
-    # Forward-looking: any connector whose type is a valid sqlglot dialect works.
-    try:
-        from sqlglot import Dialect
-
-        Dialect.get_or_raise(normalised)
-        return _GenericDialectAdapter(normalised, _POSTGRES_TYPE_MAP)
-    except (ValueError, AttributeError):
-        return DIALECT_ADAPTERS["postgres"]
+    adapter = DIALECT_ADAPTERS.get(normalised)
+    if adapter is None:
+        raise UnsupportedDialectError(dialect, supported=sorted(DIALECT_ADAPTERS))
+    return adapter
 
 
 # SQLite (no ordered-set aggregate) is handled via supports_percentile_cont() — the compiler
