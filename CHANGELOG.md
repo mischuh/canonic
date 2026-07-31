@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.15.0](https://github.com/mischuh/canonic/compare/v0.14.1...v0.15.0) (2026-07-31)
+
+
+### Features
+
+* **cli:** add diagnostic bundle, completion, and query via/limit flags ([#270](https://github.com/mischuh/canonic/issues/270)) ([b5eaea6](https://github.com/mischuh/canonic/commit/b5eaea660543be9e5283752ef10e1c3debb4c196))
+
 ## [0.14.1](https://github.com/mischuh/canonic/compare/v0.14.0...v0.14.1) (2026-07-30)
 
 
