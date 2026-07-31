@@ -36,20 +36,6 @@ def write_raw_config(path: Path, raw: Any) -> None:
         yaml.dump(raw, f)
 
 
-def not_implemented(ctx: typer.Context, feature: str) -> None:
-    """Print a uniform ``not implemented yet`` notice and exit 0 (no traceback).
-
-    Stub for capability commands not yet wired up: currently just ``completion``
-    (no backing implementation).
-    """
-    json_output = get_cli_context(ctx).json_output
-    if json_output:
-        typer.echo(json.dumps({"status": "not_implemented", "feature": feature}))
-    else:
-        _console.print(f"[yellow]{feature}[/yellow]: not implemented yet")
-    raise typer.Exit(0)
-
-
 def load_service(ctx: typer.Context) -> CanonicService:
     """Locate the enclosing canonic project and build its :class:`CanonicService`.
 

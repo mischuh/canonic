@@ -1,12 +1,30 @@
 ---
 title: "canonic completion"
-description: "Generate a shell completion script."
+description: "Print a shell completion script for canonic."
 ---
 
-<Warning>
-  Not implemented yet; the command currently returns a `not implemented` notice and exits `0`. Shell completion generation is planned but not wired up on `main` today.
-</Warning>
+```bash
+canonic completion                     # auto-detects your shell
+canonic completion --shell zsh
+canonic completion --shell bash
+canonic completion --shell fish
+```
+
+Prints a shell completion script for `canonic` (and the `can` alias) to stdout — powered by Click's built-in completion machinery, so it stays in sync with the command tree automatically. Wire it into your shell:
 
 ```bash
-canonic completion
+# zsh — add to ~/.zshrc
+eval "$(canonic completion --shell zsh)"
+
+# bash
+canonic completion --shell bash > ~/.bash_completion.d/canonic
+
+# fish
+canonic completion --shell fish > ~/.config/fish/completions/canonic.fish
 ```
+
+| Flag | Description |
+| --- | --- |
+| `--shell` | `bash`, `zsh`, or `fish`. Auto-detected from the running shell when omitted. |
+
+Exits `1` with a clear message if the shell can't be detected and `--shell` is omitted, or if the given `--shell` isn't one of the three supported.

@@ -38,6 +38,7 @@ canonic report --last 100 --recent 20
 | --- | --- |
 | `--last` | Restrict to the final N events in the log. |
 | `--recent` | Number of recent answers to list (default `10`). |
+| `--bundle` | Write a diagnostic bundle to the given path instead of printing a report (see below). |
 
 Output includes the onboarding funnel (setup started → connection added → bootstrap completed → first answer served → first curated review completed, each with a timestamp once reached), overall answer counts and latency percentiles, bytes scanned, stale-answer and guardrail-hit counts, an error distribution table, and a table of the most recent answers.
 
@@ -46,6 +47,14 @@ When `answer_outcome` events are present (see [`canonic outcome mark`](#canonic-
 - **Trust calibration** — outcome verdicts bucketed by E14 trust tier, so you can see whether `caution` predicts `incorrect` materially more often than `trusted`. This is the metric that validates whether E14's tiers are actually predictive.
 - **Correction recurrence** — bindings with more than one `incorrect` outcome. A rising count means the feedback loop isn't closing: the same canonical definition keeps getting marked wrong.
 - **Feedback loop**: a table of every binding with any `wrong_definition` outcome history, with columns `binding`, `wrong_definition` count, distinct `markers`, whether it's crossed the E4 evidence gate (`gated (E4)`), and whether it's currently capping the E14 trust tier (`trust capped`). Shown even below the gate, so a pattern is visible before it fires. Also included in `--json` under `"feedback"`. See [Feedback loop (E11)](/concepts/ingestion-and-reconciliation#feedback-loop-e11) and the `feedback` block in [config schema](/reference/config-schema#feedback).
+
+### `canonic report --bundle`
+
+```bash
+canonic report --bundle diagnostics.json
+```
+
+Writes a single JSON file for attaching to a bug report: canonic/Python/platform version, the serving contract schema, the redacted `canonic.yaml` (connection secrets are already stored as references — `env:`/`keyring:`/`file:` — never literals; free-form connector `params` entries are additionally redacted defensively), and the onboarding funnel plus event-log summary. Contains no query results. Nothing is sent anywhere — review the file yourself before attaching it.
 
 ## `canonic outcome mark`
 

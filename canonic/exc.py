@@ -227,6 +227,24 @@ class UnknownConnectorType(ConnectionError):
         super().__init__(f"unknown connector type {type_name!r}; registered types: {listed}")
 
 
+class UnsupportedDialectError(ConnectionError):
+    """A dialect name has no compiler ``DialectAdapter`` — no silent SQL-flavor fallback.
+
+    Only postgres/redshift/duckdb/sqlite (SPEC-E2 §.. — dialect coverage decided at P0) have
+    a real adapter in ``canonic.compiler.dialect.DIALECT_ADAPTERS``. ``adapter_for()`` used to
+    construct a generic adapter for any dialect name sqlglot happened to recognize, or fall
+    back to Postgres for anything else — silently compiling the wrong SQL flavor with no
+    error, which ``sl compile`` in particular has no later execution-time check to catch.
+    Subclasses :class:`ConnectionError` (exit 13), same family as :class:`UnknownConnectorType`.
+    """
+
+    def __init__(self, dialect: str, *, supported: Sequence[str]) -> None:
+        self.dialect = dialect
+        self.supported = tuple(supported)
+        listed = ", ".join(self.supported) or "(none)"
+        super().__init__(f"unsupported SQL dialect {dialect!r}; supported: {listed}")
+
+
 class ContradictionsFound(CanonicError):
     """Raised by headless ``--strict`` ingest when a run flags any contradiction (E4 §5.4)."""
 

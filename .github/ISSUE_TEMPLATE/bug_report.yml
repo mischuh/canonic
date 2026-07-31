@@ -1,0 +1,51 @@
+name: Bug report
+description: Something in canonic isn't working the way you'd expect.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report this. If you can, run `canonic report --bundle diagnostics.json`
+        in your project first — it writes a single redacted file (versions, contract schema, config with
+        secrets already referenced not literal, onboarding funnel, event-log summary) with no query results
+        or credentials, which usually saves a round trip of follow-up questions. Review the file yourself
+        before attaching it.
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: What did you do, what did you expect, what happened instead?
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      description: Commands you ran, in order. A minimal `canonic.yaml` / example project is even better.
+    validations:
+      required: false
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: Diagnostic bundle
+      description: Paste the contents of `diagnostics.json` from `canonic report --bundle diagnostics.json`, or attach the file.
+    validations:
+      required: false
+  - type: input
+    id: version
+    attributes:
+      label: canonic version
+      description: Output of `canonic --version` (also in the diagnostic bundle as `canonic_version`).
+    validations:
+      required: true
+  - type: dropdown
+    id: install-method
+    attributes:
+      label: How did you install canonic?
+      options:
+        - uvx / uv tool install
+        - pip
+        - Docker (ghcr.io/mischuh/canonic)
+        - built from source
+    validations:
+      required: false
