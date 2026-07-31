@@ -80,6 +80,8 @@ def build_semantic_query(
     metrics: list[str] | None,
     dimensions: list[str] | None,
     filters: list[str] | None,
+    via: list[str] | None = None,
+    limit: int | None = None,
 ) -> SemanticQuery:
     """Build a :class:`SemanticQuery` from ``-f``/``--file`` or the inline flag set.
 
@@ -87,10 +89,10 @@ def build_semantic_query(
     this so both commands resolve flags to the identical object the JSON-file path
     would deserialize (SPEC-E7-E8 §3, S14).
     """
-    flags_given = bool(metrics or dimensions or filters)
+    flags_given = bool(metrics or dimensions or filters or via)
     if file is not None and flags_given:
         raise typer.BadParameter(
-            "-f/--file and --metrics/--dimensions/--filter are mutually exclusive"
+            "-f/--file and --metrics/--dimensions/--filter/--via are mutually exclusive"
         )
     if file is None and not flags_given:
         raise typer.BadParameter("either -f/--file or --metrics is required")
@@ -104,5 +106,9 @@ def build_semantic_query(
         raise typer.BadParameter(str(exc)) from exc
 
     return SemanticQuery(
-        metrics=_expand_csv(metrics), dimensions=_expand_csv(dimensions), filters=parsed_filters
+        metrics=_expand_csv(metrics),
+        dimensions=_expand_csv(dimensions),
+        filters=parsed_filters,
+        via=_expand_csv(via),
+        limit=limit,
     )

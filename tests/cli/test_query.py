@@ -100,6 +100,87 @@ def project_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     return tmp_path
 
 
+_FCT_YAML = """\
+name: fct
+connection: warehouse_pg
+table: analytics.fct
+grain: [fct_id]
+columns:
+  - { name: fct_id,    type: string,  nullable: false }
+  - { name: mid_id,    type: string,  nullable: false }
+  - { name: target_id, type: string,  nullable: false }
+  - { name: amount,    type: decimal, nullable: false }
+measures:
+  - name: total_amount
+    expr: "sum(amount)"
+    additivity: additive
+joins:
+  - to: dim_mid
+    on: "fct.mid_id = dim_mid.mid_id"
+    relationship: many_to_one
+  - to: dim_target
+    on: "fct.target_id = dim_target.target_id"
+    relationship: many_to_one
+"""
+
+_DIM_MID_YAML = """\
+name: dim_mid
+connection: warehouse_pg
+table: analytics.dim_mid
+grain: [mid_id]
+columns:
+  - { name: mid_id,    type: string, nullable: false }
+  - { name: target_id, type: string, nullable: false }
+joins:
+  - to: dim_target
+    on: "dim_mid.target_id = dim_target.target_id"
+    relationship: many_to_one
+"""
+
+_DIM_TARGET_YAML = """\
+name: dim_target
+connection: warehouse_pg
+table: analytics.dim_target
+grain: [target_id]
+columns:
+  - { name: target_id,   type: string, nullable: false }
+  - { name: target_name, type: string, nullable: false }
+dimensions:
+  - { name: target_name, column: target_name }
+"""
+
+_AMOUNT_TOTAL_YAML = """\
+metric: amount_total
+canonical:
+  source: fct
+  measure: total_amount
+status: active
+"""
+
+
+@pytest.fixture
+def ambiguous_project_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """A metric whose source reaches a shared dimension by two distinct join routes.
+
+    Mirrors the real ``examples/saas-analytics`` shape (``fct_opportunities`` reaching
+    ``dim_sales_rep`` both directly and via ``dim_customer``): ``fct`` joins ``dim_target``
+    both directly and through ``dim_mid``, so a query grouping by ``target_name`` is
+    genuinely ambiguous without ``--via``.
+    """
+    (tmp_path / "canonic.yaml").write_text(_CONFIG)
+    sem = tmp_path / "semantics" / "warehouse_pg"
+    sem.mkdir(parents=True)
+    (sem / "fct.yaml").write_text(_FCT_YAML)
+    (sem / "dim_mid.yaml").write_text(_DIM_MID_YAML)
+    (sem / "dim_target.yaml").write_text(_DIM_TARGET_YAML)
+    contracts = tmp_path / "contracts" / "metrics"
+    contracts.mkdir(parents=True)
+    (contracts / "amount_total.yaml").write_text(_AMOUNT_TOTAL_YAML)
+    monkeypatch.setenv("CANONIC_PW", "test")
+    monkeypatch.chdir(tmp_path)
+    return tmp_path
+
+
 @pytest.fixture
 def fake_connector(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
@@ -169,4 +250,41 @@ def test_query_harness_flag_passes_through_on_no_assertions(
 ) -> None:
     """No assertions are defined for this metric, so --harness is a no-op that still succeeds."""
     result = runner.invoke(app, ["query", "--metrics", "revenue", "--harness"])
+    assert result.exit_code == 0, result.output
+
+
+def test_query_limit_flag_accepted(
+    runner: CliRunner, project_dir: Path, fake_connector: None
+) -> None:
+    result = runner.invoke(app, ["query", "--metrics", "revenue", "--limit", "5"])
+    assert result.exit_code == 0, result.output
+
+
+def test_query_ambiguous_join_without_via_raises(
+    runner: CliRunner, ambiguous_project_dir: Path, fake_connector: None
+) -> None:
+    """Mirrors the real-world case: no CLI-flag way to disambiguate meant `via` was
+    only reachable through -f/--file or MCP, never inline --metrics/--dimensions."""
+    result = runner.invoke(
+        app, ["query", "--metrics", "amount_total", "--dimensions", "target_name"]
+    )
+    assert result.exit_code != 0
+    assert "ambiguous_join_path" in result.output
+
+
+def test_query_via_flag_resolves_ambiguous_join(
+    runner: CliRunner, ambiguous_project_dir: Path, fake_connector: None
+) -> None:
+    result = runner.invoke(
+        app,
+        [
+            "query",
+            "--metrics",
+            "amount_total",
+            "--dimensions",
+            "target_name",
+            "--via",
+            "dim_target",
+        ],
+    )
     assert result.exit_code == 0, result.output

@@ -39,6 +39,18 @@ def query(
         list[str] | None,
         typer.Option("--filter", help="Filter as field=value or field:op:value (repeatable)."),
     ] = None,
+    via: Annotated[
+        list[str] | None,
+        typer.Option(
+            "--via",
+            help="Join-path alias prefix (comma-separated and/or repeatable) to disambiguate "
+            "an ambiguous_join_path error.",
+        ),
+    ] = None,
+    limit: Annotated[
+        int | None,
+        typer.Option("--limit", help="Row cap injected by the dialect adapter."),
+    ] = None,
     harness: Annotated[
         bool,
         typer.Option(
@@ -51,14 +63,15 @@ def query(
 
     Either ``-f``/``--file`` (a JSON file with the
     :class:`~canonic.compiler.SemanticQuery` shape:
-    ``{"metrics": [...], "dimensions": [...], "filters": [...], "limit": null}``) or
-    the inline ``--metrics``/``--dimensions``/``--filter`` flags — never both.
+    ``{"metrics": [...], "dimensions": [...], "filters": [...], "via": [...], "limit": null}``)
+    or the inline ``--metrics``/``--dimensions``/``--filter``/``--via``/``--limit`` flags —
+    never both.
 
     With ``--harness`` (benchmark/CI mode), every assertion matching the query is executed
     and any divergence from its expected result exits 10 (``ASSERTION_FAILED``); without it,
     assertions are informational and never block.
     """
-    sq = build_semantic_query(file, metrics, dimensions, filter_)
+    sq = build_semantic_query(file, metrics, dimensions, filter_, via, limit)
     service = load_service(ctx)
     result = asyncio.run(service.query(sq, harness=harness))
 
