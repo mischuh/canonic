@@ -266,6 +266,12 @@ def apply_entry(
     only system-mediated way for a fact to be promoted out of ``inferred``
     (AMENDMENT-provenance-promotion, S17). ``curate`` and ``freeze`` are independent and may
     both be set. Both are silently ignored for PRUNE ops (there is no file left to annotate).
+
+    Targets are either semantic sources (``semantics/**/*.yaml``, carrying a nested
+    ``meta.{provenance,frozen}``) or metric contracts (``contracts/metrics/*.yaml``, carrying
+    ``provenance`` directly with no ``frozen`` concept). Other contract kinds (assertions,
+    guardrails, finality) have neither field yet, so freeze/curate are silently ignored for
+    them too, same as PRUNE ops.
     """
     from canonic.ingestion.models import ProposalOp
     from canonic.ingestion.pipeline import write_emitted_diffs
@@ -278,12 +284,30 @@ def apply_entry(
     if (freeze or curate) and diff.op is not ProposalOp.PRUNE:
         path = project_root / diff.target
         if path.exists() and diff.target.endswith(".yaml"):
-            source = load_semantic_source(path)
-            meta_updates: dict[str, object] = {}
-            if freeze:
-                meta_updates["frozen"] = True
-            if curate:
-                meta_updates["provenance"] = Provenance.HUMAN_CURATED
-            updated_meta = source.meta.model_copy(update=meta_updates)
-            updated_source = source.model_copy(update={"meta": updated_meta})
-            path.write_text(dump_semantic_source(updated_source))
+            if Path(diff.target).parts[:2] == ("contracts", "metrics"):
+                if curate:
+                    _curate_metric_binding(path)
+            elif not diff.target.startswith("contracts/"):
+                source = load_semantic_source(path)
+                meta_updates: dict[str, object] = {}
+                if freeze:
+                    meta_updates["frozen"] = True
+                if curate:
+                    meta_updates["provenance"] = Provenance.HUMAN_CURATED
+                updated_meta = source.meta.model_copy(update=meta_updates)
+                updated_source = source.model_copy(update={"meta": updated_meta})
+                path.write_text(dump_semantic_source(updated_source))
+
+
+def _curate_metric_binding(path: Path) -> None:
+    """Set ``provenance: human_curated`` directly on a metric-contract file (S17).
+
+    ``MetricBinding`` has no nested ``meta`` and no ``frozen`` concept, unlike semantic
+    sources — curate is the only promotion this target type supports.
+    """
+    from canonic.contracts.loader import dump_metric_binding, load_metric_binding
+    from canonic.semantic.models import Provenance
+
+    binding = load_metric_binding(path)
+    updated = binding.model_copy(update={"provenance": Provenance.HUMAN_CURATED})
+    path.write_text(dump_metric_binding(updated))

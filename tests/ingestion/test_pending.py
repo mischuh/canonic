@@ -81,6 +81,13 @@ _VALID_SOURCE_CONTENT = {
     "columns": [{"name": "order_id", "type": "int", "nullable": False}],
 }
 
+_TARGET_METRIC = "contracts/metrics/revenue.yaml"
+
+_VALID_METRIC_BINDING_CONTENT = {
+    "metric": "revenue",
+    "canonical": {"kind": "single", "source": "orders", "measure": "total_revenue"},
+}
+
 
 def _emission_with_diffs(n: int = 2) -> Any:
     """Return an EmissionResult with ``n`` ADD diffs."""
@@ -100,6 +107,23 @@ def _emission_with_valid_source() -> Any:
             target=_TARGET_YAML,
             op=ProposalOp.ADD,
             content=_VALID_SOURCE_CONTENT,
+            provenance=Provenance.INFERRED,
+            confidence=1.0,
+            anchored_to=["sha256:abc"],
+        ),
+    )
+    return DiffEmitter().emit(_report(entry))
+
+
+def _emission_with_valid_metric_binding() -> Any:
+    """Return an EmissionResult with one ADD diff containing a full valid MetricBinding body."""
+    entry = ReconciliationEntry(
+        decision=ReconciliationDecision.ADD,
+        target=_TARGET_METRIC,
+        proposal=Proposal(
+            target=_TARGET_METRIC,
+            op=ProposalOp.ADD,
+            content=_VALID_METRIC_BINDING_CONTENT,
             provenance=Provenance.INFERRED,
             confidence=1.0,
             anchored_to=["sha256:abc"],
@@ -543,6 +567,27 @@ class TestApplyEntry:
         source = load_semantic_source(target)
         assert source.meta.provenance is Provenance.HUMAN_CURATED
         assert source.meta.frozen is False
+
+    def test_curate_metric_binding_writes_human_curated_provenance(self, tmp_path: Path) -> None:
+        """Curating a metric-contract proposal sets top-level provenance, not meta.provenance.
+
+        Regression: MetricBinding has no nested ``meta`` (unlike SemanticSource), so curate
+        must not route contracts/metrics/*.yaml through load_semantic_source.
+        """
+        from canonic.config import scaffold_project
+        from canonic.contracts.loader import load_metric_binding
+
+        scaffold_project(tmp_path)
+        emission = _emission_with_valid_metric_binding()
+        run_dir = PendingDiffStore(tmp_path).write("run1", emission)
+        run = PendingRun.load(run_dir)
+
+        apply_entry(tmp_path, run, run.proposals[0], curate=True)
+
+        target = tmp_path / run.proposals[0].target
+        assert target.exists()
+        binding = load_metric_binding(target)
+        assert binding.provenance is Provenance.HUMAN_CURATED
 
     def test_curated_fact_flags_contradiction_on_reingest(self, tmp_path: Path) -> None:
         """S18: after curate, conflicting inferred evidence yields CONTRADICTION not EDIT."""

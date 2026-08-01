@@ -30,6 +30,7 @@ __all__ = [
     "load_assertions",
     "load_finality",
     "load_guardrails",
+    "load_metric_binding",
     "load_metric_bindings",
 ]
 
@@ -116,6 +117,11 @@ def load_metric_bindings(project_root: Path) -> list[MetricBinding]:
             seen_names[name] = path
 
     return [b for _, b in loaded]
+
+
+def load_metric_binding(path: Path) -> MetricBinding:
+    """Load and validate one ``contracts/metrics/*.yaml`` file, raising ContractError."""
+    return _load_one(path, MetricBinding)
 
 
 def load_guardrails(project_root: Path) -> list[Guardrail]:
