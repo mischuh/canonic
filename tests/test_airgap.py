@@ -7,8 +7,8 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from canonic.airgap import LOCAL_REF_SCHEMES, EgressPolicy, guard_telemetry
-from canonic.exc import AirGappedViolation, ErrorCode
+from canonic.airgap import LOCAL_REF_SCHEMES, EgressPolicy, guard_telemetry, guard_telemetry_send
+from canonic.exc import AirGappedViolation, ErrorCode, TelemetryNotConfigured
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -131,3 +131,46 @@ def test_guard_telemetry_passes_when_air_gapped_and_disabled() -> None:
 
 def test_guard_telemetry_passes_when_not_air_gapped_and_enabled() -> None:
     guard_telemetry(air_gapped=False, telemetry_enabled=True)  # no raise
+
+
+# --- guard_telemetry_send (SPEC-E16 §8/§12) ------------------------------------
+
+_SEND_KWARGS = {
+    "air_gapped": False,
+    "telemetry_enabled": True,
+    "endpoint": "https://collector.example.com/ingest",
+    "transport_acknowledged": True,
+}
+
+
+def test_guard_telemetry_send_passes_when_fully_authorized() -> None:
+    guard_telemetry_send(**_SEND_KWARGS)  # no raise
+
+
+def test_guard_telemetry_send_raises_air_gapped_violation_first() -> None:
+    with pytest.raises(AirGappedViolation) as exc:
+        guard_telemetry_send(**{**_SEND_KWARGS, "air_gapped": True})
+    assert exc.value.code is ErrorCode.AIR_GAPPED_VIOLATION
+    assert exc.value.exit_code == 18
+
+
+def test_guard_telemetry_send_raises_when_disabled() -> None:
+    with pytest.raises(TelemetryNotConfigured) as exc:
+        guard_telemetry_send(**{**_SEND_KWARGS, "telemetry_enabled": False})
+    assert exc.value.code is ErrorCode.TELEMETRY_NOT_CONFIGURED
+    assert exc.value.exit_code == 20
+    assert "enabled" in str(exc.value)
+
+
+def test_guard_telemetry_send_raises_when_no_endpoint() -> None:
+    with pytest.raises(TelemetryNotConfigured) as exc:
+        guard_telemetry_send(**{**_SEND_KWARGS, "endpoint": None})
+    assert exc.value.code is ErrorCode.TELEMETRY_NOT_CONFIGURED
+    assert "endpoint" in str(exc.value)
+
+
+def test_guard_telemetry_send_raises_when_not_acknowledged() -> None:
+    with pytest.raises(TelemetryNotConfigured) as exc:
+        guard_telemetry_send(**{**_SEND_KWARGS, "transport_acknowledged": False})
+    assert exc.value.code is ErrorCode.TELEMETRY_NOT_CONFIGURED
+    assert "transport_acknowledged" in str(exc.value)

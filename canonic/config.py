@@ -146,7 +146,36 @@ class EmbeddingConfig(BaseModel):
 
 
 class TelemetryConfig(BaseModel):
+    """Opt-in aggregate telemetry (SPEC-E16 §8/§12).
+
+    ``enabled`` alone does not cause anything to be sent: a real send additionally
+    requires ``endpoint`` and ``transport_acknowledged`` to be set (checked by
+    :func:`canonic.airgap.guard_telemetry_send`), and is forced off entirely under
+    ``runtime.air_gapped`` regardless of these fields.
+    """
+
     enabled: bool = False
+    endpoint: str | None = None
+    #: Human attestation that this project has reviewed the exact aggregate payload
+    #: (see ``canonic report --telemetry-preview``) before allowing a real send.
+    #: canonic cannot verify that a review actually happened — this is a project-level
+    #: policy decision recorded in canonic.yaml, not a technical guarantee.
+    transport_acknowledged: bool = False
+    auth_token_ref: str | None = None
+
+    @field_validator("endpoint")
+    @classmethod
+    def _validate_endpoint_scheme(cls, v: str | None) -> str | None:
+        if v is not None and not (v.startswith("http://") or v.startswith("https://")):
+            raise ValueError("telemetry.endpoint must start with http:// or https://")
+        return v
+
+    @field_validator("auth_token_ref")
+    @classmethod
+    def _reject_literal_auth_token(cls, v: str | None) -> str | None:
+        if v is not None and not _REF_PATTERN.match(v):
+            raise ValueError("must be a reference (env:…, keyring:…, file:…), not a literal secret")
+        return v
 
 
 class RuntimeConfig(BaseModel):

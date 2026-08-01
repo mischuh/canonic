@@ -53,9 +53,15 @@ The `reason_code` is an attribution safeguard: acting on the wrong cause corrupt
 
 ## Opt-in telemetry
 
-`canonic.yaml`'s `telemetry.enabled` flag defaults to `false`, and is forced off whenever `runtime.air_gapped: true` is set. No aggregate-telemetry transport is implemented yet, so nothing leaves the machine regardless of the setting — but the exact payload it would send is already fully defined and previewable locally, so there's nothing hidden to review before that lands.
+`canonic.yaml`'s `telemetry.enabled` flag defaults to `false`, and is forced off whenever `runtime.air_gapped: true` is set. In a freshly scaffolded project, or any project that hasn't explicitly configured telemetry, **nothing leaves the machine** — the transport exists in the code, but it refuses to send anything unless every one of the following is explicitly set in `canonic.yaml`:
 
-`canonic report --telemetry-preview` prints precisely that payload: counts, distributions, latency and bytes-scanned aggregates, the trust-calibration buckets, and (when available) accuracy/baseline numbers. It **never** includes `query_hash`, resolved bindings, SQL, `compiled_sql_hash`, freshness source names, or any other field that could re-identify a query or reveal warehouse/schema content — the same content-safety rule as the local log itself, applied one notch stricter since this payload is meant to leave the machine.
+- `telemetry.enabled: true`
+- `telemetry.endpoint` — the destination URL; there is no default, canonic never guesses one
+- `telemetry.transport_acknowledged: true` — an attestation that *your project* has reviewed the exact aggregate payload below and is comfortable sending it. canonic cannot verify that a review happened; this is a project-level policy decision, not a technical guarantee.
+
+Missing any of these (or being air-gapped) fails the send closed with a structured error — it never silently no-ops and never partially sends.
+
+`canonic report --telemetry-preview` prints precisely the payload that would be sent, without sending it, regardless of configuration: counts, distributions, latency and bytes-scanned aggregates, the trust-calibration buckets, and (when available) accuracy/baseline numbers. It **never** includes `query_hash`, resolved bindings, SQL, `compiled_sql_hash`, freshness source names, or any other field that could re-identify a query or reveal warehouse/schema content — the same content-safety rule as the local log itself, applied one notch stricter since this payload is meant to leave the machine. Use `canonic report --telemetry-send` to actually send that same payload once `enabled`, `endpoint`, and `transport_acknowledged` are all set.
 
 ## Accuracy harness: `canonic assert`
 

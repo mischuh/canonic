@@ -13,6 +13,8 @@
   "schema_mismatch": 12,
   "structured_output_invalid": 16,
   "structured_output_unsupported": 17,
+  "telemetry_not_configured": 20,
+  "telemetry_send_failed": 21,
   "unreachable": 4,
   "unresolved": 2,
   "unsupported_measure": 6,

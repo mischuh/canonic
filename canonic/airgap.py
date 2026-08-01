@@ -19,12 +19,12 @@ import socket
 from typing import TYPE_CHECKING
 from urllib.parse import urlsplit
 
-from canonic.exc import AirGappedViolation
+from canonic.exc import AirGappedViolation, TelemetryNotConfigured
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
-__all__ = ["LOCAL_REF_SCHEMES", "EgressPolicy", "guard_telemetry"]
+__all__ = ["LOCAL_REF_SCHEMES", "EgressPolicy", "guard_telemetry", "guard_telemetry_send"]
 
 #: Secret-reference schemes that resolve on-machine. A ``*_ref`` using any other scheme
 #: (e.g. a future ``vault:``/``https:`` remote secret service) is rejected under air-gapped.
@@ -46,6 +46,37 @@ def guard_telemetry(*, air_gapped: bool, telemetry_enabled: bool) -> None:
     if air_gapped and telemetry_enabled:
         raise AirGappedViolation(
             "air-gapped: telemetry.enabled must be false when runtime.air_gapped is true"
+        )
+
+
+def guard_telemetry_send(
+    *,
+    air_gapped: bool,
+    telemetry_enabled: bool,
+    endpoint: str | None,
+    transport_acknowledged: bool,
+) -> None:
+    """Raise if a real telemetry send is not fully authorized (SPEC-E16 §8/§12).
+
+    The single chokepoint for actually sending the aggregate telemetry payload. All four
+    conditions must hold: not air-gapped (delegated to :func:`guard_telemetry`, which is
+    the enforced privacy guarantee and takes priority), ``telemetry.enabled``,
+    ``telemetry.endpoint`` configured, and ``telemetry.transport_acknowledged`` set —
+    the last being a human attestation that the aggregate payload's privacy review has
+    happened, which canonic cannot verify on its own. Called both by the CLI before
+    building the payload and again inside the transport module itself, so a direct
+    import of the transport cannot bypass the gate.
+    """
+    guard_telemetry(air_gapped=air_gapped, telemetry_enabled=telemetry_enabled)
+    if not telemetry_enabled:
+        raise TelemetryNotConfigured("telemetry.enabled is false — nothing to send")
+    if not endpoint:
+        raise TelemetryNotConfigured("telemetry.endpoint is not configured")
+    if not transport_acknowledged:
+        raise TelemetryNotConfigured(
+            "telemetry.transport_acknowledged is false — set it only after reviewing the "
+            "exact aggregate payload (see `canonic report --telemetry-preview`); canonic "
+            "cannot verify that a review happened, this is a project-level attestation"
         )
 
 

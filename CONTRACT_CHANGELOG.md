@@ -30,6 +30,17 @@ CI (`.github/workflows/contract-schema-guard.yml`,
 
 ## History
 
+## 2.5 (2026-08-01) - MINOR
+
+- ADR/PR: this PR (feat(instrumentation): add opt-in telemetry transport)
+- Summary: Add `telemetry_not_configured` (exit 20) and `telemetry_send_failed`
+  (exit 21) to the canonical error registry, for `canonic report --telemetry-send`
+  (SPEC-E16 §8/§12). Additive: existing codes and exits are unchanged. Sending
+  remains gated behind `telemetry.enabled`, `telemetry.endpoint`, and
+  `telemetry.transport_acknowledged` all being explicitly set in `canonic.yaml`,
+  so `canonic report --telemetry-preview`'s output and content-safety guarantees
+  are unaffected.
+
 ## 2.4 (2026-07-30) - MINOR
 
 - ADR/PR: this PR (feat(compiler): enforce required_dimension guardrails and honor severity)

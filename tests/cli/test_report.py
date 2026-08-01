@@ -441,10 +441,70 @@ def test_telemetry_preview_json_content_safe(runner: CliRunner, project_dir: Pat
 
 
 def test_telemetry_preview_does_not_send_anything(runner: CliRunner, project_dir: Path) -> None:
-    """No network code exists yet; the preview must be purely local and side-effect-free."""
+    """--telemetry-preview must remain purely local and side-effect-free."""
     _write_events(project_dir / ".canonic", [_event()])
     before = (project_dir / ".canonic" / "events.jsonl").read_text()
     runner.invoke(app, ["report", "--telemetry-preview"])
+    after = (project_dir / ".canonic" / "events.jsonl").read_text()
+    assert before == after
+
+
+# ---------------------------------------------------------------------------
+# --telemetry-send
+# ---------------------------------------------------------------------------
+
+_CONFIG_WITH_TELEMETRY_AUTHORIZED = """\
+version: 1
+project:
+  name: test-project
+llm:
+  provider: openai_compatible
+  base_url: http://localhost:11434/v1
+  model: llama3
+telemetry:
+  enabled: true
+  endpoint: https://collector.example.com/ingest
+  transport_acknowledged: true
+"""
+
+
+def test_telemetry_preview_and_send_are_mutually_exclusive(
+    runner: CliRunner, project_dir: Path
+) -> None:
+    result = runner.invoke(app, ["report", "--telemetry-preview", "--telemetry-send"])
+    assert result.exit_code == 2
+    assert "mutually" in result.output
+    assert "exclusive" in result.output
+
+
+def test_telemetry_send_fails_closed_without_config(runner: CliRunner, project_dir: Path) -> None:
+    """Default project_dir config has telemetry disabled — send must refuse, not no-op silently."""
+    _write_events(project_dir / ".canonic", [_event()])
+    result = runner.invoke(app, ["report", "--telemetry-send"])
+    assert result.exit_code == 20
+
+
+def test_telemetry_send_calls_transport_and_leaves_log_untouched(
+    runner: CliRunner, project_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    (project_dir / "canonic.yaml").write_text(_CONFIG_WITH_TELEMETRY_AUTHORIZED)
+    _write_events(project_dir / ".canonic", [_event()])
+    before = (project_dir / ".canonic" / "events.jsonl").read_text()
+
+    calls: list[tuple[dict[str, Any], dict[str, Any]]] = []
+
+    async def fake_send_telemetry(payload: dict[str, Any], **kwargs: Any) -> None:
+        calls.append((payload, kwargs))
+
+    monkeypatch.setattr("canonic.cli.commands.report.send_telemetry", fake_send_telemetry)
+
+    result = runner.invoke(app, ["report", "--telemetry-send"])
+
+    assert result.exit_code == 0, result.output
+    assert len(calls) == 1
+    payload, kwargs = calls[0]
+    assert payload["schema_version"] == "1"
+    assert kwargs["endpoint"] == "https://collector.example.com/ingest"
     after = (project_dir / ".canonic" / "events.jsonl").read_text()
     assert before == after
 

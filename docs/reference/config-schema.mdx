@@ -14,7 +14,7 @@ description: "Every top-level field in the project config file, and what it gove
 | `connections` | `list[Connection]` | `[]` | Configured data sources; see [Connectors](/concepts/connectors). |
 | `llm` | `LLMConfig \| null` | `null` | LLM provider config; see [Configuring an LLM](/configuring-an-llm). |
 | `embeddings` | `EmbeddingConfig` | `model: all-MiniLM-L6-v2` | Local embedding model for knowledge vector search. |
-| `telemetry` | `TelemetryConfig` | `enabled: false` | Opt-in telemetry flag; see [Instrumentation & evaluation](/concepts/instrumentation-and-eval#opt-in-telemetry). |
+| `telemetry` | `TelemetryConfig` | `enabled: false` | Opt-in telemetry; see [below](#telemetry) and [Instrumentation & evaluation](/concepts/instrumentation-and-eval#opt-in-telemetry). |
 | `reconcile` | `ReconcileConfig` | propose-only | Auto-apply policy for ingestion; see [Ingestion & reconciliation](/concepts/ingestion-and-reconciliation#propose-only-by-default). |
 | `feedback` | `FeedbackConfig` | see [below](#feedback) | Pattern-gate and trust-cap thresholds for the E11 feedback loop; see [Feedback loop (E11)](/concepts/ingestion-and-reconciliation#feedback-loop-e11). |
 | `runtime` | `RuntimeConfig` | `air_gapped: false` | Air-gapped enforcement; see [LLM & embeddings runtime](/concepts/llm-runtime#air-gapped-mode--enforced-not-advisory). |
@@ -116,6 +116,25 @@ feedback:
 
 See [Feedback loop (E11)](/concepts/ingestion-and-reconciliation#feedback-loop-e11) for how these thresholds are used.
 
+## `telemetry`
+
+```yaml
+telemetry:
+  enabled: false
+  endpoint: null                    # e.g. https://collector.example.com/ingest
+  transport_acknowledged: false
+  auth_token_ref: null              # e.g. env:CANONIC_TELEMETRY_TOKEN
+```
+
+| Field | Type | Default | Governs |
+| --- | --- | --- | --- |
+| `enabled` | `bool` | `false` | Opt-in flag. Forced to `false` under `runtime.air_gapped: true` (load-time rejection, not just a no-op). |
+| `endpoint` | `str \| null` | `null` | Destination URL for `canonic report --telemetry-send`. Must start with `http://` or `https://` when set. No default — canonic never guesses a collector. |
+| `transport_acknowledged` | `bool` | `false` | Attestation that this project has reviewed the exact aggregate payload (`canonic report --telemetry-preview`) before allowing a real send. canonic cannot verify that a review happened; this is a project-level policy decision recorded in `canonic.yaml`. |
+| `auth_token_ref` | `str \| null` | `null` | Optional bearer token for `endpoint`, resolved the same way as `credentials_ref` (`env:`/`keyring:`/`file:`, never a literal). |
+
+`canonic report --telemetry-send` only sends when **all** of `enabled`, `endpoint`, and `transport_acknowledged` are set, and `runtime.air_gapped` is `false`. Missing any one of them fails closed with a structured error (`telemetry_not_configured`) — nothing is ever sent implicitly. See [Instrumentation & evaluation](/concepts/instrumentation-and-eval#opt-in-telemetry) for the full payload shape and content-safety guarantees.
+
 ## `runtime`
 
 ```yaml
@@ -129,7 +148,7 @@ runtime:
 | `air_gapped` | `bool` | `false` | Turns on the enforced privacy guarantee: every model endpoint must resolve locally or to an allowlisted range, and no context may leave the machine. This is checked at load time, not just documented behavior, so a misconfigured project refuses to start rather than silently phoning home. |
 | `allow_cidrs` | `list[str]` | `[]` | Additional private/LAN CIDR ranges to trust under `air_gapped`, for a setup where inference runs on a separate on-prem host rather than the local machine. Only consulted when `air_gapped` is `true`. By default, air-gapped mode trusts localhost only. |
 
-When `air_gapped: true`, load-time validation additionally rejects a public `llm.base_url`, `telemetry.enabled: true`, and any `credentials_ref`/`api_key_ref` using a non-local scheme. The check runs once, at config load, so there's no window where a project starts up in a state that could leak context off the machine.
+When `air_gapped: true`, load-time validation additionally rejects a public `llm.base_url`, `telemetry.enabled: true`, and any `credentials_ref`/`api_key_ref` using a non-local scheme. The check runs once, at config load, so there's no window where a project starts up in a state that could leak context off the machine. Telemetry has no allowlist path the way `llm.base_url` does via `allow_cidrs` — under `air_gapped`, it is hard off regardless of `telemetry.endpoint`/`transport_acknowledged`.
 
 ## `mcp`
 

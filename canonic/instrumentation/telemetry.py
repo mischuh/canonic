@@ -1,10 +1,12 @@
 """Opt-in aggregate telemetry payload (SPEC-E16 Part 2 §5).
 
-No transport exists yet — sending requires a privacy review of this exact payload
-(P1 spec §12 open question) that hasn't happened. This module defines precisely what
-*would* be sent so the shape is reviewable and previewable (``canonic report
---telemetry-preview``) ahead of any sending code, rather than being a black box that
-shows up only once telemetry is wired to a real endpoint.
+This module defines precisely what would be sent, independent of whether it actually
+is: see :mod:`canonic.instrumentation.telemetry_transport` for the transport itself,
+which only sends after ``telemetry.enabled``, ``telemetry.endpoint``, and
+``telemetry.transport_acknowledged`` are all explicitly set — the last being a
+project's own attestation that it has reviewed this exact payload shape, since canonic
+cannot verify that a privacy review happened. ``canonic report --telemetry-preview``
+lets you inspect the payload locally before deciding to acknowledge and send it.
 
 Every field here is a count, distribution, or latency/accuracy aggregate — never a
 query hash, resolved binding, SQL, ``compiled_sql_hash``, or freshness source name.

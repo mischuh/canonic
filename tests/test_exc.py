@@ -29,11 +29,13 @@ _REGISTRY: list[tuple[type[CanonicError], int]] = [
     (exc.StructuredOutputUnsupported, 17),
     (exc.AirGappedViolation, 18),
     (exc.RetriesExhausted, 19),
+    (exc.TelemetryNotConfigured, 20),
+    (exc.TelemetrySendError, 21),
 ]
 
 
 def test_every_error_code_has_a_unique_exit_value() -> None:
-    assert sorted(EXIT_CODES.values()) == list(range(2, 20))
+    assert sorted(EXIT_CODES.values()) == list(range(2, 22))
     assert set(EXIT_CODES) == set(ErrorCode)
 
 

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import contextlib
 import json
 from pathlib import Path  # noqa: TC003 — used in the --bundle typer.Option annotation (runtime)
@@ -15,9 +16,11 @@ if TYPE_CHECKING:
     from canonic.config import CanonicConfig
     from canonic.trust.models import TrustScore
 
+from canonic.airgap import guard_telemetry_send
 from canonic.cli._errors import get_cli_context, handle_errors
 from canonic.config import ConfigError, FeedbackConfig, find_project_root, load_config
 from canonic.core.service import CanonicService
+from canonic.credentials import resolve_credential
 from canonic.exc import ContractError
 from canonic.feedback.history import BindingOutcomeHistory
 from canonic.feedback.report import FeedbackReport, build_feedback_report
@@ -34,6 +37,7 @@ from canonic.instrumentation.report import (
     read_events,
 )
 from canonic.instrumentation.telemetry import build_telemetry_payload
+from canonic.instrumentation.telemetry_transport import send_telemetry
 from canonic.trust.models import TrustTier
 
 _console = Console(soft_wrap=True)
@@ -169,7 +173,17 @@ def report(
         typer.Option(
             "--telemetry-preview",
             help="Print exactly the aggregate payload opt-in telemetry would send, "
-            "without sending it (SPEC-E16 Part 2 §5).",
+            "without sending it (SPEC-E16 Part 2 §5). Use --telemetry-send to actually send.",
+        ),
+    ] = False,
+    telemetry_send: Annotated[
+        bool,
+        typer.Option(
+            "--telemetry-send",
+            help="Build and send the aggregate telemetry payload. Requires "
+            "telemetry.enabled, telemetry.endpoint, and telemetry.transport_acknowledged "
+            "all set in canonic.yaml, and fails closed otherwise — nothing is ever sent "
+            "implicitly.",
         ),
     ] = False,
     bundle: Annotated[
@@ -183,6 +197,9 @@ def report(
     ] = None,
 ) -> None:
     """Show event-log figures: counts, error distribution, latency, bytes scanned, and freshness."""
+    if telemetry_preview and telemetry_send:
+        raise typer.BadParameter("--telemetry-preview and --telemetry-send are mutually exclusive")
+
     json_output = get_cli_context(ctx).json_output
     root = find_project_root()
 
@@ -238,6 +255,38 @@ def report(
         _console.print(f"[bold]telemetry preview[/bold]  (telemetry: {status})")
         _console.print("this is exactly what would be sent — nothing is sent by this command")
         _console.print_json(json.dumps(payload))
+        return
+
+    if telemetry_send:
+        endpoint = cfg.telemetry.endpoint if cfg is not None else None
+        transport_acknowledged = cfg.telemetry.transport_acknowledged if cfg is not None else False
+        auth_token_ref = cfg.telemetry.auth_token_ref if cfg is not None else None
+        # Fail fast, before building/printing the payload, on any missing precondition.
+        guard_telemetry_send(
+            air_gapped=air_gapped,
+            telemetry_enabled=telemetry_enabled,
+            endpoint=endpoint,
+            transport_acknowledged=transport_acknowledged,
+        )
+        payload = build_telemetry_payload(rep, calibration, recurrence, funnel)
+        auth_token = resolve_credential(auth_token_ref) if auth_token_ref is not None else None
+        if not json_output:
+            _console.print("[bold]telemetry send[/bold]  sending this payload:")
+            _console.print_json(json.dumps(payload))
+        asyncio.run(
+            send_telemetry(
+                payload,
+                air_gapped=air_gapped,
+                telemetry_enabled=telemetry_enabled,
+                endpoint=endpoint,
+                transport_acknowledged=transport_acknowledged,
+                auth_token=auth_token,
+            )
+        )
+        if json_output:
+            typer.echo(json.dumps({"sent": True, "payload": payload}))
+        else:
+            _console.print("[green]sent[/green]")
         return
 
     trust_scores = _load_trust_scores(root)
