@@ -41,6 +41,11 @@ class ErrorCode(StrEnum):
     # Air-gapped egress guard (SPEC-E10 §4); raised at config load and before any model
     # call when air_gapped mode would allow context to leave the machine/network.
     AIR_GAPPED_VIOLATION = "air_gapped_violation"
+    # Opt-in telemetry transport (SPEC-E16 §8/§12); raised when a real send is attempted
+    # without all of enabled/endpoint/transport_acknowledged satisfied.
+    TELEMETRY_NOT_CONFIGURED = "telemetry_not_configured"
+    # The telemetry HTTP call itself failed (non-2xx, connection error, timeout).
+    TELEMETRY_SEND_FAILED = "telemetry_send_failed"
 
 
 EXIT_CODES: dict[ErrorCode, int] = {
@@ -62,6 +67,8 @@ EXIT_CODES: dict[ErrorCode, int] = {
     ErrorCode.STRUCTURED_OUTPUT_UNSUPPORTED: 17,
     ErrorCode.AIR_GAPPED_VIOLATION: 18,
     ErrorCode.RETRIES_EXHAUSTED: 19,
+    ErrorCode.TELEMETRY_NOT_CONFIGURED: 20,
+    ErrorCode.TELEMETRY_SEND_FAILED: 21,
 }
 
 
@@ -306,6 +313,29 @@ class AirGappedViolation(CanonicError):
     """
 
     code = ErrorCode.AIR_GAPPED_VIOLATION
+
+
+class TelemetryNotConfigured(CanonicError):
+    """Raised when a real telemetry send is attempted without full authorization.
+
+    A send requires all of: ``telemetry.enabled``, ``telemetry.endpoint`` configured,
+    and ``telemetry.transport_acknowledged`` set to true (in addition to not being
+    air-gapped, which raises :class:`AirGappedViolation` instead). Distinct from that
+    class because these are ordinary missing-configuration failures, not the enforced
+    air-gapped privacy guarantee.
+    """
+
+    code = ErrorCode.TELEMETRY_NOT_CONFIGURED
+
+
+class TelemetrySendError(CanonicError):
+    """Raised when the telemetry HTTP call itself fails (non-2xx, connection, timeout).
+
+    Exactly one attempt is made per send — no retry — so this is directly actionable
+    by re-running the triggering command.
+    """
+
+    code = ErrorCode.TELEMETRY_SEND_FAILED
 
 
 class EmbeddingUnavailable(CanonicError):
