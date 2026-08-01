@@ -258,6 +258,35 @@ def _enforce_guardrails(
     return _GuardrailEnforcement(conditions=conditions, fired=fired, warnings=warnings)
 
 
+def _guardrail_join_sources(
+    sources_and_measures: Sequence[tuple[str, str]],
+    resolver: ContractResolver,
+    context: str | None,
+    sources_by_name: dict[str, SemanticSource],
+    alias_to_source: dict[str, str],
+) -> set[str]:
+    """Aliases a matched ``mandatory_filter`` guardrail's predicate reaches via join.
+
+    Guardrails are enforced in Stage 6, after the join graph is planned in Stage 3. A
+    guardrail whose filter reaches a dimension declared on a joined source rather than
+    the metric's own source needs that source folded into the join plan up front, or the
+    condition ``_enforce_guardrails`` later emits references an alias with no
+    corresponding FROM/JOIN clause. Callers fold the result into the ``referenced`` set
+    before calling :func:`canonic.compiler.joins.plan_joins`.
+    """
+    referenced: set[str] = set()
+    seen: set[str] = set()
+    for source, measure_name in sources_and_measures:
+        for guardrail in resolver.guardrails_for(source, measure_name, context):
+            if not guardrail.filter or guardrail.id in seen:
+                continue
+            seen.add(guardrail.id)
+            parsed = _parse(guardrail.filter)
+            _, used = _qualify_columns(parsed, sources_by_name, source, alias_to_source)
+            referenced |= used
+    return referenced
+
+
 def _dimension_expr(source: str, dim: Dimension) -> exp.Expression:
     """Build the SELECT/GROUP-BY expression for a dimension (with time bucketing)."""
     col = exp.column(dim.column, table=source)

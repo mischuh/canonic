@@ -1,0 +1,70 @@
+name: fct_orders
+connection: warehouse_pg
+table: analytics.fct_orders
+description: One row per order. Refunds carry status = 'refunded'.
+grain:
+- order_id
+columns:
+- name: order_id
+  type: int
+  nullable: true
+- name: customer_id
+  type: int
+  nullable: true
+- name: channel_id
+  type: int
+  nullable: true
+- name: amount
+  type: decimal
+  nullable: true
+- name: status
+  type: string
+  nullable: true
+- name: created_at
+  type: timestamp
+  nullable: true
+measures:
+- name: total_revenue
+  expr: sum(amount)
+  additivity: additive
+  semi_additive_over: []
+- name: order_count
+  expr: count(order_id)
+  additivity: additive
+  semi_additive_over: []
+dimensions:
+- name: status
+  column: status
+  granularity:
+  label: Order Status
+  description: The status of the order (e.g., pending, shipped, refunded).
+  aliases: []
+- name: created_at
+  column: created_at
+  granularity:
+  label: Order Creation Time
+  description: The timestamp when the order was created.
+  aliases: []
+joins:
+- to: dim_customers
+  on: fct_orders.customer_id = dim_customers.customer_id
+  relationship: many_to_one
+  name:
+- to: dim_channels
+  on: fct_orders.channel_id = dim_channels.channel_id
+  relationship: many_to_one
+  name:
+- to: fct_order_items
+  on: fct_orders.order_id = fct_order_items.order_id
+  relationship: many_to_one
+  name:
+filters: []
+segments: []
+finality:
+  watermark:
+meta:
+  provenance: human_curated
+  source_fingerprint: 
+    sha256:f6e966e6684682645ad618ee1d87351d8e06d4fa0c654db854e5acaa22f7fc95
+  last_validated_at: '2026-08-01T17:21:19.152180Z'
+  frozen: false

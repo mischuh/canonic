@@ -38,6 +38,7 @@ from canonic.compiler._helpers import (
     _freshness,
     _from_and_joins,
     _func,
+    _guardrail_join_sources,
     _measure_expr,
     _population_filter_conditions,
     _resolve_dimensions,
@@ -101,6 +102,13 @@ def _plan_leaf(
     )
     referenced |= filter_sources
     referenced |= {source_name}
+    referenced |= _guardrail_join_sources(
+        [(source_name, component.measure)],
+        resolver,
+        query.context,
+        sources_by_name,
+        alias_to_source,
+    )
 
     # Stage 3 — join graph from this component's owner.
     join_edges = plan_joins(

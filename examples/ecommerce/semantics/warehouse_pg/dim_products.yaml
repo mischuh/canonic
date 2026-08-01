@@ -1,0 +1,58 @@
+name: dim_products
+connection: warehouse_pg
+table: analytics.dim_products
+description: One row per product in the catalog.
+grain:
+- product_id
+columns:
+- name: product_id
+  type: int
+  nullable: true
+- name: name
+  type: string
+  nullable: true
+- name: category
+  type: string
+  nullable: true
+- name: unit_price
+  type: decimal
+  nullable: true
+measures:
+- name: row_count
+  expr: count(*)
+  additivity: additive
+  semi_additive_over: []
+- name: total_unit_price
+  expr: sum(unit_price)
+  additivity: additive
+  semi_additive_over: []
+dimensions:
+- name: name
+  column: name
+  granularity:
+  label: Product Name
+  description: The name of the product.
+  aliases: []
+- name: category
+  column: category
+  granularity:
+  label: Product Category
+  description: The category of the product (e.g., electronics, clothing, home goods).
+  aliases:
+  - product_type
+  - type
+joins:
+- to: fct_order_items
+  on: dim_products.product_id = fct_order_items.product_id
+  relationship: many_to_one
+  name:
+filters: []
+segments: []
+finality:
+  watermark:
+meta:
+  provenance: human_curated
+  source_fingerprint: 
+    sha256:3082942db71a9d7d5e29ec74d2be26eaa01ecc56b8762307fee05f98c338fa16
+  last_validated_at: '2026-08-01T17:21:19.152180Z'
+  frozen: false

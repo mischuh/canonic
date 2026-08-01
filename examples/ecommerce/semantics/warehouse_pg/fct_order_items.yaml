@@ -1,0 +1,55 @@
+name: fct_order_items
+connection: warehouse_pg
+table: analytics.fct_order_items
+description: One row per product line within an order. Joins up to orders and products.
+grain:
+- order_item_id
+columns:
+- name: order_item_id
+  type: int
+  nullable: true
+- name: order_id
+  type: int
+  nullable: true
+- name: product_id
+  type: int
+  nullable: true
+- name: quantity
+  type: int
+  nullable: true
+- name: line_amount
+  type: decimal
+  nullable: true
+measures:
+- name: line_revenue
+  expr: sum(line_amount)
+  additivity: additive
+  semi_additive_over: []
+- name: units_sold
+  expr: sum(quantity)
+  additivity: additive
+  semi_additive_over: []
+dimensions: []
+joins:
+- to: fct_orders
+  on: fct_order_items.order_id = fct_orders.order_id
+  relationship: many_to_one
+  name: order
+- to: dim_products
+  on: fct_order_items.product_id = dim_products.product_id
+  relationship: many_to_one
+  name:
+- to: fct_orders
+  on: fct_order_items.order_item_id = fct_orders.order_id
+  relationship: many_to_one
+  name: order_item
+filters: []
+segments: []
+finality:
+  watermark:
+meta:
+  provenance: human_curated
+  source_fingerprint: 
+    sha256:e62f388dfde2f99156745c8d927107cff9579e4c910c9efd4d12c37d4369adef
+  last_validated_at: '2026-08-01T17:21:19.152180Z'
+  frozen: false

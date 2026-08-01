@@ -1,0 +1,12 @@
+id: units-sold-2025-q1
+query:
+  metrics: [units_sold]
+  filters: ["order_date >= '2025-01-01'", "order_date < '2025-04-01'"]
+expect:
+  rows: 1
+  values:
+    units_sold: 33
+source_of_truth: >
+  Seed data: line-item quantities for completed+pending orders in 2025-Q1, refunds excluded
+  (units-sold-excludes-refunds guardrail, mirroring revenue-excludes-refunds at the line-item
+  grain). Non-refunded orders: 3+3+3+4+6+6+7+1 = 33 units.

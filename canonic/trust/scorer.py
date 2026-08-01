@@ -17,6 +17,7 @@ if TYPE_CHECKING:
 
     from canonic.compiler.result import CompileResult
     from canonic.connectors.base import ResultSet
+    from canonic.feedback.assertion_history import AssertionHistory
     from canonic.feedback.history import BindingOutcomeHistory
 
 __all__ = ["TrustScorer", "trust_for_compiled"]
@@ -61,6 +62,7 @@ def trust_for_compiled(
     *,
     outcome_history: BindingOutcomeHistory | None = None,
     outcome_window_days: int = _DEFAULT_OUTCOME_WINDOW_DAYS,
+    assertion_history: AssertionHistory | None = None,
 ) -> TrustScore:
     """Compute the trust tier for a compiled query (SPEC-E14 §3, §6).
 
@@ -72,6 +74,10 @@ def trust_for_compiled(
     ``outcome_history`` folds in E11's dynamic outcome signal (SPEC-E11 §5) — a recent
     confirmed-``wrong_definition`` caps the affected binding at ``caution``. Omitting it
     (the default) leaves trust scoring exactly as it was before E11: static signals only.
+
+    ``assertion_history`` folds in E16 Phase 2's assertion signal (SPEC-E14 §5) — a
+    metric with a persisted, passing ``canonic assert`` verdict can reach ``trusted``;
+    omitting it leaves every metric capped at ``provisional``, as before E16 Phase 2.
     """
     final_rows: int | None = None
     provisional_rows: int | None = None
@@ -82,7 +88,7 @@ def trust_for_compiled(
             final_rows = sum(1 for row in result.rows if row[idx])
             provisional_rows = len(result.rows) - final_rows
     signals = [
-        *static_signals_for(compiled.trust_inputs),
+        *static_signals_for(compiled.trust_inputs, assertion_history),
         finality_signal(final_rows, provisional_rows),
         freshness_signal(compiled.freshness),
     ]

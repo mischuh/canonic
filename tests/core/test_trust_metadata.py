@@ -7,6 +7,7 @@ from typing import Any
 
 from canonic.compiler.result import CompileResult, TrustInput
 from canonic.core.models import QueryMetadata
+from canonic.feedback.assertion_history import AssertionHistory, AssertionRecord
 from canonic.feedback.history import BindingOutcomeHistory
 from canonic.instrumentation.models import AnswerEvent, AnswerOutcomeEvent
 
@@ -158,3 +159,69 @@ class TestOutcomeHistorySignal:
         )
         assert meta.trust_score is not None
         assert "outcome: confirmed-wrong" not in meta.trust_score.reasons
+
+
+class TestAssertionHistorySignal:
+    """SPEC-E14 §5 "+ E16 Phase 2": a benchmarked, passing metric can reach trusted; a
+    failing one is capped at caution; the pre-E16-Phase-2 default is unchanged."""
+
+    def _compiled(self) -> CompileResult:
+        return _make_compile_result(
+            [
+                TrustInput(
+                    metric="revenue",
+                    provenance="human_curated",
+                    has_assertion=True,
+                    binding="orders.total_revenue",
+                )
+            ]
+        )
+
+    def test_passing_assertion_reaches_trusted(self) -> None:
+        history = AssertionHistory(
+            {
+                "orders.total_revenue": AssertionRecord(
+                    ts=_ts(0), assertion_id="revenue-q1", passed=True
+                )
+            }
+        )
+        meta = QueryMetadata.from_compile_result(self._compiled(), assertion_history=history)
+        assert meta.trust_score is not None
+        assert meta.trust_score.tier == "trusted"
+        assert meta.trust_score.reasons == []
+
+    def test_failing_assertion_caps_caution(self) -> None:
+        history = AssertionHistory(
+            {
+                "orders.total_revenue": AssertionRecord(
+                    ts=_ts(0), assertion_id="revenue-q1", passed=False
+                )
+            }
+        )
+        meta = QueryMetadata.from_compile_result(self._compiled(), assertion_history=history)
+        assert meta.trust_score is not None
+        assert meta.trust_score.tier == "caution"
+        assert any("revenue-q1" in r for r in meta.trust_score.reasons)
+
+    def test_no_assertion_history_leaves_scoring_provisional(self) -> None:
+        """Omitting assertion_history is fully backward compatible — pre-E16-Phase-2 default."""
+        meta = QueryMetadata.from_compile_result(self._compiled())
+        assert meta.trust_score is not None
+        assert meta.trust_score.tier == "provisional"
+
+    def test_failing_assertion_outranks_a_passing_outcome_history(self) -> None:
+        """Worst-signal-dominates across signal *sources*, not just within one (SPEC-E14 §3)."""
+        assertion_history = AssertionHistory(
+            {
+                "orders.total_revenue": AssertionRecord(
+                    ts=_ts(0), assertion_id="revenue-q1", passed=False
+                )
+            }
+        )
+        meta = QueryMetadata.from_compile_result(
+            self._compiled(),
+            outcome_history=_history(reason_code="wrong_data"),
+            assertion_history=assertion_history,
+        )
+        assert meta.trust_score is not None
+        assert meta.trust_score.tier == "caution"

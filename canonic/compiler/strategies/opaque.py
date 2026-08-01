@@ -29,6 +29,7 @@ from canonic.compiler._helpers import (
     _find_measure,
     _freshness,
     _from_and_joins,
+    _guardrail_join_sources,
     _measure_expr,
     _population_filter_conditions,
     _resolve_dimensions,
@@ -64,6 +65,13 @@ def _compile_opaque(
         query.filters, sources_by_name, source_name, alias_to_source
     )
     referenced = {alias for alias, _ in dimensions} | filter_sources | {source_name}
+    referenced |= _guardrail_join_sources(
+        [(source_name, binding.measure)],
+        resolver,
+        query.context,
+        sources_by_name,
+        alias_to_source,
+    )
 
     # Stage 3 — join graph.
     join_edges = plan_joins(

@@ -6,6 +6,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from canonic.compiler.result import SourceFreshness, TrustInput
+from canonic.feedback.assertion_history import AssertionHistory, AssertionRecord
 from canonic.feedback.history import BindingOutcomeHistory
 from canonic.instrumentation.models import AnswerEvent, AnswerOutcomeEvent
 from canonic.semantic.models import Provenance
@@ -42,7 +43,8 @@ class TestProvenanceSignal:
 
 
 class TestAssertionSignal:
-    """S3 AC1: an untested metric is provisional, never trusted."""
+    """S3 AC1 + SPEC-E14 §5 "+ E16 Phase 2": untested stays provisional; a benchmarked,
+    passing metric can reach trusted; a failing one is capped at caution."""
 
     def test_no_assertion_caps_provisional_with_untested_reason(self) -> None:
         verdict = assertion_signal(
@@ -51,13 +53,76 @@ class TestAssertionSignal:
         assert verdict.cap is TrustTier.PROVISIONAL
         assert "untested" in (verdict.reason or "")
 
-    def test_assertion_present_still_caps_provisional_pending_e16(self) -> None:
-        """v1 has no pass/fail harness (E16); an authored assertion cannot yet earn trusted."""
+    def test_assertion_present_no_history_caps_provisional_unverified(self) -> None:
+        """No AssertionHistory supplied — same behavior as before E16 Phase 2."""
         verdict = assertion_signal(
             TrustInput(metric="m", provenance="human_curated", has_assertion=True)
         )
         assert verdict.cap is TrustTier.PROVISIONAL
         assert "unverified" in (verdict.reason or "")
+
+    def test_assertion_present_binding_not_in_history_caps_provisional_unverified(self) -> None:
+        """Assertion authored, but this binding was never harnessed (or dropped since)."""
+        history = AssertionHistory(
+            {"orders.order_count": AssertionRecord(ts=_ts(0), assertion_id="oc", passed=True)}
+        )
+        verdict = assertion_signal(
+            TrustInput(
+                metric="revenue",
+                provenance="human_curated",
+                has_assertion=True,
+                binding="orders.total_revenue",
+            ),
+            history,
+        )
+        assert verdict.cap is TrustTier.PROVISIONAL
+        assert "unverified" in (verdict.reason or "")
+
+    def test_no_binding_caps_provisional_unverified_even_with_history(self) -> None:
+        """Composite metrics have no single binding to join against (binding=None)."""
+        history = AssertionHistory(
+            {"orders.total_revenue": AssertionRecord(ts=_ts(0), assertion_id="r", passed=True)}
+        )
+        verdict = assertion_signal(
+            TrustInput(metric="margin", provenance="human_curated", has_assertion=True), history
+        )
+        assert verdict.cap is TrustTier.PROVISIONAL
+        assert "unverified" in (verdict.reason or "")
+
+    def test_recorded_passing_verdict_is_inactive(self) -> None:
+        """A benchmarked, passing metric's assertion signal no longer caps it — trusted
+        is reachable if nothing else caps the tier (SPEC-E14 §5)."""
+        history = AssertionHistory(
+            {"orders.total_revenue": AssertionRecord(ts=_ts(0), assertion_id="r", passed=True)}
+        )
+        verdict = assertion_signal(
+            TrustInput(
+                metric="revenue",
+                provenance="human_curated",
+                has_assertion=True,
+                binding="orders.total_revenue",
+            ),
+            history,
+        )
+        assert verdict.cap is None
+
+    def test_recorded_failing_verdict_caps_caution(self) -> None:
+        """SPEC-E14 §7 AC1: a failing assertion caps the tier at caution."""
+        history = AssertionHistory(
+            {"orders.total_revenue": AssertionRecord(ts=_ts(0), assertion_id="r", passed=False)}
+        )
+        verdict = assertion_signal(
+            TrustInput(
+                metric="revenue",
+                provenance="human_curated",
+                has_assertion=True,
+                binding="orders.total_revenue",
+            ),
+            history,
+        )
+        assert verdict.cap is TrustTier.CAUTION
+        assert "failed" in (verdict.reason or "")
+        assert "r" in (verdict.reason or "")
 
 
 class TestStaticSignalsFor:
@@ -68,6 +133,22 @@ class TestStaticSignalsFor:
         ]
         signals = static_signals_for(inputs)
         assert len(signals) == 4
+
+    def test_threads_assertion_history_through_to_each_metric(self) -> None:
+        history = AssertionHistory(
+            {"orders.total_revenue": AssertionRecord(ts=_ts(0), assertion_id="r", passed=True)}
+        )
+        inputs = [
+            TrustInput(
+                metric="revenue",
+                provenance="human_curated",
+                has_assertion=True,
+                binding="orders.total_revenue",
+            )
+        ]
+        signals = static_signals_for(inputs, history)
+        # provenance (inactive, human_curated) + assertion (inactive, recorded pass).
+        assert all(s.cap is None for s in signals)
 
 
 class TestFinalitySignal:

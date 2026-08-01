@@ -17,6 +17,8 @@ from canonic.core.service import CanonicService
 from canonic.exc import AssertionFailed
 
 if TYPE_CHECKING:
+    from pathlib import Path
+
     from canonic.semantic.models import SemanticSource
 
 
@@ -63,6 +65,8 @@ def _service(
     assertions: list[Assertion],
     result: ResultSet,
     monkeypatch: pytest.MonkeyPatch,
+    *,
+    project_root: Path | None = None,
 ) -> CanonicService:
     monkeypatch.setenv("PG_PASSWORD", "pw")
     monkeypatch.setattr(
@@ -78,7 +82,9 @@ def _service(
         guardrails=[],
         assertions=assertions,
     )
-    return CanonicService(config=_config(), resolver=resolver, sources=[orders_source])
+    return CanonicService(
+        config=_config(), resolver=resolver, sources=[orders_source], project_root=project_root
+    )
 
 
 def _revenue_result(value: object) -> ResultSet:
@@ -166,6 +172,37 @@ class TestAccuracyHarness:
         assert report.total == 1
         assert report.accuracy == 1.0
 
+    async def test_persists_per_binding_results_to_project_state(
+        self, orders_source: SemanticSource, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """SPEC-E14 §5 "+ E16 Phase 2": a harness run's verdicts land in .canonic/assertions.json
+        so canonic query's trust scoring can read them back at serve time."""
+        from canonic.feedback.assertion_history import AssertionHistory
+
+        svc = _service(
+            orders_source,
+            [_assertion(100.0)],
+            _revenue_result(Decimal("100.0")),
+            monkeypatch,
+            project_root=tmp_path,
+        )
+        await svc.run_accuracy_harness()
+        assert (tmp_path / ".canonic" / "assertions.json").exists()
+        history = AssertionHistory.from_project(tmp_path)
+        record = history.status_for("orders.total_revenue")
+        assert record is not None
+        assert record.passed is True
+        assert record.assertion_id == "revenue-2025-q1"
+
+    async def test_no_project_root_skips_persistence_without_error(
+        self, orders_source: SemanticSource, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        svc = _service(
+            orders_source, [_assertion(100.0)], _revenue_result(Decimal("100.0")), monkeypatch
+        )
+        report = await svc.run_accuracy_harness()
+        assert report.accuracy == 1.0
+
 
 class TestAccuracyBaseline:
     async def test_lift_is_measurable_over_schema_only_resolver(
@@ -209,6 +246,21 @@ class TestAccuracyBaseline:
         )
         baseline = await svc.run_accuracy_baseline()
         assert baseline.total == 1
+
+    async def test_does_not_persist_to_project_state(
+        self, orders_source: SemanticSource, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """A schema-only baseline run is not a canonical result — must not be trusted at
+        serve time (SPEC-E16 Part 2 §2)."""
+        svc = _service(
+            orders_source,
+            [_assertion(100.0)],
+            _revenue_result(Decimal("100.0")),
+            monkeypatch,
+            project_root=tmp_path,
+        )
+        await svc.run_accuracy_baseline()
+        assert not (tmp_path / ".canonic" / "assertions.json").exists()
 
 
 class TestHarnessGate:
