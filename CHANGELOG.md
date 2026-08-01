@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.16.0](https://github.com/mischuh/canonic/compare/v0.15.1...v0.16.0) (2026-08-01)
+
+
+### Features
+
+* **instrumentation:** add gated telemetry transport ([#275](https://github.com/mischuh/canonic/issues/275)) ([f5516bb](https://github.com/mischuh/canonic/commit/f5516bb5efbc617e1a80e855723421dff8c9d44d))
+
+
+### Bug Fixes
+
+* **ingestion:** route contracts/metrics curate through MetricBinding, not SemanticSource ([#277](https://github.com/mischuh/canonic/issues/277)) ([773a090](https://github.com/mischuh/canonic/commit/773a090707295101a4b0ac4ef793510ba228296a))
+
 ## [0.15.1](https://github.com/mischuh/canonic/compare/v0.15.0...v0.15.1) (2026-08-01)
 
 
