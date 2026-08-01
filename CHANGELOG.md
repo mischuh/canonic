@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.15.1](https://github.com/mischuh/canonic/compare/v0.15.0...v0.15.1) (2026-08-01)
+
+
+### Documentation
+
+* **examples:** refresh ecommerce example and add offline Notion evidence demo ([#273](https://github.com/mischuh/canonic/issues/273)) ([60b6f90](https://github.com/mischuh/canonic/commit/60b6f903d4fbc8b634265b07d00ee1b1f55e9d44))
+* **readme:** slim to a repo card, link out to docs.getcanonic.app ([#272](https://github.com/mischuh/canonic/issues/272)) ([cd93834](https://github.com/mischuh/canonic/commit/cd93834fffc27c99509e055e9a3b008be8868d8b))
+
 ## [0.15.0](https://github.com/mischuh/canonic/compare/v0.14.1...v0.15.0) (2026-07-31)
 
 
