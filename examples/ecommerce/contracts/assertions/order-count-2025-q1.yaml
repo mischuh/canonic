@@ -1,0 +1,9 @@
+id: order-count-2025-q1
+query:
+  metrics: [order_count]
+  filters: ["order_date >= '2025-01-01'", "order_date < '2025-04-01'"]
+expect:
+  rows: 1
+  values:
+    order_count: 10
+source_of_truth: "Seed data: all 10 orders (completed, pending, and refunded) in 2025-Q1. order_count has no refund-exclusion guardrail, unlike revenue."

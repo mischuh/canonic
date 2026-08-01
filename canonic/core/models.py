@@ -23,6 +23,7 @@ from canonic.trust.scorer import trust_for_compiled
 
 if TYPE_CHECKING:
     from canonic.compiler.result import CompileResult
+    from canonic.feedback.assertion_history import AssertionHistory
     from canonic.feedback.history import BindingOutcomeHistory
 
 __all__ = [
@@ -224,6 +225,7 @@ class QueryMetadata(BaseModel):
         *,
         outcome_history: BindingOutcomeHistory | None = None,
         outcome_window_days: int = 90,
+        assertion_history: AssertionHistory | None = None,
     ) -> QueryMetadata:
         """Project a :class:`CompileResult` onto the §2.2 metadata shape.
 
@@ -233,7 +235,8 @@ class QueryMetadata(BaseModel):
         static signals (provenance, assertion coverage) apply regardless of ``result``,
         while the finality/freshness signals only activate once row-level data is known.
         ``outcome_history`` folds in E11's dynamic outcome-history signal (SPEC-E11 §5);
-        omitting it leaves trust scoring static-only, as before E11.
+        ``assertion_history`` folds in E16 Phase 2's persisted assertion signal
+        (SPEC-E14 §5); omitting either leaves trust scoring as it was before that signal.
         """
         final_rows: int | None = None
         provisional_rows: int | None = None
@@ -256,6 +259,7 @@ class QueryMetadata(BaseModel):
             result,
             outcome_history=outcome_history,
             outcome_window_days=outcome_window_days,
+            assertion_history=assertion_history,
         )
         return cls(
             resolved={"metrics": dict(compiled.resolved)},
@@ -303,6 +307,7 @@ class QueryResult(BaseModel):
         *,
         outcome_history: BindingOutcomeHistory | None = None,
         outcome_window_days: int = 90,
+        assertion_history: AssertionHistory | None = None,
     ) -> QueryResult:
         """Merge the compiler output and the executed result set (no field renamed)."""
         return cls(
@@ -313,6 +318,7 @@ class QueryResult(BaseModel):
                 result=result,
                 outcome_history=outcome_history,
                 outcome_window_days=outcome_window_days,
+                assertion_history=assertion_history,
             ),
         )
 

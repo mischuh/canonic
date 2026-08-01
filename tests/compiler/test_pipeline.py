@@ -129,6 +129,72 @@ def test_s2_mandatory_filter_warn_severity_still_injects_and_warns(
     assert result.guardrails_fired[0].severity == "warn"
 
 
+def test_s2_mandatory_filter_crosses_join_with_no_other_reference(
+    customers: SemanticSource,
+) -> None:
+    """A guardrail filter reaching a dimension only declared on a joined source must still
+    fold that source into the join plan, even when nothing else in the query touches it
+    (no dimension, no user filter) — regression for join planning (stage 3) running before
+    guardrail enforcement (stage 6): the guardrail-qualified condition would otherwise
+    reference an alias with no corresponding FROM/JOIN clause."""
+    from canonic.semantic.models import Join, Relationship
+
+    orders = SemanticSource(
+        name="orders",
+        connection="warehouse_pg",
+        table="analytics.fct_orders",
+        grain=["order_id"],
+        columns=[
+            Column(name="order_id", type="string", nullable=False),
+            Column(name="status", type="string", nullable=False),
+        ],
+        dimensions=[Dimension(name="status", column="status")],
+    )
+    order_items = SemanticSource(
+        name="order_items",
+        connection="warehouse_pg",
+        table="analytics.fct_order_items",
+        grain=["item_id"],
+        columns=[
+            Column(name="item_id", type="string", nullable=False),
+            Column(name="order_id", type="string", nullable=False),
+            Column(name="quantity", type="int", nullable=False),
+        ],
+        measures=[Measure(name="units_sold", expr="sum(quantity)", additivity="additive")],
+        joins=[
+            Join(
+                to="orders",
+                on="order_items.order_id = orders.order_id",
+                relationship=Relationship.MANY_TO_ONE,
+            ),
+        ],
+    )
+    guardrail = Guardrail(
+        id="units-sold-excludes-refunds",
+        applies_to=AppliesTo(source="order_items", measure="units_sold"),
+        kind=GuardrailKind.MANDATORY_FILTER,
+        filter="status != 'refunded'",
+        severity=Severity.ERROR,
+        rationale="Line items on a refunded order were never really sold.",
+    )
+    units_resolver = ContractResolver(
+        bindings=[
+            MetricBinding(
+                metric="units_sold",
+                canonical=CanonicalRef(source="order_items", measure="units_sold"),
+            )
+        ],
+        guardrails=[guardrail],
+    )
+    result = compile(
+        SemanticQuery(metrics=["units_sold"]), units_resolver, [order_items, orders, customers]
+    )
+    _parse_ok(result.sql)
+    assert "JOIN" in result.sql.upper()
+    assert "<> 'refunded'" in result.sql
+    assert [g.id for g in result.guardrails_fired] == ["units-sold-excludes-refunds"]
+
+
 # --- S3: fanout handling ----------------------------------------------------
 
 

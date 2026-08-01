@@ -39,6 +39,7 @@ from canonic.compiler._helpers import (
     _find_measure,
     _find_time_dim_name,
     _freshness,
+    _guardrail_join_sources,
     _parse,
     _population_filter_conditions,
     _resolve_dimensions,
@@ -117,6 +118,13 @@ def _compile_simple_additive(
     )
     referenced |= filter_sources
     referenced |= {owner}
+    referenced |= _guardrail_join_sources(
+        [(m.source, m.measure.name) for m in metrics],
+        resolver,
+        query.context,
+        sources_by_name,
+        alias_to_source,
+    )
 
     # Stage 3 — plan the join graph from the owner to every referenced alias.
     logger.debug("stage 3: planning join graph")
@@ -350,6 +358,13 @@ def _plan_metric_group(
     )
     referenced |= filter_sources
     referenced |= {owner}
+    referenced |= _guardrail_join_sources(
+        [(m.source, m.measure.name) for m in metrics],
+        resolver,
+        query.context,
+        sources_by_name,
+        alias_to_source,
+    )
 
     join_edges = plan_joins(
         owner, referenced - {owner}, sources_by_name, via=list(query.via) or None

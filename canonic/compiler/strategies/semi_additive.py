@@ -35,6 +35,7 @@ from canonic.compiler._helpers import (
     _freshness,
     _from_and_joins,
     _func,
+    _guardrail_join_sources,
     _input_columns,
     _measure_expr,
     _parse,
@@ -78,6 +79,13 @@ def _compile_semi_additive(
     )
     referenced |= filter_sources
     referenced |= {source_name}
+    referenced |= _guardrail_join_sources(
+        [(source_name, binding.measure)],
+        resolver,
+        query.context,
+        sources_by_name,
+        alias_to_source,
+    )
 
     # Stage 3 — join graph.
     join_edges = plan_joins(

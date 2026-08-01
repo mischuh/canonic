@@ -13,6 +13,7 @@ from canonic.connectors.base import Capability, require_capability
 from canonic.contract import CONTRACT_SCHEMA
 from canonic.core.models import QueryResult
 from canonic.exc import CanonicError
+from canonic.feedback.assertion_history import AssertionHistory
 from canonic.feedback.history import BindingOutcomeHistory
 from canonic.instrumentation.models import AnswerEvent, _age_days, _sha256_json
 from canonic.log import query_id_var
@@ -76,6 +77,7 @@ class QueryService:
         result: ResultSet | None = None
         error_code: str | None = None
         outcome_history: BindingOutcomeHistory | None = None
+        assertion_history: AssertionHistory | None = None
         qid_token = query_id_var.set(uuid.uuid4().hex[:8])
         logger.info(
             "query received: metrics=%s dimensions=%d",
@@ -99,11 +101,13 @@ class QueryService:
                 )
             result = await self._ctx.execute(compiled.sql, connection_id)
             outcome_history = self._load_outcome_history()
+            assertion_history = self._load_assertion_history()
             query_result = QueryResult.from_parts(
                 compiled,
                 result,
                 outcome_history=outcome_history,
                 outcome_window_days=self._ctx.config.feedback.trust_cap_window_days,
+                assertion_history=assertion_history,
             )
             await self._assertions.check_query_assertions(query, harness=harness)
             return query_result
@@ -122,6 +126,7 @@ class QueryService:
                 latency_ms,
                 error_code,
                 outcome_history,
+                assertion_history,
                 caller=caller,
             )
             query_id_var.reset(qid_token)
@@ -136,6 +141,17 @@ class QueryService:
         if self._ctx.project_root is None:
             return None
         return BindingOutcomeHistory.from_project(self._ctx.project_root)
+
+    def _load_assertion_history(self) -> AssertionHistory | None:
+        """Load the current per-binding assertion-harness snapshot, or None with no project root.
+
+        Read fresh on every call, same rationale as :meth:`_load_outcome_history`: a
+        long-lived daemon reflects a ``canonic assert`` run between queries without a
+        restart (SPEC-E14 §5, "+ E16 Phase 2").
+        """
+        if self._ctx.project_root is None:
+            return None
+        return AssertionHistory.from_project(self._ctx.project_root)
 
     async def run_sql(
         self, sql: str, connection: str | None = None, *, caller: str | None = None
@@ -175,6 +191,7 @@ class QueryService:
         latency_ms: int,
         error_code: str | None,
         outcome_history: BindingOutcomeHistory | None = None,
+        assertion_history: AssertionHistory | None = None,
         *,
         caller: str | None = None,
     ) -> None:
@@ -212,6 +229,7 @@ class QueryService:
                     result,
                     outcome_history=outcome_history,
                     outcome_window_days=self._ctx.config.feedback.trust_cap_window_days,
+                    assertion_history=assertion_history,
                 ).tier.value
                 if compiled is not None
                 else None,

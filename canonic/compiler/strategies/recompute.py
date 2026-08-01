@@ -34,6 +34,7 @@ from canonic.compiler._helpers import (
     _freshness,
     _from_and_joins,
     _func,
+    _guardrail_join_sources,
     _parse,
     _population_filter_conditions,
     _qualify_to,
@@ -75,6 +76,26 @@ def _compile_recompute_at_grain(
     referenced |= filter_sources
     referenced |= {source_name}
 
+    # Resolve the referenced column to (alias, physical_column) ahead of join planning:
+    # guardrail matching below keys on this physical name (see _make_synthetic_measure).
+    col_name = rg.distinct_on if rg.kind is BindingKind.DISTINCT_COUNT else rg.column
+    assert col_name is not None  # noqa: S101 — enforced by model_validator
+    col_binding = _bind_name(col_name, sources_by_name, source_name, alias_to_source)
+    if col_binding is None:
+        raise UnreachableError(
+            f"metric {queried_name!r}: {'distinct_on' if rg.kind is BindingKind.DISTINCT_COUNT else 'column'} "
+            f"{col_name!r} is not declared on source {source_name!r} or any reachable join"
+        )
+    col_alias, col_phys = col_binding
+
+    referenced |= _guardrail_join_sources(
+        [(source_name, col_phys)],
+        resolver,
+        query.context,
+        sources_by_name,
+        alias_to_source,
+    )
+
     # Stage 3 — join graph.
     join_edges = plan_joins(
         source_name, referenced - {source_name}, sources_by_name, via=list(query.via) or None
@@ -90,17 +111,6 @@ def _compile_recompute_at_grain(
         )
     # distinct_count tolerates fanout: DISTINCT deduplicates multiplied rows; LEFT joins
     # (the only kind the compiler emits) do not change the population over which DISTINCT counts.
-
-    # Resolve the referenced column to (alias, physical_column).
-    col_name = rg.distinct_on if rg.kind is BindingKind.DISTINCT_COUNT else rg.column
-    assert col_name is not None  # noqa: S101 — enforced by model_validator
-    col_binding = _bind_name(col_name, sources_by_name, source_name, alias_to_source)
-    if col_binding is None:
-        raise UnreachableError(
-            f"metric {queried_name!r}: {'distinct_on' if rg.kind is BindingKind.DISTINCT_COUNT else 'column'} "
-            f"{col_name!r} is not declared on source {source_name!r} or any reachable join"
-        )
-    col_alias, col_phys = col_binding
 
     # population_filter — defines the population this metric is compiled over (§4.5); before guardrails.
     where_conditions += _population_filter_conditions(

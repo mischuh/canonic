@@ -35,6 +35,8 @@ class AssertionService:
         used by :meth:`run_accuracy_baseline` (SPEC-E16 Part 2 §2) to compile the same query
         against raw schema instead of canon's bindings.
         """
+        import dataclasses
+
         from canonic.contracts.assertions import assertion_to_query, match_result
 
         sq = assertion_to_query(assertion)
@@ -45,7 +47,8 @@ class AssertionService:
             connection_dialects=self._ctx.connection_dialects,
         )
         result = await self._ctx.execute(compiled.sql, self._ctx.connection_for_sql(compiled))
-        return match_result(assertion, result, resolved=compiled.resolved)
+        outcome = match_result(assertion, result, resolved=compiled.resolved)
+        return dataclasses.replace(outcome, bindings=tuple(compiled.resolved.values()))
 
     async def check_assertions(
         self, assertions: list[Assertion] | None = None
@@ -76,10 +79,21 @@ class AssertionService:
         ``accuracy = passed / total``. Outcomes preserve load order, so the same assertion set
         yields the same number every run — the property that makes a regression detectable. The
         report never raises on a mismatch; the CI gate decides what a sub-target number means.
+
+        Persists the per-binding pass/fail snapshot to ``.canonic/assertions.json`` (E16
+        Phase 2, SPEC-E14 §5) when a project root is available, so trust scoring can read a
+        benchmarked metric back at serve time — see
+        :func:`canonic.feedback.assertion_history.write_assertion_results`. Skipped for
+        :meth:`run_accuracy_baseline`, which compiles against a schema-only resolver and is
+        not a canonical run.
         """
         from canonic.contracts.assertions import accuracy_report
+        from canonic.feedback.assertion_history import write_assertion_results
 
-        return accuracy_report(await self.check_assertions(assertions))
+        outcomes = await self.check_assertions(assertions)
+        if self._ctx.project_root is not None:
+            write_assertion_results(self._ctx.project_root, outcomes)
+        return accuracy_report(outcomes)
 
     async def run_accuracy_baseline(
         self, assertions: list[Assertion] | None = None

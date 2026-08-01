@@ -33,12 +33,17 @@ class AssertionOutcome:
     """The result of evaluating one assertion against an executed query result.
 
     ``detail`` is empty when ``passed`` is ``True``; otherwise it is a human-readable
-    diff (the message carried by ``ASSERTION_FAILED``).
+    diff (the message carried by ``ASSERTION_FAILED``). ``bindings`` is the resolved
+    ``"source.measure"`` set the assertion's query touched (empty when the caller — e.g.
+    ``match_result`` in isolation — has no compiled binding to attach); the E16 accuracy
+    harness uses it to join a pass/fail result back to the trust-score join key
+    (SPEC-E14 §5, "+ E16 Phase 2").
     """
 
     assertion_id: str
     passed: bool
     detail: str = ""
+    bindings: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)

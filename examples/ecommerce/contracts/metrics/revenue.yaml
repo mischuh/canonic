@@ -1,7 +1,22 @@
 metric: revenue
+owner:
 canonical:
+  kind: single
   source: orders
   measure: total_revenue
 provenance: human_curated
-aliases: ["net revenue", "rev"]
+label:
+aliases:
+- net revenue
+- rev
+examples:
+- query:
+    metrics:
+    - revenue
+    dimensions: []
+    filters:
+    - order_date >= '2025-01-01'
+    - order_date < '2025-04-01'
+  origin: assertion:revenue-2025-q1
+  frequency:
 status: active

@@ -1,0 +1,8 @@
+id: units-sold-excludes-refunds
+applies_to:
+  source: order_items
+  measure: units_sold
+kind: mandatory_filter
+filter: "status != 'refunded'"
+severity: error
+rationale: "Line items on a refunded order were never really sold. status lives on orders, reached via order_items's join, so this mirrors revenue-excludes-refunds at the line-item grain."
