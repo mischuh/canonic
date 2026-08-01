@@ -18,10 +18,13 @@ connections:
   # E3 definition connector: a compiled dbt manifest.json. No live database, no
   # execution — Canonic parses the manifest into modeling-tier evidence (measures,
   # joins, grain) that outranks raw Postgres introspection during reconciliation.
+  # target_connection names the physical connection these models describe, so its
+  # evidence reconciles against warehouse_pg's sources instead of proposing independent ones.
   - id: warehouse_dbt
     type: dbt
     params:
       manifest_path: dbt/manifest.json   # relative to this canonic.yaml
+      target_connection: warehouse_pg
 
 llm:
   provider: openai_compatible
