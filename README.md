@@ -1,105 +1,63 @@
 # canonic
 
 [![CI](https://github.com/mischuh/canonic/actions/workflows/ci.yml/badge.svg)](https://github.com/mischuh/canonic/actions/workflows/ci.yml)
+[![PyPI](https://img.shields.io/pypi/v/canonic)](https://pypi.org/project/canonic/)
+[![License](https://img.shields.io/badge/license-BUSL--1.1-blue)](LICENSE.md)
 
 **The context layer that lets AI agents query your data correctly.**
 
-Point canonic at your database and it builds the context an agent needs to answer data questions accurately — definitions, relationships, business meaning, and the guardrails that stop confidently-wrong answers. It keeps that context up to date as your data changes, and it never touches your warehouse beyond reading it.
+Point canonic at your database and it builds the context an agent needs to answer data questions accurately: definitions, relationships, business meaning, and the guardrails that stop confidently-wrong answers. It keeps that context up to date as your data changes, and it never touches your warehouse beyond reading it.
+
+📖 Full documentation: **https://docs.getcanonic.app**
 
 > Package and image names below show the shape of each install channel; exact names are confirmed per release.
 
----
-
 ## The problem
 
-An AI agent connected straight to your warehouse sees **tables and columns** — not **meaning**. It doesn't know that `revenue` lives in `orders.amount` but excludes refunds, that "active customer" has a specific definition your finance team agreed on, or that summing a daily balance across a week is nonsense. So it guesses. The result is the worst kind of wrong: a confident, well-formatted, *incorrect* number that looks right.
+An AI agent connected straight to your warehouse sees **tables and columns**, not **meaning**. It doesn't know that `revenue` lives in `orders.amount` but excludes refunds, or that "active customer" has a specific definition your finance team agreed on. So it guesses. Schema access makes an agent *fluent*. It doesn't make it *correct*.
 
-Schema access makes an agent *fluent*. It doesn't make it *correct*.
+Real output, captured from a live run against the [ecommerce example](examples/ecommerce):
 
-**❌ Without canonic (the guess):**
+```bash
+$ canonic sql "SELECT SUM(amount) FROM fct_orders"
+┏━━━━━━━━━┓
+┃ sum     ┃
+┡━━━━━━━━━┩
+│ 4050.50 │
+└─────────┘
 ```
-Agent query: SELECT SUM(amount) FROM orders;
-Result: $1,450,320
+This total includes two refunded orders ($260), a confident, well-formatted number that's off by 6.4%.
 
-The sum includes refunded orders and sales tax, making the number wrong
-by 12%. The agent delivers a confident, well-formatted, and completely
-incorrect metric.
+```bash
+$ canonic --json query --metrics revenue
+{
+  "result": { "rows": [["3790.50"]] },
+  "compiled": {
+    "sql": "SELECT SUM(\"orders\".\"amount\") AS \"total_revenue\" FROM \"fct_orders\" AS \"orders\" WHERE \"orders\".\"status\" <> 'refunded'"
+  },
+  "metadata": {
+    "guardrails_fired": [{ "id": "revenue-excludes-refunds", "kind": "mandatory_filter" }]
+  }
+}
 ```
 
-**✅ With canonic (the truth):**
-```
-Agent request: "Give me revenue"
-Canonic compiles: SELECT SUM(amount) FROM orders
-                  WHERE status = 'completed' AND type != 'tax';
-Result: $1,274,500 [certified fresh, excludes refunds and tax]
+canonic resolves "revenue" to its canonical definition, compiles the guardrail into the SQL whether or not anyone asked for it, and returns the right number with the reasoning attached.
 
-The agent gets the exact right number, with the business logic and
-caveats baked in — and it knows the data freshness and which
-guardrails applied. Zero guessing.
-```
-
-## What canonic does
-
-canonic sits between your data and your agents as a **context layer**: an auto-built, auto-maintained, version-controlled description of what your data *means* and how to query it *safely*. Agents ask for a metric by name; canonic resolves it to the canonical definition, compiles correct read-only SQL, runs it, and returns the answer **with the caveats that make it trustworthy** — how fresh the data is, which guardrails applied, whether the number is final or provisional.
-
-When canonic isn't sure, it **refuses and asks** instead of guessing. A confidently-wrong answer is the one outcome it's built to never produce.
-
----
-
-## Why canonic, not something else
-
-| Instead of… | You get… | canonic gives you… |
-| --- | --- | --- |
-| Giving the agent raw schema/SQL access | Fluency without correctness — it guesses definitions and picks wrong tables | Resolved canonical definitions, enforced guardrails, never a silent wrong number |
-| Hand-building a semantic layer from scratch | Months of modeling before any value | Context auto-drafted from your live schema on day one; you review, not author from zero |
-| Migrating onto a new metrics platform | Lock-in and a rebuild | canonic **ingests** your dbt / BI tools / docs — it feeds your existing stack, it doesn't replace it |
-| A hosted "AI analytics" SaaS | Your data and definitions leaving your environment | Local-first, fully **air-gapped-capable** — nothing has to leave your machine |
-
-What makes it different in one line: **canonic builds the context for you, keeps it honest, and refuses to lie when it isn't sure.**
-
----
+canonic is not a BI tool and not a chat interface: it's the layer that feeds the tools you already have (a BI dashboard, an agent, a notebook) correct, governed answers.
 
 ## The three layers
 
-canonic's context lives in three committed surfaces — plain files in your git repo, reviewed like code. Each answers a different question.
+canonic's context lives in three committed surfaces: plain files in your git repo, reviewed like code.
 
 | Layer | File | Answers | Owned by |
 | --- | --- | --- | --- |
-| **Semantics** | `semantics/**/*.yaml` | "How do I query this safely?" — tables, types, grains, joins, measures | auto-maintained |
-| **Knowledge** | `knowledge/**/*.md` | "What does this mean to the business?" — definitions, caveats, policies | auto-maintained |
+| **Semantics** | `semantics/**/*.yaml` | "How do I query this safely?" | auto-maintained |
+| **Knowledge** | `knowledge/**/*.md` | "What does this mean to the business?" | auto-maintained |
 | **Contracts** | `contracts/**/*.yaml` | "Which definition is canonical, and what must the answer obey?" | human-owned |
 
-**The split rule:**
-- Changes how the SQL *runs* → **semantics**.
-- A human needs it to *trust* the answer → **knowledge**.
-- Governs *which* definition is authoritative or *what an answer must satisfy* → **contracts**.
-
-The key idea: a knowledge page *explains* why "amount includes refunds unless filtered." A contract *makes the SQL obey* it. Documented caveats become enforced guardrails — so the warning can't be silently ignored.
-
----
-
-## Out of the box vs. a bit more effort
-
-**Works immediately, zero modeling:**
-- Connect a database (SQLite or Postgres) and canonic introspects the live schema.
-- It auto-drafts semantics — typed columns, primary-key grains, foreign-key joins, and additive measures (sums, counts).
-- The setup wizard ends by **answering a real question from your data**, so you see the payoff in minutes.
-- Connect your agent over MCP and start asking.
-
-**A bit more manual effort (when you need it):**
-- **Canonical bindings** — when two sources define "revenue" differently, you pick the authoritative one. canonic surfaces the ambiguity; you resolve it once.
-- **Knowledge prose** — the business "why" behind a definition; canonic drafts it, you refine it.
-- **Guardrails & contracts** — mandatory filters, required dimensions, final-vs-provisional rules. Added when a number needs protecting.
-- **Non-additive metrics** — ratios, averages, distinct counts, balances. Declared as composable definitions so they stay correct at any grain.
-- **More sources** — dbt / Metabase / Notion / web pages, layered on as context evidence. The connector contract is extensible, so a Confluence, Jira, or other wiki/knowledge-base connector can be added the same way.
-
-The design principle throughout: **canonic proposes, you approve.** It never silently edits your context — every change is a reviewable diff.
-
----
+Changes how the SQL *runs* → semantics. A human needs it to *trust* the answer → knowledge. Governs *which* definition is authoritative → contracts. See [Concepts: the three layers](https://docs.getcanonic.app/concepts/three-layers).
 
 ## Install
-
-> canonic ships as one distributable (CLI + local daemon). Local embeddings are an optional add-on.
 
 **uv** (dev machines, primary):
 ```bash
@@ -117,234 +75,75 @@ pip install canonic
 docker pull ghcr.io/mischuh/canonic:latest
 ```
 
-**Offline / air-gapped install** — no outbound network calls during install:
-```bash
-uv pip install --no-index --find-links ./wheels canonic
-```
+Verify with `canonic --version`. Air-gapped install and offline wheels: see [Installation](https://docs.getcanonic.app/installation).
 
-Verify:
-```bash
-canonic --version
-```
+## Quickstart
 
----
+The fastest path uses local connectors, no server, no network. Point at a SQLite `.db` or DuckDB `.duckdb`/CSV/Parquet file:
 
-## Quickstart — your first answer in minutes
-
-The fastest path uses **local connectors** — no server, no network. Pick either SQLite or DuckDB:
-
-**SQLite** — a local `.db` file:
 ```bash
 canonic setup
-# Point at a .db file when prompted
-```
-
-**DuckDB** — a local `.duckdb` file or data files (CSV/Parquet/JSON):
-```bash
-canonic setup
-# Point at a .duckdb file, or let it read a CSV/Parquet directly
 ```
 
 ![canonic setup end-to-end on the vehicle rental example](https://raw.githubusercontent.com/mischuh/canonic/main/docs/demo_canonic_setup.gif)
 
-The wizard walks you through:
-1. **Name** your project.
-2. **Connect** a source — SQLite/DuckDB file, or Postgres if you have a server.
-3. **Configure an LLM** — optional, and skippable. The core works without one.
-4. **Bootstrap** — canonic introspects the schema and drafts your semantics.
-5. **First answer** — the wizard runs a real query against your data and shows the result, plus how fresh it is and which definition it used.
+The wizard names your project, connects a source, optionally configures an LLM, drafts your semantics from the live schema, then runs a real query and shows the answer with its freshness and definition. Postgres or an LLM provider need a credential in an environment variable *before* you run `canonic setup` (canonic never stores secrets in `canonic.yaml` directly).
 
-Don't have a database handy? `examples/` ships 5 ready-to-run sample projects — dbt Jaffle Shop, e-commerce, vehicle rental, SaaS analytics, and Dutch railway — a good way to try the wizard before pointing it at your own data. See the [guides](https://docs.getcanonic.app/guides/jaffle-shop) for the walkthrough behind each one, e.g. [vehicle rental](https://docs.getcanonic.app/guides/rental).
+Don't have a database handy? `examples/` ships 5 ready-to-run sample projects (dbt Jaffle Shop, e-commerce, vehicle rental, SaaS analytics, Dutch railway), see the [guides](https://docs.getcanonic.app/guides/jaffle-shop).
 
-You now have a working context layer committed to your repo. Ask your own questions:
+You now have a working context layer committed to your repo:
 ```bash
-canonic query --metrics revenue --dimensions order_date
-canonic query --metrics revenue --filter "status=paid"
+canonic overview                                           # what's askable
+canonic query --metrics revenue --dimensions order_date    # ask it
+canonic review && canonic status                           # review what it drafted
 ```
-
-For a query with more filters or joins than is comfortable inline, write a `SemanticQuery` JSON file and pass it with `-f` instead — see [`canonic query`](https://docs.getcanonic.app/cli-reference/query-sql-assert) for the full flag reference.
-
-> `canonic knowledge search "<question>"` runs hybrid search over `knowledge/**/*.md`: lexical (BM25) always, plus a vector arm when the optional `canonic[embeddings]` add-on is installed — see [CLI reference: knowledge](https://docs.getcanonic.app/cli-reference/knowledge). `canonic knowledge add <url>` (fetch-and-write a page) works today too.
-
-Review what canonic drafted when you're ready — it's all an ordinary git diff:
-```bash
-canonic review
-canonic status        # always tells you the best next step
-```
-
----
-
-## Configuring an LLM
-
-An LLM is **optional** — canonic's answer path is fully deterministic and never calls one. It's only used to *draft* semantics/knowledge during setup and reconciliation. The `llm:` block in `canonic.yaml` supports four providers, all behind the same interface:
-
-**`openai_compatible`** — local runtimes (Ollama, vLLM, LM Studio, llama.cpp, TGI) or any hosted OpenAI-compatible endpoint. `base_url` is required; a key is optional (local servers typically need none):
-```yaml
-llm:
-  provider: openai_compatible
-  base_url: http://127.0.0.1:11434/v1   # Ollama; swap for any OpenAI-compatible endpoint
-  model: gemma-4-e2b-it-4bit
-  api_key_ref: env:CANONIC_LLM_API_KEY   # optional
-```
-
-**`anthropic`** — Claude, called directly. No `base_url` needed; `api_key_ref` is required:
-```yaml
-llm:
-  provider: anthropic
-  model: claude-opus-4-8
-  api_key_ref: env:ANTHROPIC_API_KEY
-```
-
-**`openai`** — OpenAI's hosted API directly (not a self-hosted/compatible endpoint). No `base_url` needed; `api_key_ref` is required:
-```yaml
-llm:
-  provider: openai
-  model: gpt-4o
-  api_key_ref: env:OPENAI_API_KEY
-```
-
-**`github_copilot`** — routed through your GitHub Copilot subscription. No `base_url`, and **no `api_key_ref`** — authentication is a one-time device-code flow (a browser prompt on first use); the resulting credential is cached on disk and reused after that:
-```yaml
-llm:
-  provider: github_copilot
-  model: gpt-4.1
-```
-> Structured/schema-constrained output (used for drafting) isn't honored by every model Copilot proxies — Claude and most GPT models silently return prose instead of JSON. Stick to a model litellm marks as schema-capable for this provider (`gpt-4.1`, `gpt-5`, `gpt-5.1`, `gpt-5.2`) if you hit `structured_output_unsupported`.
-
-All four are reached through [litellm](https://github.com/BerriAI/litellm) behind one interface — no per-provider branching anywhere else in canonic. `tasks:` optionally overrides the model per task (`draft`, `reconcile`):
-```yaml
-llm:
-  provider: anthropic
-  model: claude-haiku-4-5
-  api_key_ref: env:ANTHROPIC_API_KEY
-  tasks:
-    reconcile: claude-opus-4-8   # a harder task gets a stronger model
-```
-
-Under `runtime.air_gapped: true`, only a local endpoint (loopback, or an allowlisted host via `runtime.allow_cidrs`) is accepted — `openai`, `anthropic`, and `github_copilot` all call a fixed public endpoint and are rejected outright in that mode.
-
----
 
 ## Connect your agent (MCP)
 
-canonic exposes its capabilities to agent clients through a **local, on-demand MCP server** — no always-on hosted service. Verified with **Claude Code, Cursor, and Codex**.
+canonic exposes its capabilities over a local, on-demand MCP server, verified with **Claude Code, Cursor, and Codex**:
 
-**1. Start the daemon** (binds locally; reads your committed context):
 ```bash
 canonic mcp start
-canonic mcp status
 ```
 
-**2. Register canonic in your client's MCP config.** MCP clients typically spawn the server with an arbitrary working directory (not your project folder), so pass `--project` explicitly rather than relying on cwd detection:
-```json
-{
-  "mcpServers": {
-    "canonic": {
-      "command": "canonic",
-      "args": ["mcp", "start", "--project", "/absolute/path/to/your/project"]
-    }
-  }
-}
-```
-If canonic isn't installed globally (see [Install](#install)), point the client at `uvx` instead so it fetches canonic on demand:
 ```json
 {
   "mcpServers": {
     "canonic": {
       "command": "uvx",
-      "args": ["canonic", "mcp", "start", "--project", "/absolute/path/to/your/project"]
-    }
-  }
-}
-```
-Pin a version (`"args": ["canonic==0.5.1", "mcp", "start", ...]`) if you want reproducible daemon versions instead of always resolving the latest release from PyPI.
-
-(See the per-client docs for the exact config location — Claude Code, Cursor, and Codex each load standard MCP configuration.)
-
-**Environment variables for credentials.** If a connection's `credentials_ref` points at `env:SOME_VAR` (e.g. a database password), that variable must be readable by the spawned `canonic` process. GUI-launched MCP clients (Claude Desktop, Cursor, etc.) start the process with a minimal environment — they do **not** source your shell profile (`~/.zshrc`, `~/.bash_profile`) — so an `export` that works in your terminal will not reach the daemon. Pass the variable explicitly via the config's `env` field instead:
-```json
-{
-  "mcpServers": {
-    "canonic": {
-      "command": "canonic",
-      "args": ["mcp", "start", "--project", "/absolute/path/to/your/project"],
-      "env": {
-        "CANONIC_PG_PASSWORD": "your-password-here"
-      }
-    }
-  }
-}
-```
-A missing or empty variable surfaces as an `internal_error` at query time, not at startup — if you see one, check the connection's `credentials_ref` in `canonic.yaml` and confirm the named variable is set in the MCP config's `env` block.
-
-**Follow-up suggestions.** Add `--suggestions` to `mcp start` to have `query` responses include a `metadata.related` field — unused dimensions on the resolved metric and sibling metrics on the same source — so the agent can see what else is queryable without an extra `describe_metric` round trip. Off by default; descriptive only (no ranking or recommendation), same additive pattern as `guardrails_fired`/`freshness`.
-```json
-{
-  "mcpServers": {
-    "canonic": {
-      "command": "canonic",
-      "args": ["mcp", "start", "--project", "/absolute/path/to/your/project", "--suggestions"]
+      "args": [
+        "canonic",
+        "mcp",
+        "start",
+        "--project",
+        "/path/to/canonic/examples/rental",
+        "--suggestions"
+      ]
     }
   }
 }
 ```
 
-If you started the daemon with `--transport http` instead (a background daemon on a fixed host/port, useful when the client can't spawn a process), it requires a bearer token since it's network-reachable — configure `mcp.auth.tokens` in `canonic.yaml` or pass `--token-ref`:
-```bash
-canonic mcp start --transport http --host 127.0.0.1 --port 7474 --token-ref env:CANONIC_MCP_TOKEN
-```
-Point your client at the HTTP endpoint with the matching token:
-```json
-{
-  "mcpServers": {
-    "canonic": {
-      "url": "http://127.0.0.1:7474/mcp",
-      "headers": {
-        "Authorization": "Bearer your-token-here"
-      }
-    }
-  }
-}
-```
-Adjust host/port to match the flags used to start the daemon — see [`canonic mcp`](https://docs.getcanonic.app/cli-reference/mcp) for the full flag reference.
+GUI-launched clients (Claude Desktop, Cursor) don't source your shell profile, so pass connection credentials via the config's `env` field, not `export`. Every answer-producing tool of the 11 registered (`query`, `run_sql`, `search_knowledge`, ...) returns a metadata band: resolved definition, guardrails fired, freshness, `trust_score`. On ambiguity, the agent gets a structured reason, not a guess.
 
-**3. Your agent now has these tools** ([full reference](https://docs.getcanonic.app/mcp-integration/tools-reference)):
-
-| Tool | What the agent does with it |
-| --- | --- |
-| `contract_info` | check the serving contract version at session start |
-| `negotiate_contract` | declare the contract-schema major version the client expects |
-| `get_overview` | recommended first call — active metrics grouped by domain with sample questions |
-| `list_metrics` | discover what it can ask for |
-| `describe_metric` | grain, dimensions, owning source, freshness |
-| `resolve_metric` | check a name resolves; surface ambiguity instead of guessing |
-| `compile_query` | get the SQL + metadata without running it |
-| `query` | the main path — answer a question, with caveats attached |
-| `run_sql` | read-only SQL escape hatch |
-| `search_knowledge` | find knowledge and definitions by text |
-| `read_knowledge_page` | read a full knowledge page to relay its explanation |
-
-Every answer comes back with the **metadata band** — resolved definition, guardrails fired, freshness, final/provisional — so the agent can caveat honestly. On ambiguity or a blocked guardrail, the tool returns the candidates or the rationale, and the agent **asks** rather than fabricates.
-
----
+See [Connecting your agent](https://docs.getcanonic.app/mcp-integration/connecting-your-agent) for remote/enterprise deployment (`--transport http`, per-client bearer tokens) and the [tools reference](https://docs.getcanonic.app/mcp-integration/tools-reference).
 
 ## What you can rely on
 
-- **Read-only.** canonic never mutates your warehouse. It reads, it never writes back.
-- **Propose-only.** It never silently edits your context — every change is a reviewable diff anchored to evidence.
-- **Refuse-and-ask.** Ambiguous or unsafe? It returns a structured reason, not a guess.
-- **No LLM in the answer path.** Queries compile deterministically — the same question always produces the same SQL. An LLM only helps *draft* context, never *compute* an answer.
-- **Local-first & air-gapped-capable.** Run entirely on your machine with a local model and local embeddings; nothing has to leave your network.
-- **Measurable.** A local event log tracks accuracy, freshness, and answer quality — so "trustworthy" is something you can check, not just claim.
+- **Read-only.** canonic never mutates your warehouse.
+- **Propose-only, refuse-and-ask.** Every change is a reviewable diff; ambiguous or unsafe answers get a structured reason, not a guess.
+- **No LLM in the answer path.** Queries compile deterministically. An LLM is optional and only *drafts* context during setup, four providers supported (Anthropic, OpenAI, any OpenAI-compatible endpoint, GitHub Copilot), see [Configuring an LLM](https://docs.getcanonic.app/configuring-an-llm).
+- **Local-first & air-gapped-capable.** Run entirely on your machine; nothing has to leave your network.
 
----
+## Documentation
 
-## Where to go next
+- **[Quickstart](https://docs.getcanonic.app/quickstart)**: first answer in minutes.
+- **[Concepts](https://docs.getcanonic.app/concepts/three-layers)**: the three layers and the split rule.
+- **[CLI reference](https://docs.getcanonic.app/cli-reference/overview)**: every command, flag by flag.
+- **[MCP / agent integration](https://docs.getcanonic.app/mcp-integration/connecting-your-agent)**: wiring canonic into Claude Code, Cursor, Codex, or any MCP client.
+- **[Guides](https://docs.getcanonic.app/guides/jaffle-shop)**: 5 ready-to-run example projects.
+- **[Reference](https://docs.getcanonic.app/reference/error-codes)**: error codes and the full `canonic.yaml` config schema.
 
-- **[Concepts](https://docs.getcanonic.app/concepts/three-layers)** — the three layers and the split rule (the one mental model worth learning first).
-- **[CLI reference](https://docs.getcanonic.app/cli-reference/overview)** — every command, flag by flag.
-- **[MCP / agent integration](https://docs.getcanonic.app/mcp-integration/connecting-your-agent)** — wiring canonic into Claude Code, Cursor, Codex, or any MCP client.
-- **[Guides](https://docs.getcanonic.app/guides/jaffle-shop)** — 5 ready-to-run example projects: [Jaffle Shop](https://docs.getcanonic.app/guides/jaffle-shop), [e-commerce](https://docs.getcanonic.app/guides/ecommerce), [vehicle rental](https://docs.getcanonic.app/guides/rental), [SaaS analytics](https://docs.getcanonic.app/guides/saas-analytics), [Dutch railway](https://docs.getcanonic.app/guides/dutch-railway).
-- **[Reference](https://docs.getcanonic.app/reference/error-codes)** — error codes and the full `canonic.yaml` config schema.
+## License
 
-canonic is local-first, git-native, and read-only by design. Start with a SQLite file and one question; grow into the full context layer as your needs do.
+[Business Source License 1.1](LICENSE.md).
