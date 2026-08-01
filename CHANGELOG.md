@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.17.0](https://github.com/mischuh/canonic/compare/v0.16.0...v0.17.0) (2026-08-01)
+
+
+### Features
+
+* **trust:** persist assertion results so metrics can reach trusted ([#278](https://github.com/mischuh/canonic/issues/278)) ([e26e057](https://github.com/mischuh/canonic/commit/e26e057a34c64786d8699a2342cd3be6428b280e))
+
 ## [0.16.0](https://github.com/mischuh/canonic/compare/v0.15.1...v0.16.0) (2026-08-01)
 
 
