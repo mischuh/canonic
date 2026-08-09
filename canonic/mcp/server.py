@@ -23,7 +23,7 @@ from canonic.core.models import CompileOutput
 from canonic.mcp.errors import canonic_error_response
 
 if TYPE_CHECKING:
-    from fastmcp.server.auth.auth import TokenVerifier
+    from fastmcp.server.auth.auth import AuthProvider
 
     from canonic.core.service import CanonicService
 
@@ -109,13 +109,15 @@ def _format_suggestions(related: dict[str, Any]) -> str | None:
 
 
 def build_server(
-    service: CanonicService, *, suggestions: bool = False, auth: TokenVerifier | None = None
+    service: CanonicService, *, suggestions: bool = False, auth: AuthProvider | None = None
 ) -> FastMCP:
     """Return a :class:`FastMCP` instance with all P0 tools registered against *service*.
 
     ``auth`` is ``None`` for ``stdio`` transport (no auth layer). ``http`` transport
-    always passes a resolved :class:`~canonic.mcp.auth.CanonicTokenVerifier` — see
-    ``canonic.mcp.daemon.start_http``.
+    always passes a resolved auth provider — a bearer-token
+    :class:`~canonic.mcp.auth.CanonicTokenVerifier`, an OAuth provider, or a
+    :class:`~canonic.mcp.auth.CanonicCompositeVerifier` of both — see
+    ``canonic.mcp.auth.build_mcp_auth`` and ``canonic.mcp.daemon.start_http``.
     """
     mcp: FastMCP = FastMCP(
         "canonic", version=CANONIC_VERSION, instructions=_INSTRUCTIONS, auth=auth

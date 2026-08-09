@@ -40,6 +40,33 @@ canonic mcp start                                              # serve: agents c
 
 `canonic status`, `canonic ingest --bootstrap`, `canonic query`, and `canonic mcp start` never call the LLM: every table here has a declared primary key, so grain is inferred deterministically. `CANONIC_LLM_API_KEY` and `llm:` in `canonic.yaml` only matter for low-confidence grain-drafting on schemas with undeclared keys, which this one doesn't need.
 
+## MCP auth: token and OAuth side by side
+
+`canonic.yaml` configures both auth mechanisms at once, to demonstrate they compose rather than being an either-or choice (AMENDMENT-oauth-mcp-auth):
+
+```yaml
+mcp:
+  auth:
+    tokens:
+      - client_id: ops-cli
+        token_ref: env:CANONIC_MCP_TOKEN_OPS
+    oauth:
+      mode: jwt
+      issuer_url: https://sso.ns-demo.example.com
+      audience: canonic-mcp-dutch-railway
+      jwks_uri: https://sso.ns-demo.example.com/.well-known/jwks.json
+```
+
+The static token authenticates a CI pipeline or script without ever contacting the IdP; OAuth (here, `jwt` mode — a client presents a JWT already issued by NS's own identity provider, no proxy redirect) authenticates interactive human operators against the organization's SSO. `canonic mcp start --transport http` checks a request's bearer token against the static map first (fast, no network call) and only falls through to OAuth verification if it doesn't match; either one succeeding is enough, and neither is required to configure the other. `canonic mcp status` reports both as active:
+
+```bash
+canonic mcp start --transport http --port 7474
+canonic mcp status
+#   auth:      token, oauth-jwt
+```
+
+`issuer_url` here is a placeholder domain (this example ships offline, with no real IdP behind it) — point it at your organization's actual IdP to make the OAuth side functional. See [Connecting your agent](/mcp-integration/connecting-your-agent#remote-enterprise-deployment) for the full config reference and both modes (`proxy` vs `jwt`).
+
 ## Metrics
 
 | Metric | Kind | Definition |

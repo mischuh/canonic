@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from enum import StrEnum
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
 
@@ -253,16 +254,96 @@ class McpTokenEntry(BaseModel):
         return v
 
 
+class McpOAuthMode(StrEnum):
+    """Which OAuth 2.1 mechanism ``mcp.auth.oauth`` configures (AMENDMENT-oauth-mcp-auth)."""
+
+    PROXY = "proxy"
+    JWT = "jwt"
+
+
+class McpOAuthConfig(BaseModel):
+    """OAuth 2.1 auth for the MCP daemon's ``http`` transport (AMENDMENT-oauth-mcp-auth).
+
+    Two modes, delegated to ``fastmcp``:
+
+    - ``proxy``: ``OIDCProxy`` presents a DCR-compliant OAuth server to MCP clients and
+      relays the actual login to a fixed, pre-registered upstream client at the IdP
+      (Authorization Code + PKCE). Requires ``client_id`` and ``base_url`` (the daemon's
+      own public URL); ``client_secret_ref`` is typically required too, unless the IdP
+      allows a public client. See ``verify_id_token`` below for IdPs with opaque access
+      tokens.
+    - ``jwt``: the IdP hands the MCP client a JWT directly and the daemon only verifies
+      its signature against the IdP's published JWKS. No proxy state, no redirect
+      handling. Drops ``client_secret_ref`` and ``base_url`` entirely — there is no
+      proxy to run.
+    """
+
+    mode: McpOAuthMode
+    issuer_url: str
+    client_id: str | None = None
+    client_secret_ref: str | None = None
+    scopes: list[str] = []
+    base_url: str | None = None
+    #: ``jwt`` mode only. Expected token audience; without it, any token the IdP issued
+    #: for *any* resource is accepted, not just this daemon.
+    audience: str | None = None
+    #: ``jwt`` mode only. Skips OIDC discovery for IdPs that don't publish
+    #: ``/.well-known/openid-configuration``.
+    jwks_uri: str | None = None
+    #: ``proxy`` mode only. FastMCP's ``OIDCProxy`` verifies the upstream *access* token
+    #: by default, which many IdPs (Google, GitHub, some Okta setups) issue as an opaque,
+    #: non-JWT string — verification then fails outright, not just poorly. Set to
+    #: ``true`` to verify the OIDC *id_token* instead, which is always a standard JWT and
+    #: reliably carries identity claims (``sub``/``email``); needed both for the proxy to
+    #: work at all against such IdPs and for `AccessToken.client_id` (used in MCP request
+    #: logging) to be a meaningful identity rather than an opaque subject id.
+    verify_id_token: bool = False
+
+    @field_validator("issuer_url")
+    @classmethod
+    def _validate_issuer_url_scheme(cls, v: str) -> str:
+        if not (v.startswith("http://") or v.startswith("https://")):
+            raise ValueError("mcp.auth.oauth.issuer_url must start with http:// or https://")
+        return v
+
+    @field_validator("client_secret_ref")
+    @classmethod
+    def _reject_literal_client_secret(cls, v: str | None) -> str | None:
+        if v is not None and not _REF_PATTERN.match(v):
+            raise ValueError("must be a reference (env:…, keyring:…, file:…), not a literal secret")
+        return v
+
+    @model_validator(mode="after")
+    def _validate_mode_fields(self) -> McpOAuthConfig:
+        if self.mode == McpOAuthMode.PROXY:
+            if self.client_id is None:
+                raise ValueError("mcp.auth.oauth.client_id is required in proxy mode")
+            if self.base_url is None:
+                raise ValueError("mcp.auth.oauth.base_url is required in proxy mode")
+        else:  # jwt
+            if self.client_secret_ref is not None:
+                raise ValueError("mcp.auth.oauth.client_secret_ref is not used in jwt mode")
+            if self.base_url is not None:
+                raise ValueError("mcp.auth.oauth.base_url is not used in jwt mode")
+            if self.verify_id_token:
+                raise ValueError("mcp.auth.oauth.verify_id_token is not used in jwt mode")
+        return self
+
+
 class McpAuthConfig(BaseModel):
-    """Bearer-token auth for the MCP daemon's ``http`` transport (AMENDMENT-remote-mcp-transport).
+    """Auth for the MCP daemon's ``http`` transport (AMENDMENT-remote-mcp-transport,
+    AMENDMENT-oauth-mcp-auth).
 
     ``stdio`` transport needs none of this — process-level trust is sufficient for a
     local subprocess. ``http`` transport is network-reachable, so ``canonic mcp start
     --transport http`` refuses to start unless at least one token resolves here (or via
-    the ``--token-ref`` CLI override).
+    the ``--token-ref`` CLI override) or ``oauth`` is configured. ``tokens`` and
+    ``oauth`` are independently optional and compose: both configured is a supported
+    state, not just tolerated (see ``canonic.mcp.auth.CanonicCompositeVerifier``).
     """
 
     tokens: list[McpTokenEntry] = []
+    oauth: McpOAuthConfig | None = None
 
 
 class McpConfig(BaseModel):
@@ -339,6 +420,13 @@ class CanonicConfig(BaseSettings):
             if conn.credentials_ref is not None:
                 policy.check_ref_local(
                     conn.credentials_ref, what=f"connections[{conn.id}].credentials_ref"
+                )
+        oauth = self.mcp.auth.oauth
+        if oauth is not None:
+            policy.check_url(oauth.issuer_url, what="mcp.auth.oauth.issuer_url")
+            if oauth.client_secret_ref is not None:
+                policy.check_ref_local(
+                    oauth.client_secret_ref, what="mcp.auth.oauth.client_secret_ref"
                 )
         return self
 

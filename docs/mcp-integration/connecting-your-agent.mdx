@@ -48,7 +48,7 @@ Pin a version (`"args": ["canonic==0.5.1", "mcp", "start", ...]`) if you want re
 
 See your client's own docs for the exact config file location; Claude Code, Cursor, and Codex each load standard MCP configuration.
 
-If you started the daemon with `--transport http` (see [`canonic mcp`](/cli-reference/mcp)), point your client at the HTTP endpoint with the bearer token instead of spawning a process:
+If you started the daemon with `--transport http` (see [`canonic mcp`](/cli-reference/mcp)), point your client at the HTTP endpoint instead of spawning a process. With a bearer token configured (`mcp.auth.tokens`):
 
 ```json
 {
@@ -63,11 +63,13 @@ If you started the daemon with `--transport http` (see [`canonic mcp`](/cli-refe
 }
 ```
 
-Adjust the host/port to match the `--host`/`--port` flags used to start the daemon. The token must match one resolved from `mcp.auth.tokens`/`--token-ref` on the daemon side — see the [remote/enterprise deployment](#remote-enterprise-deployment) section below.
+Adjust the host/port to match the `--host`/`--port` flags used to start the daemon. The token must match one resolved from `mcp.auth.tokens`/`--token-ref` on the daemon side. With OAuth configured (`mcp.auth.oauth`) instead, an MCP client that speaks OAuth 2.1 discovers the daemon's auth requirements itself and prompts for login (`proxy` mode) or expects you to supply an IdP-issued JWT (`jwt` mode) — no `Authorization` header to hand-configure, though the exact flow depends on your client's own OAuth support. See the [remote/enterprise deployment](#remote-enterprise-deployment) section below for both.
 
 ### Remote/enterprise deployment
 
-`--transport http` is meant for a daemon running centrally (e.g. in a data center) with clients connecting from local machines over the network, not just local loopback. Local binding is not a security boundary once the daemon is network-reachable, so `--transport http` refuses to start without at least one bearer token configured:
+`--transport http` is meant for a daemon running centrally (e.g. in a data center) with clients connecting from local machines over the network, not just local loopback. Local binding is not a security boundary once the daemon is network-reachable, so `--transport http` refuses to start without at least one auth mechanism configured — a bearer token, OAuth 2.1, or both (they compose: a static token for a CI pipeline and OAuth for interactive human users on the same daemon is a supported setup, not just tolerated).
+
+**Bearer tokens** — one per client, revoked by editing `canonic.yaml`:
 
 ```yaml
 # canonic.yaml
@@ -80,7 +82,34 @@ mcp:
         token_ref: env:CANONIC_MCP_TOKEN_BOB
 ```
 
-Each client authenticates with its own token (`Authorization: Bearer <token>`), and the resolved `client_id` is attributed on every `query`/`run_sql` answer event in `.canonic/events.jsonl` — so usage is traceable per user, not just per daemon instance. TLS termination is expected to happen at a reverse proxy/ingress in front of the daemon, not in the daemon itself.
+Each client authenticates with its own token (`Authorization: Bearer <token>`), and the resolved `client_id` is attributed on every `query`/`run_sql` answer event in `.canonic/events.jsonl` — so usage is traceable per user, not just per daemon instance.
+
+**OAuth 2.1** — for SSO-integrated organizations that want per-user identity tied to their own IdP and centralized revocation instead of a shared secret to distribute and rotate:
+
+```yaml
+# canonic.yaml
+mcp:
+  auth:
+    oauth:
+      mode: proxy   # proxy | jwt
+      issuer_url: https://idp.example.com
+      client_id: canonic-mcp
+      client_secret_ref: env:CANONIC_OAUTH_CLIENT_SECRET
+      scopes: [openid, profile, email]
+      base_url: https://canonic.internal.example.com
+```
+
+`mode: proxy` presents a DCR-compliant OAuth server to MCP clients and relays the login to your IdP (Authorization Code + PKCE) — the mode most deployments use, since most enterprise IdPs don't support MCP's Dynamic Client Registration natively. `mode: jwt` is simpler: the IdP hands the client a JWT directly and the daemon only verifies its signature against the IdP's published JWKS, no proxy or redirect handling. Either way, the resolved `client_id` is attributed on every answer event the same way a token's `client_id` is. See the [config schema reference](/reference/config-schema#mcp) for the full field list.
+
+`canonic mcp status` reports which mechanism(s) are active on a running daemon (e.g. `token, oauth-proxy`), useful for confirming a deployment matches its intended config. TLS termination is expected to happen at a reverse proxy/ingress in front of the daemon, not in the daemon itself.
+
+<Warning>
+In `proxy` mode, check whether your IdP issues opaque (non-JWT) access tokens — Google and GitHub both do, and some Okta setups too. `OIDCProxy` verifies the upstream access token by default (`verify_id_token: false`), and an opaque one fails that outright. Set `verify_id_token: true` to verify the OIDC id_token instead, which is always a standard JWT. This also decides what `client_id` looks like in `.canonic/events.jsonl`: the access token's `client_id`/`azp`/`sub` claim by default, often an opaque subject id, versus the id_token's — which reliably carries `sub`/`email` and is what you want if per-user attribution in logs is the point of switching to OAuth in the first place.
+</Warning>
+
+<Note>
+In `proxy` mode, the daemon keeps its OAuth client registrations and signing key in memory by default. Restarting the daemon (`canonic mcp stop && canonic mcp start`) drops any Dynamic Client Registration state and invalidates previously minted tokens — clients transparently re-register and re-authenticate, but an in-flight session is disrupted. `jwt` mode has no such state; it only verifies tokens against the IdP's JWKS.
+</Note>
 
 ### Environment variables for credentials
 
