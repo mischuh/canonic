@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.18.0](https://github.com/mischuh/canonic/compare/v0.17.0...v0.18.0) (2026-08-09)
+
+
+### Features
+
+* **mcp:** add OAuth 2.1 auth for http transport, composable with bearer tokens ([#286](https://github.com/mischuh/canonic/issues/286)) ([b5925be](https://github.com/mischuh/canonic/commit/b5925be4851732fbaeccef2efa2e8055b9ab4f68))
+
 ## [0.17.0](https://github.com/mischuh/canonic/compare/v0.16.0...v0.17.0) (2026-08-01)
 
 
