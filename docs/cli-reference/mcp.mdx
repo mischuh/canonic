@@ -25,7 +25,7 @@ canonic mcp start --transport http --port 7474
 
 With `--transport stdio` (the default), the daemon runs in the foreground over stdio; the MCP client manages its process lifetime — no auth layer, since a local subprocess is inherently process-trusted.
 
-With `--transport http`, it forks a background uvicorn daemon bound to the given host/port using Streamable HTTP. Because the daemon becomes network-reachable, it **requires** at least one bearer token — configure `mcp.auth.tokens` in `canonic.yaml`:
+With `--transport http`, it forks a background uvicorn daemon bound to the given host/port using Streamable HTTP. Because the daemon becomes network-reachable, it **requires** at least one auth mechanism — a bearer token, OAuth 2.1, or both. Configure `mcp.auth.tokens` and/or `mcp.auth.oauth` in `canonic.yaml`:
 
 ```yaml
 mcp:
@@ -33,9 +33,15 @@ mcp:
     tokens:
       - client_id: alice
         token_ref: env:CANONIC_MCP_TOKEN_ALICE
+    oauth:
+      mode: proxy   # proxy | jwt
+      issuer_url: https://idp.example.com
+      client_id: canonic-mcp
+      client_secret_ref: env:CANONIC_OAUTH_CLIENT_SECRET
+      base_url: https://canonic.internal.example.com
 ```
 
-or pass `--token-ref env:SOME_VAR` for a quick one-off token. Starting `--transport http` with no token configured is a hard error. Clients authenticate with `Authorization: Bearer <token>`; the resolved `client_id` is recorded on every `query`/`run_sql` answer event for per-user attribution.
+or pass `--token-ref env:SOME_VAR` for a quick one-off token. Starting `--transport http` with neither configured is a hard error. Token clients authenticate with `Authorization: Bearer <token>`; OAuth clients complete the IdP's login flow (`proxy` mode) or present an IdP-issued JWT directly (`jwt` mode). Either way the resolved `client_id` (a token's configured name, or the OAuth subject/email) is recorded on every `query`/`run_sql` answer event for per-user attribution. See the [config schema reference](/reference/config-schema#mcp) for the full `oauth` field list, and [Connecting your agent](/mcp-integration/connecting-your-agent#remote-enterprise-deployment) for the deployment walkthrough.
 
 On first start in a project with no active metric contracts, canonic auto-generates inferred metric contracts from the loaded semantic sources before serving.
 
@@ -55,4 +61,4 @@ Report whether the MCP daemon is running.
 canonic mcp status
 ```
 
-Shows the PID, transport, address and auth state (for HTTP), version, and start time. Warns if the running daemon's version differs from the current CLI version; in which case, restart it with `canonic mcp stop && canonic mcp start`.
+Shows the PID, transport, address and auth state (for HTTP — which mechanism(s) are active, e.g. `token, oauth-proxy`), version, and start time. Warns if the running daemon's version differs from the current CLI version; in which case, restart it with `canonic mcp stop && canonic mcp start`.

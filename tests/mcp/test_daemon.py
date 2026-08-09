@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 from pathlib import Path  # noqa: TC003
 
@@ -18,7 +19,12 @@ def project_root(tmp_path: Path) -> Path:
 
 
 def _write_state_file(
-    root: Path, pid: int, v: str, transport: str = "stdio", auth_enabled: bool = False
+    root: Path,
+    pid: int,
+    v: str,
+    transport: str = "stdio",
+    auth_enabled: bool = False,
+    auth_mechanisms: list[str] | None = None,
 ) -> None:
     state = DaemonState(
         pid=pid,
@@ -28,6 +34,7 @@ def _write_state_file(
         port=None,
         started_at="2026-01-01T00:00:00+00:00",
         auth_enabled=auth_enabled,
+        auth_mechanisms=auth_mechanisms or [],
     )
     (root / ".canonic" / "mcp.json").write_text(state.to_json())
 
@@ -84,6 +91,38 @@ class TestStatus:
         assert s.running
         assert s.auth_enabled is True
 
+    def test_auth_mechanisms_propagated(self, project_root: Path) -> None:
+        _write_state_file(
+            project_root,
+            pid=os.getpid(),
+            v=CANONIC_VERSION,
+            transport="http",
+            auth_enabled=True,
+            auth_mechanisms=["token", "oauth-proxy"],
+        )
+        s = status(project_root)
+        assert s.running
+        assert s.auth_mechanisms == ["token", "oauth-proxy"]
+
+    def test_legacy_state_file_without_auth_mechanisms_still_parses(
+        self, project_root: Path
+    ) -> None:
+        # A state file written before auth_mechanisms existed has no such key.
+        legacy_state = {
+            "pid": os.getpid(),
+            "version": CANONIC_VERSION,
+            "transport": "http",
+            "host": None,
+            "port": None,
+            "started_at": "2026-01-01T00:00:00+00:00",
+            "auth_enabled": True,
+        }
+        (project_root / ".canonic" / "mcp.json").write_text(json.dumps(legacy_state))
+        s = status(project_root)
+        assert s.running
+        assert s.auth_enabled is True
+        assert s.auth_mechanisms == []
+
 
 class TestStop:
     def test_no_daemon(self, project_root: Path) -> None:
@@ -115,14 +154,15 @@ class TestStop:
 
 
 class TestStartHttpAuth:
-    """``start_http`` must fail closed when no auth verifier is supplied
+    """``start_http`` must fail closed when no auth provider is supplied
 
-    (AMENDMENT-remote-mcp-transport.md — http transport is network-reachable, so an
-    unauthenticated daemon is exactly the gap the amendment closes).
+    (AMENDMENT-remote-mcp-transport.md, AMENDMENT-oauth-mcp-auth.md — http transport is
+    network-reachable, so an unauthenticated daemon is exactly the gap these amendments
+    close).
     """
 
     def test_raises_without_auth(self, project_root: Path) -> None:
-        with pytest.raises(RuntimeError, match="bearer token"):
+        with pytest.raises(RuntimeError, match="auth mechanism"):
             start_http(object(), project_root, auth=None)
         # Fails before ever forking/writing state.
         assert not (project_root / ".canonic" / "mcp.json").exists()

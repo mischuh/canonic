@@ -7,6 +7,7 @@ import pytest
 from canonic.config import (
     CanonicConfig,
     ConfigError,
+    McpOAuthMode,
     find_project_root,
     load_config,
 )
@@ -225,6 +226,216 @@ class TestMcpAuthConfig:
         assert "token_ref" in str(exc_info.value)
 
 
+class TestMcpOAuthConfig:
+    """``mcp.auth.oauth`` block (AMENDMENT-oauth-mcp-auth.md)."""
+
+    def test_defaults_to_none(self, tmp_path: Path) -> None:
+        cfg = load_config(_canonic_yaml(tmp_path, _VALID))
+        assert cfg.mcp.auth.oauth is None
+
+    def test_proxy_mode_parsed(self, tmp_path: Path) -> None:
+        content = (
+            _VALID
+            + "mcp:\n"
+            + "  auth:\n"
+            + "    oauth:\n"
+            + "      mode: proxy\n"
+            + "      issuer_url: https://idp.example.com\n"
+            + "      client_id: canonic-mcp\n"
+            + "      client_secret_ref: env:CANONIC_OAUTH_CLIENT_SECRET\n"
+            + "      scopes: [openid, profile, email]\n"
+            + "      base_url: https://canonic.internal.example.com\n"
+        )
+        cfg = load_config(_canonic_yaml(tmp_path, content))
+        oauth = cfg.mcp.auth.oauth
+        assert oauth is not None
+        assert oauth.mode == McpOAuthMode.PROXY
+        assert oauth.issuer_url == "https://idp.example.com"
+        assert oauth.client_id == "canonic-mcp"
+        assert oauth.client_secret_ref == "env:CANONIC_OAUTH_CLIENT_SECRET"
+        assert oauth.scopes == ["openid", "profile", "email"]
+        assert oauth.base_url == "https://canonic.internal.example.com"
+
+    def test_jwt_mode_parsed(self, tmp_path: Path) -> None:
+        content = (
+            _VALID
+            + "mcp:\n"
+            + "  auth:\n"
+            + "    oauth:\n"
+            + "      mode: jwt\n"
+            + "      issuer_url: https://idp.example.com\n"
+            + "      audience: canonic-mcp\n"
+            + "      jwks_uri: https://idp.example.com/jwks.json\n"
+        )
+        cfg = load_config(_canonic_yaml(tmp_path, content))
+        oauth = cfg.mcp.auth.oauth
+        assert oauth is not None
+        assert oauth.mode == McpOAuthMode.JWT
+        assert oauth.audience == "canonic-mcp"
+        assert oauth.jwks_uri == "https://idp.example.com/jwks.json"
+
+    def test_tokens_and_oauth_compose(self, tmp_path: Path) -> None:
+        content = (
+            _VALID
+            + "mcp:\n"
+            + "  auth:\n"
+            + "    tokens:\n"
+            + "      - client_id: ci-pipeline\n"
+            + "        token_ref: env:CANONIC_MCP_TOKEN\n"
+            + "    oauth:\n"
+            + "      mode: jwt\n"
+            + "      issuer_url: https://idp.example.com\n"
+        )
+        cfg = load_config(_canonic_yaml(tmp_path, content))
+        assert len(cfg.mcp.auth.tokens) == 1
+        assert cfg.mcp.auth.oauth is not None
+
+    def test_literal_client_secret_ref_raises(self, tmp_path: Path) -> None:
+        content = (
+            _VALID
+            + "mcp:\n"
+            + "  auth:\n"
+            + "    oauth:\n"
+            + "      mode: proxy\n"
+            + "      issuer_url: https://idp.example.com\n"
+            + "      client_id: canonic-mcp\n"
+            + "      client_secret_ref: not-a-reference\n"
+            + "      base_url: https://canonic.internal.example.com\n"
+        )
+        with pytest.raises(ConfigError) as exc_info:
+            load_config(_canonic_yaml(tmp_path, content))
+        assert "client_secret_ref" in str(exc_info.value)
+
+    def test_non_http_issuer_url_raises(self, tmp_path: Path) -> None:
+        content = (
+            _VALID
+            + "mcp:\n"
+            + "  auth:\n"
+            + "    oauth:\n"
+            + "      mode: jwt\n"
+            + "      issuer_url: idp.example.com\n"
+        )
+        with pytest.raises(ConfigError) as exc_info:
+            load_config(_canonic_yaml(tmp_path, content))
+        assert "issuer_url" in str(exc_info.value)
+
+    def test_proxy_mode_requires_client_id(self, tmp_path: Path) -> None:
+        content = (
+            _VALID
+            + "mcp:\n"
+            + "  auth:\n"
+            + "    oauth:\n"
+            + "      mode: proxy\n"
+            + "      issuer_url: https://idp.example.com\n"
+            + "      base_url: https://canonic.internal.example.com\n"
+        )
+        with pytest.raises(ConfigError) as exc_info:
+            load_config(_canonic_yaml(tmp_path, content))
+        assert "client_id" in str(exc_info.value)
+
+    def test_proxy_mode_requires_base_url(self, tmp_path: Path) -> None:
+        content = (
+            _VALID
+            + "mcp:\n"
+            + "  auth:\n"
+            + "    oauth:\n"
+            + "      mode: proxy\n"
+            + "      issuer_url: https://idp.example.com\n"
+            + "      client_id: canonic-mcp\n"
+        )
+        with pytest.raises(ConfigError) as exc_info:
+            load_config(_canonic_yaml(tmp_path, content))
+        assert "base_url" in str(exc_info.value)
+
+    def test_jwt_mode_rejects_client_secret_ref(self, tmp_path: Path) -> None:
+        content = (
+            _VALID
+            + "mcp:\n"
+            + "  auth:\n"
+            + "    oauth:\n"
+            + "      mode: jwt\n"
+            + "      issuer_url: https://idp.example.com\n"
+            + "      client_secret_ref: env:SOME_SECRET\n"
+        )
+        with pytest.raises(ConfigError) as exc_info:
+            load_config(_canonic_yaml(tmp_path, content))
+        assert "client_secret_ref" in str(exc_info.value)
+
+    def test_jwt_mode_rejects_base_url(self, tmp_path: Path) -> None:
+        content = (
+            _VALID
+            + "mcp:\n"
+            + "  auth:\n"
+            + "    oauth:\n"
+            + "      mode: jwt\n"
+            + "      issuer_url: https://idp.example.com\n"
+            + "      base_url: https://canonic.internal.example.com\n"
+        )
+        with pytest.raises(ConfigError) as exc_info:
+            load_config(_canonic_yaml(tmp_path, content))
+        assert "base_url" in str(exc_info.value)
+
+    def test_proxy_mode_verify_id_token_defaults_to_false(self, tmp_path: Path) -> None:
+        content = (
+            _VALID
+            + "mcp:\n"
+            + "  auth:\n"
+            + "    oauth:\n"
+            + "      mode: proxy\n"
+            + "      issuer_url: https://idp.example.com\n"
+            + "      client_id: canonic-mcp\n"
+            + "      base_url: https://canonic.internal.example.com\n"
+        )
+        cfg = load_config(_canonic_yaml(tmp_path, content))
+        assert cfg.mcp.auth.oauth is not None
+        assert cfg.mcp.auth.oauth.verify_id_token is False
+
+    def test_proxy_mode_verify_id_token_parsed(self, tmp_path: Path) -> None:
+        content = (
+            _VALID
+            + "mcp:\n"
+            + "  auth:\n"
+            + "    oauth:\n"
+            + "      mode: proxy\n"
+            + "      issuer_url: https://idp.example.com\n"
+            + "      client_id: canonic-mcp\n"
+            + "      base_url: https://canonic.internal.example.com\n"
+            + "      verify_id_token: true\n"
+        )
+        cfg = load_config(_canonic_yaml(tmp_path, content))
+        assert cfg.mcp.auth.oauth is not None
+        assert cfg.mcp.auth.oauth.verify_id_token is True
+
+    def test_jwt_mode_rejects_verify_id_token(self, tmp_path: Path) -> None:
+        content = (
+            _VALID
+            + "mcp:\n"
+            + "  auth:\n"
+            + "    oauth:\n"
+            + "      mode: jwt\n"
+            + "      issuer_url: https://idp.example.com\n"
+            + "      verify_id_token: true\n"
+        )
+        with pytest.raises(ConfigError) as exc_info:
+            load_config(_canonic_yaml(tmp_path, content))
+        assert "verify_id_token" in str(exc_info.value)
+
+    def test_jwt_mode_allows_verify_id_token_false(self, tmp_path: Path) -> None:
+        # Explicitly writing the default value in jwt mode is harmless, not rejected.
+        content = (
+            _VALID
+            + "mcp:\n"
+            + "  auth:\n"
+            + "    oauth:\n"
+            + "      mode: jwt\n"
+            + "      issuer_url: https://idp.example.com\n"
+            + "      verify_id_token: false\n"
+        )
+        cfg = load_config(_canonic_yaml(tmp_path, content))
+        assert cfg.mcp.auth.oauth is not None
+        assert cfg.mcp.auth.oauth.verify_id_token is False
+
+
 class TestLLMProviders:
     """Multi-provider ``llm.provider`` validation (SPEC-E10 §2)."""
 
@@ -362,6 +573,34 @@ class TestAirGapped:
         )
         cfg = load_config(_canonic_yaml(tmp_path, content))
         assert cfg.llm.base_url == "https://api.openai.com/v1"
+
+    def test_air_gapped_blocks_public_oauth_issuer(self, tmp_path: Path) -> None:
+        content = (
+            _VALID
+            + "mcp:\n"
+            + "  auth:\n"
+            + "    oauth:\n"
+            + "      mode: jwt\n"
+            + "      issuer_url: https://idp.example.com\n"
+            + "runtime:\n  air_gapped: true\n"
+        )
+        with pytest.raises(AirGappedViolation) as exc:
+            load_config(_canonic_yaml(tmp_path, content))
+        assert exc.value.exit_code == 18
+        assert "mcp.auth.oauth.issuer_url" in str(exc.value)
+
+    def test_air_gapped_allows_local_oauth_issuer(self, tmp_path: Path) -> None:
+        content = (
+            _VALID
+            + "mcp:\n"
+            + "  auth:\n"
+            + "    oauth:\n"
+            + "      mode: jwt\n"
+            + "      issuer_url: http://localhost:9000\n"
+            + "runtime:\n  air_gapped: true\n"
+        )
+        cfg = load_config(_canonic_yaml(tmp_path, content))
+        assert cfg.mcp.auth.oauth is not None
 
 
 class TestFindProjectRoot:

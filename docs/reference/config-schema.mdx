@@ -160,6 +160,14 @@ mcp:
         token_ref: env:CANONIC_MCP_TOKEN_ALICE
       - client_id: bob
         token_ref: env:CANONIC_MCP_TOKEN_BOB
+    oauth:
+      mode: proxy   # proxy | jwt
+      issuer_url: https://idp.example.com
+      client_id: canonic-mcp
+      client_secret_ref: env:CANONIC_OAUTH_CLIENT_SECRET   # proxy mode only
+      scopes: [openid, profile, email]
+      base_url: https://canonic.internal.example.com       # proxy mode only, the daemon's own public URL
+      verify_id_token: false                                # proxy mode only, see below
 ```
 
 | Field | Type | Default | Governs |
@@ -167,8 +175,22 @@ mcp:
 | `auth.tokens` | `list[McpTokenEntry]` | `[]` | Bearer tokens accepted by the MCP daemon's `http` transport, one entry per client. |
 | `auth.tokens[].client_id` | `str` | n/a (required) | Name attributed to that token's caller in `.canonic/events.jsonl`, so usage can be traced per user rather than per daemon instance. |
 | `auth.tokens[].token_ref` | `str` | n/a (required) | Reference to the token's value, never the token itself, resolved the same way as `credentials_ref`. |
+| `auth.oauth` | `McpOAuthConfig \| null` | `null` | OAuth 2.1 auth for the MCP daemon's `http` transport, delegated to `fastmcp`. Independently optional from `auth.tokens` — both configured is a supported state, not just tolerated. |
+| `auth.oauth.mode` | `"proxy" \| "jwt"` | n/a (required) | `proxy`: presents a DCR-compliant OAuth server to MCP clients and relays the login to the upstream IdP (Authorization Code + PKCE) — the mode most SSO deployments use. `jwt`: the IdP hands the client a JWT directly and the daemon only verifies its signature against the IdP's JWKS, no proxy state. |
+| `auth.oauth.issuer_url` | `str` | n/a (required) | The IdP's base URL. In `proxy` mode, `mode: proxy` discovers endpoints from `issuer_url + /.well-known/openid-configuration`. |
+| `auth.oauth.client_id` | `str \| null` | `null` | Required in `proxy` mode: the client registered with the upstream IdP. Not used in `jwt` mode. |
+| `auth.oauth.client_secret_ref` | `str \| null` | `null` | `proxy` mode only. Reference to the upstream client's secret, resolved the same way as `credentials_ref`. Rejected in `jwt` mode (no proxy to authenticate as). |
+| `auth.oauth.scopes` | `list[str]` | `[]` | OAuth scopes requested from the IdP / required on incoming tokens. |
+| `auth.oauth.base_url` | `str \| null` | `null` | Required in `proxy` mode: the daemon's own public URL (where the IdP redirects back to). Rejected in `jwt` mode. |
+| `auth.oauth.audience` | `str \| null` | `null` | `jwt` mode only. Expected token audience. Recommended: without it, any token the IdP issued for *any* resource is accepted, not just this daemon. |
+| `auth.oauth.jwks_uri` | `str \| null` | `null` | `jwt` mode only. Skips OIDC discovery for IdPs that don't publish `/.well-known/openid-configuration`. |
+| `auth.oauth.verify_id_token` | `bool` | `false` | `proxy` mode only. Verifies the upstream OIDC *id_token* instead of the *access_token*. Rejected in `jwt` mode. See below. |
 
-This block only matters for `canonic mcp start --transport http`. The default `stdio` transport is a local subprocess and needs no auth, process-level trust is enough. `http` transport is network-reachable, though, so it refuses to start unless at least one token resolves here (or via the `--token-ref` CLI override). See [Connecting your agent](/mcp-integration/connecting-your-agent#remote-enterprise-deployment) for the full remote-deployment walkthrough.
+This block only matters for `canonic mcp start --transport http`. The default `stdio` transport is a local subprocess and needs no auth, process-level trust is enough. `http` transport is network-reachable, though, so it refuses to start unless at least one mechanism resolves: a token here (or via the `--token-ref` CLI override) and/or `auth.oauth`. When both are configured, a request is checked against the static token map first (no network call), falling through to OAuth verification if no static token matches — the two stay independently revocable, a token entry by editing `canonic.yaml`, an OAuth-issued token at the IdP. `canonic mcp status` reports which mechanism(s) are active on a running daemon. See [Connecting your agent](/mcp-integration/connecting-your-agent#remote-enterprise-deployment) for the full remote-deployment walkthrough.
+
+<Note>
+`auth.oauth.verify_id_token` matters more than its default suggests. In `proxy` mode, `OIDCProxy` verifies the upstream IdP's *access token* by default — but many IdPs (Google, GitHub, some Okta setups) issue that as an opaque, non-JWT string, which fails verification outright rather than just producing a poor client identity. Setting `verify_id_token: true` verifies the *id_token* instead, which the OIDC spec guarantees is always a standard JWT carrying `sub`/`email` claims. This also controls what ends up as `client_id` in `.canonic/events.jsonl`: with it off, `client_id` comes from the access token's `client_id`/`azp`/`sub` claim (often an opaque subject id); with it on, from the id_token's, which is far more likely to be a meaningful identity like an email address.
+</Note>
 
 ## Reserved directories
 

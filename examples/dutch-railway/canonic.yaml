@@ -34,3 +34,36 @@ telemetry:
 
 runtime:
   air_gapped: false   # set to true to enforce local-only endpoints at load time (SPEC-E16 §9)
+
+# `canonic mcp start --transport http` is network-reachable, so it requires at least one
+# auth mechanism. Both are configured here to demonstrate they compose (AMENDMENT-oauth-mcp-auth):
+# a static token authenticates the CI pipeline without touching the IdP, while OAuth authenticates
+# interactive human operators via NS's own identity provider. Neither blocks the other.
+mcp:
+  auth:
+    tokens:
+      - client_id: ops-cli
+        token_ref: env:CANONIC_MCP_TOKEN_OPS
+    oauth:
+      mode: jwt   # the IdP hands clients a JWT directly; no proxy/redirect handling on canonic's side
+      issuer_url: https://sso.ns-demo.example.com
+      audience: canonic-mcp-dutch-railway
+      jwks_uri: https://sso.ns-demo.example.com/.well-known/jwks.json
+    # Only one `oauth.mode` can be active at a time, so this `proxy` variant is commented
+    # out rather than a second live block. Shown here because most enterprise IdPs don't
+    # support MCP's Dynamic Client Registration natively, making `proxy` the mode most
+    # real deployments actually use (`jwt` above is the simpler case, for IdPs that hand
+    # clients a JWT directly). `verify_id_token: true` matters here: NS's IdP is a stand-in
+    # for IdPs like Google/GitHub/some Okta setups that issue opaque, non-JWT access
+    # tokens — OIDCProxy's default (verifying the access token) would fail those outright,
+    # not just produce a poor client_id. Verifying the id_token instead always works (it's
+    # guaranteed to be a JWT) and reliably carries `sub`/`email`, which is what ends up as
+    # `client_id` in `.canonic/events.jsonl` for OAuth-authenticated requests.
+    # oauth:
+    #   mode: proxy
+    #   issuer_url: https://sso.ns-demo.example.com
+    #   client_id: canonic-mcp-dutch-railway
+    #   client_secret_ref: env:CANONIC_OAUTH_CLIENT_SECRET
+    #   scopes: [openid, profile, email]
+    #   base_url: https://canonic.internal.ns-demo.example.com
+    #   verify_id_token: true

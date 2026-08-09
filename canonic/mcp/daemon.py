@@ -6,8 +6,8 @@ State is written to ``.canonic/mcp.json`` in the project root. Two transports:
   the process lifetime (``canonic mcp start`` blocks until the client disconnects).
 - **http** — a uvicorn-backed HTTP daemon runs detached in the background; the PID
   file tracks the process so ``canonic mcp stop/status`` work. Network-reachable, so
-  it requires a bearer-token verifier (AMENDMENT-remote-mcp-transport.md) — ``stdio``
-  needs none.
+  it requires an auth provider — a bearer token (AMENDMENT-remote-mcp-transport.md),
+  OAuth 2.1 (AMENDMENT-oauth-mcp-auth.md), or both — ``stdio`` needs none.
 
 The background daemon is spawned via ``subprocess.Popen`` (fork+exec into a fresh
 ``python -m canonic`` process), not a bare ``os.fork()``. Forking a multi-threaded
@@ -32,7 +32,7 @@ import os
 import signal
 import subprocess
 import sys
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path  # noqa: TC003 — used in function bodies, not just annotations
 from typing import TYPE_CHECKING
@@ -40,7 +40,7 @@ from typing import TYPE_CHECKING
 from canonic import __version__ as CANONIC_VERSION
 
 if TYPE_CHECKING:
-    from canonic.mcp.auth import CanonicTokenVerifier
+    from fastmcp.server.auth.auth import AuthProvider
 
 __all__ = [
     "DaemonState",
@@ -69,6 +69,11 @@ class DaemonState:
     port: int | None
     started_at: str
     auth_enabled: bool = False
+    #: Active auth mechanisms, e.g. ``["token", "oauth-proxy"]`` — see
+    #: ``canonic.mcp.auth.describe_auth_mechanisms``. Defaults to ``[]`` so a state
+    #: file written before this field existed still parses (``read_state`` does
+    #: ``DaemonState(**data)``).
+    auth_mechanisms: list[str] = field(default_factory=list)
 
     def to_json(self) -> str:
         return json.dumps(asdict(self), indent=2)
@@ -88,6 +93,7 @@ class DaemonStatus:
     version_mismatch: bool = False
     current_version: str | None = None
     auth_enabled: bool = False
+    auth_mechanisms: list[str] = field(default_factory=list)
 
 
 def _state_path(project_root: Path) -> Path:
@@ -150,6 +156,7 @@ def status(project_root: Path) -> DaemonStatus:
         version_mismatch=mismatch,
         current_version=current,
         auth_enabled=state.auth_enabled,
+        auth_mechanisms=state.auth_mechanisms,
     )
 
 
@@ -201,32 +208,35 @@ def start_http(
     host: str = _DEFAULT_HOST,
     port: int = _DEFAULT_PORT,
     *,
-    auth: CanonicTokenVerifier | None,
+    auth: AuthProvider | None,
     suggestions: bool = False,
     token_ref: str | None = None,
+    auth_mechanisms: list[str] | None = None,
 ) -> None:
     """Spawn a detached uvicorn HTTP daemon in the background and write the state file.
 
     Re-launches ``python -m canonic mcp start ... --_child`` via ``subprocess.Popen``
     (fork+exec) rather than calling ``os.fork()`` directly — see the module docstring
     for why a bare fork-without-exec is unsafe here. The relaunched process rebuilds
-    its own ``CanonicService``/auth verifier from ``project_root``/``token_ref``, since
+    its own ``CanonicService``/auth provider from ``project_root``/``token_ref``, since
     a fresh process cannot inherit live Python objects across ``exec()``.
 
     ``canonic mcp stop`` sends SIGTERM to the daemon via the recorded PID.
 
     ``auth`` is required (not optional): ``http`` transport is network-reachable once
     bound, so an unauthenticated daemon would be exactly the gap
-    AMENDMENT-remote-mcp-transport.md closes. Callers must resolve a token verifier
-    (``canonic.mcp.auth.build_token_verifier``) before calling this function and raise
-    their own user-facing error when none resolves — this function raises generically
-    for any caller that skips that step. ``token_ref`` is passed through unchanged so
-    the relaunched child can resolve the same verifier itself.
+    AMENDMENT-remote-mcp-transport.md closes. Callers must resolve an auth provider
+    (``canonic.mcp.auth.build_mcp_auth``) before calling this function and raise their
+    own user-facing error when none resolves — this function raises generically for
+    any caller that skips that step. ``token_ref`` is passed through unchanged so the
+    relaunched child can resolve the same provider itself. ``auth_mechanisms`` (e.g.
+    ``["token", "oauth-proxy"]`` from ``canonic.mcp.auth.describe_auth_mechanisms``) is
+    recorded in the state file for ``canonic mcp status`` to report.
     """
     if auth is None:
         raise RuntimeError(
-            "http transport requires at least one bearer token — configure mcp.auth.tokens "
-            "in canonic.yaml or pass --token-ref"
+            "http transport requires at least one auth mechanism — configure "
+            "mcp.auth.tokens and/or mcp.auth.oauth in canonic.yaml, or pass --token-ref"
         )
 
     _check_version_on_start(project_root)
@@ -288,6 +298,7 @@ def start_http(
         port=port,
         started_at=datetime.now(UTC).isoformat(),
         auth_enabled=True,
+        auth_mechanisms=auth_mechanisms or [],
     )
     _write_state(project_root, state)
 
@@ -298,7 +309,7 @@ def serve_http_foreground(
     host: str,
     port: int,
     *,
-    auth: CanonicTokenVerifier,
+    auth: AuthProvider,
     suggestions: bool = False,
 ) -> None:
     """Run the uvicorn HTTP daemon in the current process (blocks until stopped).

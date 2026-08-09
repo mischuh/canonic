@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+import json
+import os
 from typing import TYPE_CHECKING
 from unittest.mock import MagicMock, patch
 
 import pytest
 
 from canonic.cli.app import app
+from canonic.mcp.daemon import DaemonState
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -175,7 +178,7 @@ def test_start_http_without_token_exits_error(runner: CliRunner, project_dir: Pa
         result = runner.invoke(app, ["mcp", "start", "--transport", "http"])
 
     assert result.exit_code == 1
-    assert "bearer token" in result.output
+    assert "auth mechanism" in result.output
     mock_start_http.assert_not_called()
 
 
@@ -199,3 +202,49 @@ def test_start_http_with_token_ref_succeeds(
     assert result.exit_code == 0, result.output
     mock_start_http.assert_called_once()
     assert mock_start_http.call_args.kwargs["auth"] is not None
+
+
+# ---------------------------------------------------------------------------
+# status --json reports active auth mechanisms (AMENDMENT-oauth-mcp-auth.md)
+# ---------------------------------------------------------------------------
+
+
+def test_status_json_reports_auth_mechanisms(runner: CliRunner, project_dir: Path) -> None:
+    (project_dir / ".canonic").mkdir(exist_ok=True)
+    state = DaemonState(
+        pid=os.getpid(),
+        version="0.0.0",
+        transport="http",
+        host="127.0.0.1",
+        port=7474,
+        started_at="2026-01-01T00:00:00+00:00",
+        auth_enabled=True,
+        auth_mechanisms=["token", "oauth-jwt"],
+    )
+    (project_dir / ".canonic" / "mcp.json").write_text(state.to_json())
+
+    result = runner.invoke(app, ["--json", "mcp", "status"])
+
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.output)
+    assert payload["auth_mechanisms"] == ["token", "oauth-jwt"]
+
+
+def test_status_text_shows_auth_mechanisms(runner: CliRunner, project_dir: Path) -> None:
+    (project_dir / ".canonic").mkdir(exist_ok=True)
+    state = DaemonState(
+        pid=os.getpid(),
+        version="0.0.0",
+        transport="http",
+        host="127.0.0.1",
+        port=7474,
+        started_at="2026-01-01T00:00:00+00:00",
+        auth_enabled=True,
+        auth_mechanisms=["token", "oauth-jwt"],
+    )
+    (project_dir / ".canonic" / "mcp.json").write_text(state.to_json())
+
+    result = runner.invoke(app, ["mcp", "status"])
+
+    assert result.exit_code == 0, result.output
+    assert "token, oauth-jwt" in result.output

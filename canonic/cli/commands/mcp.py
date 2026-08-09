@@ -106,8 +106,9 @@ def start(
     With ``--transport stdio`` (default): runs in the foreground (the MCP client
     manages the process lifetime). With ``--transport http``: spawns a detached
     background uvicorn daemon bound to the given host/port; requires at least one
-    bearer token (``mcp.auth.tokens`` in canonic.yaml or ``--token-ref``) since the
-    daemon becomes network-reachable (AMENDMENT-remote-mcp-transport.md).
+    auth mechanism (``mcp.auth.tokens`` and/or ``mcp.auth.oauth`` in canonic.yaml, or
+    ``--token-ref``) since the daemon becomes network-reachable
+    (AMENDMENT-remote-mcp-transport.md, AMENDMENT-oauth-mcp-auth.md).
     """
     root = _resolve_root(ctx, project)
     json_output = get_cli_context(ctx).json_output
@@ -124,7 +125,7 @@ def start(
 
     from canonic.core.service import CanonicService
     from canonic.exc import CredentialError
-    from canonic.mcp.auth import build_token_verifier
+    from canonic.mcp.auth import build_mcp_auth, describe_auth_mechanisms
     from canonic.mcp.daemon import start_http, start_stdio
 
     try:
@@ -154,9 +155,9 @@ def start(
     try:
         if transport == "http":
             try:
-                auth = build_token_verifier(cfg.mcp.auth, extra_token_ref=token_ref)
+                auth = build_mcp_auth(cfg.mcp.auth, extra_token_ref=token_ref)
             except CredentialError as exc:
-                msg = f"could not resolve mcp auth token: {exc}"
+                msg = f"could not resolve mcp auth credential: {exc}"
                 if json_output:
                     typer.echo(json.dumps({"error": msg}))
                 else:
@@ -164,14 +165,15 @@ def start(
                 raise typer.Exit(1) from exc
             if auth is None:
                 msg = (
-                    "http transport requires at least one bearer token — add "
-                    "mcp.auth.tokens to canonic.yaml or pass --token-ref"
+                    "http transport requires at least one auth mechanism — add "
+                    "mcp.auth.tokens and/or mcp.auth.oauth to canonic.yaml, or pass --token-ref"
                 )
                 if json_output:
                     typer.echo(json.dumps({"error": msg}))
                 else:
                     _console.print(f"[red]error:[/red] {msg}")
                 raise typer.Exit(1)
+            auth_mechanisms = describe_auth_mechanisms(cfg.mcp.auth, extra_token_ref=token_ref)
 
             if child:
                 # Already the detached process spawned by start_http (via `--_child`):
@@ -189,6 +191,7 @@ def start(
                 auth=auth,
                 suggestions=suggestions,
                 token_ref=token_ref,
+                auth_mechanisms=auth_mechanisms,
             )
             if json_output:
                 typer.echo(
@@ -247,6 +250,7 @@ def status(ctx: typer.Context) -> None:
             "started_at": s.started_at,
             "version_mismatch": s.version_mismatch,
             "auth_enabled": s.auth_enabled,
+            "auth_mechanisms": s.auth_mechanisms,
         }
         typer.echo(json.dumps(payload))
         return
@@ -260,7 +264,15 @@ def status(ctx: typer.Context) -> None:
     _console.print(f"  transport: {s.transport}")
     if s.transport == "http":
         _console.print(f"  address:   {s.host}:{s.port}")
-        _console.print(f"  auth:      {'token-protected' if s.auth_enabled else 'none'}")
+        if s.auth_mechanisms:
+            auth_desc = ", ".join(s.auth_mechanisms)
+        elif s.auth_enabled:
+            # Legacy state file (predates auth_mechanisms) or a mechanism list that
+            # otherwise came back empty: fall back to the generic label.
+            auth_desc = "token-protected"
+        else:
+            auth_desc = "none"
+        _console.print(f"  auth:      {auth_desc}")
     _console.print(f"  version:   {s.version}")
     _console.print(f"  started:   {s.started_at}")
     if s.version_mismatch:
