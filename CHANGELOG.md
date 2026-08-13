@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.19.0](https://github.com/mischuh/canonic/compare/v0.18.0...v0.19.0) (2026-08-13)
+
+
+### Features
+
+* **compiler:** compose several metrics into one compiled query ([#288](https://github.com/mischuh/canonic/issues/288)) ([a01f497](https://github.com/mischuh/canonic/commit/a01f497900d2e5ac682ebff26565f456dd29df9a))
+
 ## [0.18.0](https://github.com/mischuh/canonic/compare/v0.17.0...v0.18.0) (2026-08-09)
 
 
