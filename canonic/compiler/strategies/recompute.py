@@ -6,168 +6,147 @@ from typing import TYPE_CHECKING, cast
 
 from sqlglot import exp
 
+from canonic.compiler.compose import LeafRef, MetricLeaves, MetricPlan
 from canonic.compiler.dialect import DialectAdapter, adapter_for
-from canonic.compiler.joins import JoinEdge, build_alias_tree, plan_joins
-from canonic.compiler.result import (
-    CompileResult,
-    RecomputeAtGrainMetadata,
-)
+from canonic.compiler.joins import JoinEdge, build_alias_tree
+from canonic.compiler.leaf import AuxCte, LeafContext, LeafInputs, LeafMetric, plan_leaf
+from canonic.compiler.result import RecomputeAtGrainMetadata
 from canonic.contracts.models import BindingKind
 from canonic.exc import FanoutUnsafe
 from canonic.exc import Unreachable as UnreachableError
 from canonic.semantic.models import Additivity, Measure
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
     from canonic.compiler.query import SemanticQuery
     from canonic.contracts.resolver import Binding as ResolverBinding
     from canonic.contracts.resolver import ContractResolver, RecomputeAtGrainBinding
     from canonic.semantic.models import Dimension, SemanticSource
 
 from canonic.compiler._helpers import (
-    _FANOUT,
     _alias,
-    _bind_filters,
     _bind_name,
     _dimension_expr,
     _dimension_output_names,
-    _enforce_guardrails,
-    _freshness,
     _from_and_joins,
     _func,
-    _guardrail_join_sources,
     _parse,
-    _population_filter_conditions,
     _qualify_to,
-    _resolve_dimensions,
     _ResolvedMetric,
 )
 
 
-def _compile_recompute_at_grain(
+def plan_metric(
     query: SemanticQuery,
+    queried_name: str,
     binding: ResolverBinding,
     resolver: ContractResolver,
     sources_by_name: dict[str, SemanticSource],
     *,
     dialect: str = "postgres",
-) -> CompileResult:
-    """Compile a recompute_at_grain metric (distinct_count / percentile) from base rows (§4.3).
+) -> MetricLeaves:
+    """Plan a recompute_at_grain metric (distinct_count / percentile) as one leaf (§4.3).
 
-    Never derives from pre-aggregates: always groups the base table by the requested
-    dimensions and computes the aggregate directly. Fanout policy is kind-specific:
-    - distinct_count tolerates row duplication (DISTINCT dedups); LEFT joins preserve population.
-    - percentile rejects any fanning join with FANOUT_UNSAFE (sort-based quantile is corrupted).
+    Never derives from a pre-aggregate: the leaf always groups the base table by the
+    requested dimensions and computes the aggregate directly.
+
+    Fanout policy is kind-specific, which is why this leaf brings its own builder rather
+    than the additive floor: a distinct count tolerates row duplication because DISTINCT
+    removes it again, while a sort-based quantile is corrupted by it outright.
     """
     assert binding.recompute_at_grain is not None  # noqa: S101 — routing guarantees this kind
     rg = binding.recompute_at_grain
     adapter = adapter_for(dialect)
-    queried_name = query.metrics[0]
 
     assert binding.source is not None  # noqa: S101 — enforced by model_validator
     source_name = binding.source
     alias_to_source = build_alias_tree(source_name, sources_by_name)
 
-    # Stage 2 — dimensions & filters.
-    dimensions = _resolve_dimensions(query, sources_by_name, source_name, alias_to_source)
-    referenced = {alias for alias, _ in dimensions}
-    where_conditions, filter_sources = _bind_filters(
-        query.filters, sources_by_name, source_name, alias_to_source
-    )
-    referenced |= filter_sources
-    referenced |= {source_name}
-
-    # Resolve the referenced column to (alias, physical_column) ahead of join planning:
-    # guardrail matching below keys on this physical name (see _make_synthetic_measure).
+    # Resolve the referenced column up front: guardrail matching keys on the physical
+    # name, and join planning has to know which alias it lives on.
     col_name = rg.distinct_on if rg.kind is BindingKind.DISTINCT_COUNT else rg.column
     assert col_name is not None  # noqa: S101 — enforced by model_validator
     col_binding = _bind_name(col_name, sources_by_name, source_name, alias_to_source)
     if col_binding is None:
+        kind_field = "distinct_on" if rg.kind is BindingKind.DISTINCT_COUNT else "column"
         raise UnreachableError(
-            f"metric {queried_name!r}: {'distinct_on' if rg.kind is BindingKind.DISTINCT_COUNT else 'column'} "
-            f"{col_name!r} is not declared on source {source_name!r} or any reachable join"
+            f"metric {queried_name!r}: {kind_field} {col_name!r} is not declared on "
+            f"source {source_name!r} or any reachable join"
         )
     col_alias, col_phys = col_binding
 
-    referenced |= _guardrail_join_sources(
-        [(source_name, col_phys)],
-        resolver,
-        query.context,
-        sources_by_name,
-        alias_to_source,
-    )
-
-    # Stage 3 — join graph.
-    join_edges = plan_joins(
-        source_name, referenced - {source_name}, sources_by_name, via=list(query.via) or None
-    )
-
-    # Stage 4 — fanout safety floor (kind-specific, §4.3).
-    fanout = any(edge.join.relationship in _FANOUT for edge in join_edges)
-    if fanout and rg.kind is BindingKind.PERCENTILE:
-        raise FanoutUnsafe(
-            f"percentile metric {queried_name!r} cannot be used with a "
-            f"one_to_many/many_to_many join; row duplication corrupts a sort-based quantile — "
-            f"request it without the fanning dimension"
+    def build(
+        inputs: LeafInputs, leaf_metrics: Sequence[LeafMetric]
+    ) -> tuple[exp.Expression, tuple[AuxCte, ...]]:
+        if inputs.fanout and rg.kind is BindingKind.PERCENTILE:
+            raise FanoutUnsafe(
+                f"percentile metric {queried_name!r} cannot be used with a "
+                f"one_to_many/many_to_many join; row duplication corrupts a sort-based "
+                f"quantile — request it without the fanning dimension"
+            )
+        # distinct_count tolerates fanout: DISTINCT deduplicates the multiplied rows, and
+        # the LEFT joins the compiler emits never shrink the population it counts over.
+        return _build_recompute(
+            owner=inputs.owner,
+            rg=rg,
+            col_alias=col_alias,
+            col_phys=col_phys,
+            metric_name=queried_name,
+            dimensions=inputs.dimensions,
+            where_conditions=inputs.where_conditions,
+            join_edges=inputs.join_edges,
+            sources_by_name=sources_by_name,
+            adapter=adapter,
+            name_prefix=inputs.name_prefix,
         )
-    # distinct_count tolerates fanout: DISTINCT deduplicates multiplied rows; LEFT joins
-    # (the only kind the compiler emits) do not change the population over which DISTINCT counts.
 
-    # population_filter — defines the population this metric is compiled over (§4.5); before guardrails.
-    where_conditions += _population_filter_conditions(
-        binding.binding.canonical.population_filter, sources_by_name, source_name, alias_to_source
+    # A recompute binding names a column, not a declared measure. The synthetic measure
+    # carries the physical column name so source-wide guardrails (applies_to: { source })
+    # still match, without ever colliding with a real measure name.
+    leaf = plan_leaf(
+        LeafContext(query=query, resolver=resolver, sources_by_name=sources_by_name),
+        source_name,
+        [
+            LeafMetric(
+                resolved=_ResolvedMetric(
+                    name=queried_name,
+                    source=source_name,
+                    measure=_make_synthetic_measure(col_phys),
+                ),
+                population_filter=binding.binding.canonical.population_filter,
+                alias=queried_name,
+            )
+        ],
+        strategy=str(rg.kind),
+        strategy_params=(
+            ("column", col_name),
+            ("quantile", "" if rg.quantile is None else str(rg.quantile)),
+        ),
+        builder=build,
+        fusable=False,
     )
 
-    # Stage 6 — guardrails: source-level guardrails keyed on (source, metric_name).
-    # recompute_at_grain bindings have no declared measure; we use the metric name as the
-    # measure key so source-wide guardrails (applies_to: { source }, measure: None) still fire.
-    dummy_metric = _ResolvedMetric(
-        name=queried_name,
-        source=source_name,
-        # Create a minimal Measure-like stand-in using the physical column.
-        measure=_make_synthetic_measure(col_phys),
-    )
-    guard_result = _enforce_guardrails([dummy_metric], resolver, query.context, sources_by_name)
-    where_conditions += guard_result.conditions
-    fired = guard_result.fired
-
-    # Stage 7 — emit SQL.
-    ast = _build_recompute(
-        owner=source_name,
-        rg=rg,
-        col_alias=col_alias,
-        col_phys=col_phys,
-        metric_name=queried_name,
-        dimensions=dimensions,
-        where_conditions=where_conditions,
-        join_edges=join_edges,
-        sources_by_name=sources_by_name,
-        adapter=adapter,
-    )
-    sql = adapter.emit(ast, limit=query.limit)
-    warnings: list[str] = list(guard_result.warnings)
+    warnings: tuple[str, ...] = ()
     if rg.kind is BindingKind.PERCENTILE and not adapter.supports_percentile_cont():
-        warnings.append(
+        warnings = (
             f"metric {queried_name!r}: dialect {adapter.dialect!r} has no native percentile "
             f"aggregate — computed via nearest-rank window function, which returns an actual "
             f"row value rather than a linearly interpolated one (differs from PERCENTILE_CONT "
-            f"on even-sized groups)"
+            f"on even-sized groups)",
         )
 
-    # Stage 8 — result metadata.
-    used_sources = sorted({source_name} | {e.join.to for e in join_edges})
-    return CompileResult(
-        sql=sql,
-        dialect=adapter.dialect,
-        resolved={queried_name: f"recompute_at_grain({source_name}.{col_name})"},
-        guardrails_fired=fired,
-        freshness=[_freshness(sources_by_name[s]) for s in used_sources],
-        warnings=warnings,
+    return MetricLeaves(
+        leaves=[leaf],
+        metric=MetricPlan(name=queried_name, refs=(LeafRef(leaf=0, column=queried_name),)),
+        resolved=f"recompute_at_grain({source_name}.{col_name})",
         recompute_at_grain=RecomputeAtGrainMetadata(
             kind=str(rg.kind),
             distinct_on=rg.distinct_on,
             column=rg.column,
             quantile=rg.quantile,
         ),
+        warnings=warnings,
     )
 
 
@@ -182,7 +161,8 @@ def _build_recompute(
     join_edges: list[JoinEdge],
     sources_by_name: dict[str, SemanticSource],
     adapter: DialectAdapter,
-) -> exp.Select:
+    name_prefix: str = "",
+) -> tuple[exp.Expression, tuple[AuxCte, ...]]:
     """Build the recompute-at-grain SELECT: group base table by dims, aggregate directly.
 
     distinct_count → COUNT(DISTINCT <col>)
@@ -210,6 +190,7 @@ def _build_recompute(
             where_conditions=where_conditions,
             join_edges=join_edges,
             sources_by_name=sources_by_name,
+            name_prefix=name_prefix,
         )
     else:
         # PERCENTILE: parse PERCENTILE_CONT(q) WITHIN GROUP (ORDER BY col), then qualify.
@@ -233,7 +214,7 @@ def _build_recompute(
         select = select.where(exp.and_(*where_conditions))
     if group_exprs:
         select = select.group_by(*group_exprs)
-    return select
+    return select, ()
 
 
 def _build_percentile_fallback(
@@ -246,7 +227,8 @@ def _build_percentile_fallback(
     where_conditions: list[exp.Expression],
     join_edges: list[JoinEdge],
     sources_by_name: dict[str, SemanticSource],
-) -> exp.Select:
+    name_prefix: str = "",
+) -> tuple[exp.Expression, tuple[AuxCte, ...]]:
     """Build a percentile recompute for dialects without an ordered-set aggregate (e.g. SQLite).
 
     Ranks each row within its dimension partition via ``CUME_DIST()`` and picks the smallest
@@ -256,7 +238,7 @@ def _build_percentile_fallback(
     rather than the linear interpolation between the two middle values that PERCENTILE_CONT
     would produce.
     """
-    _RANKED = "_ranked"
+    _RANKED = f"{name_prefix}_ranked"
     _VAL = "_val"
     _CD = "_cd"
 
@@ -304,7 +286,7 @@ def _build_percentile_fallback(
     if outer_group:
         outer = outer.group_by(*outer_group)
 
-    return outer.with_(_RANKED, as_=inner)
+    return outer, (AuxCte(name=_RANKED, body=inner),)
 
 
 def _make_synthetic_measure(col_name: str) -> Measure:

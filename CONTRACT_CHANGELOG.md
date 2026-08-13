@@ -30,6 +30,38 @@ CI (`.github/workflows/contract-schema-guard.yml`,
 
 ## History
 
+## 2.6 (2026-08-13) - MINOR
+
+- ADR/PR: this PR (feat(compiler): compose several metrics into one compiled query)
+- Summary: A request for more than one metric now compiles to a single SQL statement
+  for every binding kind. Previously only plain additive metrics could be combined, and
+  `ratio`/`weighted_avg`, `semi_additive`, `distinct_count`/`percentile` and `opaque`
+  each raised `unsupported_measure` ("must be queried alone") whenever a second metric
+  was requested. Each metric, and each component of a composite, is now planned as its
+  own leaf aggregating to the requested dimensions, and one outer SELECT assembles them
+  over a shared grain spine (AMENDMENT-multi-metric-compose).
+
+  No shape change and no new error codes: `metrics` was already a list in the v1 frozen
+  field set, and `unreachable`, `unresolved`, `ambiguous`, `unsupported_measure` and
+  `fanout_unsafe` cover every new failure path. Classified MINOR under §4.1 because a
+  request that previously failed now succeeds, which is behaviour a client may reasonably
+  want to negotiate on before sending multi-metric requests (§4.4); without a bump,
+  multi-metric support is undetectable except by trying it.
+
+  Behaviour that changes for callers, all of it in the direction of refusing to guess:
+  - A metric with no rows for a dimension value another metric does have now reports
+    NULL rather than a measured `0`. Conditional aggregation used to report zero, which
+    claims a measurement that was never made.
+  - Stage 1 reports *every* unresolved or ambiguous metric in one error instead of the
+    first, so a caller fixes them in one round trip. `unresolved` takes precedence over
+    `ambiguous` when both occur.
+  - `UNREACHABLE` messages now name the leaf that could not bind the dimension or filter.
+  - `related.unused_dimensions` only suggests dimensions addable from *every* queried
+    source, so a suggestion can no longer lead into an `unreachable` on the next request.
+  - Two metrics on unrelated sources, and a non-additive metric beside a metric on a
+    fanning source, now compile instead of raising: each is aggregated at its own grain,
+    so there is no join left to be unsafe.
+
 ## 2.5 (2026-08-01) - MINOR
 
 - ADR/PR: this PR (feat(instrumentation): add opt-in telemetry transport)

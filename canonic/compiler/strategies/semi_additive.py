@@ -6,99 +6,64 @@ from typing import TYPE_CHECKING, cast
 
 from sqlglot import exp
 
-from canonic.compiler.dialect import adapter_for
-from canonic.compiler.joins import JoinEdge, build_alias_tree, plan_joins
-from canonic.compiler.result import (
-    CompileResult,
-    PartialAdditiveMetadata,
-)
+from canonic.compiler.compose import LeafRef, MetricLeaves, MetricPlan
+from canonic.compiler.joins import JoinEdge, build_alias_tree
+from canonic.compiler.leaf import AuxCte, LeafContext, LeafInputs, LeafMetric, plan_leaf
+from canonic.compiler.result import PartialAdditiveMetadata
 from canonic.contracts.models import CollapseAgg
 from canonic.exc import FanoutUnsafe, Unresolved, UnsupportedMeasure
 from canonic.semantic.models import Additivity, Measure
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
     from canonic.compiler.query import SemanticQuery
     from canonic.contracts.resolver import Binding as ResolverBinding
     from canonic.contracts.resolver import ContractResolver
     from canonic.semantic.models import Dimension, SemanticSource
 
 from canonic.compiler._helpers import (
-    _FANOUT,
     _alias,
-    _bind_filters,
     _build_simple,
     _dimension_expr,
     _dimension_output_names,
-    _enforce_guardrails,
     _find_dimension,
     _find_measure,
-    _freshness,
     _from_and_joins,
     _func,
-    _guardrail_join_sources,
     _input_columns,
     _measure_expr,
     _parse,
-    _population_filter_conditions,
     _qualify_to,
     _resolve_dimensions,
     _ResolvedMetric,
 )
 
 
-def _compile_semi_additive(
+def plan_metric(
     query: SemanticQuery,
+    queried_name: str,
     binding: ResolverBinding,
     resolver: ContractResolver,
     sources_by_name: dict[str, SemanticSource],
-    *,
-    dialect: str = "postgres",
-) -> CompileResult:
-    """Compile a semi_additive metric via window or nested-aggregate collapse (SPEC §4.2).
+) -> MetricLeaves:
+    """Plan a semi_additive metric as one leaf (SPEC §4.2).
 
-    The decision hinges on whether the query groups by ``collapse_dimension``:
-    - Grouped by it → additive; plain sum via ``_build_simple``.
-    - Not grouped (collapsing across it) → ``_build_semi_additive`` applies collapse_agg.
+    The collapse happens *inside* the leaf: by the time compose sees it, the metric is an
+    ordinary column, so a semi-additive metric combines with any other metric without the
+    compose step needing to know anything about windows or snapshots.
 
-    Finality (stage 5) is deferred for semi_additive in this release (P1 scope).
+    Which shape the leaf takes hinges on whether the query groups by ``collapse_dimension``:
+    grouped by it the measure is plainly additive, and collapsing across it needs
+    ``collapse_agg`` applied to one row per entity per snapshot.
+
+    Finality (stage 5) remains deferred for semi_additive, as before.
     """
     assert binding.semi_additive is not None  # noqa: S101 — routing guarantees semi_additive kind
     sa = binding.semi_additive
-    adapter = adapter_for(dialect)
-    queried_name = query.metrics[0]
-
     assert binding.source is not None and binding.measure is not None  # noqa: S101
     source_name = binding.source
     alias_to_source = build_alias_tree(source_name, sources_by_name)
-
-    # Stage 2 — dimensions & filters.
-    dimensions = _resolve_dimensions(query, sources_by_name, source_name, alias_to_source)
-    referenced = {alias for alias, _ in dimensions}
-    where_conditions, filter_sources = _bind_filters(
-        query.filters, sources_by_name, source_name, alias_to_source
-    )
-    referenced |= filter_sources
-    referenced |= {source_name}
-    referenced |= _guardrail_join_sources(
-        [(source_name, binding.measure)],
-        resolver,
-        query.context,
-        sources_by_name,
-        alias_to_source,
-    )
-
-    # Stage 3 — join graph.
-    join_edges = plan_joins(
-        source_name, referenced - {source_name}, sources_by_name, via=list(query.via) or None
-    )
-
-    # Stage 4 — safety floor.
-    fanout = any(edge.join.relationship in _FANOUT for edge in join_edges)
-    if fanout:
-        raise FanoutUnsafe(
-            f"semi_additive metric {queried_name!r} cannot be used with a "
-            f"one_to_many/many_to_many join; request it without the fanning dimension"
-        )
 
     source_obj = sources_by_name.get(source_name)
     if source_obj is None:
@@ -119,86 +84,102 @@ def _compile_semi_additive(
             f"not supported at P0"
         )
 
-    # population_filter — defines the population this metric is compiled over (§4.5); before guardrails.
-    where_conditions += _population_filter_conditions(
-        binding.binding.canonical.population_filter, sources_by_name, source_name, alias_to_source
-    )
-
-    # Stage 6 — guardrails.
-    resolved_metric = _ResolvedMetric(name=queried_name, source=source_name, measure=measure_obj)
-    guard_result = _enforce_guardrails([resolved_metric], resolver, query.context, sources_by_name)
-    where_conditions += guard_result.conditions
-    fired = guard_result.fired
-
-    # Resolve collapse_dimension to (alias, Dimension).
-    collapse_dim_result = _find_dimension(
-        sa.collapse_dimension, sources_by_name, source_name, alias_to_source
-    )
-    if collapse_dim_result is None:
+    collapse = _find_dimension(sa.collapse_dimension, sources_by_name, source_name, alias_to_source)
+    if collapse is None:
         raise Unresolved(
             f"semi_additive binding {queried_name!r}: collapse_dimension "
             f"{sa.collapse_dimension!r} is not declared on any source"
         )
-    collapse_alias, collapse_dim = collapse_dim_result
 
-    # Resolve the source's natural grain (minus collapse_dimension) — this is the
-    # partition key for "last/first per entity". It must not be derived from the
-    # queried output dimensions: a scalar query (no dimensions) still needs to dedupe
-    # per grain entity before summing, otherwise ROW_NUMBER() ranks the whole table
-    # and only one arbitrary row survives (SPEC §4.2).
+    # The window partitions by the source's own grain minus the collapse dimension, not by
+    # the requested output dimensions: those may be a strict subset of the entity key, and
+    # a scalar query still has to dedupe per entity before summing.
     grain_dims: list[tuple[str, Dimension]] = []
     for grain_col in source_obj.grain:
         if grain_col == sa.collapse_dimension:
             continue
-        grain_dim_result = _find_dimension(grain_col, sources_by_name, source_name, alias_to_source)
-        if grain_dim_result is None:
+        grain_dim = _find_dimension(grain_col, sources_by_name, source_name, alias_to_source)
+        if grain_dim is None:
             raise Unresolved(
                 f"semi_additive binding {queried_name!r}: grain column {grain_col!r} of "
                 f"source {source_name!r} is not declared as a dimension"
             )
-        grain_dims.append(grain_dim_result)
+        grain_dims.append(grain_dim)
 
-    # Branch: is collapse_dimension among the grouped dimensions?
-    grouped = {dim.name for _alias, dim in dimensions}
+    # Which branch this leaf takes decides its output column name, and the column name has
+    # to be known before the leaf is planned. Resolving the dimensions twice is cheap and
+    # pure; what it buys is preserving the existing (inconsistent) aliasing exactly —
+    # collapsing across the dimension names the column after the metric, grouping by it
+    # names the column after the measure. Unifying the two is a separate, user-visible
+    # change and is deliberately not made here.
+    grouped = {
+        dim.name
+        for _alias, dim in _resolve_dimensions(query, sources_by_name, source_name, alias_to_source)
+    }
     collapsed = sa.collapse_dimension not in grouped
+    column = queried_name if collapsed else measure_obj.name
 
-    # Stage 7 — emit SQL.
-    ast: exp.Expression
-    if not collapsed:
-        ast = _build_simple(
-            source_name,
-            [resolved_metric],
-            dimensions,
-            where_conditions,
-            join_edges,
-            sources_by_name,
-        )
-    else:
-        ast = _build_semi_additive(
-            owner=source_name,
+    def build(
+        inputs: LeafInputs, leaf_metrics: Sequence[LeafMetric]
+    ) -> tuple[exp.Expression, tuple[AuxCte, ...]]:
+        if inputs.fanout:
+            raise FanoutUnsafe(
+                f"semi_additive metric {queried_name!r} cannot be used with a "
+                f"one_to_many/many_to_many join; request it without the fanning dimension"
+            )
+        if not collapsed:
+            return (
+                _build_simple(
+                    inputs.owner,
+                    [lm.resolved for lm in leaf_metrics],
+                    inputs.dimensions,
+                    inputs.where_conditions,
+                    inputs.join_edges,
+                    sources_by_name,
+                    measure_aliases=[column],
+                ),
+                (),
+            )
+        return _build_semi_additive(
+            owner=inputs.owner,
             measure=measure_obj,
-            metric_name=queried_name,
-            collapse_alias=collapse_alias,
-            collapse_dim=collapse_dim,
-            dimensions=dimensions,
+            metric_name=column,
+            collapse_alias=collapse[0],
+            collapse_dim=collapse[1],
+            dimensions=inputs.dimensions,
             grain_dims=grain_dims,
-            where_conditions=where_conditions,
-            join_edges=join_edges,
+            where_conditions=inputs.where_conditions,
+            join_edges=inputs.join_edges,
             sources_by_name=sources_by_name,
             collapse_agg=sa.collapse_agg,
+            name_prefix=inputs.name_prefix,
         )
 
-    sql = adapter.emit(ast, limit=query.limit)
+    leaf = plan_leaf(
+        LeafContext(query=query, resolver=resolver, sources_by_name=sources_by_name),
+        source_name,
+        [
+            LeafMetric(
+                resolved=_ResolvedMetric(
+                    name=queried_name, source=source_name, measure=measure_obj
+                ),
+                population_filter=binding.binding.canonical.population_filter,
+                alias=column,
+            )
+        ],
+        strategy="semi_additive",
+        strategy_params=(
+            ("collapse_dimension", sa.collapse_dimension),
+            ("collapse_agg", str(sa.collapse_agg)),
+        ),
+        builder=build,
+        fusable=False,
+    )
 
-    # Stage 8 — result metadata.
-    used_sources = sorted({source_name} | {e.join.to for e in join_edges})
-    return CompileResult(
-        sql=sql,
-        dialect=adapter.dialect,
-        resolved={queried_name: f"{source_name}.{measure_obj.name}"},
-        guardrails_fired=fired,
-        freshness=[_freshness(sources_by_name[s]) for s in used_sources],
-        warnings=guard_result.warnings,
+    return MetricLeaves(
+        leaves=[leaf],
+        metric=MetricPlan(name=column, refs=(LeafRef(leaf=0, column=column),)),
+        resolved=f"{source_name}.{measure_obj.name}",
         partial_additive=PartialAdditiveMetadata(
             kind="semi_additive",
             collapse_dimension=sa.collapse_dimension,
@@ -220,11 +201,17 @@ def _build_semi_additive(
     join_edges: list[JoinEdge],
     sources_by_name: dict[str, SemanticSource],
     collapse_agg: CollapseAgg,
-) -> exp.Expression:
+    name_prefix: str = "",
+) -> tuple[exp.Expression, tuple[AuxCte, ...]]:
     """Emit the window or nested-aggregate SQL for a semi_additive collapse (SPEC §4.2).
 
     ``last``/``first`` → ROW_NUMBER() window CTE then filter rn = 1.
     ``avg``/``min``/``max`` → per_snapshot CTE with two-level GROUP BY.
+
+    The inner CTE is returned rather than attached, so compose can declare it alongside
+    this leaf in the one outer ``WITH`` instead of nesting a ``WITH`` inside a CTE body
+    (AMENDMENT §3.5). With no prefix the names are unchanged, which is what keeps a
+    single-metric query byte-identical to what it compiled to before.
     """
     collapse_col = exp.column(collapse_dim.column, table=collapse_alias)
 
@@ -278,7 +265,7 @@ def _build_semi_additive(
             inner = inner.where(exp.and_(*where_conditions))
 
         # Outer SELECT: aggregate measure over ranked rows, filter rn = 1.
-        _RANKED = "ranked"
+        _RANKED = f"{name_prefix}ranked"
         outer = exp.Select()
         outer_projections: list[exp.Expression] = []
         outer_group: list[exp.Expression] = []
@@ -300,10 +287,10 @@ def _build_semi_additive(
         if outer_group:
             outer = outer.group_by(*outer_group)
 
-        return cast("exp.Expression", outer.with_(_RANKED, as_=inner))
+        return cast("exp.Expression", outer), (AuxCte(name=_RANKED, body=inner),)
 
     # avg / min / max — nested GROUP BY form.
-    _PER_SNAP = "per_snapshot"
+    _PER_SNAP = f"{name_prefix}per_snapshot"
     agg_fn = str(collapse_agg).upper()
 
     # Inner CTE: group by (grouped dims + collapse dim), compute measure per snapshot.
@@ -338,4 +325,4 @@ def _build_semi_additive(
     if outer_group:
         outer = outer.group_by(*outer_group)
 
-    return cast("exp.Expression", outer.with_(_PER_SNAP, as_=inner))
+    return cast("exp.Expression", outer), (AuxCte(name=_PER_SNAP, body=inner),)

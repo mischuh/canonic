@@ -9,11 +9,20 @@ share as sibling projections. When two metrics carry different (e.g. mutually
 exclusive) restrictions, the combined WHERE can never match any row, so every
 aggregate in that one result row comes back SQL NULL.
 
-Fix: with more than one requested metric, each metric's own population_filter/
-guardrail conditions scope only that metric's own aggregate via conditional
-aggregation (``SUM(CASE WHEN <condition> THEN <expr> END)``), never a shared WHERE.
-A single-metric query is emitted exactly as before (still a plain shared WHERE) —
-see the "no-op" and "single-metric shape frozen" tests below.
+The first fix scoped each metric's conditions to its own aggregate via conditional
+aggregation (``SUM(CASE WHEN <condition> THEN <expr> END)``). That was correct about
+which rows fed which metric, but it kept every metric on one SELECT, and so inherited a
+second-order wrong answer: a group that only a *sibling* metric has rows in still appears,
+and the conditionally-aggregated metric reports a measured ``0`` for it rather than
+"not applicable here".
+
+AMENDMENT-multi-metric-compose replaces the mechanism rather than patching it. Each
+metric is planned as its own leaf with its own honest WHERE, and compose fuses back
+together only those leaves whose plans are genuinely identical. Metrics with different
+populations therefore land on different leaves and are joined over a grain spine, where
+an absent group reads NULL — which is what it means. So the tests below assert separate
+leaves rather than ``CASE WHEN``, and the execution tests, which are the real regression
+guards, are unchanged.
 """
 
 from __future__ import annotations
@@ -32,7 +41,7 @@ from canonic.contracts.models import (
     Severity,
 )
 from canonic.contracts.resolver import ContractResolver
-from canonic.exc import FanoutUnsafe, Unreachable
+from canonic.exc import Unreachable
 from canonic.semantic.models import Column, Dimension, Join, Measure, Relationship, SemanticSource
 
 
@@ -55,6 +64,19 @@ def transactions() -> SemanticSource:
         ],
         measures=[Measure(name="amount", expr="sum(amount)", additivity="additive")],
         dimensions=[],
+    )
+
+
+@pytest.fixture
+def transactions_two_measures(transactions: SemanticSource) -> SemanticSource:
+    """The same source with a second, distinct measure, so two metrics can share a plan."""
+    return transactions.model_copy(
+        update={
+            "measures": [
+                *transactions.measures,
+                Measure(name="txn_count", expr="count(*)", additivity="additive"),
+            ]
+        }
     )
 
 
@@ -106,14 +128,16 @@ def resolver_multi(
 def test_two_conflicting_population_filters_dont_collide_structurally(
     resolver_multi: ContractResolver, transactions: SemanticSource
 ) -> None:
-    """No shared WHERE; each metric's filter is scoped via its own CASE WHEN."""
+    """Different populations are different plans: one leaf each, each with its own WHERE."""
     result = compile(
         SemanticQuery(metrics=["total_income", "total_expenses"]), resolver_multi, [transactions]
     )
     _parse_ok(result.sql)
     sql_upper = result.sql.upper()
-    assert "WHERE" not in sql_upper
-    assert sql_upper.count("CASE WHEN") == 2
+    assert sql_upper.count("_LEAF_") > 0
+    assert "_LEAF_1" in sql_upper, "mutually exclusive populations must not share a leaf"
+    assert sql_upper.count("WHERE") == 2, "one honest WHERE per population"
+    assert "CASE WHEN" not in sql_upper
     assert "'income'" in result.sql
     assert "'expense'" in result.sql
 
@@ -121,15 +145,18 @@ def test_two_conflicting_population_filters_dont_collide_structurally(
 def test_population_filter_mixed_with_metric_without_filter(
     resolver_multi: ContractResolver, transactions: SemanticSource
 ) -> None:
-    """Three metrics, only two carry a filter: exactly 2 CASE WHEN, third stays plain."""
+    """Three metrics, only two carry a filter: three distinct plans, two of them filtered."""
     result = compile(
         SemanticQuery(metrics=["total_income", "total_expenses", "net_cashflow"]),
         resolver_multi,
         [transactions],
     )
     _parse_ok(result.sql)
-    assert result.sql.upper().count("CASE WHEN") == 2
-    assert result.sql.upper().count("SUM(") == 3
+    sql_upper = result.sql.upper()
+    assert "CASE WHEN" not in sql_upper
+    assert sql_upper.count("SUM(") == 3
+    assert "_LEAF_2" in sql_upper, "three populations, three leaves"
+    assert sql_upper.count("WHERE") == 2, "the unfiltered metric carries no WHERE"
 
 
 def test_multi_metric_execution_no_longer_returns_none(
@@ -217,8 +244,9 @@ def test_guardrail_mandatory_filter_scoped_per_metric() -> None:
     )
     _parse_ok(result.sql)
     sql_upper = result.sql.upper()
-    assert "WHERE" not in sql_upper
-    assert sql_upper.count("CASE WHEN") == 2
+    assert "CASE WHEN" not in sql_upper
+    assert sql_upper.count("WHERE") == 2, "each guardrail scopes its own leaf"
+    assert "_LEAF_1" in sql_upper
     assert {g.id for g in result.guardrails_fired} == {"income-only", "expense-only"}
 
 
@@ -227,8 +255,14 @@ def test_guardrail_mandatory_filter_scoped_per_metric() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_no_filters_multi_metric_unchanged_shape(transactions: SemanticSource) -> None:
-    """Two plain metrics with no population_filter/guardrails: no CASE WHEN, no WHERE."""
+def test_two_metrics_on_the_same_measure_aggregate_once(transactions: SemanticSource) -> None:
+    """Two metrics resolving to one measure with no filters are literally the same query.
+
+    Same source, same measure, same (empty) filters, so both the leaf plan *and* the
+    projected column are identical and the aggregate is computed once and referenced
+    twice. This is leaf dedup proper, as opposed to fusion, which merges different
+    measures that share a plan.
+    """
     b1 = MetricBinding(
         metric="metric_a", canonical=CanonicalRef(source="transactions", measure="amount")
     )
@@ -241,7 +275,37 @@ def test_no_filters_multi_metric_unchanged_shape(transactions: SemanticSource) -
     sql_upper = result.sql.upper()
     assert "CASE WHEN" not in sql_upper
     assert "WHERE" not in sql_upper
-    assert sql_upper.count("SUM(") == 2
+    assert sql_upper.count("SUM(") == 1, "one aggregate, referenced by both metrics"
+    assert "_LEAF_1" not in sql_upper
+    # The caller asked for two metrics and gets two output columns.
+    assert result.sql.count('"amount" AS "amount"') == 2
+
+
+def test_two_distinct_measures_no_filters_fuse_to_one_flat_select(
+    transactions_two_measures: SemanticSource,
+) -> None:
+    """Two different measures with identical plans fuse into one CTE-free flat SELECT.
+
+    This is the shape that must not regress: the most common multi-metric query in the
+    product stays a single GROUP BY over a single scan, exactly as before the amendment.
+    """
+    b1 = MetricBinding(
+        metric="metric_a", canonical=CanonicalRef(source="transactions", measure="amount")
+    )
+    b2 = MetricBinding(
+        metric="metric_b", canonical=CanonicalRef(source="transactions", measure="txn_count")
+    )
+    resolver = ContractResolver(bindings=[b1, b2], guardrails=[])
+    result = compile(
+        SemanticQuery(metrics=["metric_a", "metric_b"]), resolver, [transactions_two_measures]
+    )
+    _parse_ok(result.sql)
+    sql_upper = result.sql.upper()
+    assert "WITH" not in sql_upper, "a single fused leaf needs no CTE at all"
+    assert "CASE WHEN" not in sql_upper
+    assert "WHERE" not in sql_upper
+    assert sql_upper.count("SUM(") == 1
+    assert sql_upper.count("COUNT(") == 1
 
 
 # ---------------------------------------------------------------------------
@@ -290,12 +354,12 @@ def transaction_tags() -> SemanticSource:
     )
 
 
-def test_fanout_dedup_path_conditional_aggregation(
+def test_fanout_dedup_applies_per_leaf(
     resolver_multi: ContractResolver,
     transactions_with_fanout: SemanticSource,
     transaction_tags: SemanticSource,
 ) -> None:
-    """A one_to_many join forces _build_deduped; per-metric filters still isolate correctly."""
+    """A one_to_many join forces the dedup shape, once per leaf, filters still isolated."""
     result = compile(
         SemanticQuery(metrics=["total_income", "total_expenses"], dimensions=["tag"]),
         resolver_multi,
@@ -303,35 +367,35 @@ def test_fanout_dedup_path_conditional_aggregation(
     )
     _parse_ok(result.sql)
     sql_upper = result.sql.upper()
-    assert "DISTINCT ON" in sql_upper
-    assert sql_upper.count("CASE WHEN") == 2
-    # The filter's source column must be projected by the inner dedup subquery.
-    assert '"type"' in result.sql.lower() or "type" in result.sql.lower()
+    assert sql_upper.count("DISTINCT ON") == 2, "each population dedups its own grain"
+    assert "CASE WHEN" not in sql_upper
+    assert sql_upper.count("WHERE") == 2
+    assert "'income'" in result.sql
+    assert "'expense'" in result.sql
 
 
 # ---------------------------------------------------------------------------
 # Cross-source metrics: metrics bound to different (but joined) sources
 #
-# Regression for a bug where the join-planning target set (`referenced` in
-# `_compile_simple_additive`) was built only from dimensions and filters, never from
-# the source of any non-owner metric. A query combining e.g. `orders.revenue` and
-# `order_items.units_sold` compiled to a SELECT that referenced `order_items` without
-# ever joining it in, failing at execution time with a DuckDB BinderException.
+# Regression for a bug where the join-planning target set was built only from dimensions
+# and filters, never from the source of any non-owner metric. A query combining e.g.
+# `orders.revenue` and `order_items.units_sold` compiled to a SELECT that referenced
+# `order_items` without ever joining it in, failing at execution with a BinderException.
 #
-# Fixing the missing join surfaced a second, more dangerous latent issue: once the
-# join *is* planned, a one_to_many/many_to_many or many_to_one relationship between
-# the two sources makes a flat-SELECT emission produce a *wrong* (not merely
-# uncompilable) aggregate for the non-owner metric — confirmed by direct reproduction.
-# Only one_to_one is safe for a single flat join.
+# Fixing the missing join surfaced a second, more dangerous latent issue: once the join
+# *is* planned, a one_to_many/many_to_many or many_to_one relationship between the two
+# sources makes a flat-SELECT emission produce a *wrong* (not merely uncompilable)
+# aggregate for the non-owner metric — confirmed by direct reproduction. Only one_to_one
+# was ever safe for a single flat join, and telling those cases apart needed a
+# hand-maintained relationship analysis that had to stay right forever.
 #
-# For any other relationship between two ADDITIVE metrics' sources, the compiler now
-# aggregates each source independently at its own grain (one CTE per metric source,
-# `_build_multi_source`/`_plan_metric_group` in `simple_additive.py`) and combines the
-# fully-aggregated leaves with a `FULL JOIN USING (<dims>)` — a leaf that's already
-# aggregated to one row per group can't be fanned out by the combining join, so this is
-# correct regardless of the relationship. Non-additive/semi-additive metrics reached via
-# a fanout edge still raise `FanoutUnsafe` — pre-aggregating those would mean invoking a
-# different compile strategy per leaf, out of scope here.
+# AMENDMENT-multi-metric-compose deleted that whole class of risk rather than maintaining
+# the analysis: every metric is aggregated at its own grain in its own leaf before any
+# cross-source join happens, so a leaf that is already one row per group cannot be fanned
+# out by the join that combines it. There is no longer a relationship between two sources
+# that a flat plan could get wrong, because there is no flat plan spanning two sources.
+# The tests below therefore assert correct *values* per relationship rather than which
+# emission strategy was picked.
 # ---------------------------------------------------------------------------
 
 
@@ -408,10 +472,19 @@ def test_cross_source_metrics_one_to_one_join_planned_and_correct(
     assert shipping == 8
 
 
-def test_cross_source_metrics_no_join_path_raises_unreachable(
+def test_cross_source_metrics_with_no_join_path_still_compose(
     orders: SemanticSource, transactions: SemanticSource
 ) -> None:
-    """Two metrics on sources with no declared join between them: compile-time error, not broken SQL."""
+    """Two metrics on entirely unrelated sources combine into one scalar row.
+
+    This used to raise ``Unreachable``, because both metrics had to share one FROM clause
+    and there was no join to build it from. Under the amendment each metric is aggregated
+    independently and the results are set beside each other, so there is nothing to reach:
+    total revenue next to total headcount is a legitimate question, not a join error
+    (AMENDMENT §2 — the cross-metric constraint is reachability of *dimensions*, not of
+    sources). ``test_..._dimension_unreachable_from_one_leaf_raises_unreachable`` below
+    pins the constraint that does still apply.
+    """
     revenue_b = MetricBinding(
         metric="revenue", canonical=CanonicalRef(source="orders", measure="revenue")
     )
@@ -419,8 +492,13 @@ def test_cross_source_metrics_no_join_path_raises_unreachable(
         metric="txn_amount", canonical=CanonicalRef(source="transactions", measure="amount")
     )
     resolver = ContractResolver(bindings=[revenue_b, amount_b], guardrails=[])
-    with pytest.raises(Unreachable):
-        compile(SemanticQuery(metrics=["revenue", "txn_amount"]), resolver, [orders, transactions])
+    result = compile(
+        SemanticQuery(metrics=["revenue", "txn_amount"]), resolver, [orders, transactions]
+    )
+    _parse_ok(result.sql)
+    sql_upper = result.sql.upper()
+    assert "CROSS JOIN" in sql_upper, "two one-row leaves, no grain to align"
+    assert "_LEAF_1" in sql_upper
 
 
 @pytest.fixture
@@ -540,10 +618,11 @@ def test_cross_source_metrics_grouped_by_source_one_leaf_per_source(
         connection_dialects={"warehouse_duckdb": "duckdb"},
     )
     _parse_ok(result.sql)
-    # Two metric sources total -> exactly two leaf CTEs, not three.
-    assert result.sql.count("_leaf0") > 0
-    assert result.sql.count("_leaf1") > 0
-    assert "_leaf2" not in result.sql
+    # Three metrics, but only two distinct plans: the two order_items measures share a
+    # source, dimensions and filters, so they fuse into one CTE projecting both.
+    assert "_leaf_0" in result.sql
+    assert "_leaf_1" in result.sql
+    assert "_leaf_2" not in result.sql
 
     con = duckdb.connect(":memory:")
     con.execute("CREATE TABLE fct_orders (order_id VARCHAR, amount DECIMAL)")
@@ -600,14 +679,18 @@ def test_cross_source_metrics_dimension_unreachable_from_one_leaf_raises_unreach
         )
 
 
-def test_cross_source_metrics_non_additive_fanout_still_raises_fanout_unsafe(
+def test_non_additive_metric_on_a_fanning_source_is_served_at_its_own_grain(
     orders: SemanticSource,
 ) -> None:
-    """The per-leaf pre-aggregation fix is additive-only: non-additive fanout still fails loud.
+    """A non-additive metric next to a metric on a fanning source is safe, not FanoutUnsafe.
 
-    Pre-aggregating a non-additive/semi-additive measure per leaf would mean invoking a
-    different compile strategy per leaf (semi_additive.py/recompute.py) — out of scope for
-    this fix, so the existing safety floor is unchanged.
+    This used to raise: both metrics shared one FROM clause, so counting distinct items
+    meant traversing the one_to_many join that multiplies rows, and the safety floor
+    correctly refused. Under the amendment ``distinct_items`` is aggregated on
+    ``order_items`` alone, at its native grain, where no fanning join exists — so there is
+    nothing to refuse. Fanout is a per-leaf question, and this leaf has none
+    (AMENDMENT §2). The falsifying check is the executed value: 4 distinct items, not 3
+    or 8.
     """
     order_items = SemanticSource(
         name="order_items",
@@ -645,9 +728,25 @@ def test_cross_source_metrics_non_additive_fanout_still_raises_fanout_unsafe(
         canonical=CanonicalRef(source="order_items", measure="distinct_items"),
     )
     resolver = ContractResolver(bindings=[revenue_b, distinct_b], guardrails=[])
-    with pytest.raises(FanoutUnsafe):
-        compile(
-            SemanticQuery(metrics=["revenue", "distinct_items"]),
-            resolver,
-            [orders_with_join, order_items],
-        )
+    result = compile(
+        SemanticQuery(metrics=["revenue", "distinct_items"]),
+        resolver,
+        [orders_with_join, order_items],
+        connection_dialects={"warehouse_duckdb": "duckdb"},
+    )
+    _parse_ok(result.sql)
+    assert "DISTINCT ON" not in result.sql.upper(), "no fanning join, so nothing to dedup"
+
+    con = duckdb.connect(":memory:")
+    con.execute("CREATE TABLE fct_orders (order_id VARCHAR, amount DECIMAL)")
+    con.execute(
+        "CREATE TABLE fct_order_items (item_id VARCHAR, order_id VARCHAR, quantity DECIMAL)"
+    )
+    con.execute("INSERT INTO fct_orders VALUES ('1', 100), ('2', 50)")
+    con.execute(
+        "INSERT INTO fct_order_items VALUES "
+        "('a', '1', 2), ('b', '1', 3), ('c', '1', 4), ('d', '2', 5)"
+    )
+    row = con.execute(result.sql).fetchone()
+    assert row is not None
+    assert row == (150, 4)

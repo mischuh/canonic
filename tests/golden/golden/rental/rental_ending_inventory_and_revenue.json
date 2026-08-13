@@ -1,0 +1,32 @@
+{
+  "case": "rental_ending_inventory_and_revenue",
+  "columns": [
+    {
+      "name": "ending_inventory",
+      "type": "int"
+    },
+    {
+      "name": "total_paid",
+      "type": "float"
+    }
+  ],
+  "dialect": "sqlite",
+  "finality": null,
+  "guardrails_fired": [],
+  "project": "rental",
+  "resolved": {
+    "metrics": {
+      "ending_inventory": "vehicle_inventory.inventory_level",
+      "rental_revenue": "payments.total_paid"
+    }
+  },
+  "row_count": 1,
+  "rows": [
+    [
+      15,
+      17468.19
+    ]
+  ],
+  "trust_tier": "provisional",
+  "warnings": []
+}

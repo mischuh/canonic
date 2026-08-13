@@ -1,0 +1,105 @@
+{
+  "case": "railway_service_count_and_cancelled_rate_by_province",
+  "columns": [
+    {
+      "name": "province_name",
+      "type": "string"
+    },
+    {
+      "name": "service_count",
+      "type": "int"
+    },
+    {
+      "name": "cancelled_arrival_rate",
+      "type": "float"
+    }
+  ],
+  "dialect": "duckdb",
+  "finality": null,
+  "guardrails_fired": [
+    {
+      "id": "exclude-cancelled-arrivals",
+      "kind": "mandatory_filter",
+      "severity": "error"
+    }
+  ],
+  "project": "dutch-railway",
+  "resolved": {
+    "metrics": {
+      "cancelled_arrival_rate": "ratio(cancelled_arrivals, scheduled_stops)",
+      "service_count": "fact_services.service_count"
+    }
+  },
+  "row_count": 13,
+  "rows": [
+    [
+      "Drenthe",
+      877,
+      0.00566893424036
+    ],
+    [
+      "Flevoland",
+      1509,
+      0.0527306967985
+    ],
+    [
+      "Frysl\u00e2n",
+      1992,
+      0.0
+    ],
+    [
+      "Gelderland",
+      8600,
+      0.00555041628122
+    ],
+    [
+      "Groningen",
+      3277,
+      0.027884900623
+    ],
+    [
+      "Limburg",
+      4184,
+      0.0691879866518
+    ],
+    [
+      "Noord-Brabant",
+      4586,
+      0.060438434747
+    ],
+    [
+      "Noord-Holland",
+      11720,
+      0.0857321163897
+    ],
+    [
+      "Overijssel",
+      4476,
+      0.0123565754634
+    ],
+    [
+      "Utrecht",
+      6947,
+      0.0132102272727
+    ],
+    [
+      "Zeeland",
+      791,
+      0.342477140482
+    ],
+    [
+      "Zuid-Holland",
+      9313,
+      0.252568218299
+    ],
+    [
+      "unknown",
+      30,
+      0.0
+    ]
+  ],
+  "trust_tier": "provisional",
+  "warnings": [
+    "zero denominator for metric 'cancelled_arrival_rate' yields NULL (on_zero_denominator=null)"
+  ]
+}

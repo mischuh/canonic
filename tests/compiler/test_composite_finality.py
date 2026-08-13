@@ -222,36 +222,46 @@ class TestS6AC1ProvisionalDenominator:
         )
         assert "is_final" in result.sql.lower()
 
-    def test_numerator_cte_padded_with_true_is_final(
+    def test_both_component_leaves_are_emitted(
         self, resolver: ContractResolver, sources: list[SemanticSource]
     ) -> None:
-        """The numerator CTE (no finality rule) is padded with TRUE AS is_final so the
-        outer AND expression compiles cleanly."""
+        """A finality rule on one component alone makes the two components distinct plans.
+
+        The numerator has no rule and the denominator does, so their leaf keys differ and
+        they cannot fuse — two CTEs, joined over the grain spine.
+        """
         result = compile(
             SemanticQuery(metrics=["avg_repair_costs"], dimensions=["report_date"], as_of=_AS_OF),
             resolver,
             sources,
         )
         _parse_ok(result.sql)
-        # Both num and den CTEs must be present; is_final appears in the outer SELECT.
         sql_upper = result.sql.upper()
-        assert "NUM" in sql_upper
-        assert "DEN" in sql_upper
+        assert "_LEAF_0" in sql_upper
+        assert "_LEAF_1" in sql_upper
         assert "IS_FINAL" in sql_upper
 
-    def test_is_final_uses_conservative_and(
+    def test_is_final_participates_in_the_grain_spine(
         self, resolver: ContractResolver, sources: list[SemanticSource]
     ) -> None:
-        """The outer is_final is an AND of COALESCE(num.is_final, TRUE) and
-        COALESCE(den.is_final, TRUE), so a provisional denominator row makes the
-        composite row provisional even when the numerator is final."""
+        """A provisional denominator row makes the composite row provisional.
+
+        ``is_final`` is part of the spine and of the join key for the leaf that projects
+        it, so a provisional denominator row can only ever pair with the spine's
+        provisional row for that grain — it can never be matched against a final one.
+        This replaces an outer ``COALESCE(n.is_final, TRUE) AND COALESCE(d.is_final, TRUE)``,
+        which said the same thing for exactly two leaves and silently mispaired rows once
+        a second finality leaf entered the query.
+        """
         result = compile(
             SemanticQuery(metrics=["avg_repair_costs"], dimensions=["report_date"], as_of=_AS_OF),
             resolver,
             sources,
         )
+        _parse_ok(result.sql)
         sql_upper = result.sql.upper()
-        assert "COALESCE" in sql_upper
+        assert '"_GRAIN"."IS_FINAL"' in sql_upper
+        assert '"_GRAIN"."IS_FINAL" = ' in sql_upper, "the finality leaf joins on is_final"
 
     def test_freshness_includes_both_leaf_sources(
         self, resolver: ContractResolver, sources: list[SemanticSource]

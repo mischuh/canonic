@@ -15,6 +15,8 @@ Cross-ticket ACs (not covered here):
 
 from __future__ import annotations
 
+import re
+
 import pytest
 import sqlglot
 
@@ -115,30 +117,35 @@ def resolver_ratio(
 
 
 # ---------------------------------------------------------------------------
-# AC1 — ratio: population_filter appears in both numerator and denominator CTEs
+# AC1 — ratio: population_filter scopes the population BOTH components are computed over
+#
+# The filter used to be asserted by counting its appearances, one per leaf CTE. Since
+# compose fuses leaves that share a plan, a ratio whose components differ only by measure
+# emits one CTE with one WHERE, and both aggregates are computed over those same filtered
+# rows. That is the property worth stating — "appears twice" was only ever a proxy for it.
 # ---------------------------------------------------------------------------
 
 
-def test_ac1_population_filter_in_both_ctes(
+def test_ac1_population_filter_scopes_both_components(
     resolver_ratio: ContractResolver, damages: SemanticSource
 ) -> None:
-    """Both the num and den CTEs carry the severity filter before aggregating."""
+    """Numerator and denominator are both computed over the severity-filtered population."""
     result = compile(SemanticQuery(metrics=["avg_repair_costs"]), resolver_ratio, [damages])
     _parse_ok(result.sql)
     sql_lower = result.sql.lower()
-    # "severity" should appear at least twice — once per CTE WHERE clause.
-    assert sql_lower.count("severity") >= 2
     assert "major" in sql_lower
     assert "moderate" in sql_lower
-    # Structural sanity: ratio produces two CTEs + CROSS JOIN (scalar).
-    assert "with" in sql_lower
-    assert "cross join" in sql_lower
+    assert sql_lower.count("where") == 1, "one filtered population, applied once"
+    # Both aggregates are projected from that one filtered CTE, and divided outside it.
+    assert re.search(r"sum\(.+repair_cost.+\)", result.sql, re.IGNORECASE)
+    assert re.search(r"count\(", result.sql, re.IGNORECASE)
+    assert "nullif" in sql_lower
 
 
 def test_ac1_population_filter_with_grouping(
     resolver_ratio: ContractResolver, damages: SemanticSource
 ) -> None:
-    """Grouped by severity: filter still appears in both CTEs alongside GROUP BY."""
+    """Grouped by severity: the filter still scopes the population, alongside GROUP BY."""
     result = compile(
         SemanticQuery(metrics=["avg_repair_costs"], dimensions=["severity"]),
         resolver_ratio,
@@ -146,8 +153,10 @@ def test_ac1_population_filter_with_grouping(
     )
     _parse_ok(result.sql)
     sql_lower = result.sql.lower()
-    assert sql_lower.count("severity") >= 2
-    assert "full" in sql_lower  # FULL JOIN because there are dimensions
+    assert "major" in sql_lower
+    assert "moderate" in sql_lower
+    assert sql_lower.count("where") == 1
+    assert "group by" in sql_lower
 
 
 def test_ac1_population_filter_model_roundtrip() -> None:
@@ -167,7 +176,7 @@ def test_ratio_population_filter_on_component_measures(
     """population_filter declared on the component measures (not the ratio itself) applies.
 
     Regression for the bug where a filter set on the numerator's/denominator's own
-    CanonicalRef was silently dropped because _compile_composite only ever read the
+    CanonicalRef was silently dropped because the composite path only ever read the
     ratio metric's own population_filter for both leaves. Uses two distinct filters,
     one per component, to prove each leaf gets its own filter rather than one leaking
     into the other or both being dropped.

@@ -15,7 +15,6 @@ import duckdb
 import pytest
 import sqlglot
 
-from canonic import exc
 from canonic.compiler import SemanticQuery, compile
 from canonic.contracts.models import (
     AppliesTo,
@@ -189,13 +188,19 @@ def _parse_ok(sql: str) -> None:
 
 
 def test_ac1_scalar_no_grouping(resolver: ContractResolver, sources: list[SemanticSource]) -> None:
-    """Scalar query: both leaves aggregate to one row; CROSS JOIN + divide."""
+    """Scalar query: the leaves aggregate to one row each, and the division happens after.
+
+    Both components sit on ``damages`` with the same filters, so compose fuses them into
+    one CTE projecting both measures rather than emitting two CTEs and joining them —
+    the join carried no information, since both sides were the same query.
+    """
     result = compile(SemanticQuery(metrics=["avg_repair_costs"]), resolver, sources)
     _parse_ok(result.sql)
     sql_upper = result.sql.upper()
     assert "WITH" in sql_upper
     assert "NULLIF" in sql_upper
-    assert "CROSS JOIN" in sql_upper
+    assert sql_upper.count("_LEAF_") >= 1
+    assert "_LEAF_1" not in sql_upper, "identical component plans must fuse into one CTE"
     assert "GROUP BY" not in sql_upper
     assert result.resolved == {"avg_repair_costs": "ratio(total_repair_cost, damage_count)"}
     assert result.composition is not None
@@ -205,7 +210,7 @@ def test_ac1_scalar_no_grouping(resolver: ContractResolver, sources: list[Semant
 
 
 def test_ac1_by_month_dimension(resolver: ContractResolver, sources: list[SemanticSource]) -> None:
-    """Grouping by month: each leaf groups by reported_month; FULL JOIN USING."""
+    """Grouping by month: the leaf groups by reported_month and the division follows it."""
     result = compile(
         SemanticQuery(metrics=["avg_repair_costs"], dimensions=["reported_month"]),
         resolver,
@@ -215,14 +220,13 @@ def test_ac1_by_month_dimension(resolver: ContractResolver, sources: list[Semant
     sql_upper = result.sql.upper()
     assert "WITH" in sql_upper
     assert "GROUP BY" in sql_upper
-    assert "FULL" in sql_upper
-    assert "USING" in sql_upper
+    assert "NULLIF" in sql_upper
     assert "reported_month" in result.sql.lower()
     assert "CROSS JOIN" not in sql_upper
 
 
 def test_ac1_by_join_dimension(resolver: ContractResolver, sources: list[SemanticSource]) -> None:
-    """Grouping by a join-reached dimension: each leaf joins to vehicles."""
+    """Grouping by a join-reached dimension: the leaf joins to vehicles before aggregating."""
     result = compile(
         SemanticQuery(metrics=["avg_repair_costs"], dimensions=["region"]),
         resolver,
@@ -232,7 +236,7 @@ def test_ac1_by_join_dimension(resolver: ContractResolver, sources: list[Semanti
     sql_upper = result.sql.upper()
     assert "WITH" in sql_upper
     assert "GROUP BY" in sql_upper
-    assert "FULL" in sql_upper
+    assert "NULLIF" in sql_upper
     assert "vehicles" in result.sql.lower() or "dim_vehicles" in result.sql.lower()
 
 
@@ -263,7 +267,13 @@ def test_ac1_sql_structure_numerator_denominator(
 def test_fanout_composite_ratio_leaves_use_distinct_on_dedup(
     resolver: ContractResolver, sources: list[SemanticSource]
 ) -> None:
-    """Grouping by a one_to_many-reached dimension: both leaves dedup before aggregating."""
+    """Grouping by a one_to_many-reached dimension: the leaf dedups before aggregating.
+
+    One ``DISTINCT ON``, not two: the components share a plan and fuse into a single CTE,
+    so the damage grain is deduplicated once and both measures aggregate over the same
+    deduplicated rows. The property that matters is that the dedup happens at all — see
+    ``test_fanout_composite_ratio_numeric_correctness`` for the falsifying value check.
+    """
     result = compile(
         SemanticQuery(metrics=["avg_repair_costs"], dimensions=["part_name"]),
         resolver,
@@ -271,7 +281,7 @@ def test_fanout_composite_ratio_leaves_use_distinct_on_dedup(
     )
     _parse_ok(result.sql)
     sql_upper = result.sql.upper()
-    assert sql_upper.count("DISTINCT ON") == 2
+    assert sql_upper.count("DISTINCT ON") == 1
     assert '"damages"."damage_id"' in result.sql
 
 
@@ -436,12 +446,22 @@ def test_composite_alone_required(
     damage_count_binding: MetricBinding,
     sources: list[SemanticSource],
 ) -> None:
-    """Requesting a composite alongside another metric raises UnsupportedMeasure."""
+    """A ratio compiles alongside another metric, sharing the leaf they have in common.
+
+    This is the request that used to raise ``UnsupportedMeasure("must be queried alone")``
+    and the symptom that prompted AMENDMENT-multi-metric-compose (S12 AC1/AC2). The ratio's
+    numerator *is* ``total_repair_cost``, so the two requests resolve to the same plan and
+    that aggregate is computed once, not twice.
+    """
     r = ContractResolver(
         bindings=[avg_costs_binding, total_cost_binding, damage_count_binding], guardrails=[]
     )
-    with pytest.raises(exc.UnsupportedMeasure):
-        compile(SemanticQuery(metrics=["avg_repair_costs", "total_repair_cost"]), r, sources)
+    result = compile(SemanticQuery(metrics=["avg_repair_costs", "total_repair_cost"]), r, sources)
+    _parse_ok(result.sql)
+    assert result.sql.upper().count("SELECT") == 2, "one leaf plus one outer SELECT"
+    assert re.findall(r"sum\(.+repair_cost.+\)", result.sql, re.IGNORECASE), "aggregated once"
+    assert len(re.findall(r"SUM\(", result.sql, re.IGNORECASE)) == 1
+    assert set(result.resolved) == {"avg_repair_costs", "total_repair_cost"}
 
 
 # ---------------------------------------------------------------------------
