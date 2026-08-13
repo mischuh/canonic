@@ -301,39 +301,6 @@ def _measure_expr(source: str, measure: Measure) -> exp.Expression:
     return _qualify_to(parsed, source)
 
 
-def _guard_aggregate(agg: exp.Expression, condition: exp.Expression) -> exp.Expression:
-    """Scope one metric's own aggregate to rows matching ``condition`` via conditional
-    aggregation (``SUM(CASE WHEN condition THEN x END)``), rather than ANDing the
-    condition into a WHERE shared with sibling metrics in the same flat SELECT — which
-    would drop rows those sibling metrics still need (GH multi-metric population_filter
-    collision).
-    """
-    inner = agg.this
-    if isinstance(inner, exp.Distinct):
-        guarded = [exp.Case(ifs=[exp.If(this=condition.copy(), true=e)]) for e in inner.expressions]
-        agg.set("this", exp.Distinct(expressions=guarded))
-    elif isinstance(inner, exp.Star):
-        agg.set("this", exp.Case(ifs=[exp.If(this=condition, true=exp.Literal.number(1))]))
-    else:
-        agg.set("this", exp.Case(ifs=[exp.If(this=condition, true=inner)]))
-    return agg
-
-
-def _requalify_all(expr: exp.Expression, new_alias: str) -> exp.Expression:
-    """Replace every qualified column's table with ``new_alias``, regardless of its
-    current table. Used to re-point a per-metric guard condition at a dedup subquery's
-    bare-named inner projection (``_DEDUP_ALIAS``), where the original source alias no
-    longer applies.
-    """
-
-    def _transform(node: exp.Expression) -> exp.Expression:
-        if isinstance(node, exp.Column) and node.table:
-            return exp.column(node.name, table=new_alias)
-        return node
-
-    return expr.transform(_transform)
-
-
 def _from_and_joins(
     select: exp.Select,
     owner: str,
@@ -360,28 +327,28 @@ def _build_simple(
     where_conditions: list[exp.Expression],
     join_edges: list[JoinEdge],
     sources_by_name: dict[str, SemanticSource],
-    metric_conditions: list[list[exp.Expression]] | None = None,
+    measure_aliases: list[str] | None = None,
 ) -> exp.Select:
     """Single-SELECT emission for the no-fanout case (SPEC §4 step 7).
 
-    ``metric_conditions``, when given, holds one condition list per metric (its own
-    population_filter/guardrails) applied via conditional aggregation on that metric's
-    own projection — used when multiple metrics share this SELECT and a shared WHERE
-    would incorrectly apply one metric's restriction to every other metric's aggregate.
+    Every metric projected here shares this SELECT's WHERE. That is safe because the
+    compose step only ever puts metrics on the same leaf when their planned filters are
+    identical (see :class:`canonic.compiler.compose.LeafKey`); metrics whose filters
+    differ get their own leaf instead.
+
+    ``measure_aliases``, when given, overrides each metric's output column name by index
+    instead of the default ``m.measure.name`` (mirrors :func:`_build_deduped`).
     """
     select = exp.Select()
     projections: list[exp.Expression] = []
     group_exprs: list[exp.Expression] = []
+    aliases = measure_aliases or [m.measure.name for m in metrics]
     for (src, dim), name in zip(dimensions, _dimension_output_names(dimensions), strict=True):
         expr = _dimension_expr(src, dim)
         projections.append(_alias(expr, name))
         group_exprs.append(expr)
     for i, m in enumerate(metrics):
-        expr = _measure_expr(m.source, m.measure)
-        conditions = metric_conditions[i] if metric_conditions else []
-        if conditions:
-            expr = _guard_aggregate(expr, cast("exp.Expression", exp.and_(*conditions)))
-        projections.append(_alias(expr, m.measure.name))
+        projections.append(_alias(_measure_expr(m.source, m.measure), aliases[i]))
     select = select.select(*projections)
     select = _from_and_joins(select, owner, join_edges, sources_by_name)
     if where_conditions:
@@ -401,7 +368,6 @@ def _build_dedup_inner(
     where_conditions: list[exp.Expression],
     join_edges: list[JoinEdge],
     sources_by_name: dict[str, SemanticSource],
-    metric_conditions: list[list[exp.Expression]] | None = None,
 ) -> exp.Select:
     """Inner half of the fanout-safe dedup: ``DISTINCT ON (owner grain)`` projecting
     dimensions + each measure's raw input columns, before any aggregation.
@@ -421,11 +387,6 @@ def _build_dedup_inner(
     for m in metrics:
         for input_col in _input_columns(m.measure):
             measure_inputs.setdefault(input_col, exp.column(input_col, table=m.source))
-    for conds in metric_conditions or []:
-        for cond in conds:
-            for col in cond.find_all(exp.Column):
-                if col.table:
-                    measure_inputs.setdefault(col.name, exp.column(col.name, table=col.table))
     for col_name in sorted(measure_inputs):
         inner_projections.append(_alias(measure_inputs[col_name], col_name))
     inner = inner.select(*inner_projections).distinct(*grain_cols)
@@ -442,7 +403,6 @@ def _build_deduped(
     where_conditions: list[exp.Expression],
     join_edges: list[JoinEdge],
     sources_by_name: dict[str, SemanticSource],
-    metric_conditions: list[list[exp.Expression]] | None = None,
     measure_aliases: list[str] | None = None,
 ) -> exp.Select:
     """Fanout-safe emission: dedup the measure grain in an inner ``DISTINCT ON`` subquery.
@@ -451,13 +411,8 @@ def _build_deduped(
     directly would inflate an additive sum. The inner query keeps one row per grain
     (Postgres ``DISTINCT ON``); the outer query aggregates over it (SPEC §4 step 4, S3 AC1).
 
-    ``metric_conditions``, when given, holds one condition list per metric applied via
-    conditional aggregation in the outer query (see ``_build_simple`` for why) — any
-    column such a condition references must also be projected by the inner subquery.
-
     ``measure_aliases``, when given, overrides the outer projection's alias for each
-    metric (by index) instead of the default ``m.measure.name`` — used by composite.py's
-    ratio/weighted_avg leaves, which alias their single measure to ``"n"``/``"d"``.
+    metric (by index) instead of the default ``m.measure.name``.
     """
     dim_names = _dimension_output_names(dimensions)
     inner = _build_dedup_inner(
@@ -467,7 +422,6 @@ def _build_deduped(
         where_conditions,
         join_edges,
         sources_by_name,
-        metric_conditions,
     )
 
     # Outer: aggregate the deduped rows.
@@ -481,10 +435,6 @@ def _build_deduped(
         group_exprs.append(dim_col)
     for i, m in enumerate(metrics):
         expr = _qualify_to(_parse(m.measure.expr), _DEDUP_ALIAS)
-        conditions = metric_conditions[i] if metric_conditions else []
-        if conditions:
-            requalified = [_requalify_all(c, _DEDUP_ALIAS) for c in conditions]
-            expr = _guard_aggregate(expr, cast("exp.Expression", exp.and_(*requalified)))
         projections.append(_alias(expr, aliases[i]))
     outer = outer.select(*projections).from_(_alias(inner.subquery(), _DEDUP_ALIAS))
     if group_exprs:
@@ -738,7 +688,7 @@ def _build_finality_union(
     watermark_dt: datetime,
     time_dim_name: str,
     original_owner: str,
-    measure_alias: str | None = None,
+    measure_aliases: list[str] | None = None,
 ) -> exp.Expression:
     """Build a UNION ALL over finality realizations (SPEC-E5-E15 stage 5).
 
@@ -748,8 +698,8 @@ def _build_finality_union(
     to each branch source — this is valid because both sources share the same column/
     dimension schema.
 
-    ``measure_alias`` overrides the column alias for each metric's measure projection; used
-    when building a leaf sub-query for a composite metric (e.g. alias ``"n"``/``"d"``).
+    ``measure_aliases`` overrides each metric's measure projection alias by index; used
+    when a leaf's output column name differs from the measure name.
     """
     from canonic.contracts.finality import watermark_to_iso
 
@@ -885,8 +835,8 @@ def _build_finality_union(
                 dim_col = exp.column(name, table=_DEDUP_ALIAS)
                 projections.append(_alias(dim_col, name))
                 group_exprs.append(dim_col)
-            for m in branch_metrics:
-                col_alias = measure_alias if measure_alias is not None else m.measure.name
+            for i, m in enumerate(branch_metrics):
+                col_alias = measure_aliases[i] if measure_aliases else m.measure.name
                 expr = _qualify_to(_parse(m.measure.expr), _DEDUP_ALIAS)
                 projections.append(_alias(expr, col_alias))
             projections.append(_alias(is_final_val, "is_final"))
@@ -896,8 +846,8 @@ def _build_finality_union(
                 expr = _dimension_expr(b_src, dim)
                 projections.append(_alias(expr, name))
                 group_exprs.append(expr)
-            for m in branch_metrics:
-                col_alias = measure_alias if measure_alias is not None else m.measure.name
+            for i, m in enumerate(branch_metrics):
+                col_alias = measure_aliases[i] if measure_aliases else m.measure.name
                 projections.append(_alias(_measure_expr(m.source, m.measure), col_alias))
             projections.append(_alias(is_final_val, "is_final"))
             select = select.select(*projections)

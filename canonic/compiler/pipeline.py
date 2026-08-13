@@ -7,11 +7,13 @@ canonicality — the compiler trusts its results and never reimplements them (§
 
 from __future__ import annotations
 
-import dataclasses
+import contextlib
 import logging
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from canonic.compiler._helpers import _block_or_warn, _find_dimension, _query_references_dimension
+from canonic.compiler.compose import MetricLeaves, MetricPlan, compose
+from canonic.compiler.dialect import adapter_for
 from canonic.compiler.joins import build_alias_tree, reachable_dimension_names
 from canonic.compiler.result import (
     CompileResult,
@@ -24,7 +26,7 @@ from canonic.contracts.models import BindingKind
 from canonic.contracts.resolver import Ambiguous as ResolverAmbiguous
 from canonic.contracts.resolver import Binding as ResolverBinding
 from canonic.contracts.resolver import Unresolved as ResolverUnresolved
-from canonic.exc import Ambiguous, Unresolved, UnsupportedMeasure
+from canonic.exc import Ambiguous, Unresolved
 from canonic.trust.models import TrustTier, tier_meets
 from canonic.trust.scorer import TrustScorer
 from canonic.trust.signals import static_signals_for
@@ -32,17 +34,19 @@ from canonic.trust.signals import static_signals_for
 if TYPE_CHECKING:
     from collections.abc import Mapping
 
+    from canonic.compiler.leaf import LeafPlan
     from canonic.compiler.query import SemanticQuery
     from canonic.contracts.resolver import ContractResolver
     from canonic.semantic.models import SemanticSource
 
 from canonic.compiler.strategies import (
-    _compile_composite,
-    _compile_opaque,
-    _compile_recompute_at_grain,
-    _compile_semi_additive,
-    _compile_simple_additive,
+    plan_composite,
+    plan_opaque,
+    plan_recompute_at_grain,
+    plan_semi_additive,
+    plan_simple_additive,
 )
+from canonic.compiler.strategies.simple_additive import _bind_metric, _enforce_restrict_source
 
 logger = logging.getLogger(__name__)
 
@@ -186,32 +190,76 @@ def _enforce_required_dimension(
     return warnings
 
 
+def _resolve_all_metrics(
+    query: SemanticQuery,
+    resolver: ContractResolver,
+) -> list[tuple[str, ResolverBinding]]:
+    """Stage 1 — resolve every requested metric before planning anything (AMENDMENT §3.1).
+
+    Failure is fail-fast for the whole query, never a partial result: a caller handed some
+    columns and some errors has no reliable way to tell which numbers to trust, which is
+    worse than being handed nothing. Every failing metric is named in one error so the
+    caller fixes them in a single round trip rather than one recompile per bad name.
+
+    ``UNRESOLVED`` takes precedence over ``AMBIGUOUS`` when both occur. An unresolved name
+    is the worse failure — the caller has to find a different name, not merely disambiguate
+    an existing one — and the ambiguous names ride along in the message so neither is lost.
+    """
+    resolved: list[tuple[str, ResolverBinding]] = []
+    unresolved: list[str] = []
+    ambiguous: list[str] = []
+    candidates: list[object] = []
+
+    for name in query.metrics:
+        result = resolver.resolve_metric(name, query.context)
+        if isinstance(result, ResolverUnresolved):
+            unresolved.append(name)
+        elif isinstance(result, ResolverAmbiguous):
+            ambiguous.append(name)
+            candidates.extend(c for c in result.candidates if c not in candidates)
+        else:
+            assert isinstance(result, ResolverBinding)  # noqa: S101 — exhaustive over the union
+            resolved.append((name, result))
+
+    if unresolved:
+        also = f"; also ambiguous: {_names(ambiguous)}" if ambiguous else ""
+        raise Unresolved(f"metric {_names(unresolved)} matches no active binding{also}")
+    if ambiguous:
+        raise Ambiguous(
+            f"metric {_names(ambiguous)} matches more than one active binding",
+            candidates=candidates,
+        )
+    return resolved
+
+
+def _names(names: list[str]) -> str:
+    return ", ".join(repr(n) for n in names)
+
+
 def compile(  # noqa: A001 — the public verb for this capability is "compile"
     query: SemanticQuery,
     resolver: ContractResolver,
     sources: list[SemanticSource],
     *,
     connection_dialects: Mapping[str, str] | None = None,
+    _dedup_leaves: bool = True,
 ) -> CompileResult:
-    """Compile a semantic query to read-only SQL and result metadata (SPEC §4)."""
+    """Compile a semantic query to read-only SQL and result metadata (SPEC §4).
+
+    ``_dedup_leaves`` is private and exists for one test. Leaf deduplication is an
+    optimisation, so the numbers must be identical with it disabled (AMENDMENT §3.2,
+    S12 AC3) — and a dedup key that is subtly too loose is exactly the kind of bug that
+    produces a plausible wrong number, so that property is worth being able to falsify
+    rather than merely assert. It is not on ``SemanticQuery``: that shape is frozen, and
+    this is not something a caller should ever ask for.
+    """
     sources_by_name = {s.name: s for s in sources}
 
     # Stage 1 — resolve metric bindings; detect composite kinds and route accordingly.
     logger.debug("stage 1: resolving metric bindings for metrics=%s", query.metrics)
     if not query.metrics:
         raise Unresolved("query requests at least one metric")
-    raw_bindings: list[tuple[str, ResolverBinding]] = []
-    for name in query.metrics:
-        result = resolver.resolve_metric(name, query.context)
-        if isinstance(result, ResolverUnresolved):
-            raise Unresolved(f"metric {name!r} matches no active binding")
-        if isinstance(result, ResolverAmbiguous):
-            raise Ambiguous(
-                f"metric {name!r} matches more than one active binding",
-                candidates=list(result.candidates),
-            )
-        assert isinstance(result, ResolverBinding)  # noqa: S101 — exhaustive over the union
-        raw_bindings.append((name, result))
+    raw_bindings = _resolve_all_metrics(query, resolver)
 
     # Compute related metadata once here using resolved bindings (all paths get it via
     # dataclasses.replace or direct constructor argument below).
@@ -230,103 +278,101 @@ def compile(  # noqa: A001 — the public verb for this capability is "compile"
         raw_bindings, resolver, query.context, trust_inputs
     ) + _enforce_required_dimension(query, raw_bindings, resolver, sources_by_name)
 
-    composite_indices = [
-        i
-        for i, (_, b) in enumerate(raw_bindings)
-        if b.kind in {BindingKind.RATIO, BindingKind.WEIGHTED_AVG}
-    ]
-    semi_additive_indices = [
-        i for i, (_, b) in enumerate(raw_bindings) if b.kind is BindingKind.SEMI_ADDITIVE
-    ]
-    recompute_indices = [
-        i
-        for i, (_, b) in enumerate(raw_bindings)
-        if b.kind in {BindingKind.DISTINCT_COUNT, BindingKind.PERCENTILE}
-    ]
-    opaque_indices = [i for i, (_, b) in enumerate(raw_bindings) if b.kind is BindingKind.OPAQUE]
-
-    # Derive the target SQL dialect from the primary binding's connection.
+    # Stages 2-6 — plan every metric into leaves. Which kind a metric is decides the
+    # shape of its leaves and nothing else: from here on a ratio, a semi-additive
+    # collapse and a plain sum are the same thing to the compose step.
     dialect = _dialect_for_bindings(raw_bindings, sources_by_name, connection_dialects)
+    logger.debug("stages 2-6: planning leaves for %d metric(s)", len(raw_bindings))
+    planned = [
+        _plan_metric(name, binding, query, resolver, sources_by_name, dialect)
+        for name, binding in raw_bindings
+    ]
 
-    if composite_indices:
-        if len(query.metrics) > 1:
-            raise UnsupportedMeasure(
-                "composite metrics (ratio/weighted_avg) must be queried alone; "
-                "remove other metrics from the request or split into separate queries"
-            )
-        _, composite = raw_bindings[0]
-        logger.info("compile path: composite metric=%s", query.metrics[0])
-        composite_result = _compile_composite(
-            query, composite, resolver, sources_by_name, dialect=dialect
-        )
-        return dataclasses.replace(
-            composite_result,
-            related=related,
-            trust_inputs=trust_inputs,
-            warnings=pipeline_warnings + composite_result.warnings,
-        )
-    if semi_additive_indices:
-        if len(query.metrics) > 1:
-            raise UnsupportedMeasure(
-                "semi_additive metrics must be queried alone; "
-                "remove other metrics from the request or split into separate queries"
-            )
-        _, sa_binding = raw_bindings[0]
-        logger.info("compile path: semi_additive metric=%s", query.metrics[0])
-        semi_additive_result = _compile_semi_additive(
-            query, sa_binding, resolver, sources_by_name, dialect=dialect
-        )
-        return dataclasses.replace(
-            semi_additive_result,
-            related=related,
-            trust_inputs=trust_inputs,
-            warnings=pipeline_warnings + semi_additive_result.warnings,
-        )
-    if recompute_indices:
-        if len(query.metrics) > 1:
-            raise UnsupportedMeasure(
-                "recompute_at_grain metrics (distinct_count/percentile) must be queried alone; "
-                "remove other metrics from the request or split into separate queries"
-            )
-        _, rg_binding = raw_bindings[0]
-        logger.info("compile path: recompute_at_grain metric=%s", query.metrics[0])
-        recompute_result = _compile_recompute_at_grain(
-            query, rg_binding, resolver, sources_by_name, dialect=dialect
-        )
-        return dataclasses.replace(
-            recompute_result,
-            related=related,
-            trust_inputs=trust_inputs,
-            warnings=pipeline_warnings + recompute_result.warnings,
-        )
-    if opaque_indices:
-        if len(query.metrics) > 1:
-            raise UnsupportedMeasure(
-                "opaque metrics must be queried alone; "
-                "remove other metrics from the request or split into separate queries"
-            )
-        _, opaque_binding = raw_bindings[0]
-        logger.info("compile path: opaque metric=%s", query.metrics[0])
-        opaque_result = _compile_opaque(
-            query, opaque_binding, resolver, sources_by_name, dialect=dialect
-        )
-        return dataclasses.replace(
-            opaque_result,
-            related=related,
-            trust_inputs=trust_inputs,
-            warnings=pipeline_warnings + opaque_result.warnings,
-        )
+    leaves: list[LeafPlan] = []
+    metric_plans: list[MetricPlan] = []
+    for metric_leaves in planned:
+        metric_plans.append(metric_leaves.offset(len(leaves)))
+        leaves.extend(metric_leaves.leaves)
 
-    logger.info("compile path: simple/additive metrics=%s", query.metrics)
-    simple_additive_result = _compile_simple_additive(
-        query, raw_bindings, resolver, sources_by_name, dialect=dialect
+    # Stage 5b — restrict_source, for the metrics that resolve to a single source/measure.
+    single_kind = [
+        _bind_metric(name, b, sources_by_name)
+        for name, b in raw_bindings
+        if b.kind is BindingKind.SINGLE
+    ]
+    restrict_warnings = (
+        _enforce_restrict_source(query, single_kind, resolver, None, sources_by_name)
+        if single_kind
+        else []
     )
-    return dataclasses.replace(
-        simple_additive_result,
+
+    # Stages 6b-7 — fuse identical leaves, join them over a shared grain, emit one statement.
+    logger.debug("stage 6b: composing %d leaves", len(leaves))
+    composed = compose(leaves, metric_plans, sources_by_name, dedup=_dedup_leaves)
+    adapter = adapter_for(dialect)
+    sql = adapter.emit(composed.ast, limit=query.limit)
+
+    logger.debug("stage 8: attaching result metadata")
+    return CompileResult(
+        sql=sql,
+        dialect=adapter.dialect,
+        resolved={
+            name: metric_leaves.resolved
+            for (name, _), metric_leaves in zip(raw_bindings, planned, strict=True)
+        },
+        guardrails_fired=composed.guardrails_fired,
+        freshness=composed.freshness,
+        warnings=[
+            *pipeline_warnings,
+            *restrict_warnings,
+            *composed.warnings,
+            *(w for m in planned for w in m.warnings),
+        ],
+        finality=composed.finality,
         related=related,
         trust_inputs=trust_inputs,
-        warnings=pipeline_warnings + simple_additive_result.warnings,
+        composition=_first(planned, "composition"),
+        partial_additive=_first(planned, "partial_additive"),
+        recompute_at_grain=_first(planned, "recompute_at_grain"),
+        opaque=_first(planned, "opaque"),
     )
+
+
+def _plan_metric(
+    name: str,
+    binding: ResolverBinding,
+    query: SemanticQuery,
+    resolver: ContractResolver,
+    sources_by_name: dict[str, SemanticSource],
+    dialect: str,
+) -> MetricLeaves:
+    """Dispatch one metric to the planner for its kind (AMENDMENT §3.3)."""
+    if binding.kind in {BindingKind.RATIO, BindingKind.WEIGHTED_AVG}:
+        return plan_composite(query, name, binding, resolver, sources_by_name)
+    if binding.kind is BindingKind.SEMI_ADDITIVE:
+        return plan_semi_additive(query, name, binding, resolver, sources_by_name)
+    if binding.kind in {BindingKind.DISTINCT_COUNT, BindingKind.PERCENTILE}:
+        return plan_recompute_at_grain(
+            query, name, binding, resolver, sources_by_name, dialect=dialect
+        )
+    if binding.kind is BindingKind.OPAQUE:
+        return plan_opaque(query, name, binding, resolver, sources_by_name)
+    return plan_simple_additive(query, name, binding, resolver, sources_by_name)
+
+
+def _first(planned: list[MetricLeaves], field: str) -> Any:
+    """First requested metric's value for a per-kind metadata field, or None.
+
+    ``CompileResult`` carries one slot per kind rather than one per metric, so a query
+    mixing two ratios can only report the first one's composition. Reporting *a* correct
+    composition beats reporting none; a per-metric map is a frozen-shape change and is
+    deferred (AMENDMENT §10).
+    """
+    for metric_leaves in planned:
+        value = getattr(metric_leaves, field)
+        if value is not None:
+            return value
+    return None
 
 
 _RELATED_CAP = 5
@@ -350,18 +396,25 @@ def _related(
         (sn, d.name): d.label for sn, src in sources_by_name.items() for d in src.dimensions
     }
 
+    # A suggested dimension has to be one the caller could actually add, so it must bind
+    # on *every* queried source, not merely on one of them (AMENDMENT §7). Suggesting a
+    # dimension that only some metrics can be grouped by would send the caller straight
+    # into an UNREACHABLE on their next request.
     seen_dims: set[str] = set()
     raw_dims: list[RelatedDimension] = []
     for src_name in sorted(queried_sources):
         for entry_name, alias in reachable_dimension_names(src_name, sources_by_name):
             if _query_references_dimension(entry_name, used_dims, filter_tokens):
                 continue
+            if entry_name in seen_dims:
+                continue
+            if not _addable_everywhere(entry_name, queried_sources, sources_by_name):
+                continue
+            seen_dims.add(entry_name)
             bare = entry_name.split(".")[-1]
-            if entry_name not in seen_dims:
-                seen_dims.add(entry_name)
-                actual_src = alias_to_src.get(alias, alias)
-                label = dim_label_lookup.get((actual_src, bare))
-                raw_dims.append(RelatedDimension(name=entry_name, source=alias, label=label))
+            actual_src = alias_to_src.get(alias, alias)
+            label = dim_label_lookup.get((actual_src, bare))
+            raw_dims.append(RelatedDimension(name=entry_name, source=alias, label=label))
     unused_dimensions = sorted(raw_dims, key=lambda d: (d.name, d.source))[:_RELATED_CAP]
 
     seen_metrics: set[str] = set()
@@ -377,3 +430,29 @@ def _related(
         unused_dimensions=unused_dimensions,
         sibling_metrics=sibling_metrics,
     )
+
+
+def _addable_everywhere(
+    entry_name: str,
+    queried_sources: set[str],
+    sources_by_name: dict[str, SemanticSource],
+) -> bool:
+    """True when *entry_name* binds from every queried source.
+
+    Resolution is delegated to :func:`_find_dimension`, the same function the compiler
+    would use when the caller actually adds the dimension, rather than re-deriving
+    reachability here — a suggestion that a second implementation says is addable and the
+    real one rejects is worse than no suggestion. Intersecting the raw entry names would
+    not work either: qualification depends on how many aliases expose the name within one
+    source's own reachable set, so the same dimension can arrive under different names
+    from different leaves. A name that resolves ambiguously is not safely addable and
+    drops out.
+    """
+    bare = entry_name.split(".")[-1]
+    for src_name in queried_sources:
+        tree = build_alias_tree(src_name, sources_by_name)
+        with contextlib.suppress(Ambiguous):
+            if _find_dimension(bare, sources_by_name, src_name, tree) is not None:
+                continue
+        return False
+    return True

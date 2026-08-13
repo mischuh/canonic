@@ -1,0 +1,34 @@
+{
+  "case": "rental_revenue_and_avg_repair_costs",
+  "columns": [
+    {
+      "name": "total_paid",
+      "type": "float"
+    },
+    {
+      "name": "avg_repair_costs",
+      "type": "float"
+    }
+  ],
+  "dialect": "sqlite",
+  "finality": null,
+  "guardrails_fired": [],
+  "project": "rental",
+  "resolved": {
+    "metrics": {
+      "avg_repair_costs": "ratio(total_repair_cost, damage_count)",
+      "rental_revenue": "payments.total_paid"
+    }
+  },
+  "row_count": 1,
+  "rows": [
+    [
+      17468.19,
+      2166.66666667
+    ]
+  ],
+  "trust_tier": "provisional",
+  "warnings": [
+    "zero denominator for metric 'avg_repair_costs' yields NULL (on_zero_denominator=null)"
+  ]
+}

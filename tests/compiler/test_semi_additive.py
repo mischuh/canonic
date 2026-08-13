@@ -362,19 +362,29 @@ def test_fanout_join_raises_fanout_unsafe(
         )
 
 
-def test_mixed_with_other_metric_raises(
+def test_composes_with_another_metric(
     ending_inventory_last: MetricBinding,
     additive_binding: MetricBinding,
     inventory_source: SemanticSource,
 ) -> None:
-    """Semi-additive metric queried alongside another metric → UnsupportedMeasure."""
+    """A semi-additive metric compiles alongside a plain additive one.
+
+    The collapse happens inside the leaf, so by the time the two are combined the
+    semi-additive metric is an ordinary column. Its ``ranked`` CTE is hoisted into the one
+    outer WITH under a leaf-scoped name rather than nested inside a CTE body, which is
+    what keeps the statement valid on every dialect (AMENDMENT §3.5).
+    """
     r = ContractResolver(bindings=[ending_inventory_last, additive_binding], guardrails=[])
-    with pytest.raises(exc.UnsupportedMeasure, match="alone"):
-        compile(
-            SemanticQuery(metrics=["ending_inventory", "total_inventory"]),
-            r,
-            [inventory_source],
-        )
+    result = compile(
+        SemanticQuery(metrics=["ending_inventory", "total_inventory"]),
+        r,
+        [inventory_source],
+    )
+    sqlglot.parse_one(result.sql, dialect="postgres")
+    assert "_leaf_0__ranked" in result.sql, "the inner CTE is hoisted and leaf-scoped"
+    assert result.sql.upper().count("WITH") == 1, "one WITH block, never a WITH inside a CTE"
+    assert "ROW_NUMBER" in result.sql.upper()
+    assert set(result.resolved) == {"ending_inventory", "total_inventory"}
 
 
 # ---------------------------------------------------------------------------

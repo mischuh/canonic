@@ -1,0 +1,49 @@
+{
+  "case": "jaffle_three_native_grains_by_customer_type",
+  "columns": [
+    {
+      "name": "customer_type",
+      "type": "string"
+    },
+    {
+      "name": "revenue",
+      "type": "decimal"
+    },
+    {
+      "name": "row_count",
+      "type": "int"
+    },
+    {
+      "name": "units_sold",
+      "type": "int"
+    }
+  ],
+  "dialect": "duckdb",
+  "finality": null,
+  "guardrails_fired": [],
+  "project": "jaffle-shop",
+  "resolved": {
+    "metrics": {
+      "num_customers": "customers.row_count",
+      "revenue": "orders.revenue",
+      "units_sold": "order_items.units_sold"
+    }
+  },
+  "row_count": 2,
+  "rows": [
+    [
+      "business",
+      "43.00",
+      5,
+      9
+    ],
+    [
+      "personal",
+      "122.04",
+      15,
+      28
+    ]
+  ],
+  "trust_tier": "provisional",
+  "warnings": []
+}

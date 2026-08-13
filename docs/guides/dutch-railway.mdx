@@ -88,7 +88,7 @@ Three-hop join (`fact_services → dim_nl_train_stations → dim_nl_municipaliti
 query({"metrics": ["service_count"], "dimensions": ["province_name"]})
 ```
 
-A `ratio`-kind metric; ratio/weighted_avg metrics compile to a CTE per component and must be queried alone (no other metrics or dimensions in the same call):
+A `ratio`-kind metric. Ratios compile to a CTE per component and divide after aggregating, and they combine freely with other metrics and dimensions in the same call:
 
 ```json
 query({"metrics": ["cancelled_arrival_rate"]})

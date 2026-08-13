@@ -217,18 +217,22 @@ def test_ac1_rejects_scalar_query(
 # ---------------------------------------------------------------------------
 
 
-def test_opaque_must_be_queried_alone(
-    opaque_resolver: ContractResolver,
+def test_opaque_at_native_grain_composes_with_another_metric(
     customer_metrics_source: SemanticSource,
 ) -> None:
-    """Querying an opaque metric alongside another metric → UnsupportedMeasure."""
-    extra_binding = MetricBinding(
-        metric="revenue",
-        canonical=CanonicalRef(
-            kind=BindingKind.SINGLE,
-            source="customer_metrics",
-            measure="health_score",
-        ),
+    """At its native grain an opaque metric is just another column, and composes.
+
+    The sibling metric needs a real aggregate of its own: the opaque measure is a bare
+    column, which is exactly what makes it opaque, and is not something the compiler will
+    aggregate at any grain.
+    """
+    source = customer_metrics_source.model_copy(
+        update={
+            "measures": [
+                *customer_metrics_source.measures,
+                Measure(name="score_total", expr="sum(health_score)", additivity="additive"),
+            ]
+        }
     )
     resolver = ContractResolver(
         bindings=[
@@ -241,16 +245,60 @@ def test_opaque_must_be_queried_alone(
                     native_grain=["customer_id", "month"],
                 ),
             ),
-            extra_binding,
+            MetricBinding(
+                metric="score_sum",
+                canonical=CanonicalRef(
+                    kind=BindingKind.SINGLE, source="customer_metrics", measure="score_total"
+                ),
+            ),
         ],
         guardrails=[],
     )
-    with pytest.raises(exc.UnsupportedMeasure):
-        compile(
-            SemanticQuery(
-                metrics=["customer_health_score", "revenue"],
-                dimensions=["customer_id", "month"],
+    result = compile(
+        SemanticQuery(
+            metrics=["customer_health_score", "score_sum"],
+            dimensions=["customer_id", "month"],
+        ),
+        resolver,
+        [source],
+    )
+    sqlglot.parse_one(result.sql, dialect="postgres")
+    assert set(result.resolved) == {"customer_health_score", "score_sum"}
+    assert result.opaque is not None
+
+
+def test_s15_ac3_opaque_off_native_grain_fails_the_whole_query(
+    customer_metrics_source: SemanticSource,
+) -> None:
+    """An opaque metric off its native grain fails the query, serveable siblings and all.
+
+    Fail-fast, never a partial result (AMENDMENT §3.1, S15 AC3): returning the sibling
+    metric alone would hand back a result whose shape does not match what was asked for,
+    and nothing in it would say which column went missing or why.
+    """
+    resolver = ContractResolver(
+        bindings=[
+            MetricBinding(
+                metric="customer_health_score",
+                canonical=CanonicalRef(
+                    kind=BindingKind.OPAQUE,
+                    source="customer_metrics",
+                    measure="health_score",
+                    native_grain=["customer_id", "month"],
+                ),
             ),
+            MetricBinding(
+                metric="score_sum",
+                canonical=CanonicalRef(
+                    kind=BindingKind.SINGLE, source="customer_metrics", measure="health_score"
+                ),
+            ),
+        ],
+        guardrails=[],
+    )
+    with pytest.raises(exc.UnsupportedMeasure, match="native grain"):
+        compile(
+            SemanticQuery(metrics=["customer_health_score", "score_sum"], dimensions=["month"]),
             resolver,
             [customer_metrics_source],
         )

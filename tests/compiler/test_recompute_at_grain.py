@@ -536,17 +536,28 @@ def test_distinct_count_many_to_one_join_ok(
 # ---------------------------------------------------------------------------
 
 
-def test_recompute_at_grain_must_be_queried_alone(
+def test_recompute_at_grain_composes_with_another_metric(
     rg_resolver: ContractResolver,
     orders_rg: SemanticSource,
 ) -> None:
-    """Querying a recompute_at_grain metric alongside another raises UnsupportedMeasure."""
-    with pytest.raises(exc.UnsupportedMeasure):
-        compile(
-            SemanticQuery(metrics=["active_customers", "median_order_value"]),
-            rg_resolver,
-            [orders_rg],
-        )
+    """A distinct count and a percentile compile together into one statement.
+
+    Each recomputes from base rows in its own leaf, so neither can affect the other's
+    grain. They do not fuse: a quantile is built around exactly one column, and merging a
+    second measure into that shape would change what the ordered-set aggregate applies to.
+    """
+    result = compile(
+        SemanticQuery(metrics=["active_customers", "median_order_value"]),
+        rg_resolver,
+        [orders_rg],
+    )
+    sqlglot.parse_one(result.sql, dialect="postgres")
+    sql_upper = result.sql.upper()
+    assert "_LEAF_0" in sql_upper
+    assert "_LEAF_1" in sql_upper
+    assert "COUNT(DISTINCT" in sql_upper
+    assert "PERCENTILE_CONT" in sql_upper
+    assert set(result.resolved) == {"active_customers", "median_order_value"}
 
 
 # ---------------------------------------------------------------------------

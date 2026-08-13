@@ -4,536 +4,82 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING
 
 from sqlglot import exp
 
-from canonic.compiler.dialect import adapter_for
-from canonic.compiler.joins import JoinEdge, build_alias_tree, plan_joins
-from canonic.compiler.result import (
-    CompileResult,
-    FinalityMetadata,
-)
-from canonic.exc import FanoutUnsafe, Unresolved, UnsupportedMeasure
-from canonic.semantic.models import Additivity, Relationship
+from canonic.compiler.compose import LeafRef, MetricLeaves, MetricPlan
+from canonic.compiler.leaf import LeafContext, LeafMetric, plan_leaf
+from canonic.exc import Unresolved
 
 if TYPE_CHECKING:
     from canonic.compiler.query import SemanticQuery
-    from canonic.compiler.result import FiredGuardrail
     from canonic.contracts.models import FinalityRule
     from canonic.contracts.resolver import Binding as ResolverBinding
     from canonic.contracts.resolver import ContractResolver
     from canonic.semantic.models import SemanticSource
 
 from canonic.compiler._helpers import (
-    _FANOUT,
     _TIME_TYPES,
-    _alias,
-    _bind_filters,
     _block_or_warn,
-    _build_deduped,
-    _build_finality_union,
-    _build_simple,
-    _dimension_output_names,
-    _enforce_guardrails,
     _find_measure,
-    _find_time_dim_name,
-    _freshness,
-    _guardrail_join_sources,
     _parse,
-    _population_filter_conditions,
-    _resolve_dimensions,
     _ResolvedMetric,
 )
 
 logger = logging.getLogger(__name__)
 
 
-def _cross_source_measure_unsafe(target: str, owner: str, join_edges: list[JoinEdge]) -> bool:
-    """True unless every join edge from ``owner`` to ``target`` is one_to_one.
-
-    A flat single-SELECT (or the owner-grain ``DISTINCT ON`` dedup used for fanout) is
-    only guaranteed correct for a measure whose columns live on ``owner`` itself. A
-    non-``owner`` measure source reached through a one_to_many/many_to_many edge gets its
-    rows collapsed by the owner-grain dedup and silently undercounted; reached through a
-    many_to_one edge, its values get broadcast across every matching owner row and
-    silently overcounted (confirmed by direct reproduction against real data, both
-    directions). one_to_one edges duplicate nothing in either direction, so they're the
-    only relationship safe for combining a non-owner measure into this query today.
-    """
-    if target == owner:
-        return False
-    by_alias = {edge.alias: edge for edge in join_edges}
-    cur = target
-    while cur != owner:
-        edge = by_alias.get(cur)
-        if edge is None:
-            return True
-        if edge.join.relationship is not Relationship.ONE_TO_ONE:
-            return True
-        cur = edge.from_alias
-    return False
-
-
-def _bindings_to_resolved(
-    name_bindings: list[tuple[str, ResolverBinding]],
+def _bind_metric(
+    name: str,
+    binding: ResolverBinding,
     sources_by_name: dict[str, SemanticSource],
-) -> list[_ResolvedMetric]:
-    """Convert pre-resolved single-kind bindings to _ResolvedMetric objects."""
-    resolved: list[_ResolvedMetric] = []
-    for name, binding in name_bindings:
-        assert binding.source is not None and binding.measure is not None  # noqa: S101
-        source = sources_by_name.get(binding.source)
-        if source is None:
-            raise Unresolved(f"metric {name!r} binds to unknown source {binding.source!r}")
-        measure = _find_measure(source, binding.measure)
-        if measure is None:
-            raise Unresolved(
-                f"metric {name!r} binds to unknown measure {binding.source}.{binding.measure!r}"
-            )
-        resolved.append(_ResolvedMetric(name=name, source=binding.source, measure=measure))
-    return resolved
+) -> _ResolvedMetric:
+    """Bind a resolved single-kind binding to its source and measure objects (stage 1)."""
+    assert binding.source is not None and binding.measure is not None  # noqa: S101
+    source = sources_by_name.get(binding.source)
+    if source is None:
+        raise Unresolved(f"metric {name!r} binds to unknown source {binding.source!r}")
+    measure = _find_measure(source, binding.measure)
+    if measure is None:
+        raise Unresolved(
+            f"metric {name!r} binds to unknown measure {binding.source}.{binding.measure!r}"
+        )
+    return _ResolvedMetric(name=name, source=binding.source, measure=measure)
 
 
-def _compile_simple_additive(
+def plan_metric(
     query: SemanticQuery,
-    raw_bindings: list[tuple[str, ResolverBinding]],
+    queried_name: str,
+    binding: ResolverBinding,
     resolver: ContractResolver,
     sources_by_name: dict[str, SemanticSource],
-    *,
-    dialect: str = "postgres",
-) -> CompileResult:
-    """Compile the simple/additive path (stages 2–8) — no composite, semi-additive, or recompute."""
-    metrics = _bindings_to_resolved(raw_bindings, sources_by_name)
-    owner = metrics[0].source  # FROM anchor
+) -> MetricLeaves:
+    """Plan a plain additive metric as one leaf aggregating to the requested dimensions.
 
-    # Stage 2 — resolve dimensions & filters to owning aliases.
-    logger.debug("stage 2: resolving dimensions and filters")
-    alias_to_source = build_alias_tree(owner, sources_by_name)
-    dimensions = _resolve_dimensions(query, sources_by_name, owner, alias_to_source)
-    referenced = {alias for alias, _ in dimensions}
-    referenced |= {m.source for m in metrics}
-    where_conditions, filter_sources = _bind_filters(
-        query.filters, sources_by_name, owner, alias_to_source
-    )
-    referenced |= filter_sources
-    referenced |= {owner}
-    referenced |= _guardrail_join_sources(
-        [(m.source, m.measure.name) for m in metrics],
-        resolver,
-        query.context,
-        sources_by_name,
-        alias_to_source,
-    )
-
-    # Stage 3 — plan the join graph from the owner to every referenced alias.
-    logger.debug("stage 3: planning join graph")
-    join_edges = plan_joins(
-        owner, referenced - {owner}, sources_by_name, via=list(query.via) or None
-    )
-
-    # Stage 4 — fanout analysis: safety floor (SPEC-E15 §5) + dedup for additive fanout.
-    logger.debug("stage 4: fanout analysis")
-    fanout = any(edge.join.relationship in _FANOUT for edge in join_edges)
-    grouped = {dim.name for _alias, dim in dimensions}
-
-    # True when at least one additive metric sits on a source reached from `owner` via a
-    # non-one_to_one join: the flat single-plan below is unsafe for it (broadcast/collapse
-    # risk), so stage 7 rebuilds the whole query as one CTE per metric source instead
-    # (aggregate each source at its own grain first, combine last — always correct).
-    needs_multi_leaf = False
-
-    for m in metrics:
-        add = m.measure.additivity
-        if add is Additivity.ADDITIVE:
-            if not m.measure.is_p0_compilable:
-                raise UnsupportedMeasure(
-                    f"measure {m.source}.{m.measure.name!r} uses an aggregate function "
-                    f"not supported at P0"
-                )
-            if _cross_source_measure_unsafe(m.source, owner, join_edges):
-                logger.debug(
-                    "cross-source measure needs per-source pre-aggregation: %s.%s is "
-                    "reached from owner %s via a non-one_to_one join",
-                    m.source,
-                    m.measure.name,
-                    owner,
-                )
-                needs_multi_leaf = True
-            continue
-
-        # Non-additive / semi-additive: safety floor — refuse corrupting aggregations.
-        if fanout:
-            logger.warning(
-                "fanout unsafe: measure %s.%s is %s and a fanout join would corrupt the aggregate",
-                m.source,
-                m.measure.name,
-                add.value,
-            )
-            raise FanoutUnsafe(
-                f"measure {m.source}.{m.measure.name!r} is {add.value} and a "
-                f"one_to_many/many_to_many join in this query would multiply its rows "
-                f"and corrupt the aggregate; request it without the fanning dimension "
-                f"or source, or query it at its native grain"
-            )
-        if add is Additivity.SEMI_ADDITIVE:
-            unsafe_dims = [d for d in m.measure.semi_additive_over if d not in grouped]
-            if unsafe_dims:
-                raise UnsupportedMeasure(
-                    f"measure {m.source}.{m.measure.name!r} is semi-additive over "
-                    f"{unsafe_dims} and cannot be collapsed across those dimensions "
-                    f"without the semi_additive strategy; group by {unsafe_dims} for "
-                    f"a correct result"
-                )
-        # Pure NON_ADDITIVE with no fanout, or SEMI_ADDITIVE grouped by its collapse dim(s):
-        # _build_simple recomputes the aggregate from base rows at the requested grain — safe.
-
-    # Stage 5 — finality & coalescing [P1]: evaluate watermark, select sources per window.
-    logger.debug("stage 5: finality evaluation")
-    finality_rule = resolver.finality_for(metrics[0].name) if len(metrics) == 1 else None
-    time_dim_name: str | None = None
-    if finality_rule is not None:
-        time_dim_name = _find_time_dim_name(dimensions, sources_by_name, alias_to_source)
-        if time_dim_name is None:
-            finality_rule = None  # no time dimension → all rows implicitly final
-
-    # Stage 5b — restrict_source: block (or warn on) queries that would pull provisional rows
-    # in guarded contexts. Independent of the flat-plan-vs-multi-leaf split below, so its
-    # warning (if any) is merged into the result regardless of which branch builds the SQL.
-    logger.debug("stage 5b: restrict_source enforcement")
-    restrict_source_warnings = _enforce_restrict_source(
-        query, metrics, resolver, finality_rule, sources_by_name
-    )
-
-    # population_filter — defines the population each metric is about (§4.5); before guardrails.
-    # With exactly one metric, its filter/guardrails fold into the single shared WHERE
-    # (unchanged, current SQL shape). With multiple metrics sharing this one flat SELECT,
-    # each metric's own filter/guardrails must scope only its own aggregate — ANDing them
-    # into one shared WHERE would apply metric A's restriction to metric B's aggregate too,
-    # and vice versa, silently collapsing all metrics to NULL when the restrictions differ.
-    logger.debug("stage 6: enforcing guardrails")
-    metric_conditions: list[list[exp.Expression]] | None = None
-    warnings: list[str] = []
-    if len(metrics) == 1:
-        _, b = raw_bindings[0]
-        where_conditions += _population_filter_conditions(
-            b.binding.canonical.population_filter, sources_by_name, owner, alias_to_source
-        )
-        guard_result = _enforce_guardrails(metrics, resolver, query.context, sources_by_name)
-        where_conditions += guard_result.conditions
-        fired = guard_result.fired
-        warnings = guard_result.warnings
-    else:
-        metric_conditions = []
-        fired = []
-        fired_seen: set[str] = set()
-        warnings_seen: set[str] = set()
-        for m, (_, b) in zip(metrics, raw_bindings, strict=True):
-            conds = _population_filter_conditions(
-                b.binding.canonical.population_filter, sources_by_name, owner, alias_to_source
-            )
-            guard_result = _enforce_guardrails([m], resolver, query.context, sources_by_name)
-            conds += guard_result.conditions
-            for g in guard_result.fired:
-                if g.id not in fired_seen:
-                    fired_seen.add(g.id)
-                    fired.append(g)
-            for w in guard_result.warnings:
-                if w not in warnings_seen:
-                    warnings_seen.add(w)
-                    warnings.append(w)
-            metric_conditions.append(conds)
-    if fired:
-        logger.info("guardrails applied: count=%d ids=%s", len(fired), [g.id for g in fired])
-
-    # Stage 7 — emit SQL through the dialect adapter.
-    logger.debug("stage 7: emitting SQL via dialect %s", dialect)
-    finality_meta: FinalityMetadata | None = None
-    adapter = adapter_for(dialect)
-    if finality_rule is not None and time_dim_name is not None:
-        from canonic.contracts.finality import evaluate_watermark, watermark_to_iso
-
-        final_r = next(r for r in finality_rule.realizations if r.role == "final")
-        watermark_dt = evaluate_watermark(
-            cast("str", final_r.watermark), cast("str", final_r.tz), query.as_of
-        )
-        ast = _build_finality_union(
-            rule=finality_rule,
-            query_metrics=metrics,
-            dimensions=dimensions,
-            where_conditions=where_conditions,
-            sources_by_name=sources_by_name,
-            watermark_dt=watermark_dt,
-            time_dim_name=time_dim_name,
-            original_owner=owner,
-        )
-        finality_meta = FinalityMetadata(
-            watermark=watermark_to_iso(watermark_dt),
-            sources_used=[r.source for r in finality_rule.realizations],
-            result_flag=finality_rule.result_flag or "per_row",
-        )
-    elif needs_multi_leaf:
-        # Cross-source additive metrics via a non-one_to_one join: the flat single-plan
-        # `join_edges`/`dimensions`/`where_conditions` above are relative to the wrong
-        # (global) owner and unsafe here — rebuild from scratch as one CTE per metric
-        # source (SPEC follow-up: correct fanout aggregation via pre-aggregate-then-join).
-        ast, fired, warnings, multi_used_sources = _build_multi_source(
-            query, metrics, raw_bindings, resolver, sources_by_name
-        )
-    elif fanout:
-        ast = _build_deduped(
-            owner,
-            metrics,
-            dimensions,
-            where_conditions,
-            join_edges,
-            sources_by_name,
-            metric_conditions,
-        )
-    else:
-        ast = _build_simple(
-            owner,
-            metrics,
-            dimensions,
-            where_conditions,
-            join_edges,
-            sources_by_name,
-            metric_conditions,
-        )
-    sql = adapter.emit(ast, limit=query.limit)
-
-    # Stage 8 — attach result metadata.
-    logger.debug("stage 8: attaching result metadata")
-    if finality_meta is not None:
-        used_sources = sorted(finality_meta.sources_used)
-    elif needs_multi_leaf:
-        used_sources = sorted(multi_used_sources)
-    else:
-        # Map aliases back to source names (deduplicated) for freshness metadata.
-        used_source_names: set[str] = {owner}
-        for e in join_edges:
-            used_source_names.add(e.join.to)
-        used_sources = sorted(used_source_names)
-    return CompileResult(
-        sql=sql,
-        dialect=adapter.dialect,
-        resolved={m.name: f"{m.source}.{m.measure.name}" for m in metrics},
-        guardrails_fired=fired,
-        freshness=[_freshness(sources_by_name[s]) for s in used_sources],
-        warnings=restrict_source_warnings + warnings,
-        finality=finality_meta,
-    )
-
-
-class _GroupPlan:
-    """A leaf SELECT for one metric-source group inside a multi-source query (§9 S4 follow-up)."""
-
-    __slots__ = ("dim_names", "select", "used_sources")
-
-    def __init__(self, select: exp.Select, dim_names: list[str], used_sources: set[str]) -> None:
-        self.select = select
-        self.dim_names = dim_names
-        self.used_sources = used_sources
-
-
-def _plan_metric_group(
-    owner: str,
-    metrics: list[_ResolvedMetric],
-    raw_bindings: list[tuple[str, ResolverBinding]],
-    query: SemanticQuery,
-    resolver: ContractResolver,
-    sources_by_name: dict[str, SemanticSource],
-) -> tuple[_GroupPlan, list[FiredGuardrail], list[str]]:
-    """Plan and build one metric-source group's SELECT at its own grain (stages 2-4, 6-7).
-
-    Every metric here shares ``owner`` as its source, so this is exactly the single-source
-    logic ``_compile_simple_additive`` runs stages 2-4/6-7 for, scoped down to one owner
-    and its own metrics so :func:`_build_multi_source` can reuse it per leaf.
+    One leaf per metric, never one per source: a leaf is defined by its *plan*, and two
+    metrics on one source whose populations or guardrails differ are not the same plan.
+    Compose fuses back together whatever genuinely is identical, so nothing is lost by
+    starting from the finest split — and the alternative, sharing a SELECT between metrics
+    with different filters, is what conditional aggregation used to paper over.
     """
-    alias_to_source = build_alias_tree(owner, sources_by_name)
-    dimensions = _resolve_dimensions(query, sources_by_name, owner, alias_to_source)
-    referenced = {alias for alias, _ in dimensions}
-    where_conditions, filter_sources = _bind_filters(
-        query.filters, sources_by_name, owner, alias_to_source
+    resolved = _bind_metric(queried_name, binding, sources_by_name)
+    leaf_metric = LeafMetric(
+        resolved=resolved, population_filter=binding.binding.canonical.population_filter
     )
-    referenced |= filter_sources
-    referenced |= {owner}
-    referenced |= _guardrail_join_sources(
-        [(m.source, m.measure.name) for m in metrics],
-        resolver,
-        query.context,
-        sources_by_name,
-        alias_to_source,
+    leaf = plan_leaf(
+        LeafContext(query=query, resolver=resolver, sources_by_name=sources_by_name),
+        resolved.source,
+        [leaf_metric],
+        finality_metric=queried_name,
     )
-
-    join_edges = plan_joins(
-        owner, referenced - {owner}, sources_by_name, via=list(query.via) or None
+    # The output column keeps the measure's name, as it always has on this path.
+    column = resolved.measure.name
+    return MetricLeaves(
+        leaves=[leaf],
+        metric=MetricPlan(name=column, refs=(LeafRef(leaf=0, column=column),)),
+        resolved=f"{resolved.source}.{column}",
     )
-
-    fanout = any(edge.join.relationship in _FANOUT for edge in join_edges)
-    grouped = {dim.name for _alias, dim in dimensions}
-
-    for m in metrics:
-        add = m.measure.additivity
-        if add is Additivity.ADDITIVE:
-            if not m.measure.is_p0_compilable:
-                raise UnsupportedMeasure(
-                    f"measure {m.source}.{m.measure.name!r} uses an aggregate function "
-                    f"not supported at P0"
-                )
-            continue
-        if fanout:
-            raise FanoutUnsafe(
-                f"measure {m.source}.{m.measure.name!r} is {add.value} and a "
-                f"one_to_many/many_to_many join in this query would multiply its rows "
-                f"and corrupt the aggregate; request it without the fanning dimension "
-                f"or source, or query it at its native grain"
-            )
-        if add is Additivity.SEMI_ADDITIVE:
-            unsafe_dims = [d for d in m.measure.semi_additive_over if d not in grouped]
-            if unsafe_dims:
-                raise UnsupportedMeasure(
-                    f"measure {m.source}.{m.measure.name!r} is semi-additive over "
-                    f"{unsafe_dims} and cannot be collapsed across those dimensions "
-                    f"without the semi_additive strategy; group by {unsafe_dims} for "
-                    f"a correct result"
-                )
-
-    metric_conditions: list[list[exp.Expression]] | None = None
-    warnings: list[str] = []
-    if len(metrics) == 1:
-        _, b = raw_bindings[0]
-        where_conditions += _population_filter_conditions(
-            b.binding.canonical.population_filter, sources_by_name, owner, alias_to_source
-        )
-        guard_result = _enforce_guardrails(metrics, resolver, query.context, sources_by_name)
-        where_conditions += guard_result.conditions
-        fired = guard_result.fired
-        warnings = guard_result.warnings
-    else:
-        metric_conditions = []
-        fired = []
-        fired_seen: set[str] = set()
-        warnings_seen: set[str] = set()
-        for m, (_, b) in zip(metrics, raw_bindings, strict=True):
-            conds = _population_filter_conditions(
-                b.binding.canonical.population_filter, sources_by_name, owner, alias_to_source
-            )
-            guard_result = _enforce_guardrails([m], resolver, query.context, sources_by_name)
-            conds += guard_result.conditions
-            for g in guard_result.fired:
-                if g.id not in fired_seen:
-                    fired_seen.add(g.id)
-                    fired.append(g)
-            for w in guard_result.warnings:
-                if w not in warnings_seen:
-                    warnings_seen.add(w)
-                    warnings.append(w)
-            metric_conditions.append(conds)
-
-    if fanout:
-        select = _build_deduped(
-            owner,
-            metrics,
-            dimensions,
-            where_conditions,
-            join_edges,
-            sources_by_name,
-            metric_conditions,
-        )
-    else:
-        select = _build_simple(
-            owner,
-            metrics,
-            dimensions,
-            where_conditions,
-            join_edges,
-            sources_by_name,
-            metric_conditions,
-        )
-
-    used_sources = {owner} | {e.join.to for e in join_edges}
-    plan = _GroupPlan(
-        select=select, dim_names=_dimension_output_names(dimensions), used_sources=used_sources
-    )
-    return plan, fired, warnings
-
-
-def _build_multi_source(
-    query: SemanticQuery,
-    metrics: list[_ResolvedMetric],
-    raw_bindings: list[tuple[str, ResolverBinding]],
-    resolver: ContractResolver,
-    sources_by_name: dict[str, SemanticSource],
-) -> tuple[exp.Select, list[FiredGuardrail], list[str], set[str]]:
-    """Combine metrics from different, fanned-out-joined sources into one query.
-
-    Each distinct metric source is planned and aggregated independently, at its own grain
-    (:func:`_plan_metric_group` — the same single-source machinery
-    ``_compile_simple_additive`` already uses) *before* any cross-source join happens. A
-    fully-aggregated one-row-per-group leaf can't be fanned out by a later join, so this
-    is correct regardless of the relationship between the sources — no dedup trick, no
-    broadcast/collapse risk. Leaves are emitted as CTEs and combined with a
-    ``FULL JOIN USING (<dims>)`` chain (``CROSS JOIN`` when there are no dimensions),
-    generalizing ``composite.py``'s fixed two-leaf (numerator/denominator) CTE pattern to
-    N leaves grouped by metric source.
-    """
-    groups: dict[str, list[int]] = {}
-    for i, m in enumerate(metrics):
-        groups.setdefault(m.source, []).append(i)
-
-    plans: list[_GroupPlan] = []
-    leaf_metric_names: list[list[str]] = []
-    fired: list[FiredGuardrail] = []
-    fired_seen: set[str] = set()
-    warnings: list[str] = []
-    warnings_seen: set[str] = set()
-    used_sources: set[str] = set()
-
-    for owner, idxs in groups.items():
-        group_metrics = [metrics[i] for i in idxs]
-        group_bindings = [raw_bindings[i] for i in idxs]
-        plan, group_fired, group_warnings = _plan_metric_group(
-            owner, group_metrics, group_bindings, query, resolver, sources_by_name
-        )
-        plans.append(plan)
-        leaf_metric_names.append([m.measure.name for m in group_metrics])
-        used_sources |= plan.used_sources
-        for g in group_fired:
-            if g.id not in fired_seen:
-                fired_seen.add(g.id)
-                fired.append(g)
-        for w in group_warnings:
-            if w not in warnings_seen:
-                warnings_seen.add(w)
-                warnings.append(w)
-
-    dim_names = plans[0].dim_names
-
-    outer = exp.Select()
-    projections: list[exp.Expression] = [
-        _alias(cast("exp.Expression", exp.column(name)), name) for name in dim_names
-    ]
-    for i, names in enumerate(leaf_metric_names):
-        for name in names:
-            projections.append(
-                _alias(cast("exp.Expression", exp.column(name, table=f"_leaf{i}")), name)
-            )
-    outer = outer.select(*projections)
-
-    outer = outer.from_(exp.to_table("_leaf0"))
-    for i in range(1, len(plans)):
-        target = exp.to_table(f"_leaf{i}")
-        if dim_names:
-            outer = outer.join(target, using=dim_names, join_type="FULL")  # type: ignore[arg-type]
-        else:
-            outer = outer.join(target, join_type="CROSS")
-
-    ast = outer
-    for i, plan in enumerate(plans):
-        ast = ast.with_(f"_leaf{i}", as_=plan.select)
-
-    return ast, fired, warnings, used_sources
 
 
 def _parse_datetime_literal(lit: str) -> datetime | None:

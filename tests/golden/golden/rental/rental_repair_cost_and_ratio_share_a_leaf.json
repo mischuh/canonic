@@ -1,0 +1,49 @@
+{
+  "case": "rental_repair_cost_and_ratio_share_a_leaf",
+  "columns": [
+    {
+      "name": "severity",
+      "type": "string"
+    },
+    {
+      "name": "total_repair_cost",
+      "type": "int"
+    },
+    {
+      "name": "avg_repair_costs",
+      "type": "float"
+    }
+  ],
+  "dialect": "sqlite",
+  "finality": null,
+  "guardrails_fired": [],
+  "project": "rental",
+  "resolved": {
+    "metrics": {
+      "avg_repair_costs": "ratio(total_repair_cost, damage_count)",
+      "total_repair_cost": "damages.total_repair_cost"
+    }
+  },
+  "row_count": 3,
+  "rows": [
+    [
+      "major",
+      4500,
+      4500.0
+    ],
+    [
+      "minor",
+      1400,
+      null
+    ],
+    [
+      "moderate",
+      2000,
+      1000.0
+    ]
+  ],
+  "trust_tier": "provisional",
+  "warnings": [
+    "zero denominator for metric 'avg_repair_costs' yields NULL (on_zero_denominator=null)"
+  ]
+}
