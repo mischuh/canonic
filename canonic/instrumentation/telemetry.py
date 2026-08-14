@@ -5,7 +5,7 @@ is: see :mod:`canonic.instrumentation.telemetry_transport` for the transport its
 which only sends after ``telemetry.enabled``, ``telemetry.endpoint``, and
 ``telemetry.transport_acknowledged`` are all explicitly set — the last being a
 project's own attestation that it has reviewed this exact payload shape, since canonic
-cannot verify that a privacy review happened. ``canonic report --telemetry-preview``
+cannot verify that a privacy review happened. ``canonic audit --telemetry-preview``
 lets you inspect the payload locally before deciding to acknowledge and send it.
 
 Every field here is a count, distribution, or latency/accuracy aggregate — never a
@@ -44,7 +44,7 @@ def build_telemetry_payload(
 
     ``accuracy``/``baseline_accuracy`` are omitted entirely (not sent as ``null``) when
     not supplied — accuracy-harness results aren't persisted to the local log yet, so
-    ``canonic report``'s preview never fabricates a number for them.
+    ``canonic audit``'s preview never fabricates a number for them.
     """
     payload: dict[str, Any] = {
         "schema_version": TELEMETRY_SCHEMA_VERSION,

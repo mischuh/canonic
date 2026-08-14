@@ -75,7 +75,7 @@ def guard_telemetry_send(
     if not transport_acknowledged:
         raise TelemetryNotConfigured(
             "telemetry.transport_acknowledged is false — set it only after reviewing the "
-            "exact aggregate payload (see `canonic report --telemetry-preview`); canonic "
+            "exact aggregate payload (see `canonic audit --telemetry-preview`); canonic "
             "cannot verify that a review happened, this is a project-level attestation"
         )
 

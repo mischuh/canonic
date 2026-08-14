@@ -368,7 +368,7 @@ def build_calibration(
     """Correlate E14 trust tiers with outcome verdicts (SPEC-E16 Part 2 §4, S3-AC1).
 
     Joins each outcome to its originating :class:`AnswerEvent` by ``ref == query_hash`` and
-    buckets by the answer's ``trust_score`` tier, so ``canonic report`` can show whether
+    buckets by the answer's ``trust_score`` tier, so ``canonic audit`` can show whether
     ``caution`` predicts ``incorrect`` materially more than ``trusted`` — the metric that
     validates E14's predictiveness. Outcomes are deduped by ``ref`` first (one verdict per
     answer); outcomes whose ``ref`` matches no known answer, or whose answer has no trust

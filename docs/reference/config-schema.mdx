@@ -129,11 +129,11 @@ telemetry:
 | Field | Type | Default | Governs |
 | --- | --- | --- | --- |
 | `enabled` | `bool` | `false` | Opt-in flag. Forced to `false` under `runtime.air_gapped: true` (load-time rejection, not just a no-op). |
-| `endpoint` | `str \| null` | `null` | Destination URL for `canonic report --telemetry-send`. Must start with `http://` or `https://` when set. No default — canonic never guesses a collector. |
-| `transport_acknowledged` | `bool` | `false` | Attestation that this project has reviewed the exact aggregate payload (`canonic report --telemetry-preview`) before allowing a real send. canonic cannot verify that a review happened; this is a project-level policy decision recorded in `canonic.yaml`. |
+| `endpoint` | `str \| null` | `null` | Destination URL for `canonic audit --telemetry-send`. Must start with `http://` or `https://` when set. No default — canonic never guesses a collector. |
+| `transport_acknowledged` | `bool` | `false` | Attestation that this project has reviewed the exact aggregate payload (`canonic audit --telemetry-preview`) before allowing a real send. canonic cannot verify that a review happened; this is a project-level policy decision recorded in `canonic.yaml`. |
 | `auth_token_ref` | `str \| null` | `null` | Optional bearer token for `endpoint`, resolved the same way as `credentials_ref` (`env:`/`keyring:`/`file:`, never a literal). |
 
-`canonic report --telemetry-send` only sends when **all** of `enabled`, `endpoint`, and `transport_acknowledged` are set, and `runtime.air_gapped` is `false`. Missing any one of them fails closed with a structured error (`telemetry_not_configured`) — nothing is ever sent implicitly. See [Instrumentation & evaluation](/concepts/instrumentation-and-eval#opt-in-telemetry) for the full payload shape and content-safety guarantees.
+`canonic audit --telemetry-send` only sends when **all** of `enabled`, `endpoint`, and `transport_acknowledged` are set, and `runtime.air_gapped` is `false`. Missing any one of them fails closed with a structured error (`telemetry_not_configured`) — nothing is ever sent implicitly. See [Instrumentation & evaluation](/concepts/instrumentation-and-eval#opt-in-telemetry) for the full payload shape and content-safety guarantees.
 
 ## `runtime`
 

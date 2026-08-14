@@ -90,6 +90,14 @@ def emit_error(err: CanonicError, *, json_output: bool) -> None:
         )
 
 
+def warn_deprecated_command(old: str, new: str) -> None:
+    """Print a one-line deprecation notice to stderr for a renamed CLI command alias."""
+    _err_console.print(
+        f'"canonic {old}" is deprecated, use "canonic {new}"; this alias will be '
+        f"removed in a future release."
+    )
+
+
 def handle_errors[F: Callable[..., Any]](func: F) -> F:
     """Wrap a command so a raised ``CanonicError`` becomes a structured exit.
 

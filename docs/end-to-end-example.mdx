@@ -174,7 +174,7 @@ canonic query --metrics waived_amount
 
 The guardrail's `mandatory_filter` is AND-ed into the compiled SQL whether or not the caller asked for it. An [MCP-connected agent](/mcp-integration/connecting-your-agent) resolves the exact same binding and guardrail on its next call — CLI and MCP dispatch to the same core service, there's no separate "agent view" to keep in sync.
 
-`canonic report`'s onboarding funnel also now shows the curated-review milestone reached:
+`canonic audit`'s onboarding funnel also now shows the curated-review milestone reached:
 
 ```text
 onboarding funnel
@@ -264,6 +264,6 @@ Because reconciliation's *decision* is always deterministic, identical evidence 
 | Batch-accept a run | `canonic apply` | [CLI reference](/cli-reference/review-apply) |
 | Ask a question | `canonic query` | [CLI reference](/cli-reference/query-sql-assert) |
 | Declare what's canonical / mandatory | `contracts/metrics/*.yaml`, `contracts/guardrails/*.yaml` | [Concept](/concepts/contracts-and-guardrails) |
-| Check project state | `canonic status` / `canonic report` | [CLI reference](/cli-reference/status-report) |
+| Check project state | `canonic status` / `canonic audit` | [CLI reference](/cli-reference/status-report) |
 
 Same design principle throughout: **canonic proposes, you approve.**
