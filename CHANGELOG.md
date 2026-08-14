@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.19.1](https://github.com/mischuh/canonic/compare/v0.19.0...v0.19.1) (2026-08-14)
+
+
+### Bug Fixes
+
+* **trust:** recognize assertion/outcome history for composite and opaque metrics ([#290](https://github.com/mischuh/canonic/issues/290)) ([a05327e](https://github.com/mischuh/canonic/commit/a05327efc51801ec7e6026dc2ea266f5314adb7b))
+
 ## [0.19.0](https://github.com/mischuh/canonic/compare/v0.18.0...v0.19.0) (2026-08-13)
 
 
