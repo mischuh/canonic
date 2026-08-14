@@ -3,11 +3,12 @@
 MCP and CLI adapters call this service; they do not duplicate any logic (SPEC §2.1).
 
 :class:`CanonicService` is a thin facade: it wires the injected dependencies into a shared
-:class:`~canonic.core.context.ServiceContext` and delegates each capability to one of four
+:class:`~canonic.core.context.ServiceContext` and delegates each capability to one of five
 focused collaborators — :class:`~canonic.core.discovery.DiscoveryService`,
 :class:`~canonic.core.query.QueryService`, :class:`~canonic.core.assertions.AssertionService`,
-and :class:`~canonic.core.knowledge.KnowledgeService`. The public method surface is unchanged,
-so the CLI/MCP adapters and their byte-identical parity are unaffected.
+:class:`~canonic.core.knowledge.KnowledgeService`, and :class:`~canonic.core.reports.ReportService`.
+The public method surface is unchanged, so the CLI/MCP adapters and their byte-identical parity
+are unaffected.
 """
 
 from __future__ import annotations
@@ -23,10 +24,12 @@ from canonic.core.context import ServiceContext
 from canonic.core.discovery import DiscoveryService
 from canonic.core.knowledge import KnowledgeService
 from canonic.core.query import QueryService
+from canonic.core.reports import ReportService
 from canonic.instrumentation.events import AnswerEventLog, DiskAnswerEventLog, NullAnswerEventLog
 from canonic.semantic.loader import list_semantic_sources
 
 if TYPE_CHECKING:
+    from datetime import datetime
     from typing import Any
 
     from canonic.compiler import SemanticQuery
@@ -35,7 +38,14 @@ if TYPE_CHECKING:
     from canonic.contracts.assertions import AccuracyReport, AssertionOutcome
     from canonic.contracts.models import Assertion
     from canonic.contracts.resolver import Binding
-    from canonic.core.models import MetricDetail, MetricSummary, OverviewResult, QueryResult
+    from canonic.core.models import (
+        MetricDetail,
+        MetricSummary,
+        OverviewResult,
+        QueryResult,
+        ReportRunResult,
+        ReportSummary,
+    )
     from canonic.knowledge.results import SearchResult
     from canonic.semantic.models import SemanticSource
     from canonic.trust.models import TrustScore
@@ -130,6 +140,7 @@ class CanonicService:
         self._assertions = AssertionService(ctx)
         self._query = QueryService(ctx, self._assertions)
         self._knowledge = KnowledgeService(ctx)
+        self._reports = ReportService(ctx, self._query, self._knowledge)
 
     @classmethod
     def from_project(cls, root: Path) -> CanonicService:
@@ -235,3 +246,26 @@ class CanonicService:
     def read_knowledge_page(self, page: str, *, user: str | None = None) -> dict[str, Any]:
         """Retrieve the full content of a knowledge page with live rendering (E6, P1)."""
         return self._knowledge.read_knowledge_page(page, user=user)
+
+    # ------------------------------------------------------------------
+    # Reports (AMENDMENT-curated-reports, P1)
+    # ------------------------------------------------------------------
+
+    def list_reports(self, domain: str | None = None) -> list[ReportSummary]:
+        """Directory listing of committed reports (AMENDMENT-curated-reports)."""
+        return self._reports.list_reports(domain)
+
+    async def run_report(
+        self,
+        report_id: str,
+        *,
+        as_of: datetime | None = None,
+        user: str | None = None,
+        caller: str | None = None,
+    ) -> ReportRunResult:
+        """Run every section of a committed report through ``query``, in order."""
+        return await self._reports.run_report(report_id, as_of=as_of, user=user, caller=caller)
+
+    def validate_reports(self) -> None:
+        """Validate every committed report's sections compile and narrative refs resolve."""
+        self._reports.validate_reports()

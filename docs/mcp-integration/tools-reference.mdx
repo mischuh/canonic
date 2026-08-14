@@ -3,7 +3,7 @@ title: "MCP tools reference"
 description: "The tools canonic's MCP server registers, grouped by purpose."
 ---
 
-The MCP server (`canonic/mcp/server.py`) registers 11 tools. Each does transport translation only: parse arguments, call the same core service the CLI calls, serialize the result. No resolution, compilation, or execution logic lives in the MCP layer itself.
+The MCP server (`canonic/mcp/server.py`) registers 13 tools. Each does transport translation only: parse arguments, call the same core service the CLI calls, serialize the result. No resolution, compilation, or execution logic lives in the MCP layer itself.
 
 | Tool | What it's for |
 | --- | --- |
@@ -18,6 +18,8 @@ The MCP server (`canonic/mcp/server.py`) registers 11 tools. Each does transport
 | `run_sql` | Read-only SQL escape hatch. |
 | `search_knowledge` | Search knowledge pages for business context. |
 | `read_knowledge_page` | Read the full content of one knowledge page. |
+| `list_reports` | Discover curated reports maintained by the data team. |
+| `run_report` | Run a curated report's sections and return ordered results. |
 
 ## Session / contract
 
@@ -84,3 +86,17 @@ Each hit's `score` is a rank-fusion value (RRF), not a confidence or relevance p
 ### `read_knowledge_page(page: str, user: str | None = None)`
 
 Retrieves the full content of a knowledge page by its id (page slug). Use after `search_knowledge()` to read the complete definition, caveat, or policy: the rendered body has live `{{ sl:entity.expr }}` definitions substituted, plus metadata, drift review flags, staleness warnings, and linked references.
+
+## Reports
+
+A report (`reports/*.yaml`) names an ordered sequence of already-existing calls — no new execution semantics, no new authority. `run_report` is a deterministic loop over `query()`, optionally attaching a rendered knowledge page per section. See [Report schema](/reference/report-schema) for the file format.
+
+### `list_reports(domain: str | None = None)`
+
+A directory listing of every committed report: `id`, `title`, `description`, `owner`, `domain`. No execution, no per-section detail. Pass `domain` to narrow to reports declaring a matching `domain` field. Call this when a user asks for a report by name (e.g. "the customer report") rather than an ad-hoc question, then call `run_report()` with the matching id.
+
+### `run_report(report_id: str, as_of: str | None = None, user: str | None = None)`
+
+Runs every section of a committed report through `query()`, in declared order, and returns an ordered array of section results. Each entry carries the section's `title` and either its **unmodified** `QueryResult` (with an optional attached `narrative`, the rendered body of the section's `narrative_from` knowledge page) or a structured `{code, message, candidates?}` error in place of a result.
+
+A failing section does **not** abort the report: the other sections still return normal results, and the call as a whole never raises for a per-section failure. An unknown `report_id` reuses the existing `unresolved` error code — there is no dedicated "report not found" code. `as_of` is an optional ISO-8601 reference point for finality-watermark evaluation, applied to every section that doesn't set its own.

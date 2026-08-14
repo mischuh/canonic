@@ -1,0 +1,58 @@
+---
+title: "Report schema"
+description: "Every field in a reports/*.yaml curated report."
+---
+
+A report (`reports/<id>.yaml`) is a committed YAML file, validated against `Report` at load time and on every `canonic validate` run. It names an ordered sequence of sections, each an unmodified `SemanticQuery` — the same shape a `query()` call or a `-f`/`--file` JSON query file accepts — plus an optional attached narrative. See [`canonic report`](/cli-reference/report) for running one.
+
+```yaml
+id: customer_report
+title: "Customer Report"
+description: "Curated customer segmentation and retention view, maintained by the data team."
+owner: data-team
+domain: orders
+context: null
+sections:
+  - title: "Active customers by segment"
+    query: { metrics: [active_customers], dimensions: [segment] }
+  - title: "Retention rate"
+    query: { metrics: [retention_rate], dimensions: [cohort_month] }
+    narrative_from: retention-definition
+```
+
+## Top-level fields
+
+| Field | Type | Default | Governs |
+| --- | --- | --- | --- |
+| `id` | `str` | required | Unique report id, referenced by `run_report(report_id)`. Must be unique across every committed report. |
+| `title` | `str` | required | Human-readable title. |
+| `description` | `str \| null` | `null` | Shown in `list_reports`. |
+| `owner` | `str \| null` | `null` | Free text, informational only — not used for access control. |
+| `domain` | `str \| null` | `null` | Optional grouping key; filters `list_reports(domain=...)`. |
+| `context` | `str \| null` | `null` | Reuses the existing guardrail `context` tag — no new guardrail kind. Merged into every section that doesn't set its own `query.context`. |
+| `sections` | `list[ReportSection]` | required, min 1 | The ordered sections `run_report` executes. |
+
+## `ReportSection`
+
+| Field | Type | Default | Governs |
+| --- | --- | --- | --- |
+| `title` | `str` | required | Shown alongside this section's result in `run_report`'s response. |
+| `query` | `SemanticQuery` | required | The exact same shape `query()`/`compile_query()` accept: `metrics`, `dimensions`, `filters`, `via`, `context`, `limit`, `as_of`. |
+| `narrative_from` | `str \| null` | `null` | An existing knowledge-page id. When set, `run_report` attaches that page's **rendered** body (live `{{ sl:entity.expr }}` definitions substituted, never the raw template) to this section's result. |
+
+A section's `query.context` and `query.as_of`, when set, always win over the report-level `context` and the `run_report(as_of=...)` call argument — the report/call-level values only fill in when the section itself doesn't specify one.
+
+## What a report is not
+
+A report introduces no new execution semantics (`run_report` is a deterministic loop over `core.query`) and no new authority: it cannot declare a canonical binding, introduce a metric, or relax/add a guardrail — it can only reference entities that already resolve. It carries no layout, chart type, or rendering; its output is an ordered array of unmodified `QueryResult` objects, so presentation stays the concern of whichever adapter or downstream consumer renders the response.
+
+There is also no per-report access control today: canonic's guardrails (`min_trust`, `context`) govern whether a *query* is correct/trusted enough to answer, not whether a given caller may invoke a given *report* at all.
+
+## Validation
+
+`canonic validate` checks every committed report the same way it already checks `semantics/`/`contracts/`:
+
+- Each section's `query` must **compile** (dry-run, no execution) against the current semantic layer. An unresolved metric or unreachable dimension fails validation with the report id and section index — never a silent skip.
+- Each `narrative_from` must resolve to an existing knowledge-page id.
+
+Because reports are committed inside the same project as `semantics/`/`contracts/`, renaming a metric a report depends on is caught in the same `canonic validate` run, the same PR — no separate external CI gate is required for this class of drift.
