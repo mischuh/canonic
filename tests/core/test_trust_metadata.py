@@ -149,8 +149,9 @@ class TestOutcomeHistorySignal:
         assert meta.trust_score.tier == "provisional"
         assert "outcome: confirmed-wrong" not in meta.trust_score.reasons
 
-    def test_composite_metric_with_no_binding_is_unaffected(self) -> None:
-        """A ratio/weighted_avg TrustInput carries no physical binding — signal stays inactive."""
+    def test_no_binding_metric_is_unaffected(self) -> None:
+        """A TrustInput with no derivable binding key (e.g. recompute_at_grain kinds) has
+        nothing to join outcome history against — signal stays inactive."""
         compiled = _make_compile_result(
             [TrustInput(metric="conversion_rate", provenance="human_curated", has_assertion=True)]
         )
@@ -208,6 +209,32 @@ class TestAssertionHistorySignal:
         meta = QueryMetadata.from_compile_result(self._compiled())
         assert meta.trust_score is not None
         assert meta.trust_score.tier == "provisional"
+
+    def test_passing_composite_assertion_reaches_trusted(self) -> None:
+        """A ratio metric's assertion, persisted under its ``ratio(...)`` key, is now
+        correctly recognized — reproduces the reported bug (previously stuck at
+        ``provisional`` regardless of a passing verdict)."""
+        compiled = _make_compile_result(
+            [
+                TrustInput(
+                    metric="avg_repair_costs",
+                    provenance="human_curated",
+                    has_assertion=True,
+                    binding="ratio(total_repair_cost, damage_count)",
+                )
+            ]
+        )
+        history = AssertionHistory(
+            {
+                "ratio(total_repair_cost, damage_count)": AssertionRecord(
+                    ts=_ts(0), assertion_id="repair-ratio-q1", passed=True
+                )
+            }
+        )
+        meta = QueryMetadata.from_compile_result(compiled, assertion_history=history)
+        assert meta.trust_score is not None
+        assert meta.trust_score.tier == "trusted"
+        assert meta.trust_score.reasons == []
 
     def test_failing_assertion_outranks_a_passing_outcome_history(self) -> None:
         """Worst-signal-dominates across signal *sources*, not just within one (SPEC-E14 §3)."""

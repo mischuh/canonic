@@ -79,7 +79,8 @@ class TestAssertionSignal:
         assert "unverified" in (verdict.reason or "")
 
     def test_no_binding_caps_provisional_unverified_even_with_history(self) -> None:
-        """Composite metrics have no single binding to join against (binding=None)."""
+        """A metric with no derivable binding key (e.g. recompute_at_grain kinds) has
+        nothing to join against history with, regardless of what history contains."""
         history = AssertionHistory(
             {"orders.total_revenue": AssertionRecord(ts=_ts(0), assertion_id="r", passed=True)}
         )
@@ -123,6 +124,47 @@ class TestAssertionSignal:
         assert verdict.cap is TrustTier.CAUTION
         assert "failed" in (verdict.reason or "")
         assert "r" in (verdict.reason or "")
+
+    def test_composite_binding_recorded_passing_verdict_is_inactive(self) -> None:
+        """A ratio metric's assertion, persisted under its ``ratio(...)`` key, is found and
+        no longer caps the tier — the bug this signal previously had (composite metrics
+        never matched any history entry, see Binding.resolved_key)."""
+        history = AssertionHistory(
+            {
+                "ratio(total_repair_cost, damage_count)": AssertionRecord(
+                    ts=_ts(0), assertion_id="r", passed=True
+                )
+            }
+        )
+        verdict = assertion_signal(
+            TrustInput(
+                metric="avg_repair_costs",
+                provenance="human_curated",
+                has_assertion=True,
+                binding="ratio(total_repair_cost, damage_count)",
+            ),
+            history,
+        )
+        assert verdict.cap is None
+
+    def test_composite_binding_recorded_failing_verdict_caps_caution(self) -> None:
+        history = AssertionHistory(
+            {
+                "ratio(total_repair_cost, damage_count)": AssertionRecord(
+                    ts=_ts(0), assertion_id="r", passed=False
+                )
+            }
+        )
+        verdict = assertion_signal(
+            TrustInput(
+                metric="avg_repair_costs",
+                provenance="human_curated",
+                has_assertion=True,
+                binding="ratio(total_repair_cost, damage_count)",
+            ),
+            history,
+        )
+        assert verdict.cap is TrustTier.CAUTION
 
 
 class TestStaticSignalsFor:
@@ -259,3 +301,22 @@ class TestOutcomeSignal:
         )
         verdict = outcome_signal(trust_input, _history(reason_code="wrong_data"), window_days=90)
         assert verdict.cap is None
+
+    def test_opaque_binding_capped(self) -> None:
+        """An opaque metric's outcome history, keyed under its ``opaque(...)`` key
+        (Binding.resolved_key), is found — previously this never matched (bare
+        ``source.measure`` was looked up against a wrapped key)."""
+        answer = AnswerEvent.model_validate(
+            {**_BASE_ANSWER, "resolved": {"metrics": {"snapshot": "opaque(daily.balance)"}}}
+        )
+        outcome = AnswerOutcomeEvent.model_validate({**_BASE_OUTCOME, "ts": _ts(1)})
+        history = BindingOutcomeHistory.from_events([answer], [outcome])
+        trust_input = TrustInput(
+            metric="snapshot",
+            provenance="human_curated",
+            has_assertion=True,
+            binding="opaque(daily.balance)",
+        )
+        verdict = outcome_signal(trust_input, history, window_days=90)
+        assert verdict.cap is TrustTier.CAUTION
+        assert verdict.reason == "outcome: confirmed-wrong"

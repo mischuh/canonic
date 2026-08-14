@@ -209,6 +209,18 @@ def test_ac1_scalar_no_grouping(resolver: ContractResolver, sources: list[Semant
     assert result.composition.denominator == "damage_count"
 
 
+def test_ratio_metric_trust_input_binding_matches_resolved_key(
+    resolver: ContractResolver, sources: list[SemanticSource]
+) -> None:
+    """The trust/assertion join key gathered at resolve time (TrustInput.binding, SPEC-E14
+    §4) must match the string actually persisted to .canonic/assertions.json (result.resolved),
+    or a passing assertion for this metric can never be recognized as trusted."""
+    result = compile(SemanticQuery(metrics=["avg_repair_costs"]), resolver, sources)
+    (trust_input,) = result.trust_inputs
+    assert trust_input.binding == result.resolved["avg_repair_costs"]
+    assert trust_input.binding == "ratio(total_repair_cost, damage_count)"
+
+
 def test_ac1_by_month_dimension(resolver: ContractResolver, sources: list[SemanticSource]) -> None:
     """Grouping by month: the leaf groups by reported_month and the division follows it."""
     result = compile(

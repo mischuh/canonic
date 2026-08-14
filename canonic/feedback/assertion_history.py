@@ -41,7 +41,7 @@ class AssertionRecord:
 class AssertionHistory:
     """Per-binding latest assertion verdict, joined from ``.canonic/assertions.json``.
 
-    Keyed by the same resolved ``"source.measure"`` binding string as
+    Keyed by the same :attr:`canonic.contracts.resolver.Binding.resolved_key` string as
     :class:`canonic.feedback.history.BindingOutcomeHistory` and
     :attr:`canonic.compiler.result.TrustInput.binding` — the E14 trust-scoring join key.
     """

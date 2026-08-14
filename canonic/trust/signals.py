@@ -128,8 +128,8 @@ def outcome_signal(
     Only ``wrong_definition`` outcomes ever cap trust — the attribution safeguard (SPEC-E11
     §3) is enforced inside :meth:`~canonic.feedback.history.BindingOutcomeHistory.is_capped`,
     so ``wrong_data``/``wrong_interpretation``/``unspecified`` never reach this signal.
-    Inactive when the metric has no known ``source.measure`` binding (composite ratio/
-    weighted_avg kinds) or no capping history.
+    Inactive when the metric has no derivable binding key (e.g. recompute_at_grain kinds)
+    or no capping history.
     """
     if trust_input.binding is None:
         return SignalVerdict(cap=None)
