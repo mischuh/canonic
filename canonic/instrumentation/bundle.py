@@ -65,7 +65,7 @@ def _canonic_version() -> str:
 def build_diagnostic_bundle(
     root: Path, config: CanonicConfig | None, config_error: str | None
 ) -> dict[str, Any]:
-    """Assemble the diagnostic bundle payload for ``canonic report --bundle``.
+    """Assemble the diagnostic bundle payload for ``canonic audit --bundle``.
 
     ``config`` is None when ``canonic.yaml`` failed to load; ``config_error`` then
     carries the reason so the bundle still explains why no config section is present.

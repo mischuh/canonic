@@ -30,7 +30,7 @@ class BindingFeedbackEntry(BaseModel):
 
 
 class FeedbackReport(BaseModel):
-    """The feedback-loop audit surfaced by ``canonic report`` (SPEC-E11 §6, S5-AC1)."""
+    """The feedback-loop audit surfaced by ``canonic audit`` (SPEC-E11 §6, S5-AC1)."""
 
     model_config = ConfigDict(frozen=True)
 
@@ -42,7 +42,7 @@ def build_feedback_report(history: BindingOutcomeHistory, config: FeedbackConfig
 
     Every binding is reported here regardless of whether it crossed the pattern gate — a
     single incident is visible in this audit even though it never reaches E4 (S2-AC1) — so a
-    human reviewing ``canonic report`` can see the pattern building before it fires.
+    human reviewing ``canonic audit`` can see the pattern building before it fires.
     """
     entries: list[BindingFeedbackEntry] = []
     for binding in history.bindings():

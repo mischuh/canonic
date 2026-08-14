@@ -1,4 +1,4 @@
-"""Tests for ``canonic report``."""
+"""Tests for ``canonic audit``."""
 
 from __future__ import annotations
 
@@ -50,16 +50,16 @@ def _write_events(dotcanonic: Path, events: list[dict[str, Any]]) -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_report_outside_project(runner: CliRunner, tmp_path: Path, monkeypatch) -> None:
+def test_audit_outside_project(runner: CliRunner, tmp_path: Path, monkeypatch) -> None:
     monkeypatch.chdir(tmp_path)
-    result = runner.invoke(app, ["report"])
+    result = runner.invoke(app, ["audit"])
     assert result.exit_code == 0
     assert "no canonic project found" in result.output
 
 
-def test_report_outside_project_json(runner: CliRunner, tmp_path: Path, monkeypatch) -> None:
+def test_audit_outside_project_json(runner: CliRunner, tmp_path: Path, monkeypatch) -> None:
     monkeypatch.chdir(tmp_path)
-    result = runner.invoke(app, ["--json", "report"])
+    result = runner.invoke(app, ["--json", "audit"])
     assert result.exit_code == 0
     assert json.loads(result.output) == {"project_root": None}
 
@@ -69,14 +69,14 @@ def test_report_outside_project_json(runner: CliRunner, tmp_path: Path, monkeypa
 # ---------------------------------------------------------------------------
 
 
-def test_report_empty_log(runner: CliRunner, project_dir: Path) -> None:
-    result = runner.invoke(app, ["report"])
+def test_audit_empty_log(runner: CliRunner, project_dir: Path) -> None:
+    result = runner.invoke(app, ["audit"])
     assert result.exit_code == 0
     assert "no served answers recorded yet" in result.output
 
 
-def test_report_empty_log_json(runner: CliRunner, project_dir: Path) -> None:
-    result = runner.invoke(app, ["--json", "report"])
+def test_audit_empty_log_json(runner: CliRunner, project_dir: Path) -> None:
+    result = runner.invoke(app, ["--json", "audit"])
     assert result.exit_code == 0
     payload = json.loads(result.output)
     assert payload["count"] == 0
@@ -91,41 +91,41 @@ def test_report_empty_log_json(runner: CliRunner, project_dir: Path) -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_report_shows_counts(runner: CliRunner, project_dir: Path) -> None:
+def test_audit_shows_counts(runner: CliRunner, project_dir: Path) -> None:
     _write_events(
         project_dir / ".canonic",
         [_event(latency_ms=100), _event(latency_ms=200, error="unresolved")],
     )
-    result = runner.invoke(app, ["report"])
+    result = runner.invoke(app, ["audit"])
     assert result.exit_code == 0
     assert "2" in result.output
 
 
-def test_report_shows_error_distribution(runner: CliRunner, project_dir: Path) -> None:
+def test_audit_shows_error_distribution(runner: CliRunner, project_dir: Path) -> None:
     _write_events(
         project_dir / ".canonic",
         [_event(), _event(error="unresolved"), _event(error="unresolved")],
     )
-    result = runner.invoke(app, ["report"])
+    result = runner.invoke(app, ["audit"])
     assert result.exit_code == 0
     assert "ok" in result.output
     assert "unresolved" in result.output
 
 
-def test_report_shows_latency(runner: CliRunner, project_dir: Path) -> None:
+def test_audit_shows_latency(runner: CliRunner, project_dir: Path) -> None:
     _write_events(project_dir / ".canonic", [_event(latency_ms=50), _event(latency_ms=150)])
-    result = runner.invoke(app, ["report"])
+    result = runner.invoke(app, ["audit"])
     assert result.exit_code == 0
     assert "p50" in result.output
     assert "p95" in result.output
 
 
-def test_report_json_shape(runner: CliRunner, project_dir: Path) -> None:
+def test_audit_json_shape(runner: CliRunner, project_dir: Path) -> None:
     _write_events(
         project_dir / ".canonic",
         [_event(latency_ms=42, bytes_scanned=1024, error=None)],
     )
-    result = runner.invoke(app, ["--json", "report"])
+    result = runner.invoke(app, ["--json", "audit"])
     assert result.exit_code == 0
     payload = json.loads(result.output)
     assert payload["count"] == 1
@@ -140,11 +140,11 @@ def test_report_json_shape(runner: CliRunner, project_dir: Path) -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_report_last_window(runner: CliRunner, project_dir: Path) -> None:
+def test_audit_last_window(runner: CliRunner, project_dir: Path) -> None:
     events = [_event(latency_ms=i * 10) for i in range(1, 11)]
     _write_events(project_dir / ".canonic", events)
 
-    result = runner.invoke(app, ["--json", "report", "--last", "3"])
+    result = runner.invoke(app, ["--json", "audit", "--last", "3"])
     assert result.exit_code == 0
     payload = json.loads(result.output)
     assert payload["count"] == 3
@@ -155,14 +155,14 @@ def test_report_last_window(runner: CliRunner, project_dir: Path) -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_report_telemetry_off_by_default(runner: CliRunner, project_dir: Path) -> None:
-    result = runner.invoke(app, ["--json", "report"])
+def test_audit_telemetry_off_by_default(runner: CliRunner, project_dir: Path) -> None:
+    result = runner.invoke(app, ["--json", "audit"])
     payload = json.loads(result.output)
     assert payload["telemetry_enabled"] is False
 
 
 # ---------------------------------------------------------------------------
-# OB-S6: funnel section in canonic report
+# OB-S6: funnel section in canonic audit
 # ---------------------------------------------------------------------------
 
 
@@ -170,7 +170,7 @@ def _funnel_event(milestone: str, ts: str = "2026-01-01T00:00:00+00:00") -> dict
     return {"kind": "funnel_milestone", "milestone": milestone, "ts": ts}
 
 
-def test_report_funnel_section_shown_when_milestones_present(
+def test_audit_funnel_section_shown_when_milestones_present(
     runner: CliRunner, project_dir: Path
 ) -> None:
     _write_events(
@@ -181,7 +181,7 @@ def test_report_funnel_section_shown_when_milestones_present(
             _funnel_event("first_answer_served", "2026-01-01T00:00:42+00:00"),
         ],
     )
-    result = runner.invoke(app, ["report"])
+    result = runner.invoke(app, ["audit"])
     assert result.exit_code == 0
     assert "onboarding funnel" in result.output
     assert "setup_started" in result.output
@@ -189,16 +189,16 @@ def test_report_funnel_section_shown_when_milestones_present(
     assert "time-to-first-answer" in result.output
 
 
-def test_report_funnel_section_hidden_when_no_milestones(
+def test_audit_funnel_section_hidden_when_no_milestones(
     runner: CliRunner, project_dir: Path
 ) -> None:
     _write_events(project_dir / ".canonic", [_event(latency_ms=10)])
-    result = runner.invoke(app, ["report"])
+    result = runner.invoke(app, ["audit"])
     assert result.exit_code == 0
     assert "onboarding funnel" not in result.output
 
 
-def test_report_json_includes_funnel(runner: CliRunner, project_dir: Path) -> None:
+def test_audit_json_includes_funnel(runner: CliRunner, project_dir: Path) -> None:
     _write_events(
         project_dir / ".canonic",
         [
@@ -206,7 +206,7 @@ def test_report_json_includes_funnel(runner: CliRunner, project_dir: Path) -> No
             _funnel_event("first_answer_served", "2026-01-01T00:01:30+00:00"),
         ],
     )
-    result = runner.invoke(app, ["--json", "report"])
+    result = runner.invoke(app, ["--json", "audit"])
     assert result.exit_code == 0
     payload = json.loads(result.output)
     assert "funnel" in payload
@@ -214,11 +214,11 @@ def test_report_json_includes_funnel(runner: CliRunner, project_dir: Path) -> No
     assert payload["funnel"]["time_to_first_answer_seconds"] == pytest.approx(90.0, abs=1.0)
 
 
-def test_report_funnel_time_to_first_answer_none_when_missing_milestone(
+def test_audit_funnel_time_to_first_answer_none_when_missing_milestone(
     runner: CliRunner, project_dir: Path
 ) -> None:
     _write_events(project_dir / ".canonic", [_funnel_event("setup_started")])
-    result = runner.invoke(app, ["--json", "report"])
+    result = runner.invoke(app, ["--json", "audit"])
     payload = json.loads(result.output)
     assert payload["funnel"]["time_to_first_answer_seconds"] is None
 
@@ -241,7 +241,7 @@ def _outcome_event(
     }
 
 
-def test_report_shows_calibration_when_outcomes_present(
+def test_audit_shows_calibration_when_outcomes_present(
     runner: CliRunner, project_dir: Path
 ) -> None:
     _write_events(
@@ -251,13 +251,13 @@ def test_report_shows_calibration_when_outcomes_present(
             _outcome_event("sha256:1", "incorrect", reason_code="wrong_definition"),
         ],
     )
-    result = runner.invoke(app, ["report"])
+    result = runner.invoke(app, ["audit"])
     assert result.exit_code == 0
     assert "Trust calibration" in result.output
     assert "caution" in result.output
 
 
-def test_report_json_includes_calibration_and_recurrence(
+def test_audit_json_includes_calibration_and_recurrence(
     runner: CliRunner, project_dir: Path
 ) -> None:
     _write_events(
@@ -267,14 +267,14 @@ def test_report_json_includes_calibration_and_recurrence(
             _outcome_event("sha256:1", "incorrect", reason_code="wrong_definition"),
         ],
     )
-    result = runner.invoke(app, ["--json", "report"])
+    result = runner.invoke(app, ["--json", "audit"])
     payload = json.loads(result.output)
     assert payload["calibration"]["buckets"][0]["tier"] == "caution"
     assert payload["calibration"]["buckets"][0]["incorrect"] == 1
     assert "correction_recurrence" in payload
 
 
-def test_report_shows_recurrence_for_repeated_binding(runner: CliRunner, project_dir: Path) -> None:
+def test_audit_shows_recurrence_for_repeated_binding(runner: CliRunner, project_dir: Path) -> None:
     _write_events(
         project_dir / ".canonic",
         [
@@ -290,7 +290,7 @@ def test_report_shows_recurrence_for_repeated_binding(runner: CliRunner, project
             _outcome_event("sha256:2", "incorrect"),
         ],
     )
-    result = runner.invoke(app, ["report"])
+    result = runner.invoke(app, ["audit"])
     assert result.exit_code == 0
     assert "Correction recurrence" in result.output
     assert "orders.total_revenue" in result.output
@@ -307,7 +307,7 @@ def _recent_ts(days_ago: float = 1) -> str:
     return (datetime.now(UTC) - timedelta(days=days_ago)).isoformat()
 
 
-def test_report_shows_feedback_section_for_recurring_pattern(
+def test_audit_shows_feedback_section_for_recurring_pattern(
     runner: CliRunner, project_dir: Path
 ) -> None:
     ts = _recent_ts()
@@ -326,22 +326,22 @@ def test_report_shows_feedback_section_for_recurring_pattern(
             _outcome_event("sha256:2", "incorrect", ts=ts, reason_code="wrong_definition"),
         ],
     )
-    result = runner.invoke(app, ["report"])
+    result = runner.invoke(app, ["audit"])
     assert result.exit_code == 0
     assert "Feedback loop" in result.output
     assert "orders.total_revenue" in result.output
 
 
-def test_report_feedback_section_hidden_without_wrong_definition_history(
+def test_audit_feedback_section_hidden_without_wrong_definition_history(
     runner: CliRunner, project_dir: Path
 ) -> None:
     _write_events(project_dir / ".canonic", [_event(latency_ms=10)])
-    result = runner.invoke(app, ["report"])
+    result = runner.invoke(app, ["audit"])
     assert result.exit_code == 0
     assert "Feedback loop" not in result.output
 
 
-def test_report_json_feedback_reflects_gate_and_cap(runner: CliRunner, project_dir: Path) -> None:
+def test_audit_json_feedback_reflects_gate_and_cap(runner: CliRunner, project_dir: Path) -> None:
     ts = _recent_ts()
     _write_events(
         project_dir / ".canonic",
@@ -358,7 +358,7 @@ def test_report_json_feedback_reflects_gate_and_cap(runner: CliRunner, project_d
             _outcome_event("sha256:2", "incorrect", ts=ts, reason_code="wrong_definition"),
         ],
     )
-    result = runner.invoke(app, ["--json", "report"])
+    result = runner.invoke(app, ["--json", "audit"])
     payload = json.loads(result.output)
     entries = payload["feedback"]["entries"]
     assert len(entries) == 1
@@ -370,7 +370,7 @@ def test_report_json_feedback_reflects_gate_and_cap(runner: CliRunner, project_d
     assert entry["refs"] == ["sha256:1", "sha256:2"]
 
 
-def test_report_json_feedback_single_incident_not_gated(
+def test_audit_json_feedback_single_incident_not_gated(
     runner: CliRunner, project_dir: Path
 ) -> None:
     """S2-AC1: a single incident is visible in the audit but never gated."""
@@ -385,14 +385,14 @@ def test_report_json_feedback_single_incident_not_gated(
             _outcome_event("sha256:1", "incorrect", ts=ts, reason_code="wrong_definition"),
         ],
     )
-    result = runner.invoke(app, ["--json", "report"])
+    result = runner.invoke(app, ["--json", "audit"])
     payload = json.loads(result.output)
     entries = payload["feedback"]["entries"]
     assert len(entries) == 1
     assert entries[0]["gated"] is False
 
 
-def test_report_json_feedback_ignores_wrong_data(runner: CliRunner, project_dir: Path) -> None:
+def test_audit_json_feedback_ignores_wrong_data(runner: CliRunner, project_dir: Path) -> None:
     """S1: wrong_data outcomes never surface in the feedback audit."""
     ts = _recent_ts()
     _write_events(
@@ -405,7 +405,7 @@ def test_report_json_feedback_ignores_wrong_data(runner: CliRunner, project_dir:
             _outcome_event("sha256:1", "incorrect", ts=ts, reason_code="wrong_data"),
         ],
     )
-    result = runner.invoke(app, ["--json", "report"])
+    result = runner.invoke(app, ["--json", "audit"])
     payload = json.loads(result.output)
     assert payload["feedback"]["entries"] == []
 
@@ -417,7 +417,7 @@ def test_report_json_feedback_ignores_wrong_data(runner: CliRunner, project_dir:
 
 def test_telemetry_preview_shows_payload(runner: CliRunner, project_dir: Path) -> None:
     _write_events(project_dir / ".canonic", [_event(latency_ms=100)])
-    result = runner.invoke(app, ["report", "--telemetry-preview"])
+    result = runner.invoke(app, ["audit", "--telemetry-preview"])
     assert result.exit_code == 0
     assert "telemetry preview" in result.output
     assert "nothing is sent" in result.output
@@ -428,7 +428,7 @@ def test_telemetry_preview_json_content_safe(runner: CliRunner, project_dir: Pat
         project_dir / ".canonic",
         [_event(query_hash="sha256:super-secret", compiled_sql_hash="sha256:sql-secret")],
     )
-    result = runner.invoke(app, ["--json", "report", "--telemetry-preview"])
+    result = runner.invoke(app, ["--json", "audit", "--telemetry-preview"])
     assert result.exit_code == 0
     payload = json.loads(result.output)
     assert payload["schema_version"] == "1"
@@ -444,7 +444,7 @@ def test_telemetry_preview_does_not_send_anything(runner: CliRunner, project_dir
     """--telemetry-preview must remain purely local and side-effect-free."""
     _write_events(project_dir / ".canonic", [_event()])
     before = (project_dir / ".canonic" / "events.jsonl").read_text()
-    runner.invoke(app, ["report", "--telemetry-preview"])
+    runner.invoke(app, ["audit", "--telemetry-preview"])
     after = (project_dir / ".canonic" / "events.jsonl").read_text()
     assert before == after
 
@@ -471,7 +471,7 @@ telemetry:
 def test_telemetry_preview_and_send_are_mutually_exclusive(
     runner: CliRunner, project_dir: Path
 ) -> None:
-    result = runner.invoke(app, ["report", "--telemetry-preview", "--telemetry-send"])
+    result = runner.invoke(app, ["audit", "--telemetry-preview", "--telemetry-send"])
     assert result.exit_code == 2
     assert "mutually" in result.output
     assert "exclusive" in result.output
@@ -480,7 +480,7 @@ def test_telemetry_preview_and_send_are_mutually_exclusive(
 def test_telemetry_send_fails_closed_without_config(runner: CliRunner, project_dir: Path) -> None:
     """Default project_dir config has telemetry disabled — send must refuse, not no-op silently."""
     _write_events(project_dir / ".canonic", [_event()])
-    result = runner.invoke(app, ["report", "--telemetry-send"])
+    result = runner.invoke(app, ["audit", "--telemetry-send"])
     assert result.exit_code == 20
 
 
@@ -496,9 +496,9 @@ def test_telemetry_send_calls_transport_and_leaves_log_untouched(
     async def fake_send_telemetry(payload: dict[str, Any], **kwargs: Any) -> None:
         calls.append((payload, kwargs))
 
-    monkeypatch.setattr("canonic.cli.commands.report.send_telemetry", fake_send_telemetry)
+    monkeypatch.setattr("canonic.cli.commands.audit.send_telemetry", fake_send_telemetry)
 
-    result = runner.invoke(app, ["report", "--telemetry-send"])
+    result = runner.invoke(app, ["audit", "--telemetry-send"])
 
     assert result.exit_code == 0, result.output
     assert len(calls) == 1
@@ -517,7 +517,7 @@ def test_telemetry_send_calls_transport_and_leaves_log_untouched(
 def test_bundle_writes_json_file(runner: CliRunner, project_dir: Path) -> None:
     _write_events(project_dir / ".canonic", [_event(latency_ms=42)])
     out = project_dir / "diag.json"
-    result = runner.invoke(app, ["report", "--bundle", str(out)])
+    result = runner.invoke(app, ["audit", "--bundle", str(out)])
     assert result.exit_code == 0
     assert out.exists()
     payload = json.loads(out.read_text())
@@ -528,7 +528,7 @@ def test_bundle_writes_json_file(runner: CliRunner, project_dir: Path) -> None:
 
 def test_bundle_message_notes_no_credentials(runner: CliRunner, project_dir: Path) -> None:
     out = project_dir / "diag.json"
-    result = runner.invoke(app, ["report", "--bundle", str(out)])
+    result = runner.invoke(app, ["audit", "--bundle", str(out)])
     assert result.exit_code == 0
     assert "no query results or credentials" in result.output
 
@@ -540,7 +540,7 @@ def test_bundle_does_not_write_normal_report_output(runner: CliRunner, project_d
         [_event(), _event(error="unresolved")],
     )
     out = project_dir / "diag.json"
-    result = runner.invoke(app, ["report", "--bundle", str(out)])
+    result = runner.invoke(app, ["audit", "--bundle", str(out)])
     assert result.exit_code == 0
     assert "Error distribution" not in result.output
 
@@ -549,7 +549,7 @@ def test_bundle_outside_project_reports_no_project(
     runner: CliRunner, tmp_path: Path, monkeypatch
 ) -> None:
     monkeypatch.chdir(tmp_path)
-    result = runner.invoke(app, ["report", "--bundle", str(tmp_path / "diag.json")])
+    result = runner.invoke(app, ["audit", "--bundle", str(tmp_path / "diag.json")])
     assert result.exit_code == 0
     assert "no canonic project found" in result.output
     assert not (tmp_path / "diag.json").exists()

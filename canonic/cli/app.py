@@ -14,6 +14,7 @@ from canonic.cli._errors import get_cli_context
 from canonic.cli.commands import (
     apply,
     assertions,
+    audit,
     completion,
     connection,
     evaluate,
@@ -23,7 +24,6 @@ from canonic.cli.commands import (
     outcome,
     overview,
     query,
-    report,
     review,
     setup,
     sl,
@@ -100,6 +100,7 @@ app.command("query")(query.query)
 app.command("assert")(assertions.assert_)
 app.command("sql")(sql.sql)
 app.command("status")(status.status)
-app.command("report")(report.report)
+app.command("audit")(audit.audit)
+app.command("report")(audit.report)
 app.command("validate")(validate.validate)
 app.command("completion")(completion.completion)

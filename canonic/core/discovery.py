@@ -114,7 +114,7 @@ class DiscoveryService:
         compile-time signals (provenance, assertion coverage) — the same ones a
         ``min_trust`` guardrail would enforce. A served query may still score lower than
         this: E11's dynamic outcome-history signal (SPEC-E11 §5) can additionally cap a
-        binding at ``caution`` at serve time — see ``canonic report``'s Feedback loop
+        binding at ``caution`` at serve time — see ``canonic audit``'s Feedback loop
         section for that per-binding state.
         """
         seen: set[str] = set()

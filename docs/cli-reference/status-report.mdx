@@ -1,5 +1,5 @@
 ---
-title: "canonic status / report"
+title: "canonic status / audit"
 description: "Inspect project state, local event-log figures, and record answer outcomes."
 ---
 
@@ -25,13 +25,13 @@ canonic validate
 
 Checks that every metric binding's `canonical.source`/`measure`, every guardrail's `applies_to`, every finality rule, and every assertion resolve against `semantics/` and `contracts/`. These are the same cross-surface checks `canonic ingest` already runs before writing a diff; `canonic validate` makes them available as a standalone check, so a broken contract — for example a `semi_additive` binding whose source `grain` column isn't declared as a dimension — is caught before it reaches a query instead of failing the next time an agent asks for that metric. Exits non-zero with a structured error (`--json` supported) on the first violation found.
 
-## `canonic report`
+## `canonic audit`
 
 Show event-log figures from the local `.canonic/` store: counts, error distribution, latency, bytes scanned, and freshness.
 
 ```bash
-canonic report
-canonic report --last 100 --recent 20
+canonic audit
+canonic audit --last 100 --recent 20
 ```
 
 | Flag | Description |
@@ -48,10 +48,10 @@ When `answer_outcome` events are present (see [`canonic outcome mark`](#canonic-
 - **Correction recurrence** — bindings with more than one `incorrect` outcome. A rising count means the feedback loop isn't closing: the same canonical definition keeps getting marked wrong.
 - **Feedback loop**: a table of every binding with any `wrong_definition` outcome history, with columns `binding`, `wrong_definition` count, distinct `markers`, whether it's crossed the E4 evidence gate (`gated (E4)`), and whether it's currently capping the E14 trust tier (`trust capped`). Shown even below the gate, so a pattern is visible before it fires. Also included in `--json` under `"feedback"`. See [Feedback loop (E11)](/concepts/ingestion-and-reconciliation#feedback-loop-e11) and the `feedback` block in [config schema](/reference/config-schema#feedback).
 
-### `canonic report --bundle`
+### `canonic audit --bundle`
 
 ```bash
-canonic report --bundle diagnostics.json
+canonic audit --bundle diagnostics.json
 ```
 
 Writes a single JSON file for attaching to a bug report: canonic/Python/platform version, the serving contract schema, the redacted `canonic.yaml` (connection secrets are already stored as references — `env:`/`keyring:`/`file:` — never literals; free-form connector `params` entries are additionally redacted defensively), and the onboarding funnel plus event-log summary. Contains no query results. Nothing is sent anywhere — review the file yourself before attaching it.

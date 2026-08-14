@@ -1,4 +1,4 @@
-"""Tests for build_diagnostic_bundle — the ``canonic report --bundle`` payload."""
+"""Tests for build_diagnostic_bundle — the ``canonic audit --bundle`` payload."""
 
 from __future__ import annotations
 

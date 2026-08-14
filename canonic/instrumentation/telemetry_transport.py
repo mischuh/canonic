@@ -9,7 +9,7 @@ human attestation that the exact aggregate payload has been privacy-reviewed; ca
 cannot verify that on its own, so setting ``enabled: true`` alone still sends nothing.
 
 Exactly one attempt is made per call — no retry. Sending is an explicit, low-frequency,
-user-triggered CLI action (``canonic report --telemetry-send``), not an automatic call
+user-triggered CLI action (``canonic audit --telemetry-send``), not an automatic call
 buried in a serving path, so a failed attempt is simply retried by re-running the command.
 """
 

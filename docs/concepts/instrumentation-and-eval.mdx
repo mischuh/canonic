@@ -7,7 +7,7 @@ canonic backs its trustworthiness claims with a local, inspectable log rather th
 
 ## The event log
 
-An append-only, structured log under `.canonic/` (local, git-ignored). It's the single substrate every producer writes to; [`canonic status`](/cli-reference/status-report#canonic-status) and [`canonic report`](/cli-reference/status-report#canonic-report) read from it.
+An append-only, structured log under `.canonic/` (local, git-ignored). It's the single substrate every producer writes to; [`canonic status`](/cli-reference/status-report#canonic-status) and [`canonic audit`](/cli-reference/status-report#canonic-audit) read from it.
 
 **No warehouse content, ever.** The semantic query and compiled SQL are recorded as `sha256` hashes, never as text, so filter literals (dates, ids) never land on disk. Resolved bindings, guardrail ids, and counts are metadata and are stored as-is. Events are immutable once written; corrections are new events, never edits.
 
@@ -49,7 +49,7 @@ The `reason_code` is an attribution safeguard: acting on the wrong cause corrupt
 
 ## Local inspection, no telemetry required
 
-`canonic status` and `canonic report` read the log directly: counts, error-code distribution, latency percentiles, bytes scanned, freshness and guardrail-hit coverage, the onboarding funnel (setup started → connection added → bootstrap completed → first answer served → first curated review completed), trust-tier calibration, and correction recurrence. None of this requires telemetry to be enabled; the log is not a black box on day one.
+`canonic status` and `canonic audit` read the log directly: counts, error-code distribution, latency percentiles, bytes scanned, freshness and guardrail-hit coverage, the onboarding funnel (setup started → connection added → bootstrap completed → first answer served → first curated review completed), trust-tier calibration, and correction recurrence. None of this requires telemetry to be enabled; the log is not a black box on day one.
 
 ## Opt-in telemetry
 
@@ -61,7 +61,7 @@ The `reason_code` is an attribution safeguard: acting on the wrong cause corrupt
 
 Missing any of these (or being air-gapped) fails the send closed with a structured error — it never silently no-ops and never partially sends.
 
-`canonic report --telemetry-preview` prints precisely the payload that would be sent, without sending it, regardless of configuration: counts, distributions, latency and bytes-scanned aggregates, the trust-calibration buckets, and (when available) accuracy/baseline numbers. It **never** includes `query_hash`, resolved bindings, SQL, `compiled_sql_hash`, freshness source names, or any other field that could re-identify a query or reveal warehouse/schema content — the same content-safety rule as the local log itself, applied one notch stricter since this payload is meant to leave the machine. Use `canonic report --telemetry-send` to actually send that same payload once `enabled`, `endpoint`, and `transport_acknowledged` are all set.
+`canonic audit --telemetry-preview` prints precisely the payload that would be sent, without sending it, regardless of configuration: counts, distributions, latency and bytes-scanned aggregates, the trust-calibration buckets, and (when available) accuracy/baseline numbers. It **never** includes `query_hash`, resolved bindings, SQL, `compiled_sql_hash`, freshness source names, or any other field that could re-identify a query or reveal warehouse/schema content — the same content-safety rule as the local log itself, applied one notch stricter since this payload is meant to leave the machine. Use `canonic audit --telemetry-send` to actually send that same payload once `enabled`, `endpoint`, and `transport_acknowledged` are all set.
 
 ## Accuracy harness: `canonic assert`
 

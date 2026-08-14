@@ -1,4 +1,4 @@
-"""``canonic report`` — surface event-log figures from the local ``.canonic/`` store (SPEC-E16 §4)."""
+"""``canonic audit`` — surface event-log figures from the local ``.canonic/`` store (SPEC-E16 §4)."""
 
 from __future__ import annotations
 
@@ -17,7 +17,7 @@ if TYPE_CHECKING:
     from canonic.trust.models import TrustScore
 
 from canonic.airgap import guard_telemetry_send
-from canonic.cli._errors import get_cli_context, handle_errors
+from canonic.cli._errors import get_cli_context, handle_errors, warn_deprecated_command
 from canonic.config import ConfigError, FeedbackConfig, find_project_root, load_config
 from canonic.core.service import CanonicService
 from canonic.credentials import resolve_credential
@@ -157,44 +157,51 @@ def _render_feedback(feedback: FeedbackReport) -> None:
     _console.print()
 
 
+_LastOption = Annotated[
+    int | None,
+    typer.Option("--last", help="Restrict to the final N events in the log.", min=1),
+]
+_RecentOption = Annotated[
+    int,
+    typer.Option("--recent", help="Number of recent answers to list.", min=1),
+]
+_TelemetryPreviewOption = Annotated[
+    bool,
+    typer.Option(
+        "--telemetry-preview",
+        help="Print exactly the aggregate payload opt-in telemetry would send, "
+        "without sending it (SPEC-E16 Part 2 §5). Use --telemetry-send to actually send.",
+    ),
+]
+_TelemetrySendOption = Annotated[
+    bool,
+    typer.Option(
+        "--telemetry-send",
+        help="Build and send the aggregate telemetry payload. Requires "
+        "telemetry.enabled, telemetry.endpoint, and telemetry.transport_acknowledged "
+        "all set in canonic.yaml, and fails closed otherwise — nothing is ever sent "
+        "implicitly.",
+    ),
+]
+_BundleOption = Annotated[
+    Path | None,
+    typer.Option(
+        "--bundle",
+        help="Write a diagnostic bundle (versions, redacted config, funnel and event "
+        "summary) to PATH for attaching to a bug report. No query results, no "
+        "credentials — connection params are redacted defensively.",
+    ),
+]
+
+
 @handle_errors
-def report(
+def audit(
     ctx: typer.Context,
-    last: Annotated[
-        int | None,
-        typer.Option("--last", help="Restrict to the final N events in the log.", min=1),
-    ] = None,
-    recent: Annotated[
-        int,
-        typer.Option("--recent", help="Number of recent answers to list.", min=1),
-    ] = 10,
-    telemetry_preview: Annotated[
-        bool,
-        typer.Option(
-            "--telemetry-preview",
-            help="Print exactly the aggregate payload opt-in telemetry would send, "
-            "without sending it (SPEC-E16 Part 2 §5). Use --telemetry-send to actually send.",
-        ),
-    ] = False,
-    telemetry_send: Annotated[
-        bool,
-        typer.Option(
-            "--telemetry-send",
-            help="Build and send the aggregate telemetry payload. Requires "
-            "telemetry.enabled, telemetry.endpoint, and telemetry.transport_acknowledged "
-            "all set in canonic.yaml, and fails closed otherwise — nothing is ever sent "
-            "implicitly.",
-        ),
-    ] = False,
-    bundle: Annotated[
-        Path | None,
-        typer.Option(
-            "--bundle",
-            help="Write a diagnostic bundle (versions, redacted config, funnel and event "
-            "summary) to PATH for attaching to a bug report. No query results, no "
-            "credentials — connection params are redacted defensively.",
-        ),
-    ] = None,
+    last: _LastOption = None,
+    recent: _RecentOption = 10,
+    telemetry_preview: _TelemetryPreviewOption = False,
+    telemetry_send: _TelemetrySendOption = False,
+    bundle: _BundleOption = None,
 ) -> None:
     """Show event-log figures: counts, error distribution, latency, bytes scanned, and freshness."""
     if telemetry_preview and telemetry_send:
@@ -306,7 +313,7 @@ def report(
         return
 
     _console.print(
-        f"[bold]canonic report[/bold]  (telemetry: {'on' if telemetry_enabled else 'off'})"
+        f"[bold]canonic audit[/bold]  (telemetry: {'on' if telemetry_enabled else 'off'})"
     )
     _console.print()
 
@@ -369,3 +376,24 @@ def report(
                 bytes_str,
             )
         _console.print(recent_table)
+
+
+@handle_errors
+def report(
+    ctx: typer.Context,
+    last: _LastOption = None,
+    recent: _RecentOption = 10,
+    telemetry_preview: _TelemetryPreviewOption = False,
+    telemetry_send: _TelemetrySendOption = False,
+    bundle: _BundleOption = None,
+) -> None:
+    """Show event-log figures (deprecated — use "canonic audit")."""
+    warn_deprecated_command("report", "audit")
+    return audit(
+        ctx,
+        last=last,
+        recent=recent,
+        telemetry_preview=telemetry_preview,
+        telemetry_send=telemetry_send,
+        bundle=bundle,
+    )

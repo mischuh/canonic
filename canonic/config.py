@@ -158,7 +158,7 @@ class TelemetryConfig(BaseModel):
     enabled: bool = False
     endpoint: str | None = None
     #: Human attestation that this project has reviewed the exact aggregate payload
-    #: (see ``canonic report --telemetry-preview``) before allowing a real send.
+    #: (see ``canonic audit --telemetry-preview``) before allowing a real send.
     #: canonic cannot verify that a review actually happened — this is a project-level
     #: policy decision recorded in canonic.yaml, not a technical guarantee.
     transport_acknowledged: bool = False
