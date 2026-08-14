@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.20.0](https://github.com/mischuh/canonic/compare/v0.19.1...v0.20.0) (2026-08-14)
+
+
+### Features
+
+* **cli:** rename canonic report to canonic audit, add deprecated alias ([#292](https://github.com/mischuh/canonic/issues/292)) ([656e455](https://github.com/mischuh/canonic/commit/656e4558ba5799703d9e6c31b82f88151f60d486))
+* **reports:** add curated reports — list_reports/run_report ([#294](https://github.com/mischuh/canonic/issues/294)) ([57e2c60](https://github.com/mischuh/canonic/commit/57e2c608a98dc050beb7388573042253132e44f8))
+
 ## [0.19.1](https://github.com/mischuh/canonic/compare/v0.19.0...v0.19.1) (2026-08-14)
 
 
