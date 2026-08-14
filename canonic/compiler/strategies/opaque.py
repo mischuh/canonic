@@ -100,10 +100,13 @@ def plan_metric(
         fusable=False,
     )
 
+    resolved_key = binding.resolved_key
+    assert resolved_key is not None  # noqa: S101 — source/measure asserted non-None above
+
     return MetricLeaves(
         leaves=[leaf],
         metric=MetricPlan(name=queried_name, refs=(LeafRef(leaf=0, column=queried_name),)),
-        resolved=f"opaque({source_name}.{binding.measure})",
+        resolved=resolved_key,
         opaque=OpaqueMetadata(
             source=source_name,
             measure=binding.measure,

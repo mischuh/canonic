@@ -129,6 +129,8 @@ def plan_metric(
 
     num_name = components.numerator.metric
     den_name = components.denominator.metric
+    resolved_key = composite.resolved_key
+    assert resolved_key is not None  # noqa: S101 — ratio/weighted_avg always resolve a key
     zero_warnings: tuple[str, ...] = ()
     if on_zero is OnZeroDenominator.NULL:
         zero_warnings = (
@@ -145,11 +147,7 @@ def plan_metric(
             ),
             combine=_ZERO_POLICY[on_zero],
         ),
-        resolved=(
-            f"weighted_avg({num_name}, {den_name})"
-            if composite.kind is BindingKind.WEIGHTED_AVG
-            else f"ratio({num_name}, {den_name})"
-        ),
+        resolved=resolved_key,
         composition=CompositionMetadata(
             kind=composite.kind,
             numerator=num_name,

@@ -103,6 +103,27 @@ class Binding:
     recompute_at_grain: RecomputeAtGrainBinding | None = None
     opaque: OpaqueBinding | None = None
 
+    @property
+    def resolved_key(self) -> str | None:
+        """The join key persisted E11 outcome history and E16 assertion history are keyed
+        by — the single source of truth for what a compiled strategy calls this metric
+        (SPEC-E11 §5, SPEC-E14 §5). Must match ``MetricLeaves.resolved`` exactly for every
+        kind, since that is the string actually written to ``.canonic/assertions.json`` and
+        ``AnswerEvent.resolved["metrics"]``; computed here from fields already resolved at
+        bind time so it's available before planning, too (SPEC-E14 §4's static trust inputs).
+        """
+        if self.kind is BindingKind.RATIO or self.kind is BindingKind.WEIGHTED_AVG:
+            assert self.components is not None  # noqa: S101 — invariant of these two kinds
+            prefix = "weighted_avg" if self.kind is BindingKind.WEIGHTED_AVG else "ratio"
+            num_name = self.components.numerator.metric
+            den_name = self.components.denominator.metric
+            return f"{prefix}({num_name}, {den_name})"
+        if self.source is None or self.measure is None:
+            return None
+        if self.kind is BindingKind.OPAQUE:
+            return f"opaque({self.source}.{self.measure})"
+        return f"{self.source}.{self.measure}"
+
 
 @dataclass(frozen=True, slots=True)
 class ComponentBindings:
