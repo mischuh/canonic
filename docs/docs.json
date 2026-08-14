@@ -49,6 +49,7 @@
           "cli-reference/review-apply",
           "cli-reference/query-sql-assert",
           "cli-reference/status-report",
+          "cli-reference/report",
           "cli-reference/completion"
         ]
       },
@@ -76,7 +77,8 @@
           "reference/config-schema",
           "reference/semantic-schema",
           "reference/contract-schema",
-          "reference/knowledge-schema"
+          "reference/knowledge-schema",
+          "reference/report-schema"
         ]
       }
     ]

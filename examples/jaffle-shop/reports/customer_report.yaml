@@ -1,0 +1,22 @@
+id: customer_report
+title: "Customer Report"
+description: "Curated customer, product, and store performance view, maintained by the data team."
+owner: data-team
+domain: orders
+sections:
+  - title: "Revenue and orders by customer type"
+    query: { metrics: [revenue, order_count], dimensions: [customer_type] }
+    narrative_from: customer-types
+  - title: "Average revenue per customer by segment"
+    query: { metrics: [avg_revenue], dimensions: [customer_type] }
+    narrative_from: revenue-definition
+  - title: "Units sold by product type"
+    query: { metrics: [units_sold], dimensions: [type] }
+    narrative_from: order-items-fanout-caveat
+  - title: "Revenue by store, first half of January"
+    query:
+      metrics: [revenue]
+      dimensions: [name]
+      filters: ["ordered_at < '2018-01-15'"]
+  - title: "Average product price by type"
+    query: { metrics: [avg_product_price], dimensions: [type] }

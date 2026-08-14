@@ -83,3 +83,67 @@ def test_validate_json_reports_contract_error(runner: CliRunner, project_dir: Pa
     assert result.exit_code != 0
     payload = json.loads(result.output)
     assert "does_not_exist" in payload["message"]
+
+
+def _write_valid_orders_project(project_dir: Path) -> None:
+    (project_dir / "semantics" / "db").mkdir(parents=True)
+    (project_dir / "contracts" / "metrics").mkdir(parents=True)
+    (project_dir / "semantics" / "db" / "src.yaml").write_text(
+        "name: orders\nconnection: db\ntable: src\n"
+        "grain: [id]\n"
+        "columns:\n"
+        "  - {name: id, type: string, nullable: false}\n"
+        "  - {name: val, type: decimal, nullable: true}\n"
+        "measures:\n"
+        "  - {name: total, expr: 'sum(val)', additivity: additive}\n"
+    )
+    (project_dir / "contracts" / "metrics" / "m.yaml").write_text(
+        "metric: revenue\ncanonical:\n  source: orders\n  measure: total\nstatus: active\n"
+    )
+
+
+def test_validate_report_with_unresolvable_metric_fails(
+    runner: CliRunner, project_dir: Path
+) -> None:
+    """S18 AC1: a report section referencing a metric that does not resolve fails, naming
+    the report id and section index."""
+    _write_valid_orders_project(project_dir)
+    (project_dir / "reports").mkdir(parents=True)
+    (project_dir / "reports" / "r.yaml").write_text(
+        "id: r\ntitle: R\nsections:\n"
+        "  - title: ok\n    query: {metrics: [revenue]}\n"
+        "  - title: bad\n    query: {metrics: [does_not_resolve]}\n"
+    )
+
+    result = runner.invoke(app, ["validate"])
+    assert result.exit_code != 0
+    assert "'r'" in result.output
+    assert "section 1" in result.output
+
+
+def test_validate_report_with_dangling_narrative_from_fails(
+    runner: CliRunner, project_dir: Path
+) -> None:
+    """S18 AC2: a narrative_from pointing at a nonexistent knowledge page fails validation."""
+    _write_valid_orders_project(project_dir)
+    (project_dir / "reports").mkdir(parents=True)
+    (project_dir / "reports" / "r.yaml").write_text(
+        "id: r\ntitle: R\nsections:\n"
+        "  - title: ok\n    query: {metrics: [revenue]}\n"
+        "    narrative_from: does-not-exist\n"
+    )
+
+    result = runner.invoke(app, ["validate"])
+    assert result.exit_code != 0
+    assert "does-not-exist" in result.output
+
+
+def test_validate_report_passes_alongside_contracts(runner: CliRunner, project_dir: Path) -> None:
+    _write_valid_orders_project(project_dir)
+    (project_dir / "reports").mkdir(parents=True)
+    (project_dir / "reports" / "r.yaml").write_text(
+        "id: r\ntitle: R\nsections:\n  - title: ok\n    query: {metrics: [revenue]}\n"
+    )
+
+    result = runner.invoke(app, ["validate"])
+    assert result.exit_code == 0, result.output

@@ -8,6 +8,7 @@ import typer
 from rich.console import Console
 
 from canonic.cli._errors import get_cli_context, handle_errors
+from canonic.cli.commands import load_service
 from canonic.config import find_project_root
 from canonic.contracts.validate import validate_contracts
 
@@ -25,6 +26,11 @@ def validate(ctx: typer.Context) -> None:
     already runs on the ingestion write path (``canonic ingest``) -- this makes
     them available as a standalone read-path check, so a broken contract is caught
     at write time instead of the next time a query happens to hit it.
+
+    Also validates every committed ``reports/*.yaml``: each section's query must
+    compile against the current semantic layer and each ``narrative_from`` must
+    resolve to an existing knowledge page (AMENDMENT-curated-reports S18) -- so
+    renaming a metric a report depends on is caught in the same run, the same PR.
     """
     json_output = get_cli_context(ctx).json_output
     root = find_project_root()
@@ -37,6 +43,7 @@ def validate(ctx: typer.Context) -> None:
         raise typer.Exit(1)
 
     validate_contracts(root)
+    load_service(ctx).validate_reports()
 
     if json_output:
         typer.echo(json.dumps({"status": "ok", "project_root": str(root)}))

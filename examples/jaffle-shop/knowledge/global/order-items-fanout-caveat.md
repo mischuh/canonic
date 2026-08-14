@@ -1,5 +1,5 @@
 ---
-summary: Joining orders to order_items fans out rows: never sum order amounts from the order_items table.
+summary: "Joining orders to order_items fans out rows: never sum order amounts from the order_items table."
 tags: [orders, order_items, fanout, caveat]
 sl_refs: [order_items.units_sold, orders.revenue]
 usage_mode: caveat

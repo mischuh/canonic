@@ -8,7 +8,7 @@ field renamed by any surface.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel, ConfigDict
 
@@ -42,6 +42,10 @@ __all__ = [
     "RelatedDimensionOut",
     "RelatedMetricOut",
     "RelatedOut",
+    "ReportNarrative",
+    "ReportRunResult",
+    "ReportSectionResult",
+    "ReportSummary",
     "SourceFreshnessOut",
     "TrustScoreOut",
 ]
@@ -338,3 +342,54 @@ class CompileOutput(BaseModel):
             compiled=Compiled(sql=compiled.sql, dialect=compiled.dialect),
             metadata=QueryMetadata.from_compile_result(compiled),
         )
+
+
+class ReportSummary(BaseModel):
+    """One committed report's directory-listing entry, as returned by ``list_reports``."""
+
+    model_config = ConfigDict(frozen=True)
+
+    id: str
+    title: str
+    description: str | None = None
+    owner: str | None = None
+    domain: str | None = None
+
+
+class ReportNarrative(BaseModel):
+    """A rendered knowledge page attached to a report section (``narrative_from``).
+
+    ``body`` is always the **rendered** page (live ``{{ sl:entity.expr }}`` definitions
+    resolved to SQL), never the raw template — same rule as ``read_page`` (E6 §7).
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    page_id: str
+    body: str
+    meta: dict[str, Any] = {}
+
+
+class ReportSectionResult(BaseModel):
+    """One section's outcome within a ``run_report`` response.
+
+    Exactly one of ``result``/``error`` is set: a failing section resolves to a
+    structured ``{code, message, candidates?}`` error (the same wire shape every other
+    capability returns) rather than aborting the whole report (S17).
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    title: str
+    result: QueryResult | None = None
+    narrative: ReportNarrative | None = None
+    error: dict[str, Any] | None = None
+
+
+class ReportRunResult(BaseModel):
+    """The ``run_report`` response: ordered section outcomes (S16)."""
+
+    model_config = ConfigDict(frozen=True)
+
+    report_id: str
+    sections: list[ReportSectionResult]

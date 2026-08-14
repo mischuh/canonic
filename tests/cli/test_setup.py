@@ -83,7 +83,7 @@ def test_fresh_setup_scaffolds_project(runner: CliRunner, tmp_path: Path, monkey
     result = runner.invoke(app, ["setup"], input=_FRESH_INPUT + "\n")
 
     assert result.exit_code == 0, result.output
-    for name in ("canonic.yaml", "semantics", "knowledge", "contracts", "raw-sources"):
+    for name in ("canonic.yaml", "semantics", "knowledge", "contracts", "reports", "raw-sources"):
         assert (tmp_path / name).exists(), name
     assert (tmp_path / "contracts" / "metrics").is_dir()
     gitignore = (tmp_path / ".gitignore").read_text()
@@ -562,7 +562,7 @@ def test_minimal_flag_scaffolds_without_prompts(
     assert config.project.name == tmp_path.name
     assert config.connections == []
     assert config.llm is None
-    for name in ("semantics", "knowledge", "contracts", "raw-sources"):
+    for name in ("semantics", "knowledge", "contracts", "reports", "raw-sources"):
         assert (tmp_path / name).exists(), name
     assert (tmp_path / ".canonic").is_dir()
     assert (tmp_path / ".gitignore").exists()

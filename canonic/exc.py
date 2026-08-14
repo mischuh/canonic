@@ -379,6 +379,18 @@ class KnowledgePageError(CanonicError):
     """Raised when a knowledge/**/*.md page is invalid; message carries file+line."""
 
 
+class ReportError(CanonicError):
+    """Raised when a reports/*.yaml file is invalid; message carries file+line."""
+
+
+class ReportNotFound(Unresolved):
+    """Raised when a ``report_id`` matches no committed report (AMENDMENT-curated-reports).
+
+    Subclasses :class:`Unresolved` so an unknown report reuses the existing ``unresolved``
+    wire code and exit 2 — no new error code, matching ``read_page`` on a missing page.
+    """
+
+
 class KnowledgeReferenceError(CanonicError):
     """A knowledge page references a target that does not resolve; blocks the write.
 

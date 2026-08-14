@@ -24,6 +24,7 @@ from canonic.cli.commands import (
     outcome,
     overview,
     query,
+    report,
     review,
     setup,
     sl,
@@ -90,6 +91,7 @@ app.add_typer(knowledge.app, name="knowledge")
 app.add_typer(evaluate.app, name="eval")
 app.add_typer(outcome.app, name="outcome")
 app.add_typer(ingest.app, name="ingest")
+app.add_typer(report.app, name="report")
 
 # Top-level single commands.
 app.command("overview")(overview.overview)
@@ -101,6 +103,5 @@ app.command("assert")(assertions.assert_)
 app.command("sql")(sql.sql)
 app.command("status")(status.status)
 app.command("audit")(audit.audit)
-app.command("report")(audit.report)
 app.command("validate")(validate.validate)
 app.command("completion")(completion.completion)

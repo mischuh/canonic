@@ -68,6 +68,10 @@ _INSTRUCTIONS = (
     "invented formula. Relay any 'caveats' the same way you relay 'suggestions'. Only fall "
     "back to general knowledge if search_knowledge() returns no hits, and say so explicitly "
     "when you do.\n\n"
+    "NAMED REPORTS — if the user asks for a report by name (e.g. 'the customer report', "
+    "'the management report', 'run my weekly report') rather than an ad-hoc question, call "
+    "list_reports() first to see what is committed, then run_report(report_id) instead of "
+    "reconstructing the sections yourself from list_metrics()/query().\n\n"
     "RAW SQL (run_sql) — only use this when no metric/dimension in list_metrics() covers the "
     "question. Prefer query()/compile_query() whenever a metric exists: they route joins "
     "through the resolved join graph and apply guardrails (e.g. against fan-out from "
@@ -383,5 +387,50 @@ def build_server(
     @canonic_error_response
     async def read_knowledge_page(page: str, user: str | None = None) -> dict[str, Any]:
         return service.read_knowledge_page(page, user=user)
+
+    # ------------------------------------------------------------------
+    # Tool: list_reports  (AMENDMENT-curated-reports, P1)
+    # ------------------------------------------------------------------
+
+    @mcp.tool(
+        description=(
+            "Discover curated reports maintained by the data team: a directory listing of "
+            "id, title, description, and owner for every committed report. Call this when a "
+            "user asks for a named report (e.g. 'the customer report', 'the management "
+            "report') rather than an ad-hoc question — then call run_report() with the "
+            "matching id. Pass 'domain' to narrow to one owning-source group."
+        )
+    )
+    @canonic_error_response
+    async def list_reports(domain: str | None = None) -> dict[str, Any]:
+        summaries = service.list_reports(domain=domain)
+        return {"reports": [s.model_dump(mode="json") for s in summaries]}
+
+    # ------------------------------------------------------------------
+    # Tool: run_report  (AMENDMENT-curated-reports, P1)
+    # ------------------------------------------------------------------
+
+    @mcp.tool(
+        description=(
+            "Run every section of a committed report (see list_reports()) through query(), "
+            "in declared order. Returns an ordered array of section results, each with the "
+            "section's title and either its unmodified query result (with an optional "
+            "attached narrative) or a structured {code, message} error. A failing section "
+            "does NOT abort the report — other sections still return normal results. Do not "
+            "treat a per-section error as a failure of the whole call; report it alongside "
+            "the sections that succeeded."
+        )
+    )
+    @canonic_error_response
+    async def run_report(
+        report_id: str, as_of: str | None = None, user: str | None = None
+    ) -> dict[str, Any]:
+        from datetime import datetime
+
+        parsed_as_of = datetime.fromisoformat(as_of) if as_of is not None else None
+        result = await service.run_report(
+            report_id, as_of=parsed_as_of, user=user, caller=_caller_id()
+        )
+        return result.model_dump(mode="json")
 
     return mcp

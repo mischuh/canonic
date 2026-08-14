@@ -30,6 +30,26 @@ CI (`.github/workflows/contract-schema-guard.yml`,
 
 ## History
 
+## 2.7 (2026-08-14) - MINOR
+
+- ADR/PR: this PR (feat(reports): curated reports — list_reports/run_report,
+  AMENDMENT-curated-reports)
+- Summary: Adds a fourth committed directory, `reports/`, and two capabilities —
+  `list_reports(domain?)` and `run_report(report_id, as_of?)` — plus their CLI
+  (`canonic report list`/`canonic report run`) and MCP (`list_reports`/`run_report`)
+  adapters. A report is a named, ordered sequence of sections, each an unmodified
+  `SemanticQuery` run through the existing `query()` capability, with an optional
+  narrative attached via the existing `read_page` capability. `run_report` introduces
+  zero new execution semantics (a deterministic loop over `core.query`) and zero new
+  authority (a report cannot declare a canonical binding, introduce a metric, or relax
+  a guardrail — PRD §5.1's three-way split is unchanged). A failing section resolves to
+  the existing `{code, message, candidates?}` error shape in place of a result rather
+  than aborting the run; an unknown `report_id` reuses the existing `unresolved` wire
+  code. No new error code, no change to `SemanticQuery`, `QueryResult`, `CompileOutput`,
+  or the error registry — classified MINOR under §4.1 because two new capabilities and
+  two new MCP tools are additive surface a client may want to negotiate on before
+  relying on them.
+
 ## 2.6 (2026-08-13) - MINOR
 
 - ADR/PR: this PR (feat(compiler): compose several metrics into one compiled query)

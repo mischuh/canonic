@@ -22,7 +22,7 @@ KNOWN_VERSIONS: frozenset[int] = frozenset({1})
 _REF_PATTERN = re.compile(r"^(env:|keyring:|file:)")
 
 #: Committed context directories scaffolded for every project (SPEC E1 §2).
-CONTEXT_DIRS: tuple[str, ...] = ("semantics", "knowledge", "contracts", "raw-sources")
+CONTEXT_DIRS: tuple[str, ...] = ("semantics", "knowledge", "contracts", "reports", "raw-sources")
 #: Git-ignored local state/secret directory (SPEC E1 §7).
 LOCAL_STATE_DIR = ".canonic"
 
@@ -492,9 +492,9 @@ def scaffold_project(root: Path) -> list[Path]:
     """Create the canonic project skeleton under root; return the paths created.
 
     Idempotent — existing files and directories are left untouched. Scaffolds the
-    four committed context directories (SPEC E1 §2), the restrictive-permission
-    ``.canonic/`` local-state directory (§7), and a ``.gitignore`` covering
-    ``.canonic/`` when none exists yet.
+    committed context directories (SPEC E1 §2, ``CONTEXT_DIRS``), the
+    restrictive-permission ``.canonic/`` local-state directory (§7), and a
+    ``.gitignore`` covering ``.canonic/`` when none exists yet.
     """
     from canonic.contracts.loader import contracts_dir_scaffold
 

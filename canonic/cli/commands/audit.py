@@ -17,7 +17,7 @@ if TYPE_CHECKING:
     from canonic.trust.models import TrustScore
 
 from canonic.airgap import guard_telemetry_send
-from canonic.cli._errors import get_cli_context, handle_errors, warn_deprecated_command
+from canonic.cli._errors import get_cli_context, handle_errors
 from canonic.config import ConfigError, FeedbackConfig, find_project_root, load_config
 from canonic.core.service import CanonicService
 from canonic.credentials import resolve_credential
@@ -376,24 +376,3 @@ def audit(
                 bytes_str,
             )
         _console.print(recent_table)
-
-
-@handle_errors
-def report(
-    ctx: typer.Context,
-    last: _LastOption = None,
-    recent: _RecentOption = 10,
-    telemetry_preview: _TelemetryPreviewOption = False,
-    telemetry_send: _TelemetrySendOption = False,
-    bundle: _BundleOption = None,
-) -> None:
-    """Show event-log figures (deprecated — use "canonic audit")."""
-    warn_deprecated_command("report", "audit")
-    return audit(
-        ctx,
-        last=last,
-        recent=recent,
-        telemetry_preview=telemetry_preview,
-        telemetry_send=telemetry_send,
-        bundle=bundle,
-    )
