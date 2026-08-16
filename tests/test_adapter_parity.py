@@ -221,3 +221,40 @@ def test_run_report_parity(report_project: Path, monkeypatch: pytest.MonkeyPatch
 
     assert cli_payload == mcp_payload
     assert cli_payload["sections"][0]["result"]["result"]["rows"] == [["paid", "100.00"]]
+
+
+def test_run_report_filters_parity(report_project: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """CLI ``--filter`` and the MCP ``run_report`` ``filters`` argument apply the same
+    additive predicate and return byte-identical payloads, actually excluding the row
+    that fails the filter (real DuckDB execution, not a fake connector)."""
+    import asyncio
+    import json
+
+    from typer.testing import CliRunner
+
+    from canonic.cli.app import app
+    from canonic.core.service import CanonicService
+
+    async def _mcp_run_report(service: CanonicService) -> object:
+        mcp = build_server(service)
+        async with Client(mcp) as client:
+            result = await client.call_tool(
+                "run_report",
+                {"report_id": "customer_report", "filters": ["status = 'refunded'"]},
+            )
+        return result.data
+
+    monkeypatch.chdir(report_project)
+    cli = CliRunner().invoke(
+        app,
+        ["--json", "report", "run", "customer_report", "--filter", "status=refunded"],
+        catch_exceptions=False,
+    )
+    assert cli.exit_code == 0, cli.stdout
+    cli_payload = json.loads(cli.stdout)
+
+    service = CanonicService.from_project(report_project)
+    mcp_payload = asyncio.run(_mcp_run_report(service))
+
+    assert cli_payload == mcp_payload
+    assert cli_payload["sections"][0]["result"]["result"]["rows"] == []

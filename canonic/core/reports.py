@@ -68,17 +68,25 @@ class ReportService:
         raise ReportNotFound(f"report {report_id!r} matches no committed report")
 
     def _effective_query(
-        self, section: ReportSection, report: Report, as_of: datetime | None
+        self,
+        section: ReportSection,
+        report: Report,
+        as_of: datetime | None,
+        filters: list[str] | None = None,
     ) -> SemanticQuery:
         context = section.query.context if section.query.context is not None else report.context
         section_as_of = section.query.as_of if section.query.as_of is not None else as_of
-        return section.query.model_copy(update={"context": context, "as_of": section_as_of})
+        combined_filters = [*section.query.filters, *(filters or [])]
+        return section.query.model_copy(
+            update={"context": context, "as_of": section_as_of, "filters": combined_filters}
+        )
 
     async def run_report(
         self,
         report_id: str,
         *,
         as_of: datetime | None = None,
+        filters: list[str] | None = None,
         user: str | None = None,
         caller: str | None = None,
     ) -> ReportRunResult:
@@ -89,12 +97,17 @@ class ReportService:
         whole never raises for a per-section failure. Only an unknown ``report_id``
         raises (:class:`~canonic.exc.ReportNotFound`, reusing the ``unresolved`` wire
         code — no new error code).
+
+        ``filters`` are caller-supplied predicate strings (same shape as
+        ``SemanticQuery.filters``) applied additively — AND-ed onto every section's own
+        filters, never replacing them — so a multi-tenant caller can scope an entire
+        report run (e.g. ``["merchant_id = '123'"]``) without editing the report file.
         """
         report = self._find_report(report_id)
 
         sections: list[ReportSectionResult] = []
         for section in report.sections:
-            effective = self._effective_query(section, report, as_of)
+            effective = self._effective_query(section, report, as_of, filters)
             try:
                 result = await self._query.query(effective, caller=caller)
             except CanonicError as exc:

@@ -260,11 +260,14 @@ class CanonicService:
         report_id: str,
         *,
         as_of: datetime | None = None,
+        filters: list[str] | None = None,
         user: str | None = None,
         caller: str | None = None,
     ) -> ReportRunResult:
         """Run every section of a committed report through ``query``, in order."""
-        return await self._reports.run_report(report_id, as_of=as_of, user=user, caller=caller)
+        return await self._reports.run_report(
+            report_id, as_of=as_of, filters=filters, user=user, caller=caller
+        )
 
     def validate_reports(self) -> None:
         """Validate every committed report's sections compile and narrative refs resolve."""

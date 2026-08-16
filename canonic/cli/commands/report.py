@@ -19,6 +19,7 @@ from rich.table import Table
 
 from canonic.cli._errors import get_cli_context, handle_errors
 from canonic.cli.commands import load_service
+from canonic.compiler.query import parse_filter_flag
 
 if TYPE_CHECKING:
     from canonic.core.models import ReportRunResult
@@ -91,6 +92,15 @@ def run(
         datetime | None,
         typer.Option("--as-of", help="ISO-8601 reference point for finality watermark evaluation."),
     ] = None,
+    filter_: Annotated[
+        list[str] | None,
+        typer.Option(
+            "--filter",
+            help="Filter as field=value or field:op:value (repeatable). Applied additively "
+            "to every section's own filters — e.g. scope a whole report run to one "
+            "merchant with --filter merchant_id=123.",
+        ),
+    ] = None,
     user: Annotated[
         str | None,
         typer.Option("--user", help="Requesting user id, for narrative access control."),
@@ -103,8 +113,15 @@ def run(
     normally — the call as a whole exits 0. With ``--json`` the output matches the MCP
     ``run_report`` tool payload byte-for-byte.
     """
+    try:
+        parsed_filters = [parse_filter_flag(f) for f in filter_ or []]
+    except ValueError as exc:
+        raise typer.BadParameter(str(exc)) from exc
+
     service = load_service(ctx)
-    result = asyncio.run(service.run_report(report_id, as_of=as_of, user=user))
+    result = asyncio.run(
+        service.run_report(report_id, as_of=as_of, filters=parsed_filters, user=user)
+    )
 
     payload = result.model_dump(mode="json")
     if get_cli_context(ctx).json_output:
