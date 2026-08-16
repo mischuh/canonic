@@ -14,7 +14,9 @@ from canonic.contracts.models import (
     FinalityRule,
     Guardrail,
     MetricBinding,
+    RolePolicy,
     Status,
+    TenancyPolicy,
 )
 from canonic.exc import ContractError
 
@@ -32,11 +34,14 @@ __all__ = [
     "load_guardrails",
     "load_metric_binding",
     "load_metric_bindings",
+    "load_role_policy",
+    "load_tenancy_policy",
 ]
 
 _METRICS_DIR = "contracts/metrics"
 _GUARDRAILS_DIR = "contracts/guardrails"
 _ASSERTIONS_DIR = "contracts/assertions"
+_POLICIES_DIR = "contracts/policies"
 
 
 def _line_for_path(raw: Any, path: Iterable[str | int]) -> int | None:
@@ -148,6 +153,26 @@ def load_assertions(project_root: Path) -> list[Assertion]:
     if not base.is_dir():
         return []
     return [_load_one(p, Assertion) for p in sorted(base.rglob("*.yaml"))]
+
+
+def load_tenancy_policy(project_root: Path) -> TenancyPolicy | None:
+    """Load contracts/policies/tenancy.yaml, or None if absent (SPEC-E12 §1.1).
+
+    Absence is the tenancy feature switch: no file means single-tenant behaviour,
+    unchanged from before this policy surface existed.
+    """
+    path = project_root / _POLICIES_DIR / "tenancy.yaml"
+    if not path.exists():
+        return None
+    return _load_one(path, TenancyPolicy)
+
+
+def load_role_policy(project_root: Path) -> RolePolicy | None:
+    """Load contracts/policies/roles.yaml, or None if absent (SPEC-E12 §1.2)."""
+    path = project_root / _POLICIES_DIR / "roles.yaml"
+    if not path.exists():
+        return None
+    return _load_one(path, RolePolicy)
 
 
 def contracts_dir_scaffold(project_root: Path) -> None:

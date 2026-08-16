@@ -3,14 +3,15 @@
 from __future__ import annotations
 
 from enum import StrEnum
-from typing import Any
+from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from canonic.semantic.models import Provenance
 from canonic.trust.models import TrustTier
 
 __all__ = [
+    "AllowDenyPolicy",
     "AppliesTo",
     "Assertion",
     "AssertionExpect",
@@ -25,12 +26,21 @@ __all__ = [
     "FinalityRule",
     "Guardrail",
     "GuardrailKind",
+    "KnowledgePolicy",
+    "MaskingRule",
+    "MaskStrategy",
     "MetricBinding",
+    "OnMissingPrincipal",
     "OnZeroDenominator",
     "Realization",
     "RestrictTo",
+    "RoleDef",
+    "RolePolicy",
+    "ScopedSource",
     "Severity",
     "Status",
+    "TenancyPolicy",
+    "UndeclaredSource",
 ]
 
 
@@ -448,3 +458,162 @@ class Assertion(BaseModel):
     query: dict[str, Any]
     expect: AssertionExpect = AssertionExpect()
     source_of_truth: str | None = None
+
+
+class OnMissingPrincipal(StrEnum):
+    """Behavior when a tenancy policy is active but the request carries no principal (§1.1)."""
+
+    DENY = "deny"
+    ALLOW_UNSCOPED = "allow_unscoped"
+
+
+class UndeclaredSource(StrEnum):
+    """Behavior when a query reaches a source in neither scoped nor shared lists (§1.1)."""
+
+    DENY = "deny"
+    WARN = "warn"
+
+
+class MaskStrategy(StrEnum):
+    """Column-masking strategy for a role's ``masking`` rules (§1.2, inert until Phase 7)."""
+
+    PARTIAL = "partial"
+    HASH = "hash"
+    NULL = "null"
+
+
+class ScopedSource(BaseModel):
+    """One source declared tenant-scoped, naming the column that carries the tenant id (§1.1)."""
+
+    model_config = ConfigDict(frozen=True)
+
+    source: str
+    column: str
+
+
+class TenancyPolicy(BaseModel):
+    """Row-level tenant isolation policy — singular per project (SPEC-E12 §1.1).
+
+    ``tenancy_for`` (SPEC-E12 §2) is total over every source: it must resolve to a
+    scope rule, ``shared``, or ``undeclared`` — never silently "no restriction". A
+    source omitted from both ``scoped_sources`` and ``shared_sources`` is a policy
+    hole, and ``undeclared_source`` controls whether that hole fails closed or warns.
+    """
+
+    model_config = ConfigDict(frozen=True, populate_by_name=True)
+
+    schema_: Literal["tenancy/v1"] = Field(alias="schema")
+    claim: str
+    on_missing_principal: OnMissingPrincipal = OnMissingPrincipal.DENY
+    scoped_sources: list[ScopedSource] = []
+    shared_sources: list[str] = []
+    undeclared_source: UndeclaredSource = UndeclaredSource.DENY
+
+    @model_validator(mode="after")
+    def _validate_no_overlap(self) -> TenancyPolicy:
+        scoped_names = {s.source for s in self.scoped_sources}
+        shared_names = set(self.shared_sources)
+        overlap = scoped_names & shared_names
+        if overlap:
+            raise ContractValidationError(
+                ("shared_sources",),
+                f"source(s) {sorted(overlap)} declared both scoped and shared",
+            )
+        return self
+
+
+class AllowDenyPolicy(BaseModel):
+    """An allow/deny name list shared by ``metrics`` and ``dimensions`` role policies (§1.2).
+
+    ``allow`` omitted (``None``) means unrestricted — every name is allowed subject to
+    ``deny``. ``allow`` present but empty is a deliberate allow-nothing declaration; this
+    is what keeps the fail-closed posture (§1.1) distinct from "no allow list authored
+    yet". ``"*"`` in ``allow`` is the explicit unrestricted wildcard used by exempt roles.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    allow: list[str] | None = None
+    deny: list[str] = []
+
+
+class KnowledgePolicy(BaseModel):
+    """A role's knowledge-page visibility, by tag (§1.2)."""
+
+    model_config = ConfigDict(frozen=True)
+
+    allow_tags: list[str] = []
+
+
+class MaskingRule(BaseModel):
+    """A column-masking rule on a role (§1.2). Parses inert until Phase 7 enforces it."""
+
+    model_config = ConfigDict(frozen=True)
+
+    column: str
+    strategy: MaskStrategy
+
+
+class RoleDef(BaseModel):
+    """One role's policy: which metrics/dimensions/knowledge/run_sql it grants (§1.2).
+
+    ``inherits`` names a parent role; a field left at its default on this role means
+    "use the parent's value for that field", while a field explicitly authored here
+    replaces the parent's value for that field wholesale — allow/deny lists are not
+    merged across the inheritance boundary. See the amendment's ``merchant_admin``
+    example, which re-opens the PII dimensions ``merchant_viewer`` denies rather than
+    adding to its list.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    inherits: str | None = None
+    metrics: AllowDenyPolicy = AllowDenyPolicy()
+    dimensions: AllowDenyPolicy = AllowDenyPolicy()
+    knowledge: KnowledgePolicy = KnowledgePolicy()
+    run_sql: bool = False
+    tenancy_exempt: bool = False
+    masking: list[MaskingRule] = []
+
+
+class RolePolicy(BaseModel):
+    """Role-based authorization policy — singular per project (SPEC-E12 §1.2).
+
+    ``claim`` names the token claim carrying the caller's role list. ``default_role``
+    applies when the token carries no role claim; if unset, a principal with no roles
+    resolves to deny-everything (SPEC-E12 §5).
+    """
+
+    model_config = ConfigDict(frozen=True, populate_by_name=True)
+
+    schema_: Literal["roles/v1"] = Field(alias="schema")
+    claim: str
+    default_role: str | None = None
+    roles: dict[str, RoleDef] = {}
+
+    @model_validator(mode="after")
+    def _validate_roles(self) -> RolePolicy:
+        if self.default_role is not None and self.default_role not in self.roles:
+            raise ContractValidationError(
+                ("default_role",),
+                f"default_role {self.default_role!r} is not declared in 'roles'",
+            )
+        for name, role in self.roles.items():
+            if role.inherits is None:
+                continue
+            seen = {name}
+            current: str | None = role.inherits
+            while current is not None:
+                if current not in self.roles:
+                    raise ContractValidationError(
+                        ("roles", name, "inherits"),
+                        f"role {name!r} inherits undeclared role {current!r}",
+                    )
+                if current in seen:
+                    raise ContractValidationError(
+                        ("roles", name, "inherits"),
+                        f"role {name!r} has a cyclic 'inherits' chain",
+                    )
+                seen.add(current)
+                current = self.roles[current].inherits
+        return self

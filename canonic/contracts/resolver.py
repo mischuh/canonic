@@ -21,6 +21,8 @@ from canonic.contracts.loader import (
     load_finality,
     load_guardrails,
     load_metric_bindings,
+    load_role_policy,
+    load_tenancy_policy,
 )
 from canonic.contracts.models import (
     BindingKind,
@@ -29,10 +31,16 @@ from canonic.contracts.models import (
     FinalityRule,
     Guardrail,
     GuardrailKind,
+    MaskingRule,
     MetricBinding,
     OnZeroDenominator,
+    RoleDef,
+    RolePolicy,
+    ScopedSource,
     Status,
+    TenancyPolicy,
 )
+from canonic.contracts.principal import EffectivePolicy, Principal
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
@@ -52,7 +60,11 @@ __all__ = [
     "MetricResolution",
     "OpaqueBinding",
     "RecomputeAtGrainBinding",
+    "ScopeResolution",
+    "ScopeRule",
     "SemiAdditiveBinding",
+    "Shared",
+    "Undeclared",
     "Unresolved",
 ]
 
@@ -163,6 +175,35 @@ class Unresolved:
 MetricResolution = Binding | Ambiguous | Unresolved
 
 
+@dataclass(frozen=True, slots=True)
+class ScopeRule:
+    """A source declared tenant-scoped: predicate ``<source>.<column> = :principal_tenant``."""
+
+    source: str
+    column: str
+
+
+@dataclass(frozen=True, slots=True)
+class Shared:
+    """A source explicitly declared tenant-neutral — no predicate is injected (§1.1)."""
+
+    source: str
+
+
+@dataclass(frozen=True, slots=True)
+class Undeclared:
+    """A source in neither ``scoped_sources`` nor ``shared_sources`` — a policy hole (§1.1).
+
+    Distinct from ``None`` by design: :meth:`ContractResolver.tenancy_for` is total, so
+    the compiler cannot read "no rule" as "no restriction".
+    """
+
+    source: str
+
+
+ScopeResolution = ScopeRule | Shared | Undeclared
+
+
 class ContractResolver:
     """The only authority on canonicality, queried by the compiler at hook points.
 
@@ -177,10 +218,22 @@ class ContractResolver:
         guardrails: Iterable[Guardrail],
         finality: Iterable[FinalityRule] = (),
         assertions: Iterable[Assertion] = (),
+        tenancy: TenancyPolicy | None = None,
+        roles: RolePolicy | None = None,
     ) -> None:
         self._guardrails: list[Guardrail] = list(guardrails)
         self._finality_by_metric: dict[str, FinalityRule] = {r.metric: r for r in finality}
         self._assertions: list[Assertion] = list(assertions)
+        self._tenancy = tenancy
+        self._roles = roles
+
+        scoped_by_source: dict[str, ScopedSource] = (
+            {s.source: s for s in tenancy.scoped_sources} if tenancy is not None else {}
+        )
+        self._scoped_by_source = scoped_by_source
+        self._shared_sources: frozenset[str] = (
+            frozenset(tenancy.shared_sources) if tenancy is not None else frozenset()
+        )
 
         # name/alias -> active bindings; multiple entries for a name means ambiguity
         name_index: dict[str, list[MetricBinding]] = {}
@@ -208,12 +261,14 @@ class ContractResolver:
 
     @classmethod
     def from_project(cls, project_root: Path) -> ContractResolver:
-        """Load bindings, guardrails, and finality rules from a project root."""
+        """Load bindings, guardrails, finality rules, and policies from a project root."""
         return cls(
             bindings=load_metric_bindings(project_root),
             guardrails=load_guardrails(project_root),
             finality=load_finality(project_root),
             assertions=load_assertions(project_root),
+            tenancy=load_tenancy_policy(project_root),
+            roles=load_role_policy(project_root),
         )
 
     @classmethod
@@ -523,3 +578,122 @@ class ContractResolver:
         return [
             a for a in self._assertions if is_executable(a) and set(assertion_metrics(a)) == wanted
         ]
+
+    @property
+    def tenancy_enabled(self) -> bool:
+        """Whether a tenancy policy is loaded for this project (SPEC-E12 §1.1 stage-0 guard)."""
+        return self._tenancy is not None
+
+    def tenancy_for(self, source: str) -> ScopeResolution:
+        """Resolve a source's tenant-scoping rule — total over every source (SPEC-E12 §2).
+
+        Returns :class:`Shared` for every source when no tenancy policy is loaded, which
+        is what makes an unconfigured project's compiled SQL identical to today's. With a
+        policy loaded, a source is exactly one of :class:`ScopeRule` (predicate required),
+        :class:`Shared` (declared tenant-neutral), or :class:`Undeclared` (a policy hole).
+        """
+        if self._tenancy is None:
+            return Shared(source=source)
+        rule = self._scoped_by_source.get(source)
+        if rule is not None:
+            return ScopeRule(source=rule.source, column=rule.column)
+        if source in self._shared_sources:
+            return Shared(source=source)
+        return Undeclared(source=source)
+
+    def authz_for(self, principal: Principal) -> EffectivePolicy:
+        """Flatten a principal's role(s) into one :class:`EffectivePolicy` (SPEC-E12 §2).
+
+        Returns an unrestricted policy when no role policy is loaded, matching the
+        "absence is the feature switch" rule tenancy follows. With a policy loaded, each
+        assigned role's ``inherits`` chain is flattened first (field-level override, not
+        merge — see :class:`~canonic.contracts.models.RoleDef`); when a principal carries
+        several roles, the per-role results are unioned, with deny always winning in the
+        final :meth:`EffectivePolicy.metric_allowed`-style check.
+        """
+        if self._roles is None:
+            return EffectivePolicy(
+                allow_metrics=frozenset({"*"}),
+                deny_metrics=frozenset(),
+                allow_dimensions=frozenset({"*"}),
+                deny_dimensions=frozenset(),
+                allow_tags=frozenset({"*"}),
+                run_sql=True,
+                tenancy_exempt=False,
+                masking=(),
+                roles=(),
+            )
+
+        role_names = principal.roles
+        if not role_names and self._roles.default_role is not None:
+            role_names = (self._roles.default_role,)
+        known_role_names = tuple(sorted(n for n in role_names if n in self._roles.roles))
+        if not known_role_names:
+            return EffectivePolicy(
+                allow_metrics=frozenset(),
+                deny_metrics=frozenset(),
+                allow_dimensions=frozenset(),
+                deny_dimensions=frozenset(),
+                allow_tags=frozenset(),
+                run_sql=False,
+                tenancy_exempt=False,
+                masking=(),
+                roles=(),
+            )
+
+        flattened = [self._flatten_role(name) for name in known_role_names]
+        allow_metrics: set[str] = set()
+        deny_metrics: set[str] = set()
+        allow_dimensions: set[str] = set()
+        deny_dimensions: set[str] = set()
+        allow_tags: set[str] = set()
+        masking: set[MaskingRule] = set()
+        for role in flattened:
+            allow_metrics |= set(role.metrics.allow) if role.metrics.allow is not None else {"*"}
+            deny_metrics |= set(role.metrics.deny)
+            allow_dimensions |= (
+                set(role.dimensions.allow) if role.dimensions.allow is not None else {"*"}
+            )
+            deny_dimensions |= set(role.dimensions.deny)
+            allow_tags |= set(role.knowledge.allow_tags)
+            masking |= set(role.masking)
+
+        return EffectivePolicy(
+            allow_metrics=frozenset(allow_metrics),
+            deny_metrics=frozenset(deny_metrics),
+            allow_dimensions=frozenset(allow_dimensions),
+            deny_dimensions=frozenset(deny_dimensions),
+            allow_tags=frozenset(allow_tags),
+            run_sql=any(role.run_sql for role in flattened),
+            tenancy_exempt=any(role.tenancy_exempt for role in flattened),
+            masking=tuple(sorted(masking, key=lambda m: (m.column, m.strategy))),
+            roles=known_role_names,
+        )
+
+    def _flatten_role(self, role_name: str) -> RoleDef:
+        """Resolve ``role_name``'s single-inheritance chain into one effective RoleDef.
+
+        Walks from the root ancestor to ``role_name``, applying each role's explicitly
+        authored fields (via Pydantic's ``model_fields_set``) over the accumulated result.
+        A field a role leaves at its default inherits the parent's value for that field
+        untouched; a field it authors — even partially — replaces the parent's wholesale.
+        Acyclicity and that every ``inherits`` target exists are already guaranteed by
+        :class:`~canonic.contracts.models.RolePolicy`'s validator, so no cycle guard is
+        needed here.
+        """
+        assert self._roles is not None  # noqa: S101 — only called once self._roles is set
+        chain: list[RoleDef] = []
+        current = self._roles.roles[role_name]
+        chain.append(current)
+        while current.inherits is not None:
+            current = self._roles.roles[current.inherits]
+            chain.append(current)
+
+        overridable = ("metrics", "dimensions", "knowledge", "run_sql", "tenancy_exempt", "masking")
+        resolved: dict[str, Any] = {}
+        for role in reversed(chain):
+            fields_set = role.model_fields_set
+            for field_name in overridable:
+                if field_name in fields_set or field_name not in resolved:
+                    resolved[field_name] = getattr(role, field_name)
+        return RoleDef(inherits=None, **resolved)
