@@ -42,6 +42,10 @@ sections:
 
 A section's `query.context` and `query.as_of`, when set, always win over the report-level `context` and the `run_report(as_of=...)` call argument — the report/call-level values only fill in when the section itself doesn't specify one.
 
+## Caller-supplied filters (`run_report(..., filters=...)`)
+
+`run_report` also accepts an optional `filters: list[str]` argument — the same predicate-string shape as `SemanticQuery.filters` (e.g. `["merchant_id = '123'"]`). Unlike `context`/`as_of`, these are **additive, not an override**: they're AND-ed onto every section's own `query.filters`, never replacing them. This is how a multi-tenant caller scopes an entire report run — e.g. to one merchant — without editing the report file or duplicating a filter into every section. Exposed as `--filter` (repeatable) on `canonic report run` and as the `filters` argument on the MCP `run_report` tool, both accepting the identical predicate format as `canonic query --filter`/the `query` tool.
+
 ## What a report is not
 
 A report introduces no new execution semantics (`run_report` is a deterministic loop over `core.query`) and no new authority: it cannot declare a canonical binding, introduce a metric, or relax/add a guardrail — it can only reference entities that already resolve. It carries no layout, chart type, or rendering; its output is an ordered array of unmodified `QueryResult` objects, so presentation stays the concern of whichever adapter or downstream consumer renders the response.

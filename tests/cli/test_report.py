@@ -187,3 +187,36 @@ def test_run_unknown_report_id_fails(
     result = runner.invoke(app, ["report", "run", "does_not_exist"])
     assert result.exit_code != 0
     assert "unresolved" in result.output.lower() or "does_not_exist" in result.output
+
+
+def test_run_with_filter_exits_zero(
+    runner: CliRunner, project_dir: Path, fake_connector: None
+) -> None:
+    result = runner.invoke(app, ["report", "run", "customer_report", "--filter", "status=paid"])
+    assert result.exit_code == 0, result.output
+    assert "Revenue by status" in result.output
+
+
+def test_run_with_repeated_filters_exits_zero(
+    runner: CliRunner, project_dir: Path, fake_connector: None
+) -> None:
+    result = runner.invoke(
+        app,
+        [
+            "report",
+            "run",
+            "customer_report",
+            "--filter",
+            "status=paid",
+            "--filter",
+            "amount:>:0",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+
+
+def test_run_with_invalid_filter_fails(
+    runner: CliRunner, project_dir: Path, fake_connector: None
+) -> None:
+    result = runner.invoke(app, ["report", "run", "customer_report", "--filter", "not-a-filter"])
+    assert result.exit_code != 0

@@ -418,18 +418,25 @@ def build_server(
             "attached narrative) or a structured {code, message} error. A failing section "
             "does NOT abort the report — other sections still return normal results. Do not "
             "treat a per-section error as a failure of the whole call; report it alongside "
-            "the sections that succeeded."
+            "the sections that succeeded. "
+            "'filters' (list[str]): SQL WHERE predicates, same format as query()'s filters "
+            "e.g. [\"merchant_id = '123'\"]. Applied additively (AND-ed) onto every section's "
+            "own filters, never replacing them — use this to scope an entire report run to "
+            "one tenant/merchant without editing the report file."
         )
     )
     @canonic_error_response
     async def run_report(
-        report_id: str, as_of: str | None = None, user: str | None = None
+        report_id: str,
+        as_of: str | None = None,
+        filters: list[str] | None = None,
+        user: str | None = None,
     ) -> dict[str, Any]:
         from datetime import datetime
 
         parsed_as_of = datetime.fromisoformat(as_of) if as_of is not None else None
         result = await service.run_report(
-            report_id, as_of=parsed_as_of, user=user, caller=_caller_id()
+            report_id, as_of=parsed_as_of, filters=filters, user=user, caller=_caller_id()
         )
         return result.model_dump(mode="json")
 

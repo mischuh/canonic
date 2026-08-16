@@ -272,6 +272,35 @@ class TestRunReport:
         result = await report_service.run_report("customer_report")
         assert result.sections[0].error is None
 
+    async def test_call_level_filters_merge_additively_with_section_filters(
+        self, report_service: CanonicService, tmp_path: Path
+    ) -> None:
+        """Caller-supplied filters are AND-ed onto a section's own filters, not a replacement."""
+        _write_report(
+            tmp_path,
+            "id: customer_report\ntitle: Customer Report\nsections:\n"
+            "  - title: Revenue\n    query: {metrics: [revenue], dimensions: [status], "
+            "filters: [\"status = 'paid'\"]}\n",
+        )
+        result = await report_service.run_report(
+            "customer_report", filters=["segment = 'business'"]
+        )
+        rs = result.sections[0].result.result
+        assert [tuple(row) for row in rs.rows] == [("paid", 100.00)]
+
+    async def test_no_filters_leaves_report_unchanged(
+        self, report_service: CanonicService, tmp_path: Path
+    ) -> None:
+        """Default ``filters=None`` behaves exactly like the pre-existing call shape."""
+        _write_report(
+            tmp_path,
+            "id: customer_report\ntitle: Customer Report\nsections:\n"
+            "  - title: Revenue\n    query: {metrics: [revenue], dimensions: [status]}\n",
+        )
+        result = await report_service.run_report("customer_report")
+        rs = result.sections[0].result.result
+        assert {tuple(row) for row in rs.rows} == {("paid", 150.00)}
+
 
 class TestValidateReports:
     def test_passes_for_valid_report(self, report_service: CanonicService, tmp_path: Path) -> None:

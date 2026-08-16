@@ -27,15 +27,19 @@ A directory listing only: `id`, `title`, `description`, `owner`, `domain` per co
 ```bash
 canonic report run customer_report
 canonic report run customer_report --as-of 2026-06-01 --user alice
+canonic report run customer_report --filter merchant_id=123
 ```
 
 | Argument / Flag | Description |
 | --- | --- |
 | `report_id` | Committed report id to run (positional). |
 | `--as-of` | ISO-8601 reference point for finality watermark evaluation, applied to every section that doesn't set its own. |
+| `--filter` | Filter as `field=value` or `field:op:value`, repeatable — same syntax as `canonic query --filter`. Applied additively (AND-ed) onto every section's own filters, never replacing them. |
 | `--user` | Requesting user id, for narrative knowledge-page access control. |
 
 Runs every section of the report through `query()`, in declared order, and prints one table per section. A failing section — for example one blocked by a `min_trust` or `context` guardrail — does not abort the run: it's printed as a `code: message` error in place of a table, and the command still exits `0`. `--json` output matches the MCP `run_report` tool payload byte-for-byte, and every section's `result` is the same unmodified `QueryResult` shape a standalone `canonic query` call returns.
+
+`--filter` lets a caller scope an entire multi-merchant/multi-tenant report at run time without editing the report file — e.g. `--filter merchant_id=123` adds `merchant_id = 123` to every section's own filters. It composes with a section's existing `filters` (both apply, AND-ed together); it does not override them.
 
 ```bash
 $ canonic report run customer_report
