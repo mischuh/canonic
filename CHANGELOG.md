@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.21.0](https://github.com/mischuh/canonic/compare/v0.20.0...v0.21.0) (2026-08-16)
+
+
+### Features
+
+* **reports:** support caller-supplied filters in run_report ([#295](https://github.com/mischuh/canonic/issues/295)) ([80fb392](https://github.com/mischuh/canonic/commit/80fb392ad0779b0f2405f52a04a2486bb5551a04))
+
 ## [0.20.0](https://github.com/mischuh/canonic/compare/v0.19.1...v0.20.0) (2026-08-14)
 
 
