@@ -128,6 +128,16 @@ def test_sql_rejects_non_select_statement(
     assert result.exception is None or isinstance(result.exception, SystemExit)
 
 
+def test_sql_tenant_flag_warns_and_succeeds(
+    runner: CliRunner, project_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """--tenant (SPEC-E12 §5, §7) is accepted for direct CLI use and always warns."""
+    _patch_connector(monkeypatch, _FakeConnector(_one_row_result()))
+    result = runner.invoke(app, ["sql", "--tenant", "4711", "SELECT 1 AS n"])
+    assert result.exit_code == 0, result.output
+    assert "warning" in result.output.lower()
+
+
 def test_sql_truncated_shows_note(
     runner: CliRunner, project_dir: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

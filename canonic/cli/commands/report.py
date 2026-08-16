@@ -18,6 +18,7 @@ from rich.console import Console
 from rich.table import Table
 
 from canonic.cli._errors import get_cli_context, handle_errors
+from canonic.cli._tenant import TenantOption, cli_tenant_principal
 from canonic.cli.commands import load_service
 from canonic.compiler.query import parse_filter_flag
 
@@ -105,6 +106,7 @@ def run(
         str | None,
         typer.Option("--user", help="Requesting user id, for narrative access control."),
     ] = None,
+    tenant: TenantOption = None,
 ) -> None:
     """Run every section of a committed report through query(), in declared order.
 
@@ -113,6 +115,8 @@ def run(
     normally — the call as a whole exits 0. With ``--json`` the output matches the MCP
     ``run_report`` tool payload byte-for-byte.
     """
+    # SPEC-E12 §7: validated + warned here; not yet threaded into service.run_report (E12 P2).
+    cli_tenant_principal(tenant)
     try:
         parsed_filters = [parse_filter_flag(f) for f in filter_ or []]
     except ValueError as exc:

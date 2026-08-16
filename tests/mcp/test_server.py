@@ -8,14 +8,21 @@ from __future__ import annotations
 
 import pytest
 from fastmcp import Client
+from fastmcp.server.auth.auth import AccessToken
 
 from canonic.config import CanonicConfig
 from canonic.contract import CONTRACT_SCHEMA
-from canonic.contracts.models import CanonicalRef, MetricBinding, Status
+from canonic.contracts.models import (
+    CanonicalRef,
+    MetricBinding,
+    RolePolicy,
+    Status,
+    TenancyPolicy,
+)
 from canonic.contracts.resolver import ContractResolver
 from canonic.core.service import CanonicService  # noqa: TC001
-from canonic.mcp.auth import CanonicTokenVerifier
-from canonic.mcp.server import build_server
+from canonic.mcp.auth import CanonicTokenVerifier, ResolvedToken
+from canonic.mcp.server import _principal, build_server
 from canonic.semantic.models import Column, Dimension, Join, Measure, Relationship, SemanticSource
 
 
@@ -93,7 +100,7 @@ def test_build_server_defaults_to_no_auth(canonic_service: CanonicService) -> No
 
 def test_build_server_wires_auth_verifier(canonic_service: CanonicService) -> None:
     """http transport passes its resolved verifier straight through to FastMCP."""
-    verifier = CanonicTokenVerifier({"secret-token": "alice"})
+    verifier = CanonicTokenVerifier({"secret-token": ResolvedToken(client_id="alice")})
     mcp = build_server(canonic_service, auth=verifier)
     assert mcp.auth is verifier
 
@@ -266,3 +273,42 @@ async def test_compile_query_via_resolves_ambiguous_join_path(
     assert "compiled" in data
     assert "hop_a" in data["compiled"]["sql"]
     assert "hop_b" not in data["compiled"]["sql"]
+
+
+class TestPrincipal:
+    """``_principal`` (SPEC-E12 §5) — derived exclusively from the verified AccessToken."""
+
+    def test_none_without_access_token(
+        self, monkeypatch: pytest.MonkeyPatch, canonic_service: CanonicService
+    ) -> None:
+        monkeypatch.setattr("canonic.mcp.server.get_access_token", lambda: None)
+        assert _principal(canonic_service.resolver) is None
+
+    def test_none_when_no_policy_configured(
+        self, monkeypatch: pytest.MonkeyPatch, canonic_service: CanonicService
+    ) -> None:
+        token = AccessToken(token="t", client_id="alice", scopes=[], claims={"merchant_id": "4711"})
+        monkeypatch.setattr("canonic.mcp.server.get_access_token", lambda: token)
+        # canonic_service's resolver has no tenancy/role policy loaded.
+        assert _principal(canonic_service.resolver) is None
+
+    def test_derives_principal_from_token_claims(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        resolver = ContractResolver(
+            bindings=[],
+            guardrails=[],
+            tenancy=TenancyPolicy(
+                schema="tenancy/v1", claim="merchant_id", scoped_sources=[], shared_sources=[]
+            ),
+            roles=RolePolicy(schema="roles/v1", claim="roles", roles={}),
+        )
+        token = AccessToken(
+            token="t",
+            client_id="merchant-4711-agent",
+            scopes=[],
+            claims={"merchant_id": "4711", "roles": ["merchant_viewer"]},
+        )
+        monkeypatch.setattr("canonic.mcp.server.get_access_token", lambda: token)
+        principal = _principal(resolver)
+        assert principal is not None
+        assert principal.tenant == "4711"
+        assert principal.roles == ("merchant_viewer",)

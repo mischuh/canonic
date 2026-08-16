@@ -205,6 +205,57 @@ def test_start_http_with_token_ref_succeeds(
 
 
 # ---------------------------------------------------------------------------
+# --tenant flag (SPEC-E12 §5, §7)
+# ---------------------------------------------------------------------------
+
+
+def test_tenant_refused_with_http_transport(runner: CliRunner, project_dir: Path) -> None:
+    """--tenant + --transport http is refused: http already derives a principal per request."""
+    with (
+        patch(_PATCH_SERVICE) as mock_cls,
+        patch(_PATCH_START_HTTP) as mock_start_http,
+    ):
+        mock_cls.from_project.return_value = _mock_service()
+        result = runner.invoke(app, ["mcp", "start", "--transport", "http", "--tenant", "4711"])
+
+    assert result.exit_code == 1
+    assert "refused" in result.output
+    mock_start_http.assert_not_called()
+    mock_cls.from_project.assert_not_called()
+
+
+def test_tenant_passed_through_on_stdio(runner: CliRunner, project_dir: Path) -> None:
+    """--tenant + stdio (default transport) is accepted, warns, and reaches start_stdio."""
+    with (
+        patch(_PATCH_SERVICE) as mock_cls,
+        patch(_PATCH_START_STDIO) as mock_start_stdio,
+        patch("canonic.cli.commands.mcp._save_last_project"),
+    ):
+        mock_cls.from_project.return_value = _mock_service()
+        result = runner.invoke(app, ["mcp", "start", "--tenant", "4711"])
+
+    assert result.exit_code == 0, result.output
+    assert "warning" in result.output.lower()
+    mock_start_stdio.assert_called_once()
+    assert mock_start_stdio.call_args.kwargs["tenant"] == "4711"
+
+
+def test_no_tenant_stdio_unaffected(runner: CliRunner, project_dir: Path) -> None:
+    """Without --tenant, stdio start is unchanged (no warning, tenant=None passed through)."""
+    with (
+        patch(_PATCH_SERVICE) as mock_cls,
+        patch(_PATCH_START_STDIO) as mock_start_stdio,
+        patch("canonic.cli.commands.mcp._save_last_project"),
+    ):
+        mock_cls.from_project.return_value = _mock_service()
+        result = runner.invoke(app, ["mcp", "start"])
+
+    assert result.exit_code == 0, result.output
+    mock_start_stdio.assert_called_once()
+    assert mock_start_stdio.call_args.kwargs["tenant"] is None
+
+
+# ---------------------------------------------------------------------------
 # status --json reports active auth mechanisms (AMENDMENT-oauth-mcp-auth.md)
 # ---------------------------------------------------------------------------
 

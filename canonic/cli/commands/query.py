@@ -12,6 +12,7 @@ from rich.console import Console
 from rich.table import Table
 
 from canonic.cli._errors import get_cli_context, handle_errors
+from canonic.cli._tenant import TenantOption, cli_tenant_principal
 from canonic.cli.commands import build_semantic_query, load_service
 
 if TYPE_CHECKING:
@@ -58,6 +59,7 @@ def query(
             help="Benchmark/CI mode: run matching assertions and exit 10 on a mismatch.",
         ),
     ] = False,
+    tenant: TenantOption = None,
 ) -> None:
     """Resolve, compile, and execute a semantic query read-only.
 
@@ -71,6 +73,8 @@ def query(
     and any divergence from its expected result exits 10 (``ASSERTION_FAILED``); without it,
     assertions are informational and never block.
     """
+    # SPEC-E12 §7: validated + warned here; not yet threaded into service.query (E12 P2).
+    cli_tenant_principal(tenant)
     sq = build_semantic_query(file, metrics, dimensions, filter_, via, limit)
     service = load_service(ctx)
     result = asyncio.run(service.query(sq, harness=harness))

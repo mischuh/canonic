@@ -584,6 +584,22 @@ class ContractResolver:
         """Whether a tenancy policy is loaded for this project (SPEC-E12 §1.1 stage-0 guard)."""
         return self._tenancy is not None
 
+    @property
+    def tenancy_policy(self) -> TenancyPolicy | None:
+        """The raw loaded tenancy policy, or ``None`` — for adapters that need ``claim``
+        itself (e.g. ``canonic.mcp.auth.principal_from_token``) rather than a derived
+        per-source decision.
+        """
+        return self._tenancy
+
+    @property
+    def role_policy(self) -> RolePolicy | None:
+        """The raw loaded role policy, or ``None`` — for adapters that need ``claim``
+        itself (e.g. ``canonic.mcp.auth.principal_from_token``) rather than a flattened
+        :class:`EffectivePolicy`.
+        """
+        return self._roles
+
     def tenancy_for(self, source: str) -> ScopeResolution:
         """Resolve a source's tenant-scoping rule — total over every source (SPEC-E12 §2).
 
