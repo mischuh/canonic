@@ -33,6 +33,7 @@ from canonic.compiler._helpers import (
     _guardrail_join_sources,
     _measure_expr,
     _population_filter_conditions,
+    _resolve_dim_mask,
     _resolve_dimensions,
     _tenant_conditions,
 )
@@ -47,7 +48,7 @@ if TYPE_CHECKING:
 
     from sqlglot import exp
 
-    from canonic.compiler._helpers import _ResolvedMetric
+    from canonic.compiler._helpers import DimMask, _ResolvedMetric
     from canonic.compiler.joins import JoinEdge
     from canonic.compiler.query import SemanticQuery
     from canonic.compiler.result import FiredGuardrail
@@ -130,6 +131,10 @@ class LeafInputs:
     fanout: bool
     alias_to_source: dict[str, str]
     name_prefix: str = ""
+    #: A role's masking rules resolved against this leaf's join aliases (SPEC-E12 §1.2,
+    #: Phase 7), keyed the same way :func:`_dimension_expr`'s callers already hold a
+    #: ``(src, dim.column)`` pair.
+    dim_mask: DimMask = field(default_factory=dict)
 
     @property
     def dim_names(self) -> list[str]:
@@ -383,6 +388,7 @@ def _build_additive(
             inputs.join_edges,
             inputs.ctx.sources_by_name,
             measure_aliases=[_output_alias(lm) for lm in metrics],
+            dim_mask=inputs.dim_mask,
         ),
         (),
     )
@@ -426,6 +432,7 @@ def plan_leaf(
     # the leaves where it happens to work: half-applying a filter produces a result whose
     # columns were computed over different populations, with nothing saying so (§5).
     alias_to_source = build_alias_tree(owner, sources_by_name)
+    dim_mask = _resolve_dim_mask(alias_to_source, ctx.effective_policy.masking)
     with _naming_the_leaf(metrics, owner):
         dimensions = _resolve_dimensions(query, sources_by_name, owner, alias_to_source)
         referenced = {alias for alias, _ in dimensions}
@@ -485,6 +492,7 @@ def plan_leaf(
         join_edges=join_edges,
         fanout=fanout,
         alias_to_source=alias_to_source,
+        dim_mask=dim_mask,
     )
 
     # Stage 7 (per leaf) — build the SELECT. Kept as a closure so compose can re-emit this
@@ -515,6 +523,7 @@ def plan_leaf(
                     time_dim_name=time_dim,
                     original_owner=owner,
                     measure_aliases=[_output_alias(lm) for lm in leaf_metrics],
+                    masking=ctx.effective_policy.masking,
                 ),
                 (),
             )
@@ -545,6 +554,7 @@ def plan_leaf(
                     join_edges=inputs.join_edges,
                     fanout=inputs.fanout,
                     alias_to_source=inputs.alias_to_source,
+                    dim_mask=inputs.dim_mask,
                     name_prefix=name_prefix,
                 ),
                 leaf_metrics,
@@ -558,7 +568,10 @@ def plan_leaf(
         source=owner,
         strategy=strategy,
         dimensions=tuple(_dimension_output_names(dimensions)),
-        dimension_exprs=tuple(_render(_dimension_expr(src, dim)) for src, dim in dimensions),
+        dimension_exprs=tuple(
+            _render(_dimension_expr(src, dim, dim_mask.get((src, dim.column))))
+            for src, dim in dimensions
+        ),
         filters=tuple(_render(c) for c in scoping.where_conditions),
         join_path=tuple((e.from_alias, e.alias, e.on_sql) for e in join_edges),
         finality=finality_key,

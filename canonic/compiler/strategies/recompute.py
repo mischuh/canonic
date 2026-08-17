@@ -19,6 +19,7 @@ from canonic.semantic.models import Additivity, Measure
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
+    from canonic.compiler._helpers import DimMask
     from canonic.compiler.query import SemanticQuery
     from canonic.contracts.principal import EffectivePolicy, Principal
     from canonic.contracts.resolver import Binding as ResolverBinding
@@ -102,6 +103,7 @@ def plan_metric(
             sources_by_name=sources_by_name,
             adapter=adapter,
             name_prefix=inputs.name_prefix,
+            dim_mask=inputs.dim_mask,
         )
 
     # A recompute binding names a column, not a declared measure. The synthetic measure
@@ -171,6 +173,7 @@ def _build_recompute(
     sources_by_name: dict[str, SemanticSource],
     adapter: DialectAdapter,
     name_prefix: str = "",
+    dim_mask: DimMask | None = None,
 ) -> tuple[exp.Expression, tuple[AuxCte, ...]]:
     """Build the recompute-at-grain SELECT: group base table by dims, aggregate directly.
 
@@ -200,6 +203,7 @@ def _build_recompute(
             join_edges=join_edges,
             sources_by_name=sources_by_name,
             name_prefix=name_prefix,
+            dim_mask=dim_mask,
         )
     else:
         # PERCENTILE: parse PERCENTILE_CONT(q) WITHIN GROUP (ORDER BY col), then qualify.
@@ -212,8 +216,9 @@ def _build_recompute(
     select = exp.Select()
     projections: list[exp.Expression] = []
     group_exprs: list[exp.Expression] = []
+    mask = dim_mask or {}
     for (src, dim), name in zip(dimensions, _dimension_output_names(dimensions), strict=True):
-        expr = _dimension_expr(src, dim)
+        expr = _dimension_expr(src, dim, mask.get((src, dim.column)))
         projections.append(_alias(expr, name))
         group_exprs.append(expr)
     projections.append(_alias(agg_expr, metric_name))
@@ -237,6 +242,7 @@ def _build_percentile_fallback(
     join_edges: list[JoinEdge],
     sources_by_name: dict[str, SemanticSource],
     name_prefix: str = "",
+    dim_mask: DimMask | None = None,
 ) -> tuple[exp.Expression, tuple[AuxCte, ...]]:
     """Build a percentile recompute for dialects without an ordered-set aggregate (e.g. SQLite).
 
@@ -257,8 +263,9 @@ def _build_percentile_fallback(
     inner = exp.Select()
     inner_projections: list[exp.Expression] = []
     partition_exprs: list[exp.Expression] = []
+    mask = dim_mask or {}
     for (src, dim), name in zip(dimensions, dim_names, strict=True):
-        expr = _dimension_expr(src, dim)
+        expr = _dimension_expr(src, dim, mask.get((src, dim.column)))
         inner_projections.append(_alias(expr, name))
         partition_exprs.append(expr)
     inner_projections.append(_alias(col_expr, _VAL))

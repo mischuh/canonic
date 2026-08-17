@@ -475,7 +475,13 @@ class UndeclaredSource(StrEnum):
 
 
 class MaskStrategy(StrEnum):
-    """Column-masking strategy for a role's ``masking`` rules (§1.2, inert until Phase 7)."""
+    """Column-masking strategy for a role's ``masking`` rules (§1.2).
+
+    Enforced at compile time by :func:`canonic.compiler._helpers._apply_mask`, which
+    rewrites the matching dimension's SELECT/GROUP-BY expression: ``NULL`` replaces it
+    outright, ``HASH`` wraps it in ``MD5(CAST(... AS TEXT))``, and ``PARTIAL`` keeps the
+    first two characters and replaces the rest with ``'***'``.
+    """
 
     PARTIAL = "partial"
     HASH = "hash"
@@ -546,7 +552,10 @@ class KnowledgePolicy(BaseModel):
 
 
 class MaskingRule(BaseModel):
-    """A column-masking rule on a role (§1.2). Parses inert until Phase 7 enforces it."""
+    """A column-masking rule on a role (§1.2). ``column`` is ``<source>.<column>``, naming
+    the canonical semantic source the way ``tenancy.yaml``'s ``scoped_sources`` does — never
+    a join alias, so the same rule applies under a self-join too.
+    """
 
     model_config = ConfigDict(frozen=True)
 
