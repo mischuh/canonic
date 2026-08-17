@@ -18,7 +18,7 @@ from canonic.compiler.result import (
     FiredGuardrail,
     SourceFreshness,
 )
-from canonic.contracts.models import Severity, UndeclaredSource
+from canonic.contracts.models import MaskStrategy, Severity, UndeclaredSource
 from canonic.contracts.resolver import ScopeRule, Shared, Undeclared
 from canonic.exc import (
     Ambiguous,
@@ -35,10 +35,14 @@ if TYPE_CHECKING:
     from datetime import datetime
 
     from canonic.compiler.query import SemanticQuery
-    from canonic.contracts.models import FinalityRule, Guardrail
+    from canonic.contracts.models import FinalityRule, Guardrail, MaskingRule
     from canonic.contracts.principal import EffectivePolicy
     from canonic.contracts.resolver import ContractResolver
     from canonic.semantic.models import Dimension, SemanticSource
+
+    #: Alias/column -> masking strategy, resolved against one leaf's join tree
+    #: (see :func:`_resolve_dim_mask`).
+    DimMask = dict[tuple[str, str], MaskStrategy]
 
 
 _FANOUT = frozenset({Relationship.ONE_TO_MANY, Relationship.MANY_TO_MANY})
@@ -382,12 +386,69 @@ def _guardrail_join_sources(
     return referenced
 
 
-def _dimension_expr(source: str, dim: Dimension) -> exp.Expression:
-    """Build the SELECT/GROUP-BY expression for a dimension (with time bucketing)."""
+def _dimension_expr(
+    source: str,
+    dim: Dimension,
+    mask_strategy: MaskStrategy | None = None,
+) -> exp.Expression:
+    """Build the SELECT/GROUP-BY expression for a dimension (with time bucketing).
+
+    ``mask_strategy``, when given, wraps the result per a role's ``masking`` rule
+    (SPEC-E12 §1.2). It applies after granularity bucketing, so the same expression a
+    caller sees in the SELECT list is what GROUP BY collapses on too — a masked
+    dimension merging distinct underlying values into one output row is the intended
+    effect of column masking, not a side effect to guard against.
+    """
     col = exp.column(dim.column, table=source)
-    if dim.granularity:
-        return _func("DATE_TRUNC", exp.Literal.string(dim.granularity), col)
-    return col
+    expr = _func("DATE_TRUNC", exp.Literal.string(dim.granularity), col) if dim.granularity else col
+    if mask_strategy is not None:
+        expr = _apply_mask(expr, mask_strategy)
+    return expr
+
+
+def _apply_mask(expr: exp.Expression, strategy: MaskStrategy) -> exp.Expression:
+    """Rewrite a column expression per a role's masking strategy (SPEC-E12 §1.2, Phase 7).
+
+    Built from sqlglot expression nodes rather than a parsed string, the same discipline
+    :func:`_tenant_conditions` follows for S14 AC3 — there is nothing caller-controlled in
+    a masking rule, but the AST-node construction is also what lets sqlglot render each
+    strategy correctly per dialect (``MD5``/``SUBSTRING`` syntax differs across engines).
+    """
+    if strategy is MaskStrategy.NULL:
+        return cast("exp.Expression", exp.Null())
+    if strategy is MaskStrategy.HASH:
+        return _func("MD5", exp.cast(expr, "text"))
+    assert strategy is MaskStrategy.PARTIAL  # noqa: S101 — exhaustive over MaskStrategy
+    head = cast(
+        "exp.Expression",
+        exp.Substring(this=expr, start=exp.Literal.number(1), length=exp.Literal.number(2)),
+    )
+    return cast("exp.Expression", exp.Concat(expressions=[head, exp.Literal.string("***")]))
+
+
+def _resolve_dim_mask(
+    alias_to_source: dict[str, str],
+    masking: tuple[MaskingRule, ...],
+) -> DimMask:
+    """Resolve a role's masking rules against one leaf's join aliases (SPEC-E12 §1.2).
+
+    A masking rule names a canonical ``source.column``, never a join alias — the same
+    convention ``tenancy.yaml``'s ``scoped_sources``/``shared_sources`` use — so a rule
+    applies to every alias in this leaf's tree that resolves to that source, self-joins
+    included. Returns an alias/column-keyed lookup so callers holding a
+    ``(src, dim.column)`` pair from :func:`_dimension_expr`'s call sites need only a plain
+    dict lookup.
+    """
+    if not masking:
+        return {}
+    by_column = {rule.column: rule.strategy for rule in masking}
+    resolved: DimMask = {}
+    for alias, source in alias_to_source.items():
+        for column_key, strategy in by_column.items():
+            source_name, sep, column = column_key.partition(".")
+            if sep and source_name == source:
+                resolved[(alias, column)] = strategy
+    return resolved
 
 
 def _measure_expr(source: str, measure: Measure) -> exp.Expression:
@@ -423,6 +484,7 @@ def _build_simple(
     join_edges: list[JoinEdge],
     sources_by_name: dict[str, SemanticSource],
     measure_aliases: list[str] | None = None,
+    dim_mask: DimMask | None = None,
 ) -> exp.Select:
     """Single-SELECT emission for the no-fanout case (SPEC §4 step 7).
 
@@ -438,8 +500,9 @@ def _build_simple(
     projections: list[exp.Expression] = []
     group_exprs: list[exp.Expression] = []
     aliases = measure_aliases or [m.measure.name for m in metrics]
+    mask = dim_mask or {}
     for (src, dim), name in zip(dimensions, _dimension_output_names(dimensions), strict=True):
-        expr = _dimension_expr(src, dim)
+        expr = _dimension_expr(src, dim, mask.get((src, dim.column)))
         projections.append(_alias(expr, name))
         group_exprs.append(expr)
     for i, m in enumerate(metrics):
@@ -463,6 +526,7 @@ def _build_dedup_inner(
     where_conditions: list[exp.Expression],
     join_edges: list[JoinEdge],
     sources_by_name: dict[str, SemanticSource],
+    dim_mask: DimMask | None = None,
 ) -> exp.Select:
     """Inner half of the fanout-safe dedup: ``DISTINCT ON (owner grain)`` projecting
     dimensions + each measure's raw input columns, before any aggregation.
@@ -477,8 +541,11 @@ def _build_dedup_inner(
     inner = exp.Select()
     inner_projections: list[exp.Expression] = []
     measure_inputs: dict[str, exp.Expression] = {}
+    mask = dim_mask or {}
     for (src, dim), name in zip(dimensions, dim_names, strict=True):
-        inner_projections.append(_alias(_dimension_expr(src, dim), name))
+        inner_projections.append(
+            _alias(_dimension_expr(src, dim, mask.get((src, dim.column))), name)
+        )
     for m in metrics:
         for input_col in _input_columns(m.measure):
             measure_inputs.setdefault(input_col, exp.column(input_col, table=m.source))
@@ -499,6 +566,7 @@ def _build_deduped(
     join_edges: list[JoinEdge],
     sources_by_name: dict[str, SemanticSource],
     measure_aliases: list[str] | None = None,
+    dim_mask: DimMask | None = None,
 ) -> exp.Select:
     """Fanout-safe emission: dedup the measure grain in an inner ``DISTINCT ON`` subquery.
 
@@ -517,6 +585,7 @@ def _build_deduped(
         where_conditions,
         join_edges,
         sources_by_name,
+        dim_mask=dim_mask,
     )
 
     # Outer: aggregate the deduped rows.
@@ -784,6 +853,7 @@ def _build_finality_union(
     time_dim_name: str,
     original_owner: str,
     measure_aliases: list[str] | None = None,
+    masking: tuple[MaskingRule, ...] = (),
 ) -> exp.Expression:
     """Build a UNION ALL over finality realizations (SPEC-E5-E15 stage 5).
 
@@ -838,6 +908,7 @@ def _build_finality_union(
 
         # Resolve dimensions with join-awareness (dimensions may live on joined sources).
         branch_alias_to_source = build_alias_tree(src_name, sources_by_name)
+        branch_dim_mask = _resolve_dim_mask(branch_alias_to_source, masking)
         branch_dims: list[tuple[str, Dimension]] = []
         for _orig, dim in dimensions:
             resolved = _find_dimension(
@@ -925,6 +996,7 @@ def _build_finality_union(
                 branch_where,
                 branch_join_edges,
                 sources_by_name,
+                dim_mask=branch_dim_mask,
             )
             for name in dim_names:
                 dim_col = exp.column(name, table=_DEDUP_ALIAS)
@@ -938,7 +1010,7 @@ def _build_finality_union(
             select = select.select(*projections).from_(_alias(inner.subquery(), _DEDUP_ALIAS))
         else:
             for (b_src, dim), name in zip(branch_dims, dim_names, strict=True):
-                expr = _dimension_expr(b_src, dim)
+                expr = _dimension_expr(b_src, dim, branch_dim_mask.get((b_src, dim.column)))
                 projections.append(_alias(expr, name))
                 group_exprs.append(expr)
             for i, m in enumerate(branch_metrics):

@@ -17,6 +17,7 @@ from canonic.semantic.models import Additivity, Measure
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
+    from canonic.compiler._helpers import DimMask
     from canonic.compiler.query import SemanticQuery
     from canonic.contracts.principal import EffectivePolicy, Principal
     from canonic.contracts.resolver import Binding as ResolverBinding
@@ -141,6 +142,7 @@ def plan_metric(
                     inputs.join_edges,
                     sources_by_name,
                     measure_aliases=[column],
+                    dim_mask=inputs.dim_mask,
                 ),
                 (),
             )
@@ -157,6 +159,7 @@ def plan_metric(
             sources_by_name=sources_by_name,
             collapse_agg=sa.collapse_agg,
             name_prefix=inputs.name_prefix,
+            dim_mask=inputs.dim_mask,
         )
 
     leaf = plan_leaf(
@@ -212,6 +215,7 @@ def _build_semi_additive(
     sources_by_name: dict[str, SemanticSource],
     collapse_agg: CollapseAgg,
     name_prefix: str = "",
+    dim_mask: DimMask | None = None,
 ) -> tuple[exp.Expression, tuple[AuxCte, ...]]:
     """Emit the window or nested-aggregate SQL for a semi_additive collapse (SPEC §4.2).
 
@@ -236,11 +240,16 @@ def _build_semi_additive(
         inner = exp.Select()
         inner_projections: list[exp.Expression] = []
         seen_names: set[str] = set()
+        mask = dim_mask or {}
         for (src, dim), name in zip(dimensions, dim_names, strict=True):
-            expr = _dimension_expr(src, dim)
+            expr = _dimension_expr(src, dim, mask.get((src, dim.column)))
             inner_projections.append(_alias(expr, name))
             seen_names.add(name)
 
+        # grain_dims never masks: it is the source's own entity key, used only to
+        # partition "last per entity" correctly, and is projected here (when not already
+        # a requested dimension) purely as plumbing for that window — never as visible
+        # output. Masking it would corrupt which row the window picks as "last".
         partition_exprs: list[exp.Expression] = []
         grain_names = _dimension_output_names(grain_dims)
         for (src, dim), name in zip(grain_dims, grain_names, strict=True):
@@ -308,8 +317,9 @@ def _build_semi_additive(
     inner = exp.Select()
     inner_projections = []
     inner_group: list[exp.Expression] = []
+    mask = dim_mask or {}
     for (src, dim), name in zip(dimensions, dim_names, strict=True):
-        expr = _dimension_expr(src, dim)
+        expr = _dimension_expr(src, dim, mask.get((src, dim.column)))
         inner_projections.append(_alias(expr, name))
         inner_group.append(expr)
     inner_projections.append(_alias(_measure_expr(owner, measure), "m"))

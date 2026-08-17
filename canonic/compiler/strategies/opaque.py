@@ -14,6 +14,7 @@ from canonic.exc import Unresolved, UnsupportedMeasure
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
+    from canonic.compiler._helpers import DimMask
     from canonic.compiler.joins import JoinEdge
     from canonic.compiler.query import SemanticQuery
     from canonic.contracts.principal import EffectivePolicy, Principal
@@ -84,6 +85,7 @@ def plan_metric(
                 where_conditions=inputs.where_conditions,
                 join_edges=inputs.join_edges,
                 sources_by_name=sources_by_name,
+                dim_mask=inputs.dim_mask,
             ),
             (),
         )
@@ -133,12 +135,14 @@ def _build_opaque(
     where_conditions: list[exp.Expression],
     join_edges: list[JoinEdge],
     sources_by_name: dict[str, SemanticSource],
+    dim_mask: DimMask | None = None,
 ) -> exp.Select:
     """Build a raw direct-lookup SELECT for an opaque metric — no aggregate, no GROUP BY (§4.4)."""
     select = exp.Select()
     projections: list[exp.Expression] = []
+    mask = dim_mask or {}
     for (src, dim), name in zip(dimensions, _dimension_output_names(dimensions), strict=True):
-        projections.append(_alias(_dimension_expr(src, dim), name))
+        projections.append(_alias(_dimension_expr(src, dim, mask.get((src, dim.column))), name))
     projections.append(_alias(_measure_expr(metric.source, metric.measure), alias))
     select = select.select(*projections)
     select = _from_and_joins(select, owner, join_edges, sources_by_name)
