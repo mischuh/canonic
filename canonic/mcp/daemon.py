@@ -30,8 +30,10 @@ import contextlib
 import json
 import os
 import signal
+import socket
 import subprocess
 import sys
+import time
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path  # noqa: TC003 — used in function bodies, not just annotations
@@ -58,6 +60,13 @@ __all__ = [
 _STATE_FILE = ".canonic/mcp.json"
 _DEFAULT_HOST = "127.0.0.1"
 _DEFAULT_PORT = 7474
+
+#: How long to wait for the spawned child to start accepting connections before
+#: giving up (SPEC E8 §4.2). Generous on purpose: the child re-imports canonic from
+#: scratch, including optional heavy/network-touching deps (e.g. a cost-map fetch
+#: that falls back locally after its own multi-second timeout) before uvicorn binds.
+_READY_TIMEOUT = 15.0
+_READY_POLL_INTERVAL = 0.1
 
 
 @dataclass
@@ -178,6 +187,52 @@ def stop(project_root: Path) -> bool:
         os.kill(state.pid, signal.SIGTERM)
     _remove_state(project_root)
     return True
+
+
+def _wait_for_daemon_ready(
+    proc: subprocess.Popen[bytes],
+    host: str,
+    port: int,
+    log_path: Path,
+    *,
+    timeout: float = _READY_TIMEOUT,
+) -> None:
+    """Block until the spawned child is confirmed accepting connections on ``(host, port)``.
+
+    A fixed short sleep followed by a bare ``proc.poll()`` check (the previous
+    approach) only catches a crash that happens to land within that window — a
+    child that is still importing/initializing, or one that fails to bind moments
+    later (e.g. a stale daemon already holding the port), is misreported as started.
+    This polls both the child's liveness and a real TCP connect to the port it should
+    be listening on, so "started" means "actually reachable," not "hasn't crashed yet."
+
+    Raises :class:`RuntimeError` if the child exits before becoming ready, or if it
+    hasn't started accepting connections within ``timeout`` seconds — in the timeout
+    case the child is killed first, so a slow-starting process that eventually does
+    bind never ends up as an untracked orphan (no state file was written for it).
+    """
+    # A bind-all host isn't itself a valid connect target; probe loopback instead,
+    # matching how a client on the same machine would actually reach it.
+    check_host = "127.0.0.1" if host in ("0.0.0.0", "::", "") else host  # noqa: S104
+
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if proc.poll() is not None:
+            raise RuntimeError(
+                f"MCP daemon exited before becoming ready — check {log_path} for details"
+            )
+        try:
+            with socket.create_connection((check_host, port), timeout=_READY_POLL_INTERVAL):
+                return
+        except OSError:
+            time.sleep(_READY_POLL_INTERVAL)
+
+    with contextlib.suppress(ProcessLookupError):
+        proc.kill()
+    raise RuntimeError(
+        f"MCP daemon did not start accepting connections on {host}:{port} within "
+        f"{timeout:.0f}s — check {log_path} for details"
+    )
 
 
 def start_stdio(
@@ -302,14 +357,7 @@ def start_http(
             close_fds=True,
         )
 
-    # The child may still be starting up; give it a moment and confirm it is still
-    # alive before reporting success.
-    import time
-
-    time.sleep(0.2)
-    if proc.poll() is not None:
-        hint = f"check {log_path} for details"
-        raise RuntimeError(f"MCP daemon exited immediately after starting — {hint}")
+    _wait_for_daemon_ready(proc, host, port, log_path)
 
     state = DaemonState(
         pid=proc.pid,

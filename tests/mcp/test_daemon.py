@@ -4,12 +4,21 @@ from __future__ import annotations
 
 import json
 import os
+import socket
 from pathlib import Path  # noqa: TC003
 
 import pytest
 
 from canonic import __version__ as CANONIC_VERSION
-from canonic.mcp.daemon import DaemonState, read_state, start_http, start_stdio, status, stop
+from canonic.mcp.daemon import (
+    DaemonState,
+    _wait_for_daemon_ready,
+    read_state,
+    start_http,
+    start_stdio,
+    status,
+    stop,
+)
 
 
 @pytest.fixture
@@ -148,6 +157,83 @@ class TestStop:
             assert not (project_root / ".canonic" / "mcp.json").exists()
             proc.wait(timeout=3)
             assert proc.returncode in (-signal.SIGTERM, -15, 1)
+        finally:
+            if proc.poll() is None:
+                proc.kill()
+
+
+def _free_port() -> int:
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.bind(("127.0.0.1", 0))
+        return s.getsockname()[1]
+
+
+class TestWaitForDaemonReady:
+    """The readiness check ``start_http`` runs before declaring success (SPEC E8 §4.2).
+
+    Regression coverage for the bug where a fixed 0.2s sleep + bare ``proc.poll()``
+    reported "started" for a child that hadn't crashed *yet* but was either still
+    initializing or about to fail to bind (e.g. a stale daemon already holding the
+    port) — ``canonic mcp status`` would then report "not running" moments later.
+    """
+
+    def test_returns_once_port_is_listening(self, tmp_path: Path) -> None:
+        import subprocess
+        import sys
+
+        server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        server.bind(("127.0.0.1", 0))
+        server.listen(1)
+        port = server.getsockname()[1]
+        proc = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(5)"])
+        try:
+            _wait_for_daemon_ready(proc, "127.0.0.1", port, tmp_path / "mcp.log", timeout=2.0)
+        finally:
+            server.close()
+            proc.kill()
+            proc.wait(timeout=3)
+
+    def test_bind_all_host_checks_loopback(self, tmp_path: Path) -> None:
+        import subprocess
+        import sys
+
+        server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        server.bind(("127.0.0.1", 0))
+        server.listen(1)
+        port = server.getsockname()[1]
+        proc = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(5)"])
+        try:
+            # host="0.0.0.0" isn't itself a connectable address; the check must
+            # probe loopback instead of failing/timing out.
+            _wait_for_daemon_ready(proc, "0.0.0.0", port, tmp_path / "mcp.log", timeout=2.0)
+        finally:
+            server.close()
+            proc.kill()
+            proc.wait(timeout=3)
+
+    def test_raises_when_process_exits_before_ready(self, tmp_path: Path) -> None:
+        import subprocess
+        import sys
+
+        proc = subprocess.Popen([sys.executable, "-c", "pass"])
+        proc.wait(timeout=3)  # ensure it has actually exited before we check
+        log_path = tmp_path / "mcp.log"
+        with pytest.raises(RuntimeError, match="exited before becoming ready"):
+            _wait_for_daemon_ready(proc, "127.0.0.1", _free_port(), log_path, timeout=2.0)
+
+    def test_timeout_kills_process_and_raises(self, tmp_path: Path) -> None:
+        import subprocess
+        import sys
+
+        # Nothing ever listens on this port, so readiness can never be confirmed.
+        proc = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"])
+        try:
+            with pytest.raises(RuntimeError, match="did not start accepting connections"):
+                _wait_for_daemon_ready(
+                    proc, "127.0.0.1", _free_port(), tmp_path / "mcp.log", timeout=0.3
+                )
+            proc.wait(timeout=3)
+            assert proc.poll() is not None, "timed-out process should have been killed"
         finally:
             if proc.poll() is None:
                 proc.kill()
