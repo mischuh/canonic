@@ -11,6 +11,8 @@ Contracts are split across four directories, each validated against its own Pyda
 | `contracts/guardrails/*.yaml` (excluding `finality-*.yaml`) | `Guardrail` | `load_guardrails` |
 | `contracts/guardrails/finality-*.yaml` | `FinalityRule` | `load_finality` |
 | `contracts/assertions/*.yaml` | `Assertion` | `load_assertions` |
+| `contracts/policies/tenancy.yaml` | `TenancyPolicy` | `load_tenancy_policy` |
+| `contracts/policies/roles.yaml` | `RolePolicy` | `load_role_policy` |
 
 A finality rule is filename-discriminated from a guardrail — both live under `contracts/guardrails/`, but only files named `finality-*.yaml` load as `FinalityRule`; everything else in that directory loads as `Guardrail`.
 
@@ -184,3 +186,103 @@ source_of_truth: "Finance close, FY25 Q1"
 An assertion is a known-good query paired with the answer it should produce, usually sourced from a finance close or another trusted report. `query` is run through the exact same compiler path a real caller would hit, so an assertion tests the whole stack, not just the metric definition in isolation. `source_of_truth` matters more than it looks: it's the thing that lets a reviewer trust the expected value in the first place, an assertion with no traceable origin is just a number someone typed in.
 
 [`canonic assert`](/cli-reference/query-sql-assert) runs every assertion through the compiler and gates on the result; `canonic query --harness` runs matching assertions inline against a single query.
+
+## `contracts/policies/tenancy.yaml` — `TenancyPolicy`
+
+See [Tenancy & access control](/concepts/tenancy-and-access-control) for the concepts behind this file. At most one per project; its presence is the feature switch for row-level tenant isolation.
+
+```yaml
+schema: tenancy/v1
+claim: merchant_id
+on_missing_principal: deny
+
+scoped_sources:
+  - { source: orders,      column: merchant_id }
+  - { source: order_items, column: merchant_id }
+
+shared_sources:
+  - dim_date
+
+undeclared_source: deny
+```
+
+| Field | Type | Default | Governs |
+| --- | --- | --- | --- |
+| `schema` | `Literal["tenancy/v1"]` | n/a (required) | Schema discriminator. |
+| `claim` | `str` | n/a (required) | The verified-token claim carrying the tenant identity. |
+| `on_missing_principal` | `deny \| allow_unscoped` | `deny` | Behavior when tenancy is active but the request carries no resolvable tenant. |
+| `scoped_sources` | `list[ScopedSource]` | `[]` | Sources tenant-scoped on a named column; see below. |
+| `shared_sources` | `list[str]` | `[]` | Source names explicitly declared tenant-neutral — no predicate is injected for them. |
+| `undeclared_source` | `deny \| warn` | `deny` | Behavior when a query reaches a source in neither `scoped_sources` nor `shared_sources`. |
+
+### `scoped_sources[]` (`ScopedSource`)
+
+| Field | Type | Default | Governs |
+| --- | --- | --- | --- |
+| `source` | `str` | n/a (required) | The scoped source's name. |
+| `column` | `str` | n/a (required) | The column carrying the tenant id; the injected predicate is `<source>.<column> = :tenant`. |
+
+**Validation rules**, enforced at load time with a file+line location:
+
+- `scoped_sources` and `shared_sources` must be disjoint — a source name appearing in both fails validation.
+- `tenancy_for(source)` is total over every source in the project once this file is present: a source reachable by a query but declared in neither list is `Undeclared`, governed by `undeclared_source` rather than treated as unrestricted.
+
+## `contracts/policies/roles.yaml` — `RolePolicy`
+
+See [Tenancy & access control](/concepts/tenancy-and-access-control) for the two runtime gaps (`dimensions` enforcement, `knowledge.allow_tags` defaults) that matter when authoring this file.
+
+```yaml
+schema: roles/v1
+claim: roles
+default_role: merchant_viewer
+
+roles:
+  merchant_viewer:
+    metrics:    { allow: ["revenue", "order_count", "aov"] }
+    dimensions: { deny: ["customer_email", "customer_phone"] }
+    knowledge:  { allow_tags: ["public", "merchant"] }
+    run_sql:    false
+  merchant_admin:
+    inherits: merchant_viewer
+    dimensions: { deny: [] }
+    masking:
+      - { column: customers.customer_email, strategy: partial }
+  platform_analyst:
+    tenancy_exempt: true
+    metrics: { allow: ["*"] }
+    run_sql: true
+```
+
+| Field | Type | Default | Governs |
+| --- | --- | --- | --- |
+| `schema` | `Literal["roles/v1"]` | n/a (required) | Schema discriminator. |
+| `claim` | `str` | n/a (required) | The token claim carrying the caller's role list (array of strings, or a single string). |
+| `default_role` | `str \| null` | `null` | Applied when the token carries no role claim. Must be a declared role — see validation rules below. If unset, a principal with no roles resolves to deny-everything. |
+| `roles` | `dict[str, RoleDef]` | `{}` | Named role definitions, keyed by role name. |
+
+### `roles{}` (`RoleDef`) — one entry per role name
+
+| Field | Type | Default | Governs |
+| --- | --- | --- | --- |
+| `inherits` | `str \| null` | `null` | A single parent role name; see the field-level-override rule below. |
+| `metrics` | `AllowDenyPolicy` | `{allow: null, deny: []}` | Which metric names this role may query. |
+| `dimensions` | `AllowDenyPolicy` | `{allow: null, deny: []}` | Which dimension names this role may query. Parsed and validated, but not enforced at query time today. |
+| `knowledge` | `KnowledgePolicy` | `{allow_tags: []}` | `{allow_tags: list[str]}` — which knowledge-page tags this role may search/read. |
+| `run_sql` | `bool` | `false` | Whether this role may call `run_sql` at all. |
+| `tenancy_exempt` | `bool` | `false` | Bypasses tenant-predicate injection entirely. |
+| `masking` | `list[MaskingRule]` | `[]` | Column-masking rules; see below. |
+
+`AllowDenyPolicy` (`metrics`/`dimensions`): `allow: null` (default) is unrestricted subject to `deny`; `allow: []` is a deliberate allow-nothing; `"*"` in `allow` is the explicit wildcard. `deny` always wins over `allow`.
+
+### `masking[]` (`MaskingRule`)
+
+| Field | Type | Default | Governs |
+| --- | --- | --- | --- |
+| `column` | `str` | n/a (required) | `<source>.<column>` — the canonical source/column, never a join alias; the rule applies to every alias resolving to that source, self-joins included. |
+| `strategy` | `null \| hash \| partial` | n/a (required) | `null`: replaced with SQL `NULL`. `hash`: `MD5(CAST(... AS TEXT))`. `partial`: first two characters kept, rest replaced with `'***'`. |
+
+**Validation rules**, enforced at load time with a file+line location:
+
+- `default_role`, if set, must name a role declared in `roles`.
+- `inherits`, if set, must resolve to a declared role and the resulting chain must be acyclic — a role that (directly or transitively) inherits from itself fails validation.
+- `inherits` is single-parent field-level override, not list-merge: a role that explicitly authors a field (even to an empty list) replaces the parent's value for that field wholesale; a field left untouched inherits the parent's value unchanged.

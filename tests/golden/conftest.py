@@ -23,6 +23,10 @@ EXAMPLES_ROOT = Path(__file__).parents[2] / "examples"
 
 #: The zero-infrastructure example projects this suite covers. ``ecommerce`` needs a
 #: live Postgres and stays covered by tests/e2e/test_walking_skeleton.py instead.
+#: ``marketplace`` is intentionally excluded too, despite being zero-infra: its
+#: ``on_missing_principal: deny`` tenancy policy would hard-fail every query here, since
+#: this suite passes no principal. It's covered by tests/e2e/test_marketplace_tenancy.py
+#: instead, which loads it with an explicit Principal per case. Do not add it here.
 PROJECTS = ("jaffle-shop", "dutch-railway", "saas-analytics", "rental")
 
 # Excluding .canonic is load-bearing, not hygiene: BindingOutcomeHistory.from_project

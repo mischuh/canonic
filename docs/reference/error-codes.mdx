@@ -25,6 +25,11 @@ Every canonic error carries a stable, wire-safe `code` string plus a headless pr
 | 17 | `structured_output_unsupported` | The model/endpoint can't honor schema-constrained output at all. |
 | 18 | `air_gapped_violation` | Air-gapped mode would let context leave the machine (public endpoint, remote secret ref, or telemetry). |
 | 19 | `retries_exhausted` | A transient provider/transport failure persisted past the bounded retry budget. |
+| 20 | `telemetry_not_configured` | A real telemetry send was attempted without `enabled`/`endpoint`/`transport_acknowledged` all set. |
+| 21 | `telemetry_send_failed` | The telemetry HTTP call itself failed (non-2xx, connection error, timeout). |
+| 22 | `tenant_unresolved` | A [tenancy policy](/concepts/tenancy-and-access-control) is active but the request carries no resolvable tenant. Raised at compiler stage 0, before metric resolution. |
+| 23 | `tenant_scope_missing` | A query reaches a source declared in neither `scoped_sources` nor `shared_sources` of the tenancy policy — a policy hole, not an unfiltered pass-through. |
+| 24 | `tenant_forbidden` | The caller's own policy denies something the caller can already see: `run_sql` denied by role, or `run_sql` refused because the connection lacks `rls_enforced: true` under an active tenancy policy. |
 
 ## Resolving `ambiguous`
 
@@ -51,6 +56,51 @@ canonic query --metrics rental_revenue --dimensions customers.country
 ```
 
 **Ambiguous metric name**: two active bindings share a name/alias. The `candidates` list names each competing metric; re-issue with the specific canonical name (or fix the duplicate alias in `contracts/metrics/`) rather than the ambiguous shared one.
+
+## Resolving `tenant_unresolved`
+
+A [tenancy policy](/concepts/tenancy-and-access-control) is loaded, but the request carries no resolvable tenant — most commonly a `stdio` MCP session with no `--tenant` flag, or a bearer token whose claims don't carry the tenancy policy's `claim`:
+
+```bash
+canonic query --metrics revenue
+```
+```text
+error tenant_unresolved: tenancy policy is active but the request carries no resolvable tenant
+```
+
+Fix it with `--tenant` for local development (always warns; see [`--tenant` CLI override](/concepts/tenancy-and-access-control#--tenant-cli-override)), or by confirming the token actually carries the configured `claim`:
+
+```bash
+canonic query --metrics revenue --tenant 4711
+```
+
+Setting `on_missing_principal: allow_unscoped` in `tenancy.yaml` avoids the error entirely and serves unscoped with a warning instead — a dev-only escape hatch, not a production setting.
+
+## Resolving `tenant_scope_missing`
+
+A query's join plan reaches a source declared in neither `scoped_sources` nor `shared_sources` of the tenancy policy. This is a policy hole the compiler refuses to serve unfiltered, not a bug to silently work around:
+
+```text
+error tenant_scope_missing: source 'shipments' is declared in neither scoped_sources nor shared_sources of the tenancy policy
+```
+
+Fix it by classifying `shipments` in `tenancy.yaml` — as `scoped_sources` (add its tenant column) if it carries per-tenant rows, or `shared_sources` if it's genuinely tenant-neutral (a lookup/dimension table). Setting `undeclared_source: warn` turns this into a warning instead of a hard failure, useful only for incremental adoption on an existing project — it still means the source is served unfiltered in the meantime.
+
+## Resolving `tenant_forbidden`
+
+Raised only by the [`run_sql` gate](/concepts/tenancy-and-access-control#the-run_sql-gate), for one of two independent reasons:
+
+```text
+error tenant_forbidden: role denies raw SQL execution (run_sql: false)
+```
+
+The caller's role doesn't grant `run_sql: true` — no connection-level fix resolves this; the role itself has to change.
+
+```text
+error tenant_forbidden: run_sql is refused on connection 'warehouse_pg': a tenancy policy is active and this connection carries no rls_enforced: true attestation
+```
+
+Tenancy is active, the caller isn't `tenancy_exempt`, and the target connection has no `rls_enforced: true` in `canonic.yaml`. Fix it by setting `rls_enforced: true` — but only once the warehouse actually enforces the tenant boundary out of band (per-tenant credentials or native row-level security); setting the flag without the enforcement behind it defeats the point of the gate.
 
 ## Errors without a registry code
 

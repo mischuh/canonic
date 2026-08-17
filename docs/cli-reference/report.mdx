@@ -36,10 +36,15 @@ canonic report run customer_report --filter merchant_id=123
 | `--as-of` | ISO-8601 reference point for finality watermark evaluation, applied to every section that doesn't set its own. |
 | `--filter` | Filter as `field=value` or `field:op:value`, repeatable — same syntax as `canonic query --filter`. Applied additively (AND-ed) onto every section's own filters, never replacing them. |
 | `--user` | Requesting user id, for narrative knowledge-page access control. |
+| `--tenant` | Bind a fixed, roleless principal for local development / platform-operator use. Always logs a warning. See [Tenancy & access control](/concepts/tenancy-and-access-control#--tenant-cli-override). |
 
 Runs every section of the report through `query()`, in declared order, and prints one table per section. A failing section — for example one blocked by a `min_trust` or `context` guardrail — does not abort the run: it's printed as a `code: message` error in place of a table, and the command still exits `0`. `--json` output matches the MCP `run_report` tool payload byte-for-byte, and every section's `result` is the same unmodified `QueryResult` shape a standalone `canonic query` call returns.
 
 `--filter` lets a caller scope an entire multi-merchant/multi-tenant report at run time without editing the report file — e.g. `--filter merchant_id=123` adds `merchant_id = 123` to every section's own filters. It composes with a section's existing `filters` (both apply, AND-ed together); it does not override them.
+
+<Note>
+This `--filter` is an unauthenticated, ad-hoc convenience — anyone who can run the command can pass any value. It is unrelated to the enforced tenant scoping described in [Tenancy & access control](/concepts/tenancy-and-access-control): that mechanism derives the tenant from a verified token (or an explicit, warned `--tenant` override) and injects it as a real predicate the caller cannot widen. Don't rely on `--filter merchant_id=…` for row-level isolation.
+</Note>
 
 ```bash
 $ canonic report run customer_report

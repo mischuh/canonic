@@ -1,0 +1,8 @@
+id: orders-excludes-cancelled
+applies_to:
+  source: orders
+  measure: revenue
+kind: mandatory_filter
+filter: "status != 'cancelled'"
+severity: error
+rationale: "orders.amount includes rows with status = 'cancelled', which were never actually paid. Summing revenue without excluding them overstates settled sales. Always filter status != 'cancelled' when aggregating orders.revenue."

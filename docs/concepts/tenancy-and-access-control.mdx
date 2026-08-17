@@ -1,0 +1,213 @@
+---
+title: "Tenancy & access control"
+description: "Row-level tenant isolation and role-based authorization, enforced as a compiler input — never as a query field."
+---
+
+canonic answers a question the compiler otherwise declines: given a resolved, compiled query, which **rows** and which **metrics** is *this caller* allowed to see? This is SPEC-E12's governance layer, built for the case that motivates it: many merchants served from one warehouse and one daemon, each reaching only its own rows.
+
+## Opt-in, and total once opted in
+
+The whole layer activates on the presence of `contracts/policies/tenancy.yaml` and/or `contracts/policies/roles.yaml`. Neither file exists in any of the shipped example projects today, and their absence **is** the current single-tenant behavior — nothing changes for an existing project until you add one.
+
+Once a `tenancy.yaml` is present, though, `tenancy_for(source)` is **total** over every source in the project: every source resolves to exactly one of scoped, shared, or `Undeclared` — a distinct sentinel, never silently "no restriction." A source you forgot to classify is a policy hole, not an unfiltered pass-through; see `undeclared_source` below for what happens to it.
+
+<Note>
+The tenant identity and role set are derived **exclusively** from the verified access token (or, for local dev, an explicit `--tenant` flag) and passed into the compiler as an explicit `Principal` argument — never read from the semantic query, a filter, or anything an agent or LLM can author. A `merchant_id` filter an agent supplies is a suggestion; a `Principal` the daemon binds from a verified token is a constraint.
+</Note>
+
+## `TenancyPolicy` — `contracts/policies/tenancy.yaml`
+
+```yaml
+schema: tenancy/v1
+claim: merchant_id              # the verified-token claim carrying the tenant identity
+on_missing_principal: deny      # deny | allow_unscoped
+
+scoped_sources:                 # every source reachable by a scoped principal MUST appear here
+  - { source: orders,      column: merchant_id }
+  - { source: order_items, column: merchant_id }
+  - { source: customers,   column: merchant_id }
+
+shared_sources:                 # explicitly tenant-neutral: dimension/lookup tables
+  - dim_date
+  - dim_currency
+
+undeclared_source: deny         # deny | warn
+```
+
+| Field | Type | Default | Governs |
+| --- | --- | --- | --- |
+| `schema` | `Literal["tenancy/v1"]` | n/a (required) | Schema discriminator. |
+| `claim` | `str` | n/a (required) | The verified-token claim carrying the tenant identity (e.g. `merchant_id`). |
+| `on_missing_principal` | `deny \| allow_unscoped` | `deny` | Behavior when tenancy is active but the request carries no resolvable tenant. `allow_unscoped` serves unfiltered with a warning; it exists for local development, not production. |
+| `scoped_sources` | `list[{source, column}]` | `[]` | Sources tenant-scoped on `column`; every scoped predicate is `<source>.<column> = :tenant`. |
+| `shared_sources` | `list[str]` | `[]` | Sources explicitly declared tenant-neutral — no predicate is injected. Must not overlap `scoped_sources`; a source in both fails validation. |
+| `undeclared_source` | `deny \| warn` | `deny` | Behavior when a query reaches a source in neither list above. `warn` exists only for incremental adoption on an existing project. |
+
+`shared_sources` is a deliberate, reviewable act — declaring a table tenant-neutral belongs in a git diff with a reviewer on it, not an implicit default.
+
+## `RolePolicy` — `contracts/policies/roles.yaml`
+
+Tenancy answers "which rows." Roles answer "which metrics, dimensions, columns, and knowledge" — the RBAC half proper.
+
+```yaml
+schema: roles/v1
+claim: roles                    # token claim carrying the role list (array of strings)
+default_role: merchant_viewer   # applied when the token carries no role claim
+
+roles:
+  merchant_viewer:
+    metrics:    { allow: ["revenue", "order_count", "aov"] }
+    dimensions: { deny:  ["customer_email", "customer_phone"] }
+    knowledge:  { allow_tags: ["public", "merchant"] }
+    run_sql:    false
+  merchant_admin:
+    inherits: merchant_viewer
+    dimensions: { deny: [] }
+    masking:
+      - { column: customers.customer_email, strategy: partial }
+  platform_analyst:            # internal, cross-tenant
+    tenancy_exempt: true
+    metrics: { allow: ["*"] }
+    run_sql: true
+```
+
+### `RolePolicy` fields
+
+| Field | Type | Default | Governs |
+| --- | --- | --- | --- |
+| `schema` | `Literal["roles/v1"]` | n/a (required) | Schema discriminator. |
+| `claim` | `str` | n/a (required) | The token claim carrying the caller's role list. |
+| `default_role` | `str \| null` | `null` | Applied when the token carries no role claim. Must be a declared role. If unset, a principal with no roles resolves to deny-everything. |
+| `roles` | `dict[str, RoleDef]` | `{}` | Named role definitions, keyed by role name. |
+
+### `RoleDef` fields — one entry under `roles`
+
+| Field | Type | Default | Governs |
+| --- | --- | --- | --- |
+| `inherits` | `str \| null` | `null` | A single parent role name. Acyclic and must resolve — validated at load time. |
+| `metrics` | `AllowDenyPolicy` | `{allow: null, deny: []}` | Which metric names this role may query. |
+| `dimensions` | `AllowDenyPolicy` | `{allow: null, deny: []}` | Which dimension names this role may query. **Declared but not enforced today — see warning below.** |
+| `knowledge` | `KnowledgePolicy` | `{allow_tags: []}` | `allow_tags`: which knowledge-page tags this role may search/read. **Defaults to zero pages — see warning below.** |
+| `run_sql` | `bool` | `false` | Whether this role may call the `run_sql` escape hatch at all (a separate, additional gate from `rls_enforced`; see [The `run_sql` gate](#the-run_sql-gate)). |
+| `tenancy_exempt` | `bool` | `false` | Bypasses tenant-predicate injection entirely — the one caller-reachable way to read across tenants. Deliberately ugly to write, and every use is recorded on the answer event; see [Instrumentation](#instrumentation) below. |
+| `masking` | `list[MaskingRule]` | `[]` | Column-level masking rules; see [Masking](#masking). |
+
+`AllowDenyPolicy` (shared by `metrics` and `dimensions`): `allow: null` (the default) means unrestricted, subject to `deny`. `allow: []` is a deliberate allow-nothing declaration, distinct from "no allow list authored yet." `"*"` in `allow` is the explicit wildcard used by exempt roles. `deny` always wins over `allow`.
+
+**Inheritance is single-parent, field-level override — not list-merge.** A role that authors `dimensions: { deny: [] }` **replaces** its parent's deny list wholesale; it does not subtract from it. This is why `merchant_admin` above re-opens every dimension `merchant_viewer` denies rather than needing to enumerate them: an empty `deny` on a field the role explicitly authors wins outright over the inherited list. A field a role leaves untouched inherits the parent's value for that field unchanged.
+
+When a principal holds several roles, each field is the union of what every assigned role grants or denies, with `deny` winning in the final check regardless of how many roles are in play.
+
+<Warning>
+`RoleDef.dimensions` (`allow`/`deny`) is parsed, validated, and exposed via `EffectivePolicy.dimension_allowed()` — but nothing in the compiler, discovery, or MCP serving path actually calls that method. Declaring `dimensions.deny` on a role today has **no runtime effect** on what a query returns. The only mechanism that actually protects a column at query time is `masking` (below), which is narrower — it rewrites/nulls a column's *value*, it does not prevent the column from being requested at all.
+</Warning>
+
+<Warning>
+A role that declares no `knowledge:` block at all gets `allow_tags: []` by default — meaning that role sees **zero** knowledge pages. This is the opposite of the "no role policy loaded" case, which is fully unrestricted. A role meant to see everything (an internal/platform role, say) must explicitly set `knowledge: { allow_tags: ["*"] }`; simply omitting the block is a footgun, not a no-op.
+</Warning>
+
+## Principal binding
+
+A `Principal` (tenant + role set) is built from a verified token, never from anything caller-suppliable, and threaded into the compiler alongside `as_of`.
+
+**MCP static tokens** carry claims inline, since there's no IdP to ask:
+
+```yaml
+mcp:
+  auth:
+    tokens:
+      - client_id: merchant-4711-agent
+        token_ref: env:CANONIC_MCP_TOKEN_ALICE
+        claims:
+          merchant_id: '4711'
+          roles: [merchant_viewer]
+    oauth:
+      claim_mapping:
+        merchant_id: https://example.com/merchant_id
+        roles: roles
+```
+
+**MCP OAuth** carries claims in the verified JWT; `claim_mapping` renames a namespaced IdP claim key (e.g. `https://example.com/merchant_id`) to the policy's own `claim` name before lookup — a `claim` absent from the mapping is looked up unchanged. Both are handled by `canonic.mcp.auth.principal_from_token`, which returns `None` (no principal to derive) only when neither `tenancy.yaml` nor `roles.yaml` is loaded at all.
+
+**CLI `--tenant`** binds a fixed principal with no roles, for local development and the platform-operator path — see [`--tenant` CLI override](#--tenant-cli-override) below.
+
+**`SYSTEM_PRINCIPAL`** is the one caller-unreachable principal in the codebase: an unrestricted, `tenancy_exempt` principal used only by canonic's own internal correctness checks — the assertion/CI harness (`canonic assert`, `canonic eval`) and static report validation (`ReportService.validate_reports`). Assertions check whether the compiler computes a metric correctly against a fixed expected value, a question orthogonal to tenant scoping, so they run against the full, unfiltered dataset — exactly the population an assertion's `expect` was calibrated against. It's never bound from a token, a CLI flag, or anything caller-controlled; the only project-configurable way to read cross-tenant is a role with `tenancy_exempt: true`.
+
+## Compiler enforcement
+
+Tenancy and RBAC hook into the [deterministic compiler pipeline](/concepts/compiler#pipeline-stages) at three points:
+
+**Stage 0 — bind the principal.** Before any metric resolution, `authz_for(principal)` is resolved once into an `EffectivePolicy`. If tenancy is active, the principal isn't `tenancy_exempt`, and no tenant resolved, the compiler raises `TENANT_UNRESOLVED` immediately — no SQL is emitted, and no error message can leak whether a named metric exists, because metric resolution hasn't run yet. `on_missing_principal: allow_unscoped` avoids the error and appends a warning instead.
+
+A metric outside the effective policy is also folded into stage 1's `UNRESOLVED` outcome, not a distinct forbidden code — the same "don't let the error channel become an existence oracle" discipline used elsewhere in the compiler.
+
+**Stage 2b — inject tenant predicates.** For every source actually joined into a leaf's plan (not just the metric's own owning source), the compiler injects `<source>.<column> = :tenant` ahead of query filters, `population_filter`, and guardrails. This is what closes the leak a fact-table-only predicate would miss: filtering `orders` alone while joining an unfiltered `customers` still exposes another tenant's customer rows through join-induced row multiplication. The predicate is built as a real `sqlglot` AST node (`exp.EQ(...)`) bound to the principal's tenant value directly — never by parsing a string with the tenant value interpolated into it — so a crafted `filters` entry (`x) OR (1=1`-style) cannot escape its own predicate. A `tenancy_exempt` principal skips this stage entirely: no predicate, no `Undeclared` enforcement.
+
+An `Undeclared` source reached mid-leaf raises `TENANT_SCOPE_MISSING` (or warns, per `undeclared_source: warn`).
+
+**`metadata.scope`** (attached at result-metadata time): the sources that actually received a predicate, derived from what was actually emitted — not restated from the policy — so an unjoined scoped source correctly doesn't show up:
+
+```json
+{
+  "scope": {
+    "tenant": "4711",
+    "scoped_sources": ["orders", "order_items"],
+    "shared_sources": ["dim_date"],
+    "roles": ["merchant_viewer"],
+    "tenancy_exempt": false
+  }
+}
+```
+
+This is what makes isolation *provable* to a reviewer, rather than merely asserted.
+
+## Masking
+
+A role's `masking` list rewrites a dimension's SELECT/GROUP-BY expression at compile time, matched by canonical `source.column` (never a join alias — the same convention `scoped_sources` uses), so one rule applies to every join alias that resolves to that source, self-joins included:
+
+| `strategy` | Rewrite |
+| --- | --- |
+| `null` | Replaced with SQL `NULL`. |
+| `hash` | `MD5(CAST(expr AS TEXT))`. |
+| `partial` | First two characters kept, rest replaced with `'***'`. |
+
+Masking applies after granularity bucketing (for time dimensions), so the SELECT list and the GROUP BY collapse on the same masked expression — merging distinct underlying values into one output row is the intended effect, not a side effect to guard against.
+
+## Discovery filtering
+
+`list_metrics` and `get_overview` silently omit any metric outside the caller's effective policy — an entity the caller cannot query is an entity the caller cannot see listed. `describe_metric` and `resolve_metric` on a denied metric name raise the **identical** `Unresolved` shape a genuinely nonexistent name produces, so there is no existence oracle here either: a caller can't distinguish "this metric doesn't exist" from "you're not allowed to see this metric" by probing the API. Knowledge search and page reads are filtered by the caller's `allow_tags`, per the footgun noted [above](#roledef-fields--one-entry-under-roles).
+
+## The `run_sql` gate
+
+`run_sql` bypasses the compiler entirely — no stage-2b predicate injection is possible on caller-supplied SQL — so it is gated fail-closed by two independent conditions, either of which raises `TENANT_FORBIDDEN`:
+
+1. The caller's role has `run_sql: false`.
+2. Tenancy is active, the caller isn't `tenancy_exempt`, and the target connection's `rls_enforced` (`canonic.yaml`, [`connections[]`](/reference/config-schema#connections)) isn't `true`.
+
+<Warning>
+`rls_enforced: true` is an **operator attestation** that the warehouse itself enforces the tenant boundary out of band — per-tenant credentials, or warehouse-native row-level security keyed on a session variable. canonic cannot verify this claim; it only trusts it. Setting it to `true` on a connection that doesn't actually enforce RLS re-opens exactly the hole `run_sql` is otherwise gated against.
+</Warning>
+
+## `--tenant` CLI override
+
+`canonic query`, `canonic sql`, `canonic report run`, and `canonic mcp start --transport stdio` all accept a shared `--tenant <id>` flag: it binds a fixed, roleless principal for local development and the platform-operator path, and **always prints a warning** when used. It exists because stdio sessions have no per-request auth to derive a principal from.
+
+`canonic mcp start --transport http` **refuses** `--tenant` outright, exiting `1`: an HTTP daemon already derives a fresh principal from each request's verified token, so a single flag-supplied tenant applying to every caller regardless of who they are would be a much larger hole than the one `--tenant` exists to work around on stdio.
+
+## Instrumentation
+
+`AnswerEvent` (the record written for every served answer and `run_sql` call, in `.canonic/events.jsonl`) carries three additional fields:
+
+| Field | Type | Default | Notes |
+| --- | --- | --- | --- |
+| `tenant` | `str \| null` | `null` | The principal's tenant. Null when no tenancy policy is configured, or for a caller with no resolvable principal. Stored **verbatim**, not hashed — a deliberate carve-out from the event log's usual "no content, ever" discipline, justified because it's a verified identifier, not warehouse content. |
+| `roles` | `list[str] \| null` | `null` | The caller's effective, sorted role names. |
+| `tenancy_exempt` | `bool` | `false` | `true` when this event served a cross-tenant read. Every occurrence should be treated as alertable. |
+
+See [Instrumentation & evaluation](/concepts/instrumentation-and-eval#the-event-log) for the rest of the event shape.
+
+## Further reading
+
+- [Contract schema](/reference/contract-schema) for the exhaustive field reference and validation rules on `tenancy.yaml` / `roles.yaml`.
+- [Error codes](/reference/error-codes#resolving-tenant_unresolved) for worked examples of `tenant_unresolved`, `tenant_scope_missing`, and `tenant_forbidden`.
+- [Marketplace guide](/guides/marketplace) for a full worked multi-tenant example project.

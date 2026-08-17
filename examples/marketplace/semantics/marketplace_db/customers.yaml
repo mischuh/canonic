@@ -1,0 +1,27 @@
+name: customers
+connection: marketplace_db
+table: customers
+grain: [customer_id]
+description: "One row per registered customer of a merchant. Tenant-scoped on merchant_id (contracts/policies/tenancy.yaml): every query joining this source gets a merchant_id predicate injected. customer_email/customer_phone are PII: merchant_viewer's dimensions.deny lists them (not enforced today — see the guardrail note in README), and merchant_admin's masking rule is what actually protects customer_email at query time."
+
+columns:
+  - { name: customer_id,    type: int,    nullable: false }
+  - { name: merchant_id,    type: string, nullable: false }
+  - { name: customer_name,  type: string, nullable: false }
+  - { name: customer_email, type: string, nullable: false }
+  - { name: customer_phone, type: string, nullable: false }
+  - { name: country,        type: string, nullable: false }
+
+dimensions:
+  - { name: customer_name,  column: customer_name }
+  - { name: customer_email, column: customer_email }
+  - { name: customer_phone, column: customer_phone }
+  - { name: country,        column: country }
+
+joins:
+  - to: merchants
+    on: 'customers.merchant_id = merchants.merchant_id'
+    relationship: many_to_one
+
+meta:
+  provenance: human_curated

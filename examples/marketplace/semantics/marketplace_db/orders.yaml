@@ -1,0 +1,47 @@
+name: orders
+connection: marketplace_db
+table: orders
+grain: [order_id]
+description: "One row per order placed with a merchant. Tenant-scoped on merchant_id (contracts/policies/tenancy.yaml): every query gets a merchant_id predicate injected for the caller's resolved tenant. amount is the post-discount total charged to the customer; see the orders-excludes-cancelled guardrail before summing revenue."
+
+columns:
+  - { name: order_id,      type: int,     nullable: false }
+  - { name: merchant_id,   type: string,  nullable: false }
+  - { name: customer_id,   type: int,     nullable: false }
+  - { name: order_date,    type: date,    nullable: false }
+  - { name: currency_code, type: string,  nullable: false }
+  - { name: promo_id,      type: string,  nullable: true  }
+  - { name: status,        type: string,  nullable: false }
+  - { name: amount,        type: decimal, nullable: false }
+
+measures:
+  - name: revenue
+    expr: 'sum(amount)'
+    additivity: additive
+  - name: order_count
+    expr: 'count(order_id)'
+    additivity: additive
+
+dimensions:
+  - { name: status,     column: status }
+  - { name: order_date, column: order_date, granularity: day }
+
+joins:
+  - to: customers
+    on: 'orders.customer_id = customers.customer_id'
+    relationship: many_to_one
+  - to: merchants
+    on: 'orders.merchant_id = merchants.merchant_id'
+    relationship: many_to_one
+  - to: dim_date
+    on: 'orders.order_date = dim_date.date_id'
+    relationship: many_to_one
+  - to: dim_currency
+    on: 'orders.currency_code = dim_currency.currency_code'
+    relationship: many_to_one
+  - to: promotions
+    on: 'orders.promo_id = promotions.promo_id'
+    relationship: many_to_one
+
+meta:
+  provenance: human_curated

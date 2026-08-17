@@ -23,6 +23,7 @@ canonic query --file query.json --harness
 | `--limit` | Row cap injected by the dialect adapter. |
 | `--file`, `-f` | Semantic query JSON file. |
 | `--harness` | Benchmark/CI mode: run matching assertions and exit `10` (`ASSERTION_FAILED`) on a mismatch. |
+| `--tenant` | Bind a fixed, roleless principal for local development / platform-operator use. Always logs a warning. See [Tenancy & access control](/concepts/tenancy-and-access-control#--tenant-cli-override). |
 
 `--metrics`/`--dimensions`/`--filter`/`--via`/`--limit` and `-f` are mutually exclusive; pick one way to build the query per invocation; passing both is a usage error. The flags build the identical `SemanticQuery` a JSON file would deserialize: `{"metrics": [...], "dimensions": [...], "filters": [...], "via": [...], "limit": null}`. Use `-f` once a query grows more filters or joins than is comfortable inline. Without `--harness`, any matching assertions are informational only and never block. With `--json`, the output matches the MCP `query` tool's payload byte-for-byte.
 
@@ -42,8 +43,9 @@ canonic sql "SELECT customer_id, SUM(amount) FROM orders GROUP BY 1" --connectio
 | --- | --- |
 | `statement` | A read-only `SELECT` statement (positional). |
 | `--connection`, `-c` | Connection id (defaults to `project.default_connection`). |
+| `--tenant` | Bind a fixed, roleless principal for local development / platform-operator use. Always logs a warning. See [Tenancy & access control](/concepts/tenancy-and-access-control#--tenant-cli-override). |
 
-Non-`SELECT` statements are rejected with `READ_ONLY_VIOLATION` (exit `11`).
+Non-`SELECT` statements are rejected with `READ_ONLY_VIOLATION` (exit `11`). Raw SQL bypasses the compiler entirely, so under an active tenancy policy `canonic sql` is additionally gated by the [`run_sql` gate](/concepts/tenancy-and-access-control#the-run_sql-gate) — refused with `TENANT_FORBIDDEN` (exit `24`) unless the caller's role allows `run_sql` and the target connection attests `rls_enforced: true`.
 
 ## `canonic assert`
 

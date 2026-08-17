@@ -1,0 +1,19 @@
+name: merchants
+connection: marketplace_db
+table: merchants
+grain: [merchant_id]
+description: "One row per merchant hosted on the platform. A SHARED reference dimension: declared in tenancy.yaml's shared_sources, never predicated by tenant scoping, so any role can join to it for merchant-name/category/country lookups."
+
+columns:
+  - { name: merchant_id,   type: string, nullable: false }
+  - { name: merchant_name, type: string, nullable: false }
+  - { name: category,      type: string, nullable: false }
+  - { name: country,       type: string, nullable: false }
+
+dimensions:
+  - { name: merchant_name, column: merchant_name }
+  - { name: category,      column: category }
+  - { name: country,       column: country }
+
+meta:
+  provenance: human_curated

@@ -67,7 +67,7 @@ Adjust the host/port to match the `--host`/`--port` flags used to start the daem
 
 ### Remote/enterprise deployment
 
-`--transport http` is meant for a daemon running centrally (e.g. in a data center) with clients connecting from local machines over the network, not just local loopback. Local binding is not a security boundary once the daemon is network-reachable, so `--transport http` refuses to start without at least one auth mechanism configured — a bearer token, OAuth 2.1, or both (they compose: a static token for a CI pipeline and OAuth for interactive human users on the same daemon is a supported setup, not just tolerated).
+`--transport http` is meant for a daemon running centrally (e.g. in a data center) with clients connecting from local machines over the network, not just local loopback. Local binding is not a security boundary once the daemon is network-reachable, so `--transport http` refuses to start without at least one auth mechanism configured — a bearer token, OAuth 2.1, or both (they compose: a static token for a CI pipeline and OAuth for interactive human users on the same daemon is a supported setup, not just tolerated). This is also why `canonic mcp start --tenant <id>` (the local-development principal override, see [Tenancy & access control](/concepts/tenancy-and-access-control#--tenant-cli-override)) is refused outright on `--transport http`: each HTTP request already derives its own principal from its verified token, so a single flag-supplied tenant applying to every caller would undo per-request isolation.
 
 **Bearer tokens** — one per client, revoked by editing `canonic.yaml`:
 
@@ -83,6 +83,42 @@ mcp:
 ```
 
 Each client authenticates with its own token (`Authorization: Bearer <token>`), and the resolved `client_id` is attributed on every `query`/`run_sql` answer event in `.canonic/events.jsonl` — so usage is traceable per user, not just per daemon instance.
+
+### Binding tenant/role claims to a token
+
+When the project has a [tenancy and/or role policy](/concepts/tenancy-and-access-control) configured (`contracts/policies/tenancy.yaml` / `roles.yaml`), a token also needs to carry the claims those policies name (`claim: merchant_id`, `claim: roles`, or whatever the policy declares). A static bearer token has no IdP to fetch claims from at request time, so it carries them inline via `claims`:
+
+```yaml
+# canonic.yaml
+mcp:
+  auth:
+    tokens:
+      - client_id: merchant-4711-agent
+        token_ref: env:CANONIC_MCP_TOKEN_ALICE
+        claims:
+          merchant_id: '4711'
+          roles: [merchant_viewer]
+      - client_id: merchant-4899-agent
+        token_ref: env:CANONIC_MCP_TOKEN_BOB
+        claims:
+          merchant_id: '4899'
+          roles: [merchant_viewer]
+```
+
+Each of these two tokens now resolves to a distinct `Principal` — same daemon, same warehouse, isolated rows — with every compiled query for `merchant-4711-agent` carrying `orders.merchant_id = '4711'` and nothing else. With OAuth instead of static tokens, the claims arrive in the verified JWT itself; use `mcp.auth.oauth.claim_mapping` to rename a namespaced IdP claim key (e.g. `https://example.com/merchant_id`) to the policy's own `claim` name:
+
+```yaml
+mcp:
+  auth:
+    oauth:
+      mode: jwt
+      issuer_url: https://idp.example.com
+      claim_mapping:
+        merchant_id: https://example.com/merchant_id
+        roles: roles
+```
+
+A `claim` absent from `claim_mapping` is looked up under its own name unchanged. See [Tenancy & access control](/concepts/tenancy-and-access-control#principal-binding) for how the resulting `Principal` flows into the compiler, and [config schema](/reference/config-schema#mcp) for the full field list.
 
 **OAuth 2.1** — for SSO-integrated organizations that want per-user identity tied to their own IdP and centralized revocation instead of a shared secret to distribute and rotate:
 

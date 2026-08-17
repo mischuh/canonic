@@ -44,6 +44,8 @@ Two scopes, defined by path, not by a field you set by hand:
 
 **Strict-additive rule:** a user page can *add* context but can never override or shadow a global one. On a name/topic collision, the global page stays authoritative and the user page is surfaced as a personal annotation attached to it, never a replacement. A user's search sees `global` + their own `user/<id>`, never another user's pages.
 
+Under an active [role policy](/concepts/tenancy-and-access-control), search and page reads are additionally filtered by the caller's `knowledge.allow_tags` — a page whose tags fall entirely outside the allow set is invisible to that role, same treatment as a page outside scope. A role that declares no `knowledge:` block at all defaults to `allow_tags: []`, i.e. zero visible pages, a footgun worth reading about in full under [`RoleDef` fields](/concepts/tenancy-and-access-control#roledef-fields--one-entry-under-roles).
+
 ## Retrieval
 
 Search fuses two arms via Reciprocal Rank Fusion:

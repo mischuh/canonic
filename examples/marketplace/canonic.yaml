@@ -1,0 +1,59 @@
+version: 1
+
+project:
+  name: marketplace-demo
+  default_connection: marketplace_db
+
+connections:
+  - id: marketplace_db
+    type: sqlite
+    params:
+      path: marketplace.db   # created by: sqlite3 marketplace.db < setup.sql
+    # Deliberately false: this shared SQLite warehouse has no warehouse-native
+    # row-level-security layer, so run_sql stays refused for any non-exempt role once
+    # tenancy is active — see docs/guides/marketplace.mdx "run_sql's two gates".
+    rls_enforced: false
+
+llm:
+  provider: openai_compatible
+  base_url: http://127.0.0.1:11434/v1   # Ollama; swap for any OpenAI-compatible endpoint
+  model: gemma-4-e2b-it-4bit
+  api_key_ref: env:CANONIC_LLM_API_KEY
+
+mcp:
+  auth:
+    tokens:
+      - client_id: byte-gadgets-viewer
+        token_ref: env:CANONIC_MCP_TOKEN_BYTE_GADGETS_VIEWER
+        claims: { merchant_id: 'byte-gadgets', roles: [merchant_viewer] }
+      - client_id: byte-gadgets-admin
+        token_ref: env:CANONIC_MCP_TOKEN_BYTE_GADGETS_ADMIN
+        claims: { merchant_id: 'byte-gadgets', roles: [merchant_admin] }
+      - client_id: urban-threads-viewer
+        token_ref: env:CANONIC_MCP_TOKEN_URBAN_THREADS_VIEWER
+        claims: { merchant_id: 'urban-threads', roles: [merchant_viewer] }
+      - client_id: urban-threads-admin
+        token_ref: env:CANONIC_MCP_TOKEN_URBAN_THREADS_ADMIN
+        claims: { merchant_id: 'urban-threads', roles: [merchant_admin] }
+      - client_id: platform-ops
+        token_ref: env:CANONIC_MCP_TOKEN_PLATFORM_OPS
+        claims: { roles: [platform_analyst] }   # no merchant_id claim: tenancy_exempt reads across all merchants
+
+embeddings:
+  model: all-MiniLM-L6-v2
+
+reconcile:
+  strict_contradictions: false
+  auto_apply:
+    enabled: false
+
+telemetry:
+  enabled: false
+
+runtime:
+  air_gapped: false
+
+logging:
+  level: INFO
+  format: json
+  file: .canonic/canonic.log

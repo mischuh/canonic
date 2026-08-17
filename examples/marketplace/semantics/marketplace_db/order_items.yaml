@@ -1,0 +1,33 @@
+name: order_items
+connection: marketplace_db
+table: order_items
+grain: [order_item_id]
+description: "One row per line item within an order. Tenant-scoped on merchant_id (denormalized from the parent order, so scoping does not depend on the join to orders resolving)."
+
+columns:
+  - { name: order_item_id, type: int,     nullable: false }
+  - { name: order_id,      type: int,     nullable: false }
+  - { name: merchant_id,   type: string,  nullable: false }
+  - { name: sku,           type: string,  nullable: false }
+  - { name: quantity,      type: int,     nullable: false }
+  - { name: unit_price,    type: decimal, nullable: false }
+  - { name: line_amount,   type: decimal, nullable: false }
+
+measures:
+  - name: items_sold
+    expr: 'sum(quantity)'
+    additivity: additive
+  - name: line_revenue
+    expr: 'sum(line_amount)'
+    additivity: additive
+
+dimensions:
+  - { name: sku, column: sku }
+
+joins:
+  - to: orders
+    on: 'order_items.order_id = orders.order_id'
+    relationship: many_to_one
+
+meta:
+  provenance: human_curated

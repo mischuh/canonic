@@ -22,8 +22,9 @@ canonic mcp start --transport http --port 7474
 | `--host` | Host for the HTTP daemon (default `127.0.0.1`). |
 | `--token-ref` | Bearer token reference (`env:VAR`) for `--transport http`, overriding/supplementing `mcp.auth.tokens` in `canonic.yaml`. |
 | `--suggestions` | Enable follow-up suggestions in query responses. |
+| `--tenant` | Bind a fixed, roleless principal for a `stdio` session, local-development/platform-operator use only. Always logs a warning. Refused (exit `1`) on `--transport http`; see [Tenancy & access control](/concepts/tenancy-and-access-control#--tenant-cli-override). |
 
-With `--transport stdio` (the default), the daemon runs in the foreground over stdio; the MCP client manages its process lifetime — no auth layer, since a local subprocess is inherently process-trusted.
+With `--transport stdio` (the default), the daemon runs in the foreground over stdio; the MCP client manages its process lifetime — no auth layer, since a local subprocess is inherently process-trusted. If a [tenancy policy](/concepts/tenancy-and-access-control) is active, a `stdio` session has no per-request auth to derive a principal from, so `--tenant <id>` must be passed explicitly.
 
 With `--transport http`, it forks a background uvicorn daemon bound to the given host/port using Streamable HTTP. Because the daemon becomes network-reachable, it **requires** at least one auth mechanism — a bearer token, OAuth 2.1, or both. Configure `mcp.auth.tokens` and/or `mcp.auth.oauth` in `canonic.yaml`:
 
