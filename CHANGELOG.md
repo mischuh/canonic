@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.22.0](https://github.com/mischuh/canonic/compare/v0.21.0...v0.22.0) (2026-08-17)
+
+
+### Features
+
+* **compiler:** enforce role-based column masking ([#304](https://github.com/mischuh/canonic/issues/304)) ([9ebeae9](https://github.com/mischuh/canonic/commit/9ebeae994c0323bf234ddc268f79cd9f21ca8e89))
+* **compiler:** inject tenant predicates and filter metrics through RBAC (SPEC-E12 §3) ([#300](https://github.com/mischuh/canonic/issues/300)) ([1546d6d](https://github.com/mischuh/canonic/commit/1546d6d634af24626e0a9bbd9f17f0909a00ddf7))
+* **contracts:** add tenancy/role policy contracts and resolver seam ([#297](https://github.com/mischuh/canonic/issues/297)) ([147878c](https://github.com/mischuh/canonic/commit/147878c42b820f07b98d77683351da0b2649fd4f))
+* **contracts:** validate tenancy/role policies against semantics ([#303](https://github.com/mischuh/canonic/issues/303)) ([40944da](https://github.com/mischuh/canonic/commit/40944dabcb57e4ce17671d0cd742ce41594a3610))
+* **core:** error registry, AnswerEvent tenant attribution, contract 2.8 ([#302](https://github.com/mischuh/canonic/issues/302)) ([b25ec5c](https://github.com/mischuh/canonic/commit/b25ec5c95ed798b3040224a343146c507af4876a))
+* **core:** thread principal through serving surfaces for tenant/role scoping (SPEC-E12 §5, §6) ([#301](https://github.com/mischuh/canonic/issues/301)) ([b6b6691](https://github.com/mischuh/canonic/commit/b6b6691be87d073addfed4c3dd625527f5e96a8f))
+* **mcp:** bind principal from verified token claims (SPEC-E12 §5, §7) ([#299](https://github.com/mischuh/canonic/issues/299)) ([9aa0852](https://github.com/mischuh/canonic/commit/9aa085257b7b22ebfaadede8d46ce9ef8a21132f))
+
+
+### Documentation
+
+* SPEC-E12 tenancy/RBAC guide and marketplace example ([#305](https://github.com/mischuh/canonic/issues/305)) ([c39977d](https://github.com/mischuh/canonic/commit/c39977d3a1c3cc3ac2121b27fc56311a3d4e3a7f))
+
 ## [0.21.0](https://github.com/mischuh/canonic/compare/v0.20.0...v0.21.0) (2026-08-16)
 
 
