@@ -74,9 +74,9 @@ canonic query --metrics revenue --dimensions order_date
 canonic query --metrics revenue --filter "status=paid"
 ```
 
-Using your own data instead of a guide? Replace `revenue` with a metric that actually exists in your project; run `canonic status` to see what's available.
+Using your own data instead of a guide? Replace `revenue` with a metric that actually exists in your project. Run `canonic status` to see what's available.
 
-For a query with more filters or joins than is comfortable inline, write a `SemanticQuery` JSON file and pass it with `-f` instead; see [`canonic query`](/cli-reference/query-sql-assert) for the full flag reference.
+For a query with more filters or joins than is comfortable inline, write a `SemanticQuery` JSON file and pass it with `-f` instead. See [`canonic query`](/cli-reference/query-sql-assert) for the full flag reference.
 
 ## Review what canonic drafted
 
@@ -96,8 +96,8 @@ canonic status        # always tells you the best next step
 - Connect your agent over MCP and start asking.
 
 **A bit more manual effort (when you need it):**
-- **Canonical bindings**: when two sources define "revenue" differently, you pick the authoritative one. canonic surfaces the ambiguity; you resolve it once.
-- **Knowledge prose**: the business "why" behind a definition; canonic drafts it, you refine it.
+- **Canonical bindings**: when two sources define "revenue" differently, you pick the authoritative one. canonic surfaces the ambiguity. You resolve it once.
+- **Knowledge prose**: the business "why" behind a definition. canonic drafts it, you refine it.
 - **Guardrails & contracts**: mandatory filters, required dimensions, final-vs-provisional rules. Added when a number needs protecting.
 - **Non-additive metrics**: ratios, averages, distinct counts, balances. Declared as composable definitions so they stay correct at any grain.
 - **More sources**: dbt / Metabase / Notion / web pages, layered on as context evidence. The connector contract is extensible, so a Confluence, Jira, or other wiki/knowledge-base connector can be added the same way.

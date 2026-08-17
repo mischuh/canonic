@@ -23,19 +23,19 @@ The query references **names** (metrics, dimensions), never physical tables or c
 
 ## Pipeline stages
 
-0. **Bind the principal** (SPEC-E12 §3, only when a [tenancy/role policy](/concepts/tenancy-and-access-control) is loaded). Resolve the caller's `Principal` into an `EffectivePolicy` before any metric resolution. If tenancy is active and no tenant resolved, fail immediately with `TENANT_UNRESOLVED` — no partial work, no error message that could reveal whether a named metric exists.
-1. **Resolve metrics.** Map each metric name → canonical binding → source/measure (or composite components). Unknown/ambiguous → `UNRESOLVED`/`AMBIGUOUS` with candidates. A metric outside the caller's effective policy is folded into `UNRESOLVED` here too, rather than a distinct forbidden code — see [Tenancy & access control](/concepts/tenancy-and-access-control#compiler-enforcement).
+0. **Bind the principal** (only when a [tenancy/role policy](/concepts/tenancy-and-access-control) is loaded). Resolve the caller's `Principal` into an `EffectivePolicy` before any metric resolution. If tenancy is active and no tenant resolved, fail immediately with `TENANT_UNRESOLVED`: no partial work, no error message that could reveal whether a named metric exists.
+1. **Resolve metrics.** Map each metric name → canonical binding → source/measure (or composite components). Unknown/ambiguous → `UNRESOLVED`/`AMBIGUOUS` with candidates. A metric outside the caller's effective policy is folded into `UNRESOLVED` here too, rather than a distinct forbidden code. See [Tenancy & access control](/concepts/tenancy-and-access-control#compiler-enforcement).
 2. **Resolve dimensions & filters.** Bind to columns on the owning source or a join-reachable source. Unreachable → `UNREACHABLE`.
-3. **Plan the join graph.** From the metric's source, find the minimal join path to every referenced source using only declared `joins`. No path → `UNREACHABLE`; more than one valid path → `AMBIGUOUS_JOIN_PATH`; the compiler never guesses a shortest path or invents a cross join.
+3. **Plan the join graph.** From the metric's source, find the minimal join path to every referenced source using only declared `joins`. No path → `UNREACHABLE`. More than one valid path → `AMBIGUOUS_JOIN_PATH`. The compiler never guesses a shortest path or invents a cross join.
 
-**Stage 2b — inject tenant predicates** (only under an active [tenancy policy](/concepts/tenancy-and-access-control#compiler-enforcement)). For every source actually joined into the leaf's plan — not just the metric's owning source — AND `<source>.<column> = :tenant` into the leaf's `WHERE`, ahead of query filters, `population_filter`, and guardrails. A source declared neither scoped nor shared → `TENANT_SCOPE_MISSING`. Built as a real AST node bound to the tenant value, never by string interpolation, so a crafted filter cannot escape its own predicate.
+**Stage 2b: inject tenant predicates** (only under an active [tenancy policy](/concepts/tenancy-and-access-control#compiler-enforcement)). For every source actually joined into the leaf's plan, not just the metric's owning source, AND `<source>.<column> = :tenant` into the leaf's `WHERE`, ahead of query filters, `population_filter`, and guardrails. A source declared neither scoped nor shared → `TENANT_SCOPE_MISSING`. Built as a real AST node bound to the tenant value, never by string interpolation, so a crafted filter cannot escape its own predicate.
 
 4. **Fanout & additivity analysis.** Detect when a join fans out the grain relative to a measure's source grain, and dispatch to the binding's compilation strategy (below).
 5. **Apply finality & coalescing.** If the metric has a [finality rule](/concepts/contracts-and-guardrails#finality), select the right source(s) for the requested time window and tag output rows `final`/`provisional`.
-6. **Enforce guardrails.** AND-in mandatory filters, apply `restrict_source` for the active `context`. `severity: error` blocks; `warn` annotates.
+6. **Enforce guardrails.** AND-in mandatory filters, apply `restrict_source` for the active `context`. `severity: error` blocks, but `warn` annotates.
 7. **Emit SQL.** Build a dialect-neutral AST, then transpile via the [dialect adapter](#dialect-adapter). Read-only (`SELECT`) only, by construction.
-8. **Attach result attributes.** Resolved bindings, guardrails fired, provisional/final mix, per-source freshness, and additivity handling applied. Under an active tenancy policy, also a `metadata.scope` block — tenant, scoped/shared sources, roles, `tenancy_exempt` — derived from the predicates actually emitted in stage 2b, not restated from the policy.
-9. **Assertion check** (in benchmark/CI mode). Run the emitted SQL and compare to the matching assertion's expected value; divergence beyond tolerance fails. Runs tenant-exempt against the full, unfiltered dataset — the population an assertion's `expect` was calibrated against — independent of any tenancy policy.
+8. **Attach result attributes.** Resolved bindings, guardrails fired, provisional/final mix, per-source freshness, and additivity handling applied. Under an active tenancy policy, also a `metadata.scope` block (tenant, scoped/shared sources, roles, `tenancy_exempt`) derived from the predicates actually emitted in stage 2b, not restated from the policy.
+9. **Assertion check** (in benchmark/CI mode). Run the emitted SQL and compare to the matching assertion's expected value. Divergence beyond tolerance fails. Runs tenant-exempt against the full, unfiltered dataset, the population an assertion's `expect` was calibrated against, independent of any tenancy policy.
 
 Output shape:
 
@@ -55,7 +55,7 @@ Errors are always structured (`code`, `message`, `candidates?`), never free text
 
 ## No guessing
 
-Stage 2 and stage 3 share one rule: if there is more than one way to satisfy a query, the compiler refuses rather than picking one silently. It doesn't matter that a join *could* be inferred; if the semantic model doesn't say which one, the compiler asks instead of guessing.
+Stage 2 and stage 3 share one rule: if there is more than one way to satisfy a query, the compiler refuses rather than picking one silently. It doesn't matter that a join *could* be inferred. If the semantic model doesn't say which one, the compiler asks instead of guessing.
 
 A concrete case: a car-rental model where `rentals` joins `locations` twice (once as `pickup`, once as `dropoff`) and `country` is a declared dimension on both `locations` and `customers`. Asking for `country` without saying which one is ambiguous:
 
@@ -87,7 +87,7 @@ resolved:
   rental_revenue → payments.total_paid
 ```
 
-Only the `pickup` join was added: `customers` and `dropoff` never appear in the SQL, because nothing in the query needed them. The same discipline applies one level up: when a *join path itself* has more than one valid route (`AMBIGUOUS_JOIN_PATH`), the compiler returns candidate routes and expects `via` to pick one; see [Resolving `ambiguous`](/reference/error-codes#resolving-ambiguous) for both cases end to end.
+Only the `pickup` join was added: `customers` and `dropoff` never appear in the SQL, because nothing in the query needed them. The same discipline applies one level up: when a *join path itself* has more than one valid route (`AMBIGUOUS_JOIN_PATH`), the compiler returns candidate routes and expects `via` to pick one. See [Resolving `ambiguous`](/reference/error-codes#resolving-ambiguous) for both cases end to end.
 
 ## Fanout & additivity
 
@@ -97,19 +97,19 @@ A join can multiply rows relative to a measure's grain (one-to-many, many-to-man
 | --- | --- |
 | `single` (additive) | Deduplicate to the measure's own grain before summing across a fanout join. |
 | `ratio` / `weighted_avg` | Each component (itself another metric) is planned as an independent sub-query through the full pipeline, then combined with a divide step on the shared grain, never divided row-by-row. |
-| `semi_additive` | Sums normally over dimensions the query groups by; collapses the non-additive dimension (e.g. `snapshot_date`) via a window function (`last`/`first`/`avg`/`min`/`max`) when the query doesn't group by it. |
+| `semi_additive` | Sums normally over dimensions the query groups by, and collapses the non-additive dimension (e.g. `snapshot_date`) via a window function (`last`/`first`/`avg`/`min`/`max`) when the query doesn't group by it. |
 | `distinct_count` / `percentile` | Recomputed directly from base rows at the requested grain, never derived from a partial `count(distinct …)` or a combined quantile. |
-| `opaque` | Served only at its declared native grain; any other grain is rejected outright. |
+| `opaque` | Served only at its declared native grain. Any other grain is rejected outright. |
 
-The unifying rule behind the composable strategies: **aggregate first, combine last**; division, weighting, and ratios happen on the aggregated result, never on raw rows. Where no strategy can guarantee correctness, the compiler refuses with `UNSUPPORTED_MEASURE` or `FANOUT_UNSAFE` and a rationale, rather than emit a silently wrong number.
+The unifying rule behind the composable strategies is **aggregate first, combine last**: division, weighting, and ratios happen on the aggregated result, never on raw rows. Where no strategy can guarantee correctness, the compiler refuses with `UNSUPPORTED_MEASURE` or `FANOUT_UNSAFE` and a rationale, rather than emit a silently wrong number.
 
 When a metric is composed from parts, the result inherits the **most conservative** signal across them: stale if any component is stale, provisional if any component is provisional, and `guardrails_fired` is the union across every leaf.
 
 ## Dialect adapter
 
-The compiler builds one dialect-neutral SQLGlot AST; a dialect adapter transpiles it to the target engine: type mapping, identifier quoting, `LIMIT` injection, and the read-only guarantee. Adding a database and supporting its SQL dialect are independent concerns.
+The compiler builds one dialect-neutral SQLGlot AST. A dialect adapter transpiles it to the target engine: type mapping, identifier quoting, `LIMIT` injection, and the read-only guarantee. Adding a database and supporting its SQL dialect are independent concerns.
 
-Dialects shipped today: **PostgreSQL**, **DuckDB**, **SQLite**, matching the [queryable connectors](/concepts/connectors#queryable-primary). An unrecognized dialect name that SQLGlot itself understands still works via a generic adapter; anything else falls back to the PostgreSQL adapter to preserve existing behavior.
+Dialects shipped today: **PostgreSQL**, **DuckDB**, **SQLite**, matching the [queryable connectors](/concepts/connectors#queryable-primary). An unrecognized dialect name that SQLGlot itself understands still works via a generic adapter. Anything else falls back to the PostgreSQL adapter to preserve existing behavior.
 
 ## Determinism & headless
 

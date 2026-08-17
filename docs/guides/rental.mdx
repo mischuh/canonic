@@ -3,7 +3,7 @@ title: "Guide: Vehicle Rental (SQLite)"
 description: "A SQLite-only project with cross-fact fanout and a NULL-handling guardrail."
 ---
 
-An end-to-end canonic project on a vehicle rental service: one SQLite connection, five dimensions, three fact tables, nine metric contracts (three canonical), and one enforced guardrail. No external database required; the entire dataset lives in a single `rental.db` file.
+An end-to-end canonic project on a vehicle rental service: one SQLite connection, five dimensions, three fact tables, nine metric contracts (three canonical), and one enforced guardrail. No external database required. The entire dataset lives in a single `rental.db` file.
 
 <Info>Full source: [`examples/rental/`](https://github.com/mischuh/canonic/tree/main/examples/rental)</Info>
 
@@ -51,7 +51,7 @@ canonic eval baseline \                    # (optional) grain-inference accuracy
 
 ## Metrics
 
-`contracts/metrics/` ships **9** metric contracts. Three are the canonical showcase bindings; the rest support the guardrail's caveats and other reporting cuts.
+`contracts/metrics/` ships **9** metric contracts. Three are the canonical showcase bindings. The rest support the guardrail's caveats and other reporting cuts.
 
 | Metric | Source · measure | Canonical for |
 | --- | --- | --- |
@@ -65,10 +65,10 @@ canonic eval baseline \                    # (optional) grain-inference accuracy
 
 ## Guardrail
 
-`contracts/guardrails/` ships **one** enforced guardrail — **`completed-rentals-only`**: `rentals.total_base_revenue` must never be summed without a `status = 'completed'` filter: active and cancelled rows have `NULL` in `total_amount`. Use `payments.total_paid` for financial reporting instead.
+`contracts/guardrails/` ships **one** enforced guardrail, **`completed-rentals-only`**: `rentals.total_base_revenue` must never be summed without a `status = 'completed'` filter: active and cancelled rows have `NULL` in `total_amount`. Use `payments.total_paid` for financial reporting instead.
 
 <Note>
-  **Cross-fact fanout** (documented in a knowledge caveat, not a guardrail; none of the four guardrail kinds cover "reject a join between two fanning fact tables", see [Contracts & guardrails](/concepts/contracts-and-guardrails#guardrails)): joining `damages` to `payments` in a single query fans out both facts. Always bridge each independently through `rentals`.
+  **Cross-fact fanout** (documented in a knowledge caveat, not a guardrail: none of the four guardrail kinds cover "reject a join between two fanning fact tables", see [Contracts & guardrails](/concepts/contracts-and-guardrails#guardrails)): joining `damages` to `payments` in a single query fans out both facts. Always bridge each independently through `rentals`.
 </Note>
 
 ## Files

@@ -9,15 +9,15 @@ description: "Every top-level field in the project config file, and what it gove
 
 | Field | Type | Default | Governs |
 | --- | --- | --- | --- |
-| `version` | `int` | n/a (required) | Config schema version; currently only `1` is recognized. |
+| `version` | `int` | n/a (required) | Config schema version. Currently only `1` is recognized. |
 | `project` | `ProjectConfig` | n/a (required) | Project `name` and optional `default_connection`. |
-| `connections` | `list[Connection]` | `[]` | Configured data sources; see [Connectors](/concepts/connectors). |
-| `llm` | `LLMConfig \| null` | `null` | LLM provider config; see [Configuring an LLM](/configuring-an-llm). |
+| `connections` | `list[Connection]` | `[]` | Configured data sources, see [Connectors](/concepts/connectors). |
+| `llm` | `LLMConfig \| null` | `null` | LLM provider config, see [Configuring an LLM](/configuring-an-llm). |
 | `embeddings` | `EmbeddingConfig` | `model: all-MiniLM-L6-v2` | Local embedding model for knowledge vector search. |
-| `telemetry` | `TelemetryConfig` | `enabled: false` | Opt-in telemetry; see [below](#telemetry) and [Instrumentation & evaluation](/concepts/instrumentation-and-eval#opt-in-telemetry). |
-| `reconcile` | `ReconcileConfig` | propose-only | Auto-apply policy for ingestion; see [Ingestion & reconciliation](/concepts/ingestion-and-reconciliation#propose-only-by-default). |
-| `feedback` | `FeedbackConfig` | see [below](#feedback) | Pattern-gate and trust-cap thresholds for the E11 feedback loop; see [Feedback loop (E11)](/concepts/ingestion-and-reconciliation#feedback-loop-e11). |
-| `runtime` | `RuntimeConfig` | `air_gapped: false` | Air-gapped enforcement; see [LLM & embeddings runtime](/concepts/llm-runtime#air-gapped-mode--enforced-not-advisory). |
+| `telemetry` | `TelemetryConfig` | `enabled: false` | Opt-in telemetry, see [below](#telemetry) and [Instrumentation & evaluation](/concepts/instrumentation-and-eval#opt-in-telemetry). |
+| `reconcile` | `ReconcileConfig` | propose-only | Auto-apply policy for ingestion, see [Ingestion & reconciliation](/concepts/ingestion-and-reconciliation#propose-only-by-default). |
+| `feedback` | `FeedbackConfig` | see [below](#feedback) | Pattern-gate and trust-cap thresholds for the E11 feedback loop, see [Feedback loop (E11)](/concepts/ingestion-and-reconciliation#feedback-loop-e11). |
+| `runtime` | `RuntimeConfig` | `air_gapped: false` | Air-gapped enforcement, see [LLM & embeddings runtime](/concepts/llm-runtime#air-gapped-mode--enforced-not-advisory). |
 | `logging` | `LoggingConfig` | `level: WARNING`, `format: text` | Log level, optional file, and text/json format. |
 | `mcp` | `McpConfig` | `auth: { tokens: [] }` | Bearer-token auth for the MCP daemon's `http` transport, see [below](#mcp). |
 
@@ -41,13 +41,13 @@ connections:
 | `params` | `dict[str, Any]` | `{}` | Connector-specific settings such as `host`, `port`, `database`, or `schema`. What's valid here depends entirely on `type`. |
 | `credentials_ref` | `str \| null` | `null` | Where to resolve this connection's secret from, never the secret itself. See below. |
 | `read_only_role` | `str \| null` | `null` | Reserved for a future read-only enforcement mode. Accepted and stored today but not yet consulted by any connector. |
-| `rls_enforced` | `bool` | `false` | Operator attestation that this connection's warehouse enforces row-level security independent of canonic (per-tenant credentials, or warehouse-native RLS). canonic cannot verify this claim, only trust it. Must be `true` for `run_sql` to be served on this connection once a [tenancy policy](/concepts/tenancy-and-access-control) is active — see [the `run_sql` gate](/concepts/tenancy-and-access-control#the-run_sql-gate). |
+| `rls_enforced` | `bool` | `false` | Operator attestation that this connection's warehouse enforces row-level security independent of canonic (per-tenant credentials, or warehouse-native RLS). canonic cannot verify this claim, only trust it. Must be `true` for `run_sql` to be served on this connection once a [tenancy policy](/concepts/tenancy-and-access-control) is active, see [the `run_sql` gate](/concepts/tenancy-and-access-control#the-run_sql-gate). |
 
 A connection is how canonic reaches an actual data source. `id` is the name every other file uses to point back at it, `type` picks which connector implementation handles it, and `params` carries whatever that connector needs to connect, host and port for a warehouse, a manifest path for dbt. `credentials_ref` keeps the secret itself out of `canonic.yaml` entirely, instead of a password you write a pointer to where the password actually lives.
 
-- `credentials_ref` (and `llm.api_key_ref`) must be a reference, one of `env:`, `keyring:`, or `file:`, never a literal secret; config validation rejects a literal outright.
+- `credentials_ref` (and `llm.api_key_ref`) must be a reference, one of `env:`, `keyring:`, or `file:`, never a literal secret. Config validation rejects a literal outright.
 - Postgres/Redshift connections additionally recognize `schema`/`schemas` (search path) and `tables` (glob patterns narrowing introspection), plus `fetch_column_stats: true` to merge zero-scan cardinality/null-ratio stats into the returned schema (a no-op on SQLite/DuckDB).
-- `dbt` connections recognize `manifest_path` (path to the compiled `manifest.json`, default `manifest.json`) and `target_connection` (the id of the physical, queryable connection whose tables this manifest describes — see [Connectors](/concepts/connectors#definition)). `target_connection` must name a connection actually declared in `connections[]`; an unknown id fails config validation at load time. Omitting it falls back to the dbt connection's own id.
+- `dbt` connections recognize `manifest_path` (path to the compiled `manifest.json`, default `manifest.json`) and `target_connection` (the id of the physical, queryable connection whose tables this manifest describes, see [Connectors](/concepts/connectors#definition)). `target_connection` must name a connection actually declared in `connections[]`. An unknown id fails config validation at load time. Omitting it falls back to the dbt connection's own id.
 
 ```yaml
   - id: jaffle_dbt
@@ -130,11 +130,11 @@ telemetry:
 | Field | Type | Default | Governs |
 | --- | --- | --- | --- |
 | `enabled` | `bool` | `false` | Opt-in flag. Forced to `false` under `runtime.air_gapped: true` (load-time rejection, not just a no-op). |
-| `endpoint` | `str \| null` | `null` | Destination URL for `canonic audit --telemetry-send`. Must start with `http://` or `https://` when set. No default — canonic never guesses a collector. |
-| `transport_acknowledged` | `bool` | `false` | Attestation that this project has reviewed the exact aggregate payload (`canonic audit --telemetry-preview`) before allowing a real send. canonic cannot verify that a review happened; this is a project-level policy decision recorded in `canonic.yaml`. |
+| `endpoint` | `str \| null` | `null` | Destination URL for `canonic audit --telemetry-send`. Must start with `http://` or `https://` when set. No default, canonic never guesses a collector. |
+| `transport_acknowledged` | `bool` | `false` | Attestation that this project has reviewed the exact aggregate payload (`canonic audit --telemetry-preview`) before allowing a real send. canonic cannot verify that a review happened. This is a project-level policy decision recorded in `canonic.yaml`. |
 | `auth_token_ref` | `str \| null` | `null` | Optional bearer token for `endpoint`, resolved the same way as `credentials_ref` (`env:`/`keyring:`/`file:`, never a literal). |
 
-`canonic audit --telemetry-send` only sends when **all** of `enabled`, `endpoint`, and `transport_acknowledged` are set, and `runtime.air_gapped` is `false`. Missing any one of them fails closed with a structured error (`telemetry_not_configured`) — nothing is ever sent implicitly. See [Instrumentation & evaluation](/concepts/instrumentation-and-eval#opt-in-telemetry) for the full payload shape and content-safety guarantees.
+`canonic audit --telemetry-send` only sends when **all** of `enabled`, `endpoint`, and `transport_acknowledged` are set, and `runtime.air_gapped` is `false`. Missing any one of them fails closed with a structured error (`telemetry_not_configured`). Nothing is ever sent implicitly. See [Instrumentation & evaluation](/concepts/instrumentation-and-eval#opt-in-telemetry) for the full payload shape and content-safety guarantees.
 
 ## `runtime`
 
@@ -149,7 +149,7 @@ runtime:
 | `air_gapped` | `bool` | `false` | Turns on the enforced privacy guarantee: every model endpoint must resolve locally or to an allowlisted range, and no context may leave the machine. This is checked at load time, not just documented behavior, so a misconfigured project refuses to start rather than silently phoning home. |
 | `allow_cidrs` | `list[str]` | `[]` | Additional private/LAN CIDR ranges to trust under `air_gapped`, for a setup where inference runs on a separate on-prem host rather than the local machine. Only consulted when `air_gapped` is `true`. By default, air-gapped mode trusts localhost only. |
 
-When `air_gapped: true`, load-time validation additionally rejects a public `llm.base_url`, `telemetry.enabled: true`, and any `credentials_ref`/`api_key_ref` using a non-local scheme. The check runs once, at config load, so there's no window where a project starts up in a state that could leak context off the machine. Telemetry has no allowlist path the way `llm.base_url` does via `allow_cidrs` — under `air_gapped`, it is hard off regardless of `telemetry.endpoint`/`transport_acknowledged`.
+When `air_gapped: true`, load-time validation additionally rejects a public `llm.base_url`, `telemetry.enabled: true`, and any `credentials_ref`/`api_key_ref` using a non-local scheme. The check runs once, at config load, so there's no window where a project starts up in a state that could leak context off the machine. Telemetry has no allowlist path the way `llm.base_url` does via `allow_cidrs`. Under `air_gapped`, it is hard off regardless of `telemetry.endpoint`/`transport_acknowledged`.
 
 ## `mcp`
 
@@ -163,7 +163,7 @@ mcp:
         token_ref: env:CANONIC_MCP_TOKEN_BOB
       - client_id: merchant-4711-agent
         token_ref: env:CANONIC_MCP_TOKEN_4711
-        claims: { merchant_id: '4711', roles: [merchant_viewer] }   # SPEC-E12 §7, tenancy/RBAC only
+        claims: { merchant_id: '4711', roles: [merchant_viewer] }   # tenancy/RBAC only
     oauth:
       mode: proxy   # proxy | jwt
       issuer_url: https://idp.example.com
@@ -172,7 +172,7 @@ mcp:
       scopes: [openid, profile, email]
       base_url: https://canonic.internal.example.com       # proxy mode only, the daemon's own public URL
       verify_id_token: false                                # proxy mode only, see below
-      claim_mapping:                                        # SPEC-E12 §7, tenancy/RBAC only
+      claim_mapping:                                        # tenancy/RBAC only
         merchant_id: https://example.com/merchant_id
         roles: roles
 ```
@@ -183,8 +183,8 @@ mcp:
 | `auth.tokens[].client_id` | `str` | n/a (required) | Name attributed to that token's caller in `.canonic/events.jsonl`, so usage can be traced per user rather than per daemon instance. |
 | `auth.tokens[].token_ref` | `str` | n/a (required) | Reference to the token's value, never the token itself, resolved the same way as `credentials_ref`. |
 | `auth.tokens[].claims` | `dict[str, Any]` | `{}` | Claims carried by this static token (e.g. `{merchant_id: "4711", roles: ["merchant_viewer"]}`), keyed by the raw claim name a [tenancy/role policy](/concepts/tenancy-and-access-control)'s `claim` field names. Static tokens carry claims inline since there's no IdP to ask. |
-| `auth.oauth` | `McpOAuthConfig \| null` | `null` | OAuth 2.1 auth for the MCP daemon's `http` transport, delegated to `fastmcp`. Independently optional from `auth.tokens` — both configured is a supported state, not just tolerated. |
-| `auth.oauth.mode` | `"proxy" \| "jwt"` | n/a (required) | `proxy`: presents a DCR-compliant OAuth server to MCP clients and relays the login to the upstream IdP (Authorization Code + PKCE) — the mode most SSO deployments use. `jwt`: the IdP hands the client a JWT directly and the daemon only verifies its signature against the IdP's JWKS, no proxy state. |
+| `auth.oauth` | `McpOAuthConfig \| null` | `null` | OAuth 2.1 auth for the MCP daemon's `http` transport, delegated to `fastmcp`. Independently optional from `auth.tokens`. Both configured is a supported state, not just tolerated. |
+| `auth.oauth.mode` | `"proxy" \| "jwt"` | n/a (required) | `proxy`: presents a DCR-compliant OAuth server to MCP clients and relays the login to the upstream IdP (Authorization Code + PKCE), the mode most SSO deployments use. `jwt`: the IdP hands the client a JWT directly and the daemon only verifies its signature against the IdP's JWKS, no proxy state. |
 | `auth.oauth.issuer_url` | `str` | n/a (required) | The IdP's base URL. In `proxy` mode, `mode: proxy` discovers endpoints from `issuer_url + /.well-known/openid-configuration`. |
 | `auth.oauth.client_id` | `str \| null` | `null` | Required in `proxy` mode: the client registered with the upstream IdP. Not used in `jwt` mode. |
 | `auth.oauth.client_secret_ref` | `str \| null` | `null` | `proxy` mode only. Reference to the upstream client's secret, resolved the same way as `credentials_ref`. Rejected in `jwt` mode (no proxy to authenticate as). |
@@ -195,10 +195,10 @@ mcp:
 | `auth.oauth.verify_id_token` | `bool` | `false` | `proxy` mode only. Verifies the upstream OIDC *id_token* instead of the *access_token*. Rejected in `jwt` mode. See below. |
 | `auth.oauth.claim_mapping` | `dict[str, str]` | `{}` | Maps a [tenancy/role policy](/concepts/tenancy-and-access-control)'s raw `claim` name (e.g. `merchant_id`) to the namespaced claim key the IdP actually issues (e.g. `https://example.com/merchant_id`), which most IdPs require for custom claims. A `claim` absent from this mapping is looked up under its own name unchanged. |
 
-This block only matters for `canonic mcp start --transport http`. The default `stdio` transport is a local subprocess and needs no auth, process-level trust is enough. `http` transport is network-reachable, though, so it refuses to start unless at least one mechanism resolves: a token here (or via the `--token-ref` CLI override) and/or `auth.oauth`. When both are configured, a request is checked against the static token map first (no network call), falling through to OAuth verification if no static token matches — the two stay independently revocable, a token entry by editing `canonic.yaml`, an OAuth-issued token at the IdP. `canonic mcp status` reports which mechanism(s) are active on a running daemon. See [Connecting your agent](/mcp-integration/connecting-your-agent#remote-enterprise-deployment) for the full remote-deployment walkthrough.
+This block only matters for `canonic mcp start --transport http`. The default `stdio` transport is a local subprocess and needs no auth, process-level trust is enough. `http` transport is network-reachable, though, so it refuses to start unless at least one mechanism resolves: a token here (or via the `--token-ref` CLI override) and/or `auth.oauth`. When both are configured, a request is checked against the static token map first (no network call), falling through to OAuth verification if no static token matches: the two stay independently revocable, a token entry by editing `canonic.yaml`, an OAuth-issued token at the IdP. `canonic mcp status` reports which mechanism(s) are active on a running daemon. See [Connecting your agent](/mcp-integration/connecting-your-agent#remote-enterprise-deployment) for the full remote-deployment walkthrough.
 
 <Note>
-`auth.oauth.verify_id_token` matters more than its default suggests. In `proxy` mode, `OIDCProxy` verifies the upstream IdP's *access token* by default — but many IdPs (Google, GitHub, some Okta setups) issue that as an opaque, non-JWT string, which fails verification outright rather than just producing a poor client identity. Setting `verify_id_token: true` verifies the *id_token* instead, which the OIDC spec guarantees is always a standard JWT carrying `sub`/`email` claims. This also controls what ends up as `client_id` in `.canonic/events.jsonl`: with it off, `client_id` comes from the access token's `client_id`/`azp`/`sub` claim (often an opaque subject id); with it on, from the id_token's, which is far more likely to be a meaningful identity like an email address.
+`auth.oauth.verify_id_token` matters more than its default suggests. In `proxy` mode, `OIDCProxy` verifies the upstream IdP's *access token* by default, but many IdPs (Google, GitHub, some Okta setups) issue that as an opaque, non-JWT string, which fails verification outright rather than just producing a poor client identity. Setting `verify_id_token: true` verifies the *id_token* instead, which the OIDC spec guarantees is always a standard JWT carrying `sub`/`email` claims. This also controls what ends up as `client_id` in `.canonic/events.jsonl`: with it off, `client_id` comes from the access token's `client_id`/`azp`/`sub` claim (often an opaque subject id). With it on, from the id_token's, which is far more likely to be a meaningful identity like an email address.
 </Note>
 
 ## Reserved directories
@@ -210,9 +210,9 @@ Independent of `canonic.yaml` fields, every project scaffolds four committed con
 | `semantics/` | Hand-drafted-then-reviewed relations: grain, columns, measures, dimensions, joins. | [Semantic source schema](/reference/semantic-schema) |
 | `knowledge/` | Markdown pages with YAML frontmatter carrying business meaning. | [Knowledge page schema](/reference/knowledge-schema) |
 | `contracts/` | Human-owned metric bindings, guardrails, finality rules, and assertions. | [Contract schema](/reference/contract-schema) |
-| `raw-sources/` | System-generated, committed audit trail — never hand-edited. | See below. |
+| `raw-sources/` | System-generated, committed audit trail, never hand-edited. | See below. |
 
-`contracts/policies/` (`tenancy.yaml` / `roles.yaml`) is optional — its presence is the feature switch for [tenancy & access control](/concepts/tenancy-and-access-control); a project without it behaves exactly as it did before that layer existed.
+`contracts/policies/` (`tenancy.yaml` / `roles.yaml`) is optional. Its presence is the feature switch for [tenancy & access control](/concepts/tenancy-and-access-control), and a project without it behaves exactly as it did before that layer existed.
 
 ### `raw-sources/<connection-id>/evidence.jsonl`
 
@@ -223,8 +223,8 @@ Not a hand-authored config file: it's a deterministically-sorted, one-JSON-objec
 | `source` | `str` | The connection id this evidence came from. |
 | `kind` | `str` (open set) | `relation_schema` \| `observed_query` \| `definition` \| `doc_evidence` \| `usage_evidence` \| `answer_outcome`, or an unrecognized future kind (accepted, just not dispatched). |
 | `acquisition_tier` | `AcquisitionTier` | Curation rank of the evidence, e.g. `live`, `modeling`, `query_history`, `declarative`, `sample`, `hand_authored`. |
-| `payload` | `dict[str, Any]` | Shape depends on `kind` — e.g. a `RelationSchema` for `relation_schema`. |
+| `payload` | `dict[str, Any]` | Shape depends on `kind`, e.g. a `RelationSchema` for `relation_schema`. |
 | `source_fingerprint` | `str` | sha256 identifying the exact evidence content, for dedup and drift detection. |
 | `observed_at` | `datetime` | When the evidence was collected. |
 
-This is what [`canonic ingest`](/cli-reference/ingest) reads to draft proposals against `semantics/`; you'd only ever read it, not write it.
+This is what [`canonic ingest`](/cli-reference/ingest) reads to draft proposals against `semantics/`. You'd only ever read it, not write it.

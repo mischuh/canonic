@@ -61,11 +61,11 @@ The `jaffle_dbt` connection parses `manifest.json` (schema v11, dbt 1.7, MetricF
 - **2 semantic models** → entity (grain), foreign-join paths, named measure and dimension definitions.
 - **3 metrics** → `revenue`, `order_count`, `units_sold`.
 
-Because MetricFlow's semantic models name measures explicitly, the resulting semantic sources in `semantics/jaffle_duckdb/` carry business-meaningful measure names (`revenue`, `order_count`) rather than generic inferred ones (`total_amount`, `row_count`); the clearest illustration in these examples of why [modeling-tier evidence outranks raw introspection](/concepts/connectors#schema-acquisition-ladder).
+Because MetricFlow's semantic models name measures explicitly, the resulting semantic sources in `semantics/jaffle_duckdb/` carry business-meaningful measure names (`revenue`, `order_count`) rather than generic inferred ones (`total_amount`, `row_count`), the clearest illustration in these examples of why [modeling-tier evidence outranks raw introspection](/concepts/connectors#schema-acquisition-ladder).
 
 ## Metrics
 
-`contracts/metrics/` ships **8** metric contracts. Three are the canonical showcase bindings straight from the dbt manifest's MetricFlow metrics; the rest are supporting ratio and count metrics the bootstrap also drafted from the same manifest.
+`contracts/metrics/` ships **8** metric contracts. Three are the canonical showcase bindings straight from the dbt manifest's MetricFlow metrics. The rest are supporting ratio and count metrics the bootstrap also drafted from the same manifest.
 
 | Metric | Source · measure | Notes |
 | --- | --- | --- |

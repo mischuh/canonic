@@ -46,7 +46,7 @@ If canonic isn't installed globally (see [Installation](/installation)), point t
 
 Pin a version (`"args": ["canonic==0.5.1", "mcp", "start", ...]`) if you want reproducible daemon versions instead of always resolving the latest release from PyPI.
 
-See your client's own docs for the exact config file location; Claude Code, Cursor, and Codex each load standard MCP configuration.
+See your client's own docs for the exact config file location. Claude Code, Cursor, and Codex each load standard MCP configuration.
 
 If you started the daemon with `--transport http` (see [`canonic mcp`](/cli-reference/mcp)), point your client at the HTTP endpoint instead of spawning a process. With a bearer token configured (`mcp.auth.tokens`):
 
@@ -63,13 +63,13 @@ If you started the daemon with `--transport http` (see [`canonic mcp`](/cli-refe
 }
 ```
 
-Adjust the host/port to match the `--host`/`--port` flags used to start the daemon. The token must match one resolved from `mcp.auth.tokens`/`--token-ref` on the daemon side. With OAuth configured (`mcp.auth.oauth`) instead, an MCP client that speaks OAuth 2.1 discovers the daemon's auth requirements itself and prompts for login (`proxy` mode) or expects you to supply an IdP-issued JWT (`jwt` mode) — no `Authorization` header to hand-configure, though the exact flow depends on your client's own OAuth support. See the [remote/enterprise deployment](#remote-enterprise-deployment) section below for both.
+Adjust the host/port to match the `--host`/`--port` flags used to start the daemon. The token must match one resolved from `mcp.auth.tokens`/`--token-ref` on the daemon side. With OAuth configured (`mcp.auth.oauth`) instead, an MCP client that speaks OAuth 2.1 discovers the daemon's auth requirements itself and prompts for login (`proxy` mode) or expects you to supply an IdP-issued JWT (`jwt` mode): no `Authorization` header to hand-configure, though the exact flow depends on your client's own OAuth support. See the [remote/enterprise deployment](#remote-enterprise-deployment) section below for both.
 
 ### Remote/enterprise deployment
 
-`--transport http` is meant for a daemon running centrally (e.g. in a data center) with clients connecting from local machines over the network, not just local loopback. Local binding is not a security boundary once the daemon is network-reachable, so `--transport http` refuses to start without at least one auth mechanism configured — a bearer token, OAuth 2.1, or both (they compose: a static token for a CI pipeline and OAuth for interactive human users on the same daemon is a supported setup, not just tolerated). This is also why `canonic mcp start --tenant <id>` (the local-development principal override, see [Tenancy & access control](/concepts/tenancy-and-access-control#--tenant-cli-override)) is refused outright on `--transport http`: each HTTP request already derives its own principal from its verified token, so a single flag-supplied tenant applying to every caller would undo per-request isolation.
+`--transport http` is meant for a daemon running centrally (e.g. in a data center) with clients connecting from local machines over the network, not just local loopback. Local binding is not a security boundary once the daemon is network-reachable, so `--transport http` refuses to start without at least one auth mechanism configured: a bearer token, OAuth 2.1, or both (they compose: a static token for a CI pipeline and OAuth for interactive human users on the same daemon is a supported setup, not just tolerated). This is also why `canonic mcp start --tenant <id>` (the local-development principal override, see [Tenancy & access control](/concepts/tenancy-and-access-control#--tenant-cli-override)) is refused outright on `--transport http`: each HTTP request already derives its own principal from its verified token, so a single flag-supplied tenant applying to every caller would undo per-request isolation.
 
-**Bearer tokens** — one per client, revoked by editing `canonic.yaml`:
+**Bearer tokens**: one per client, revoked by editing `canonic.yaml`:
 
 ```yaml
 # canonic.yaml
@@ -82,7 +82,7 @@ mcp:
         token_ref: env:CANONIC_MCP_TOKEN_BOB
 ```
 
-Each client authenticates with its own token (`Authorization: Bearer <token>`), and the resolved `client_id` is attributed on every `query`/`run_sql` answer event in `.canonic/events.jsonl` — so usage is traceable per user, not just per daemon instance.
+Each client authenticates with its own token (`Authorization: Bearer <token>`), and the resolved `client_id` is attributed on every `query`/`run_sql` answer event in `.canonic/events.jsonl`, so usage is traceable per user, not just per daemon instance.
 
 ### Binding tenant/role claims to a token
 
@@ -105,7 +105,7 @@ mcp:
           roles: [merchant_viewer]
 ```
 
-Each of these two tokens now resolves to a distinct `Principal` — same daemon, same warehouse, isolated rows — with every compiled query for `merchant-4711-agent` carrying `orders.merchant_id = '4711'` and nothing else. With OAuth instead of static tokens, the claims arrive in the verified JWT itself; use `mcp.auth.oauth.claim_mapping` to rename a namespaced IdP claim key (e.g. `https://example.com/merchant_id`) to the policy's own `claim` name:
+Each of these two tokens now resolves to a distinct `Principal` (same daemon, same warehouse, isolated rows) with every compiled query for `merchant-4711-agent` carrying `orders.merchant_id = '4711'` and nothing else. With OAuth instead of static tokens, the claims arrive in the verified JWT itself. Use `mcp.auth.oauth.claim_mapping` to rename a namespaced IdP claim key (e.g. `https://example.com/merchant_id`) to the policy's own `claim` name:
 
 ```yaml
 mcp:
@@ -120,7 +120,7 @@ mcp:
 
 A `claim` absent from `claim_mapping` is looked up under its own name unchanged. See [Tenancy & access control](/concepts/tenancy-and-access-control#principal-binding) for how the resulting `Principal` flows into the compiler, and [config schema](/reference/config-schema#mcp) for the full field list.
 
-**OAuth 2.1** — for SSO-integrated organizations that want per-user identity tied to their own IdP and centralized revocation instead of a shared secret to distribute and rotate:
+**OAuth 2.1**: for SSO-integrated organizations that want per-user identity tied to their own IdP and centralized revocation instead of a shared secret to distribute and rotate:
 
 ```yaml
 # canonic.yaml
@@ -135,21 +135,21 @@ mcp:
       base_url: https://canonic.internal.example.com
 ```
 
-`mode: proxy` presents a DCR-compliant OAuth server to MCP clients and relays the login to your IdP (Authorization Code + PKCE) — the mode most deployments use, since most enterprise IdPs don't support MCP's Dynamic Client Registration natively. `mode: jwt` is simpler: the IdP hands the client a JWT directly and the daemon only verifies its signature against the IdP's published JWKS, no proxy or redirect handling. Either way, the resolved `client_id` is attributed on every answer event the same way a token's `client_id` is. See the [config schema reference](/reference/config-schema#mcp) for the full field list.
+`mode: proxy` presents a DCR-compliant OAuth server to MCP clients and relays the login to your IdP (Authorization Code + PKCE), the mode most deployments use, since most enterprise IdPs don't support MCP's Dynamic Client Registration natively. `mode: jwt` is simpler: the IdP hands the client a JWT directly and the daemon only verifies its signature against the IdP's published JWKS, no proxy or redirect handling. Either way, the resolved `client_id` is attributed on every answer event the same way a token's `client_id` is. See the [config schema reference](/reference/config-schema#mcp) for the full field list.
 
 `canonic mcp status` reports which mechanism(s) are active on a running daemon (e.g. `token, oauth-proxy`), useful for confirming a deployment matches its intended config. TLS termination is expected to happen at a reverse proxy/ingress in front of the daemon, not in the daemon itself.
 
 <Warning>
-In `proxy` mode, check whether your IdP issues opaque (non-JWT) access tokens — Google and GitHub both do, and some Okta setups too. `OIDCProxy` verifies the upstream access token by default (`verify_id_token: false`), and an opaque one fails that outright. Set `verify_id_token: true` to verify the OIDC id_token instead, which is always a standard JWT. This also decides what `client_id` looks like in `.canonic/events.jsonl`: the access token's `client_id`/`azp`/`sub` claim by default, often an opaque subject id, versus the id_token's — which reliably carries `sub`/`email` and is what you want if per-user attribution in logs is the point of switching to OAuth in the first place.
+In `proxy` mode, check whether your IdP issues opaque (non-JWT) access tokens: Google and GitHub both do, and some Okta setups too. `OIDCProxy` verifies the upstream access token by default (`verify_id_token: false`), and an opaque one fails that outright. Set `verify_id_token: true` to verify the OIDC id_token instead, which is always a standard JWT. This also decides what `client_id` looks like in `.canonic/events.jsonl`: the access token's `client_id`/`azp`/`sub` claim by default, often an opaque subject id, versus the id_token's, which reliably carries `sub`/`email` and is what you want if per-user attribution in logs is the point of switching to OAuth in the first place.
 </Warning>
 
 <Note>
-In `proxy` mode, the daemon keeps its OAuth client registrations and signing key in memory by default. Restarting the daemon (`canonic mcp stop && canonic mcp start`) drops any Dynamic Client Registration state and invalidates previously minted tokens — clients transparently re-register and re-authenticate, but an in-flight session is disrupted. `jwt` mode has no such state; it only verifies tokens against the IdP's JWKS.
+In `proxy` mode, the daemon keeps its OAuth client registrations and signing key in memory by default. Restarting the daemon (`canonic mcp stop && canonic mcp start`) drops any Dynamic Client Registration state and invalidates previously minted tokens. Clients transparently re-register and re-authenticate, but an in-flight session is disrupted. `jwt` mode has no such state: it only verifies tokens against the IdP's JWKS.
 </Note>
 
 ### Environment variables for credentials
 
-If a connection's `credentials_ref` points at `env:SOME_VAR` (e.g. a database password), that variable must be readable by the spawned `canonic` process. GUI-launched MCP clients (Claude Desktop, Cursor, etc.) start the process with a minimal environment; they do **not** source your shell profile (`~/.zshrc`, `~/.bash_profile`), so an `export` that works in your terminal will not reach the daemon. Pass the variable explicitly via the config's `env` field instead:
+If a connection's `credentials_ref` points at `env:SOME_VAR` (e.g. a database password), that variable must be readable by the spawned `canonic` process. GUI-launched MCP clients (Claude Desktop, Cursor, etc.) start the process with a minimal environment. They do **not** source your shell profile (`~/.zshrc`, `~/.bash_profile`), so an `export` that works in your terminal will not reach the daemon. Pass the variable explicitly via the config's `env` field instead:
 
 ```json
 {
@@ -165,11 +165,11 @@ If a connection's `credentials_ref` points at `env:SOME_VAR` (e.g. a database pa
 }
 ```
 
-A missing or empty variable surfaces as an `internal_error` at query time, not at startup; if you see one, check the connection's `credentials_ref` in `canonic.yaml` and confirm the named variable is set in the MCP config's `env` block.
+A missing or empty variable surfaces as an `internal_error` at query time, not at startup. If you see one, check the connection's `credentials_ref` in `canonic.yaml` and confirm the named variable is set in the MCP config's `env` block.
 
 ### Follow-up suggestions
 
-Add `--suggestions` to `mcp start` to have `query` responses include a `metadata.related` field; unused dimensions on the resolved metric and sibling metrics on the same source, so the agent can see what else is queryable without an extra `describe_metric` round trip. Off by default; descriptive only (no ranking or recommendation), same additive pattern as `guardrails_fired`/`freshness`.
+Add `--suggestions` to `mcp start` to have `query` responses include a `metadata.related` field: unused dimensions on the resolved metric and sibling metrics on the same source, so the agent can see what else is queryable without an extra `describe_metric` round trip. Off by default, descriptive only (no ranking or recommendation), same additive pattern as `guardrails_fired`/`freshness`.
 
 ```json
 {
@@ -186,4 +186,4 @@ Add `--suggestions` to `mcp start` to have `query` responses include a `metadata
 
 See [Tools reference](/mcp-integration/tools-reference) for the full list and payload shapes.
 
-Every answer-producing tool returns the **metadata band** alongside the result; resolved definition, guardrails fired, freshness, final/provisional; so the agent can caveat honestly. On ambiguity or a blocked guardrail, the tool returns the candidates or the rationale instead of a guess, and the agent is expected to relay that rather than fabricate an answer.
+Every answer-producing tool returns the **metadata band** alongside the result (resolved definition, guardrails fired, freshness, final/provisional), so the agent can caveat honestly. On ambiguity or a blocked guardrail, the tool returns the candidates or the rationale instead of a guess, and the agent is expected to relay that rather than fabricate an answer.

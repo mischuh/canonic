@@ -14,9 +14,9 @@ Contracts are split across four directories, each validated against its own Pyda
 | `contracts/policies/tenancy.yaml` | `TenancyPolicy` | `load_tenancy_policy` |
 | `contracts/policies/roles.yaml` | `RolePolicy` | `load_role_policy` |
 
-A finality rule is filename-discriminated from a guardrail — both live under `contracts/guardrails/`, but only files named `finality-*.yaml` load as `FinalityRule`; everything else in that directory loads as `Guardrail`.
+A finality rule is filename-discriminated from a guardrail: both live under `contracts/guardrails/`, but only files named `finality-*.yaml` load as `FinalityRule`. Everything else in that directory loads as `Guardrail`.
 
-## `contracts/metrics/*.yaml` — `MetricBinding`
+## `contracts/metrics/*.yaml`: `MetricBinding`
 
 ```yaml
 metric: revenue
@@ -34,7 +34,7 @@ status: active
 | --- | --- | --- | --- |
 | `metric` | `str` | n/a (required) | The logical metric name the binding resolves. |
 | `owner` | `str \| null` | `null` | Team/person accountable for the definition. |
-| `canonical` | `CanonicalRef` | n/a (required) | The compilation strategy and its parameters; see below. |
+| `canonical` | `CanonicalRef` | n/a (required) | The compilation strategy and its parameters, see below. |
 | `provenance` | `Provenance` | `human_curated` | `board_approved` \| `human_curated` \| `inferred`. |
 | `label` | `str \| null` | `null` | Human-readable display name. |
 | `aliases` | `list[str]` | `[]` | Alternate names resolving to this binding (must not duplicate `metric` itself). |
@@ -46,7 +46,7 @@ A metric binding is what turns a name like `revenue` into something the compiler
 
 **Ambiguity rule:** if a requested name matches zero or more than one active binding, the compiler returns a structured `AMBIGUOUS`/`UNRESOLVED` error rather than guessing.
 
-### `canonical` (`CanonicalRef`) — one shape per `kind`
+### `canonical` (`CanonicalRef`): one shape per `kind`
 
 `kind` selects a compilation strategy, and each kind needs a different subset of the fields below. Missing a required field for the chosen `kind` raises a located error at load time rather than failing later at query time. Most metrics are `single`, a direct pointer at one measure on one source. The other kinds exist for shapes a plain source-and-measure pair can't express on its own: `ratio` and `weighted_avg` combine two other metrics after they're each aggregated independently, `semi_additive` handles point-in-time values like balances that can't just be summed across every dimension, `distinct_count` and `percentile` recompute their value at whatever grain the query asks for instead of pre-aggregating, and `opaque` is the escape hatch for a measure that's only trustworthy at the exact grain it was computed at.
 
@@ -58,7 +58,7 @@ A metric binding is what turns a name like `revenue` into something the compiler
 | `semi_additive` | `source`, `measure`, `collapse_dimension`, `collapse_agg` | Sum over every dimension except `collapse_dimension`, which collapses via `collapse_agg`. |
 | `distinct_count` | `source`, `distinct_on` (column name) | Recompute `count(distinct …)` at the requested grain. |
 | `percentile` | `source`, `column`, `quantile` ∈ (0, 1) | Recompute the quantile at the requested grain from base rows. |
-| `opaque` | `source`, `measure`, `native_grain` (non-empty list of dimension columns) | Serve only at its declared native grain; any other grain returns `UNSUPPORTED_MEASURE`. |
+| `opaque` | `source`, `measure`, `native_grain` (non-empty list of dimension columns) | Serve only at its declared native grain. Any other grain returns `UNSUPPORTED_MEASURE`. |
 
 Full field list on `CanonicalRef`:
 
@@ -94,7 +94,7 @@ Full field list on `CanonicalRef`:
 | `origin` | `str` | n/a (required) | Typed discriminator: `observed_query`, `assertion:<id>`, or `usage_evidence:<id>`. |
 | `frequency` | `int \| null` | `null` | Observed count, when available (omitted for assertion-sourced examples). |
 
-## `contracts/guardrails/*.yaml` — `Guardrail`
+## `contracts/guardrails/*.yaml`: `Guardrail`
 
 ```yaml
 id: revenue-excludes-refunds
@@ -108,27 +108,27 @@ rationale: "Refunds are reversals, not revenue."
 | Field | Type | Default | Governs |
 | --- | --- | --- | --- |
 | `id` | `str` | n/a (required) | Guardrail identifier. |
-| `applies_to` | `AppliesTo` | n/a (required) | Target: `{ source, measure }` **or** `{ metric }` — exactly one shape, never both or neither. |
-| `kind` | `GuardrailKind` | n/a (required) | `mandatory_filter` \| `required_dimension` \| `restrict_source` \| `min_trust`; see below. |
+| `applies_to` | `AppliesTo` | n/a (required) | Target: `{ source, measure }` **or** `{ metric }`, exactly one shape, never both or neither. |
+| `kind` | `GuardrailKind` | n/a (required) | `mandatory_filter` \| `required_dimension` \| `restrict_source` \| `min_trust`, see below. |
 | `filter` | `str \| null` | `null` | Required (non-empty) when `kind: mandatory_filter`. |
-| `restrict_to` | `RestrictTo \| null` | `null` | Required when `kind: restrict_source`; `{ role: "final" \| "provisional" }`. |
+| `restrict_to` | `RestrictTo \| null` | `null` | Required when `kind: restrict_source`: `{ role: "final" \| "provisional" }`. |
 | `level` | `str \| null` | `null` | Required when `kind: min_trust`, one of `caution` \| `provisional` \| `trusted`, the minimum trust tier the query must meet. See [Trust score](/concepts/contracts-and-guardrails#trust-score). |
 | `dimension` | `str \| null` | `null` | Required (non-empty) when `kind: required_dimension`, the dimension name the query must group by or filter on. |
-| `context` | `str \| null` | `null` | Required (non-empty) when `kind: restrict_source` or `kind: min_trust`; optional for `required_dimension` (omit to apply in every context, including no context at all). The named context the restriction applies in (e.g. `board_reporting`). |
-| `severity` | `Severity` | `error` | `error` blocks the query; `warn` lets it through with a `warnings[]` entry instead. See below for how this applies per `kind`. |
+| `context` | `str \| null` | `null` | Required (non-empty) when `kind: restrict_source` or `kind: min_trust`. Optional for `required_dimension` (omit to apply in every context, including no context at all). The named context the restriction applies in (e.g. `board_reporting`). |
+| `severity` | `Severity` | `error` | `error` blocks the query. `warn` lets it through with a `warnings[]` entry instead. See below for how this applies per `kind`. |
 | `rationale` | `str` | n/a (required) | Why the rule exists, surfaced to the caller. |
 | `phase` | `str \| null` | `null` | Optional compiler-pipeline phase hint. |
 
 | `kind` | Behavior | Status |
 | --- | --- | --- |
-| `mandatory_filter` | The predicate is always AND-ed into the compiled `WHERE`, regardless of `severity`; `severity: warn` additionally adds a `warnings[]` entry. | Enforced |
+| `mandatory_filter` | The predicate is always AND-ed into the compiled `WHERE`, regardless of `severity`. `severity: warn` additionally adds a `warnings[]` entry. | Enforced |
 | `restrict_source` | In a given `context`, only the source matching `restrict_to.role` is permitted. | Enforced |
 | `required_dimension` | The query must group by or filter on `dimension` (by its canonical name, a qualified `alias.dim` form, or a declared alias) or be rejected. | Enforced |
 | `min_trust` | In a given `context`, blocks (`severity: error`) or warns if the computed trust tier is below `level`. | Enforced |
 
-A guardrail attaches a rule to either a specific `(source, measure)` pair or a whole `metric`, chosen by which shape you fill in under `applies_to`. Which fields besides `kind` are required depends entirely on that `kind`: a `mandatory_filter` needs `filter`, a `restrict_source` needs `restrict_to` and `context`, a `min_trust` needs `level` and `context`, a `required_dimension` needs `dimension`. `severity` decides how hard the rule bites: for `restrict_source`, `min_trust`, and `required_dimension`, `error` stops the query outright while `warn` lets it through with a `warnings[]` entry instead; `mandatory_filter` has no "block" action to gate; its predicate is always injected; `severity: warn` there only adds the `warnings[]` entry. `rationale` is what actually gets shown to whoever hit the block (or the warning), so it's worth writing for a person, not just as a code comment.
+A guardrail attaches a rule to either a specific `(source, measure)` pair or a whole `metric`, chosen by which shape you fill in under `applies_to`. Which fields besides `kind` are required depends entirely on that `kind`: a `mandatory_filter` needs `filter`, a `restrict_source` needs `restrict_to` and `context`, a `min_trust` needs `level` and `context`, a `required_dimension` needs `dimension`. `severity` decides how hard the rule bites: for `restrict_source`, `min_trust`, and `required_dimension`, `error` stops the query outright while `warn` lets it through with a `warnings[]` entry instead. `mandatory_filter` has no "block" action to gate, its predicate is always injected, and `severity: warn` there only adds the `warnings[]` entry. `rationale` is what actually gets shown to whoever hit the block (or the warning), so it's worth writing for a person, not just as a code comment.
 
-## `contracts/guardrails/finality-*.yaml` — `FinalityRule`
+## `contracts/guardrails/finality-*.yaml`: `FinalityRule`
 
 ```yaml
 metric: revenue
@@ -143,7 +143,7 @@ board_only_final: true
 | Field | Type | Default | Governs |
 | --- | --- | --- | --- |
 | `metric` | `str` | n/a (required) | The metric these realizations apply to. |
-| `realizations` | `list[Realization]` | `[]` | Physical sources along the freshness axis; see below. |
+| `realizations` | `list[Realization]` | `[]` | Physical sources along the freshness axis, see below. |
 | `coalescing` | `str \| null` | `null` | Expression selecting which realization backs a given time window. |
 | `result_flag` | `str \| null` | `null` | How the `final`/`provisional` tag is attached to results (e.g. `per_row`). |
 | `board_only_final` | `bool` | `false` | Pairs with a `restrict_source` guardrail so a restricted context sees only the `final` source. |
@@ -159,7 +159,7 @@ board_only_final: true
 
 A finality rule exists for a metric that can be served from more than one physical realization of the same data, typically a slower, fully-reconciled table and a faster, real-time one. `realizations` lists each candidate source along with its `role`, `final` or `provisional`, and `coalescing` is the expression that decides which realization actually backs a given time window in the result. `board_only_final` is the piece that ties this to a guardrail: pair it with a `restrict_source` guardrail so a sensitive context (board reporting, say) only ever sees the `final` realization, never the faster but not-yet-settled one.
 
-## `contracts/assertions/*.yaml` — `Assertion`
+## `contracts/assertions/*.yaml`: `Assertion`
 
 ```yaml
 id: revenue-2025-q1
@@ -172,7 +172,7 @@ source_of_truth: "Finance close, FY25 Q1"
 | --- | --- | --- | --- |
 | `id` | `str` | n/a (required) | Assertion identifier. |
 | `query` | `dict[str, Any]` | n/a (required) | A semantic query (`metrics`, `dimensions`, `filters`) run through the compiler. |
-| `expect` | `AssertionExpect` | `{}` | Expected result; see below. |
+| `expect` | `AssertionExpect` | `{}` | Expected result, see below. |
 | `source_of_truth` | `str \| null` | `null` | Where the expected value came from (e.g. a finance close). |
 
 ### `expect` (`AssertionExpect`)
@@ -181,15 +181,15 @@ source_of_truth: "Finance close, FY25 Q1"
 | --- | --- | --- | --- |
 | `rows` | `int \| null` | `null` | Expected row count. |
 | `values` | `dict[str, Any]` | `{}` | Expected value per output column. |
-| `tolerance` | `float \| null` | `null` | Relative tolerance for numeric comparison (e.g. `0.01` = 1%); `null` means exact match. |
+| `tolerance` | `float \| null` | `null` | Relative tolerance for numeric comparison (e.g. `0.01` = 1%). `null` means exact match. |
 
 An assertion is a known-good query paired with the answer it should produce, usually sourced from a finance close or another trusted report. `query` is run through the exact same compiler path a real caller would hit, so an assertion tests the whole stack, not just the metric definition in isolation. `source_of_truth` matters more than it looks: it's the thing that lets a reviewer trust the expected value in the first place, an assertion with no traceable origin is just a number someone typed in.
 
-[`canonic assert`](/cli-reference/query-sql-assert) runs every assertion through the compiler and gates on the result; `canonic query --harness` runs matching assertions inline against a single query.
+[`canonic assert`](/cli-reference/query-sql-assert) runs every assertion through the compiler and gates on the result. `canonic query --harness` runs matching assertions inline against a single query.
 
-## `contracts/policies/tenancy.yaml` — `TenancyPolicy`
+## `contracts/policies/tenancy.yaml`: `TenancyPolicy`
 
-See [Tenancy & access control](/concepts/tenancy-and-access-control) for the concepts behind this file. At most one per project; its presence is the feature switch for row-level tenant isolation.
+See [Tenancy & access control](/concepts/tenancy-and-access-control) for the concepts behind this file. At most one per project. Its presence is the feature switch for row-level tenant isolation.
 
 ```yaml
 schema: tenancy/v1
@@ -211,8 +211,8 @@ undeclared_source: deny
 | `schema` | `Literal["tenancy/v1"]` | n/a (required) | Schema discriminator. |
 | `claim` | `str` | n/a (required) | The verified-token claim carrying the tenant identity. |
 | `on_missing_principal` | `deny \| allow_unscoped` | `deny` | Behavior when tenancy is active but the request carries no resolvable tenant. |
-| `scoped_sources` | `list[ScopedSource]` | `[]` | Sources tenant-scoped on a named column; see below. |
-| `shared_sources` | `list[str]` | `[]` | Source names explicitly declared tenant-neutral — no predicate is injected for them. |
+| `scoped_sources` | `list[ScopedSource]` | `[]` | Sources tenant-scoped on a named column, see below. |
+| `shared_sources` | `list[str]` | `[]` | Source names explicitly declared tenant-neutral: no predicate is injected for them. |
 | `undeclared_source` | `deny \| warn` | `deny` | Behavior when a query reaches a source in neither `scoped_sources` nor `shared_sources`. |
 
 ### `scoped_sources[]` (`ScopedSource`)
@@ -220,14 +220,14 @@ undeclared_source: deny
 | Field | Type | Default | Governs |
 | --- | --- | --- | --- |
 | `source` | `str` | n/a (required) | The scoped source's name. |
-| `column` | `str` | n/a (required) | The column carrying the tenant id; the injected predicate is `<source>.<column> = :tenant`. |
+| `column` | `str` | n/a (required) | The column carrying the tenant id: the injected predicate is `<source>.<column> = :tenant`. |
 
 **Validation rules**, enforced at load time with a file+line location:
 
-- `scoped_sources` and `shared_sources` must be disjoint — a source name appearing in both fails validation.
+- `scoped_sources` and `shared_sources` must be disjoint: a source name appearing in both fails validation.
 - `tenancy_for(source)` is total over every source in the project once this file is present: a source reachable by a query but declared in neither list is `Undeclared`, governed by `undeclared_source` rather than treated as unrestricted.
 
-## `contracts/policies/roles.yaml` — `RolePolicy`
+## `contracts/policies/roles.yaml`: `RolePolicy`
 
 See [Tenancy & access control](/concepts/tenancy-and-access-control) for the two runtime gaps (`dimensions` enforcement, `knowledge.allow_tags` defaults) that matter when authoring this file.
 
@@ -257,32 +257,32 @@ roles:
 | --- | --- | --- | --- |
 | `schema` | `Literal["roles/v1"]` | n/a (required) | Schema discriminator. |
 | `claim` | `str` | n/a (required) | The token claim carrying the caller's role list (array of strings, or a single string). |
-| `default_role` | `str \| null` | `null` | Applied when the token carries no role claim. Must be a declared role — see validation rules below. If unset, a principal with no roles resolves to deny-everything. |
+| `default_role` | `str \| null` | `null` | Applied when the token carries no role claim. Must be a declared role, see validation rules below. If unset, a principal with no roles resolves to deny-everything. |
 | `roles` | `dict[str, RoleDef]` | `{}` | Named role definitions, keyed by role name. |
 
-### `roles{}` (`RoleDef`) — one entry per role name
+### `roles{}` (`RoleDef`): one entry per role name
 
 | Field | Type | Default | Governs |
 | --- | --- | --- | --- |
-| `inherits` | `str \| null` | `null` | A single parent role name; see the field-level-override rule below. |
+| `inherits` | `str \| null` | `null` | A single parent role name, see the field-level-override rule below. |
 | `metrics` | `AllowDenyPolicy` | `{allow: null, deny: []}` | Which metric names this role may query. |
 | `dimensions` | `AllowDenyPolicy` | `{allow: null, deny: []}` | Which dimension names this role may query. Parsed and validated, but not enforced at query time today. |
-| `knowledge` | `KnowledgePolicy` | `{allow_tags: []}` | `{allow_tags: list[str]}` — which knowledge-page tags this role may search/read. |
+| `knowledge` | `KnowledgePolicy` | `{allow_tags: []}` | `{allow_tags: list[str]}`: which knowledge-page tags this role may search/read. |
 | `run_sql` | `bool` | `false` | Whether this role may call `run_sql` at all. |
 | `tenancy_exempt` | `bool` | `false` | Bypasses tenant-predicate injection entirely. |
-| `masking` | `list[MaskingRule]` | `[]` | Column-masking rules; see below. |
+| `masking` | `list[MaskingRule]` | `[]` | Column-masking rules, see below. |
 
-`AllowDenyPolicy` (`metrics`/`dimensions`): `allow: null` (default) is unrestricted subject to `deny`; `allow: []` is a deliberate allow-nothing; `"*"` in `allow` is the explicit wildcard. `deny` always wins over `allow`.
+`AllowDenyPolicy` (`metrics`/`dimensions`): `allow: null` (default) is unrestricted subject to `deny`. `allow: []` is a deliberate allow-nothing. `"*"` in `allow` is the explicit wildcard. `deny` always wins over `allow`.
 
 ### `masking[]` (`MaskingRule`)
 
 | Field | Type | Default | Governs |
 | --- | --- | --- | --- |
-| `column` | `str` | n/a (required) | `<source>.<column>` — the canonical source/column, never a join alias; the rule applies to every alias resolving to that source, self-joins included. |
+| `column` | `str` | n/a (required) | `<source>.<column>`: the canonical source/column, never a join alias. The rule applies to every alias resolving to that source, self-joins included. |
 | `strategy` | `null \| hash \| partial` | n/a (required) | `null`: replaced with SQL `NULL`. `hash`: `MD5(CAST(... AS TEXT))`. `partial`: first two characters kept, rest replaced with `'***'`. |
 
 **Validation rules**, enforced at load time with a file+line location:
 
 - `default_role`, if set, must name a role declared in `roles`.
-- `inherits`, if set, must resolve to a declared role and the resulting chain must be acyclic — a role that (directly or transitively) inherits from itself fails validation.
-- `inherits` is single-parent field-level override, not list-merge: a role that explicitly authors a field (even to an empty list) replaces the parent's value for that field wholesale; a field left untouched inherits the parent's value unchanged.
+- `inherits`, if set, must resolve to a declared role and the resulting chain must be acyclic: a role that (directly or transitively) inherits from itself fails validation.
+- `inherits` is single-parent field-level override, not list-merge: a role that explicitly authors a field (even to an empty list) replaces the parent's value for that field wholesale. A field left untouched inherits the parent's value unchanged.

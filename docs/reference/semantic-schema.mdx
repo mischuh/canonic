@@ -3,7 +3,7 @@ title: "Semantic source schema"
 description: "Every field in a semantics/*.yaml file, section by section."
 ---
 
-A semantic source (`semantics/<connection-id>/<name>.yaml`) is validated against `SemanticSource` at load time. `name`, `connection`, `table`, `grain`, and `columns` are required; everything else defaults. See [Semantics](/concepts/semantics) for the concepts behind these fields.
+A semantic source (`semantics/<connection-id>/<name>.yaml`) is validated against `SemanticSource` at load time. `name`, `connection`, `table`, `grain`, and `columns` are required. Everything else defaults. See [Semantics](/concepts/semantics) for the concepts behind these fields.
 
 ## Top-level fields
 
@@ -12,18 +12,18 @@ A semantic source (`semantics/<connection-id>/<name>.yaml`) is validated against
 | `name` | `str` | n/a (required) | Unique identifier across the whole project. |
 | `connection` | `str` | n/a (required) | Which configured connection this source reads from. |
 | `table` | `str` | n/a (required) | Physical relation (`schema.table`) queried at compile time. |
-| `grain` | `list[str]` | n/a (required) | Row-uniqueness columns; must already be declared in `columns`. Drives join fanout safety. |
+| `grain` | `list[str]` | n/a (required) | Row-uniqueness columns. Must already be declared in `columns`. Drives join fanout safety. |
 | `description` | `str \| null` | `null` | Free-text explanation. |
-| `columns` | `list[Column]` | n/a (required) | Typed physical columns; see below. |
-| `measures` | `list[Measure]` | `[]` | Aggregations over the source; see below. |
-| `dimensions` | `list[Dimension]` | `[]` | Grouping/filtering columns; see below. |
-| `joins` | `list[Join]` | `[]` | Declared join paths to other semantic sources; see below. |
-| `filters` | `list[Filter]` | `[]` | Named reusable predicates; see below. |
-| `segments` | `list[Any]` | `[]` | Reserved for named, reusable row subsets. Not yet populated by ingestion or read by the compiler — always empty today. |
-| `finality` | `FinalityMeta` | `{watermark: null}` | Per-source finality watermark; see below. |
-| `meta` | `SourceMeta` | `{provenance: inferred}` | System-managed provenance metadata; see below. |
+| `columns` | `list[Column]` | n/a (required) | Typed physical columns, see below. |
+| `measures` | `list[Measure]` | `[]` | Aggregations over the source, see below. |
+| `dimensions` | `list[Dimension]` | `[]` | Grouping/filtering columns, see below. |
+| `joins` | `list[Join]` | `[]` | Declared join paths to other semantic sources, see below. |
+| `filters` | `list[Filter]` | `[]` | Named reusable predicates, see below. |
+| `segments` | `list[Any]` | `[]` | Reserved for named, reusable row subsets. Not yet populated by ingestion or read by the compiler, always empty today. |
+| `finality` | `FinalityMeta` | `{watermark: null}` | Per-source finality watermark, see below. |
+| `meta` | `SourceMeta` | `{provenance: inferred}` | System-managed provenance metadata, see below. |
 
-Cross-field rules enforced at write time: column, measure, dimension, and join-alias names must each be unique within the file; every `grain` entry and every `dimensions[].column` must reference a declared column; every column a measure's `expr` touches must be declared. Violations raise a located `SemanticValidationError` (file + YAML path), not a silent drop.
+Cross-field rules enforced at write time: column, measure, dimension, and join-alias names must each be unique within the file. Every `grain` entry and every `dimensions[].column` must reference a declared column. Every column a measure's `expr` touches must be declared. Violations raise a located `SemanticValidationError` (file + YAML path), not a silent drop.
 
 `name` is how every other file in the project refers to this source, in joins, metric bindings, and guardrails. `connection` ties the source to a connection defined in your project config, and `table` is the physical table or view the compiler queries at runtime. `grain` lists the columns that make each row unique. Get this wrong and join fanout can silently double-count measures, so the compiler treats it as a required declaration, not a guess.
 
@@ -56,8 +56,8 @@ measures:
 | Field | Type | Default | Governs |
 | --- | --- | --- | --- |
 | `name` | `str` | n/a (required) | Measure identifier, unique within the file. |
-| `expr` | `str` | n/a (required) | SQL aggregate expression; may reference only declared columns. |
-| `additivity` | `Additivity` | `additive` | `additive` \| `semi_additive` \| `non_additive`; see [Additivity](/concepts/semantics#additivity). |
+| `expr` | `str` | n/a (required) | SQL aggregate expression, may reference only declared columns. |
+| `additivity` | `Additivity` | `additive` | `additive` \| `semi_additive` \| `non_additive`, see [Additivity](/concepts/semantics#additivity). |
 | `semi_additive_over` | `list[str]` | `[]` | Dimensions the measure is *not* additive over (semi-additive measures only). |
 
 A measure defines one aggregation the compiler can compute over the source. `expr` is a small SQL aggregate expression and it can only reference columns declared above, anything else fails validation. `additivity` tells the compiler whether a measure's value can still be safely summed after it has already been aggregated once, for example when re-aggregating at a coarser grain or across a join fanout. Set it to `semi_additive` for values like account balances or inventory snapshots that sum correctly across every dimension except one (usually time), and list that dimension in `semi_additive_over`. Set it to `non_additive` for anything that can't be derived from a partial sum, such as distinct counts, ratios, or percentiles.
@@ -96,7 +96,7 @@ joins:
 | `to` | `str` | n/a (required) | Target semantic source's `name`. |
 | `on` | `str` | n/a (required) | SQL join predicate. |
 | `relationship` | `Relationship` | n/a (required) | `one_to_one` \| `many_to_one` \| `one_to_many` \| `many_to_many`. |
-| `name` | `str \| null` | `null` | SQL alias for the target table; defaults to `to` (the join's effective alias must be unique within the file). |
+| `name` | `str \| null` | `null` | SQL alias for the target table, defaults to `to` (the join's effective alias must be unique within the file). |
 
 A join declares how this source relates to another semantic source, by name, not by physical table. `on` is the SQL join predicate, and `relationship` tells the compiler which side of the join can fan out rows, which in turn determines whether measures need deduplication before they're safe to sum. Get the relationship wrong and an additive measure can silently double count across the join. `name` only matters when you join the same target more than once or want a specific SQL alias, otherwise it defaults to the target's own name.
 
@@ -123,13 +123,13 @@ finality:
 
 | Field | Type | Default | Governs |
 | --- | --- | --- | --- |
-| `watermark` | `str \| null` | `null` | Cutoff expression before which rows are considered final; `null` means the source is always final. See [Finality](/concepts/contracts-and-guardrails#finality) for how this combines with a contract's `FinalityRule`. |
+| `watermark` | `str \| null` | `null` | Cutoff expression before which rows are considered final. `null` means the source is always final. See [Finality](/concepts/contracts-and-guardrails#finality) for how this combines with a contract's `FinalityRule`. |
 
 `watermark` tells the compiler the point before which this source's rows are considered final and won't change anymore. Leave it `null` if the source never gets late-arriving updates or corrections. In that case canonic treats it as always final. A non-null watermark is a relative expression, like `business_day - 1 day`, evaluated against the current query window. This combines with a contract's `FinalityRule` when a metric can be served from more than one realization of the same data.
 
 ## `meta`
 
-System-managed — not hand-edited; reconciliation writes these fields.
+System-managed, not hand-edited: reconciliation writes these fields.
 
 ```yaml
 meta:
@@ -141,9 +141,9 @@ meta:
 
 | Field | Type | Default | Governs |
 | --- | --- | --- | --- |
-| `provenance` | `Provenance` | `inferred` | `board_approved` \| `human_curated` \| `inferred`. `board_approved`/`human_curated` facts are never auto-overwritten; only `inferred` facts can be revised, and even then only through a reviewable diff. |
-| `source_fingerprint` | `str \| null` | `null` | sha256 of the introspected/declared schema; drives drift detection. |
+| `provenance` | `Provenance` | `inferred` | `board_approved` \| `human_curated` \| `inferred`. `board_approved`/`human_curated` facts are never auto-overwritten. Only `inferred` facts can be revised, and even then only through a reviewable diff. |
+| `source_fingerprint` | `str \| null` | `null` | sha256 of the introspected/declared schema, drives drift detection. |
 | `last_validated_at` | `datetime \| null` | `null` | When this source was last checked against live evidence. |
-| `frozen` | `bool` | `false` | Human-owned freeze marker; reconciliation flags conflicts but never edits a frozen source. |
+| `frozen` | `bool` | `false` | Human-owned freeze marker. Reconciliation flags conflicts but never edits a frozen source. |
 
 These fields are written by ingestion and reconciliation, not by a human editing YAML. `provenance` tracks how much a fact can be trusted. `board_approved` and `human_curated` facts are locked and never silently overwritten. `inferred` facts can be revised automatically, always through a reviewable diff rather than a direct rewrite. `source_fingerprint` is a hash of the introspected schema, used to detect drift between what's declared here and what the warehouse actually looks like. `last_validated_at` records when that check last ran, and `frozen` is a manual override you can set to stop reconciliation from touching a source at all, even one that's only `inferred`.

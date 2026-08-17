@@ -3,7 +3,7 @@ title: "canonic report"
 description: "List and run curated, committed reports."
 ---
 
-`canonic report` operates on `reports/*.yaml` — committed, git-reviewed definitions of a named, ordered sequence of `query()` calls. A report is composition over the semantic/knowledge/contracts layers, not a fourth kind of fact: it declares no SQL behavior, no meaning, and no authority of its own.
+`canonic report` operates on `reports/*.yaml`: committed, git-reviewed definitions of a named, ordered sequence of `query()` calls. A report is composition over the semantic/knowledge/contracts layers, not a fourth kind of fact: it declares no SQL behavior, no meaning, and no authority of its own.
 
 <Note>
   `canonic report` used to be an alias for the event-log diagnostics command now named [`canonic audit`](/cli-reference/status-report#canonic-audit). A bare `canonic report` (no subcommand) prints a pointer to `canonic audit` instead of silently doing something else.
@@ -20,7 +20,7 @@ canonic report list --domain orders
 | --- | --- |
 | `--domain` | Filter to reports declaring this `domain` field. |
 
-A directory listing only: `id`, `title`, `description`, `owner`, `domain` per committed report — no execution, no per-section detail. `--json` output matches the MCP `list_reports` tool payload byte-for-byte.
+A directory listing only: `id`, `title`, `description`, `owner`, `domain` per committed report, no execution, no per-section detail. `--json` output matches the MCP `list_reports` tool payload byte-for-byte.
 
 ## `canonic report run`
 
@@ -34,16 +34,16 @@ canonic report run customer_report --filter merchant_id=123
 | --- | --- |
 | `report_id` | Committed report id to run (positional). |
 | `--as-of` | ISO-8601 reference point for finality watermark evaluation, applied to every section that doesn't set its own. |
-| `--filter` | Filter as `field=value` or `field:op:value`, repeatable — same syntax as `canonic query --filter`. Applied additively (AND-ed) onto every section's own filters, never replacing them. |
+| `--filter` | Filter as `field=value` or `field:op:value`, repeatable, same syntax as `canonic query --filter`. Applied additively (AND-ed) onto every section's own filters, never replacing them. |
 | `--user` | Requesting user id, for narrative knowledge-page access control. |
 | `--tenant` | Bind a fixed, roleless principal for local development / platform-operator use. Always logs a warning. See [Tenancy & access control](/concepts/tenancy-and-access-control#--tenant-cli-override). |
 
-Runs every section of the report through `query()`, in declared order, and prints one table per section. A failing section — for example one blocked by a `min_trust` or `context` guardrail — does not abort the run: it's printed as a `code: message` error in place of a table, and the command still exits `0`. `--json` output matches the MCP `run_report` tool payload byte-for-byte, and every section's `result` is the same unmodified `QueryResult` shape a standalone `canonic query` call returns.
+Runs every section of the report through `query()`, in declared order, and prints one table per section. A failing section (for example one blocked by a `min_trust` or `context` guardrail) does not abort the run: it's printed as a `code: message` error in place of a table, and the command still exits `0`. `--json` output matches the MCP `run_report` tool payload byte-for-byte, and every section's `result` is the same unmodified `QueryResult` shape a standalone `canonic query` call returns.
 
-`--filter` lets a caller scope an entire multi-merchant/multi-tenant report at run time without editing the report file — e.g. `--filter merchant_id=123` adds `merchant_id = 123` to every section's own filters. It composes with a section's existing `filters` (both apply, AND-ed together); it does not override them.
+`--filter` lets a caller scope an entire multi-merchant/multi-tenant report at run time without editing the report file (e.g. `--filter merchant_id=123` adds `merchant_id = 123` to every section's own filters). It composes with a section's existing `filters` (both apply, AND-ed together). It does not override them.
 
 <Note>
-This `--filter` is an unauthenticated, ad-hoc convenience — anyone who can run the command can pass any value. It is unrelated to the enforced tenant scoping described in [Tenancy & access control](/concepts/tenancy-and-access-control): that mechanism derives the tenant from a verified token (or an explicit, warned `--tenant` override) and injects it as a real predicate the caller cannot widen. Don't rely on `--filter merchant_id=…` for row-level isolation.
+This `--filter` is an unauthenticated, ad-hoc convenience: anyone who can run the command can pass any value. It is unrelated to the enforced tenant scoping described in [Tenancy & access control](/concepts/tenancy-and-access-control): that mechanism derives the tenant from a verified token (or an explicit, warned `--tenant` override) and injects it as a real predicate the caller cannot widen. Don't rely on `--filter merchant_id=…` for row-level isolation.
 </Note>
 
 ```bash
@@ -71,10 +71,10 @@ Units sold by product type
 ...
 ```
 
-This example report (`examples/jaffle-shop/reports/customer_report.yaml`) mixes several things a single report commonly needs: a multi-metric section (`revenue` + `order_count` together), a composite `ratio` metric (`avg_revenue`), a section joined through a different source (`units_sold` via `order_items` → `products`), a filtered section (store revenue for the first half of January), and sections with and without an attached narrative — proving none of it needs special-casing in `run_report` itself.
+This example report (`examples/jaffle-shop/reports/customer_report.yaml`) mixes several things a single report commonly needs: a multi-metric section (`revenue` + `order_count` together), a composite `ratio` metric (`avg_revenue`), a section joined through a different source (`units_sold` via `order_items` → `products`), a filtered section (store revenue for the first half of January), and sections with and without an attached narrative, proving none of it needs special-casing in `run_report` itself.
 
 ## `canonic validate` and reports
 
-[`canonic validate`](/cli-reference/status-report#canonic-validate) also validates every committed `reports/*.yaml`: each section's query must compile against the current semantic layer (dry-run, no execution) and each `narrative_from` must resolve to an existing knowledge page. A metric rename that breaks a report is caught in the same `canonic validate` run — and the same PR — that already catches it for `semantics/`/`contracts/`.
+[`canonic validate`](/cli-reference/status-report#canonic-validate) also validates every committed `reports/*.yaml`: each section's query must compile against the current semantic layer (dry-run, no execution) and each `narrative_from` must resolve to an existing knowledge page. A metric rename that breaks a report is caught in the same `canonic validate` run (and the same PR) that already catches it for `semantics/`/`contracts/`.
 
 See [Report schema](/reference/report-schema) for the `reports/*.yaml` file format.

@@ -12,7 +12,7 @@ canonic ingest --dry-run
 canonic ingest --connection warehouse --strict
 ```
 
-Propose-only by default; it writes the audit trail and refreshes `last_validated_at` on unchanged files, but never edits committed semantics in place.
+Propose-only by default. It writes the audit trail and refreshes `last_validated_at` on unchanged files, but never edits committed semantics in place.
 
 Alongside connector evidence, `canonic ingest` also gathers E11 outcome evidence from `.canonic/events.jsonl`: bindings with a recurring, gate-crossing pattern of `wrong_definition` outcomes get flagged as contradictions the same way any other conflicting evidence would. See [Feedback loop (E11)](/concepts/ingestion-and-reconciliation#feedback-loop-e11).
 
@@ -27,7 +27,7 @@ Alongside connector evidence, `canonic ingest` also gathers E11 outcome evidence
 
 ## Headless mode
 
-Headless mode (explicit `--headless`, or auto-detected when `CI=true`) pins the deterministic builder, opens an auto-PR carrying the diffs and any contradiction notes, and gates the run on the canonical exit codes; the safe, repeatable path for scheduled ingest in CI.
+Headless mode (explicit `--headless`, or auto-detected when `CI=true`) pins the deterministic builder, opens an auto-PR carrying the diffs and any contradiction notes, and gates the run on the canonical exit codes: the safe, repeatable path for scheduled ingest in CI.
 
 ## After a run
 
@@ -45,7 +45,7 @@ canonic ingest add-tables --connection warehouse --dry-run
 
 | Flag | Description |
 | --- | --- |
-| `--connection` / `-c` | Connection id to widen (default: the only one configured; required if there's more than one). |
+| `--connection` / `-c` | Connection id to widen (default: the only one configured, but required if there's more than one). |
 | `--dry-run` | Print proposed diffs and write nothing. |
 
-If the connection already had a `tables` filter, the picked tables are merged into it and persisted back to `canonic.yaml`. If the connection was unfiltered (all tables visible), nothing is persisted — the picked tables only scope this one run, so future ingests keep auto-discovering new tables. Either way, curated tables are never touched: the ingest that follows the picker is a normal propose-only run, so newly picked tables land as `ADD` proposals for [`canonic review`](/cli-reference/review-apply).
+If the connection already had a `tables` filter, the picked tables are merged into it and persisted back to `canonic.yaml`. If the connection was unfiltered (all tables visible), nothing is persisted: the picked tables only scope this one run, so future ingests keep auto-discovering new tables. Either way, curated tables are never touched: the ingest that follows the picker is a normal propose-only run, so newly picked tables land as `ADD` proposals for [`canonic review`](/cli-reference/review-apply).

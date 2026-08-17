@@ -7,9 +7,9 @@ canonic backs its trustworthiness claims with a local, inspectable log rather th
 
 ## The event log
 
-An append-only, structured log under `.canonic/` (local, git-ignored). It's the single substrate every producer writes to; [`canonic status`](/cli-reference/status-report#canonic-status) and [`canonic audit`](/cli-reference/status-report#canonic-audit) read from it.
+An append-only, structured log under `.canonic/` (local, git-ignored). It's the single substrate every producer writes to. [`canonic status`](/cli-reference/status-report#canonic-status) and [`canonic audit`](/cli-reference/status-report#canonic-audit) read from it.
 
-**No warehouse content, ever.** The semantic query and compiled SQL are recorded as `sha256` hashes, never as text, so filter literals (dates, ids) never land on disk. Resolved bindings, guardrail ids, and counts are metadata and are stored as-is. Events are immutable once written; corrections are new events, never edits.
+**No warehouse content, ever.** The semantic query and compiled SQL are recorded as `sha256` hashes, never as text, so filter literals (dates, ids) never land on disk. Resolved bindings, guardrail ids, and counts are metadata and are stored as-is. Events are immutable once written. Corrections are new events, never edits.
 
 One record per served answer:
 
@@ -30,7 +30,7 @@ cache_hit: null
 over_limit_blocked: null
 ```
 
-Under an active [tenancy/role policy](/concepts/tenancy-and-access-control), a served-answer event also carries `tenant` (`str | null`), `roles` (`list[str] | null`, sorted), and `tenancy_exempt` (`bool`, default `false`) — populated for every `query()` and `run_sql` call, not just `query()`. `tenant` is the one exception to this page's "no content, ever" rule above: it's a verified identifier, not warehouse content, so it's stored verbatim rather than hashed, which is what makes per-tenant attribution, cost accounting, and breach forensics possible from the log at all. Every `tenancy_exempt: true` event is a cross-tenant read and should be treated as alertable. All three are `null`/`false` when no tenancy or role policy is configured.
+Under an active [tenancy/role policy](/concepts/tenancy-and-access-control), a served-answer event also carries `tenant` (`str | null`), `roles` (`list[str] | null`, sorted), and `tenancy_exempt` (`bool`, default `false`), populated for every `query()` and `run_sql` call, not just `query()`. `tenant` is the one exception to this page's "no content, ever" rule above: it's a verified identifier, not warehouse content, so it's stored verbatim rather than hashed, which is what makes per-tenant attribution, cost accounting, and breach forensics possible from the log at all. Every `tenancy_exempt: true` event is a cross-tenant read and should be treated as alertable. All three are `null`/`false` when no tenancy or role policy is configured.
 
 A `reconcile_decision` event (add/edit/prune/contradiction/no-op, with tier, confidence, and anchored evidence) shares the same substrate: one store backs both serving and ingest traceability.
 
@@ -47,29 +47,29 @@ correction: "sha256:…"              # optional: corrected SQL hash or definiti
 marked_by: analyst                  # analyst | agent | ci
 ```
 
-The `reason_code` is an attribution safeguard: acting on the wrong cause corrupts good context. `wrong_definition` is the only code that implicates the binding used — it's the one eligible to become contradiction evidence downstream. `wrong_data` (the warehouse data is wrong) and `wrong_interpretation` (the wrong metric was picked) are recorded but never flag the binding. `unspecified` — the default when a verdict is marked incorrect without an explicit reason — carries the lowest weight. canonic records the code faithfully; it does not act on it.
+The `reason_code` is an attribution safeguard: acting on the wrong cause corrupts good context. `wrong_definition` is the only code that implicates the binding used: it's the one eligible to become contradiction evidence downstream. `wrong_data` (the warehouse data is wrong) and `wrong_interpretation` (the wrong metric was picked) are recorded but never flag the binding. `unspecified`, the default when a verdict is marked incorrect without an explicit reason, carries the lowest weight. canonic records the code faithfully. It does not act on it.
 
 ## Local inspection, no telemetry required
 
-`canonic status` and `canonic audit` read the log directly: counts, error-code distribution, latency percentiles, bytes scanned, freshness and guardrail-hit coverage, the onboarding funnel (setup started → connection added → bootstrap completed → first answer served → first curated review completed), trust-tier calibration, and correction recurrence. None of this requires telemetry to be enabled; the log is not a black box on day one.
+`canonic status` and `canonic audit` read the log directly: counts, error-code distribution, latency percentiles, bytes scanned, freshness and guardrail-hit coverage, the onboarding funnel (setup started → connection added → bootstrap completed → first answer served → first curated review completed), trust-tier calibration, and correction recurrence. None of this requires telemetry to be enabled. The log is not a black box on day one.
 
 ## Opt-in telemetry
 
-`canonic.yaml`'s `telemetry.enabled` flag defaults to `false`, and is forced off whenever `runtime.air_gapped: true` is set. In a freshly scaffolded project, or any project that hasn't explicitly configured telemetry, **nothing leaves the machine** — the transport exists in the code, but it refuses to send anything unless every one of the following is explicitly set in `canonic.yaml`:
+`canonic.yaml`'s `telemetry.enabled` flag defaults to `false`, and is forced off whenever `runtime.air_gapped: true` is set. In a freshly scaffolded project, or any project that hasn't explicitly configured telemetry, **nothing leaves the machine**: the transport exists in the code, but it refuses to send anything unless every one of the following is explicitly set in `canonic.yaml`:
 
 - `telemetry.enabled: true`
-- `telemetry.endpoint` — the destination URL; there is no default, canonic never guesses one
-- `telemetry.transport_acknowledged: true` — an attestation that *your project* has reviewed the exact aggregate payload below and is comfortable sending it. canonic cannot verify that a review happened; this is a project-level policy decision, not a technical guarantee.
+- `telemetry.endpoint`: the destination URL. There is no default, canonic never guesses one
+- `telemetry.transport_acknowledged: true`: an attestation that *your project* has reviewed the exact aggregate payload below and is comfortable sending it. canonic cannot verify that a review happened. This is a project-level policy decision, not a technical guarantee.
 
-Missing any of these (or being air-gapped) fails the send closed with a structured error — it never silently no-ops and never partially sends.
+Missing any of these (or being air-gapped) fails the send closed with a structured error: it never silently no-ops and never partially sends.
 
-`canonic audit --telemetry-preview` prints precisely the payload that would be sent, without sending it, regardless of configuration: counts, distributions, latency and bytes-scanned aggregates, the trust-calibration buckets, and (when available) accuracy/baseline numbers. It **never** includes `query_hash`, resolved bindings, SQL, `compiled_sql_hash`, freshness source names, or any other field that could re-identify a query or reveal warehouse/schema content — the same content-safety rule as the local log itself, applied one notch stricter since this payload is meant to leave the machine. Use `canonic audit --telemetry-send` to actually send that same payload once `enabled`, `endpoint`, and `transport_acknowledged` are all set.
+`canonic audit --telemetry-preview` prints precisely the payload that would be sent, without sending it, regardless of configuration: counts, distributions, latency and bytes-scanned aggregates, the trust-calibration buckets, and (when available) accuracy/baseline numbers. It **never** includes `query_hash`, resolved bindings, SQL, `compiled_sql_hash`, freshness source names, or any other field that could re-identify a query or reveal warehouse/schema content, the same content-safety rule as the local log itself, applied one notch stricter since this payload is meant to leave the machine. Use `canonic audit --telemetry-send` to actually send that same payload once `enabled`, `endpoint`, and `transport_acknowledged` are all set.
 
 ## Accuracy harness: `canonic assert`
 
-The mechanism that turns ">90% accuracy" from aspirational into measured. Every executable assertion in `contracts/assertions/` is compiled, executed read-only, and compared to its expected value within tolerance; the harness reports `accuracy = passed / total` and gates on a floor (default `1.0`, every assertion must hold). See [`canonic assert`](/cli-reference/query-sql-assert#canonic-assert) for the CLI, and [Assertions](/concepts/contracts-and-guardrails#assertions) for how an assertion is declared.
+The mechanism that turns ">90% accuracy" from aspirational into measured. Every executable assertion in `contracts/assertions/` is compiled, executed read-only, and compared to its expected value within tolerance. The harness reports `accuracy = passed / total` and gates on a floor (default `1.0`, every assertion must hold). See [`canonic assert`](/cli-reference/query-sql-assert#canonic-assert) for the CLI, and [Assertions](/concepts/contracts-and-guardrails#assertions) for how an assertion is declared.
 
-`canonic assert --baseline` also runs the same assertions against a schema-only resolver — raw physical schema, no curated bindings/aliases/guardrails — so the accuracy *lift* the canonical context layer provides is a measured delta, not an asserted one.
+`canonic assert --baseline` also runs the same assertions against a schema-only resolver, raw physical schema, no curated bindings/aliases/guardrails, so the accuracy *lift* the canonical context layer provides is a measured delta, not an asserted one.
 
 ## Model baseline harness: `canonic eval baseline`
 
