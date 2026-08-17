@@ -72,10 +72,10 @@ Ratio and weighted-avg components must themselves be `single`-kind metrics, so a
 - **`revenue-excludes-refunds`** / **`revenue-excludes-trials`**: `mandatory_filter` (`error`). Injects `status != 'refunded'` and `is_trial = false` into every `gross_revenue` query.
 - **`board-reporting-final-only`**: `restrict_source` (`error`). In the `board_reporting` context, confines `gross_revenue` to the final `fct_invoices` source, paired with a finality rule (`finality-revenue`) that declares the final/provisional realizations and coalescing rule.
 - **`board-reporting-trusted-only`**: `min_trust` (`error`). In the `board_reporting` context, blocks the query unless the answer's trust tier meets the declared floor.
-- **`ending-mrr-requires-month`**: `required_dimension` (`warn`). Requires grouping `ending_mrr` by `snapshot_month`; unlike the guardrails above, `warn` means an omitted `snapshot_month` doesn't block the query, only adds a `warnings[]` entry.
+- **`ending-mrr-requires-month`**: `required_dimension` (`warn`). Requires grouping `ending_mrr` by `snapshot_month`. Unlike the guardrails above, `warn` means an omitted `snapshot_month` doesn't block the query, only adds a `warnings[]` entry.
 
 ```json
-// refunds + trials silently excluded; provisional rows excluded under board_reporting
+// refunds + trials silently excluded, and provisional rows excluded under board_reporting
 query({"metrics": ["gross_revenue"], "context": "board_reporting"})
 
 // opaque grain guard: this errors with UNSUPPORTED_MEASURE

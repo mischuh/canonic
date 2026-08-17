@@ -43,7 +43,7 @@ canonic sl compile --file query.json
 | `--limit` | Row cap injected by the dialect adapter. |
 | `--file`, `-f` | Semantic query JSON file. |
 
-`--metrics`/`--dimensions`/`--filter`/`--via`/`--limit` and `-f` are mutually exclusive, same as `canonic query`; see [`canonic query`](/cli-reference/query-sql-assert) for the full filter syntax. The flags build the identical `SemanticQuery` a JSON file would deserialize: `{"metrics": [...], "dimensions": [...], "filters": [...], "via": [...], "limit": null}`. Output includes the target dialect, the compiled SQL, resolved bindings, and any guardrails that fired.
+`--metrics`/`--dimensions`/`--filter`/`--via`/`--limit` and `-f` are mutually exclusive, same as `canonic query`. See [`canonic query`](/cli-reference/query-sql-assert) for the full filter syntax. The flags build the identical `SemanticQuery` a JSON file would deserialize: `{"metrics": [...], "dimensions": [...], "filters": [...], "via": [...], "limit": null}`. Output includes the target dialect, the compiled SQL, resolved bindings, and any guardrails that fired.
 
 ## `sl describe`
 

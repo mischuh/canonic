@@ -13,7 +13,7 @@ A connector declares **capabilities**, not identity. canonic's core dispatches o
 default_factory.register("postgres", PostgresConnector)
 default_factory.register("dbt", _make_dbt)
 default_factory.register("metabase", MetabaseConnector)
-# … one register() call per type; no vendor branches in core logic
+# … one register() call per type, and no vendor branches in core logic
 ```
 
 An unregistered `type` raises `UnknownConnectorType` (exit `13`) listing what *is* registered, never a silent fallback. Manage connections with [`canonic connection`](/cli-reference/connection).
@@ -39,7 +39,7 @@ Implement `extract_definitions`: feed the semantic layer and canonical-binding c
 | --- | --- |
 | `dbt` | Parses a compiled `manifest.json`: models → typed columns/grain, measures, joins, descriptions. |
 
-A definition connector is its own connection entry (own `id`) but describes tables that live in a *different*, queryable connection. `params.target_connection` names that connection's id, so the evidence is attributed to it rather than to the definition connector's own id — this is what lets its `RelationSchema` proposals land on the same `semantics/<connection>/<name>.yaml` target as that connection's live introspection and reconcile against it (see the [worked example](/concepts/ingestion-and-reconciliation#example-adding-a-definition-connector-after-an-initial-apply)), instead of colliding on the project-wide unique source `name`. Omitting it falls back to the definition connector's own id — fine for a definitions-only project with no paired physical connection, but such sources can never actually be queried (no `run_read_only_sql`).
+A definition connector is its own connection entry (own `id`) but describes tables that live in a *different*, queryable connection. `params.target_connection` names that connection's id, so the evidence is attributed to it rather than to the definition connector's own id: this is what lets its `RelationSchema` proposals land on the same `semantics/<connection>/<name>.yaml` target as that connection's live introspection and reconcile against it (see the [worked example](/concepts/ingestion-and-reconciliation#example-adding-a-definition-connector-after-an-initial-apply)), instead of colliding on the project-wide unique source `name`. Omitting it falls back to the definition connector's own id, fine for a definitions-only project with no paired physical connection, but such sources can never actually be queried (no `run_read_only_sql`).
 
 ### Evidence
 
@@ -65,7 +65,7 @@ Every connector translates its native output into one of a few normalized shapes
 - **`RelationSchema`**, a table/view: columns (normalized types), primary key, foreign keys, row-count estimate. From queryable connectors' `introspect_schema`.
 - **`DefinitionEvidence`**, a named measure/dimension/join from modeling code, with its expression and additivity. From `extract_definitions`.
 - **`DocEvidence`**, a title + body + candidate topic references, with a `usage_hint` that maps to a knowledge page's `usage_mode`. From `extract_evidence` doc sources.
-- **`UsageEvidence`**, a BI artifact (question/dashboard), the metric it appears to define, and how often it's used; always a *candidate*, never auto-promoted to canonical.
+- **`UsageEvidence`**, a BI artifact (question/dashboard), the metric it appears to define, and how often it's used, always a *candidate*, never auto-promoted to canonical.
 
 Unmappable native constructs are recorded with a warning, never silently dropped.
 
@@ -75,7 +75,7 @@ For queryable connectors, read-only is defense in depth, not a convention: a rea
 
 ## Schema acquisition ladder
 
-When live introspection is unavailable or partial, canonic descends a priority order; every tier still emits the same `RelationSchema`, tagged with which tier produced it:
+When live introspection is unavailable or partial, canonic descends a priority order. Every tier still emits the same `RelationSchema`, tagged with which tier produced it:
 
 1. **Live introspection**: catalog views.
 2. **Modeling code as schema**: via a `dbt`/definition connector.

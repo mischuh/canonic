@@ -33,7 +33,7 @@ Returns the serving contract version this daemon implements. Call at session sta
 
 ### `negotiate_contract(contract_major: int)`
 
-Declares the contract-schema major version your client was built against. The daemon accepts iff `contract_major == server major version`; otherwise it fails fast with a clear message rather than serving mismatched behavior.
+Declares the contract-schema major version your client was built against. The daemon accepts iff `contract_major == server major version`. Otherwise it fails fast with a clear message rather than serving mismatched behavior.
 
 ## Discovery
 
@@ -62,7 +62,7 @@ Compiles a semantic query to dialect-correct SQL + metadata without executing it
 - `metrics` (`list[str]`)
 - `dimensions` (`list[str]`): canonical `name` values as returned by `describe_metric`, not natural-language terms
 - `filters` (`list[str]`): SQL `WHERE` predicates, e.g. `["segment = 'smb'", "status = 'active'"]`
-- `via` (`list[str]`): routes join paths through specific intermediate sources; required when multiple join paths exist between the metric source and a dimension source
+- `via` (`list[str]`): routes join paths through specific intermediate sources, required when multiple join paths exist between the metric source and a dimension source
 - `limit` (`int | null`)
 
 On an `ambiguous_join_path` error, inspect the returned candidates (each has a `via` list and a human-readable `route`) and re-issue with that `via` value. On an `unreachable` error for a dimension, check `candidates` for the correct canonical name and re-issue.
@@ -81,7 +81,7 @@ Executes a read-only SQL `SELECT` on a named connection (or the project default)
 
 Searches the project's knowledge pages for business context: definitions, caveats, and policies. Returns ranked hits plus any caveats auto-surfaced because a hit references their bound semantic entity. Call this **before** answering any question about what a metric means or how it's calculated: this project's definitions may differ from textbook ones. Returns empty hits when the project has no knowledge pages.
 
-Each hit's `score` is a rank-fusion value (RRF), not a confidence or relevance percentage — use hit *order*, not the raw number, to judge how well a result matches. See [`canonic knowledge search`](/cli-reference/knowledge#reading-score) for the exact formula.
+Each hit's `score` is a rank-fusion value (RRF), not a confidence or relevance percentage. Use hit *order*, not the raw number, to judge how well a result matches. See [`canonic knowledge search`](/cli-reference/knowledge#reading-score) for the exact formula.
 
 ### `read_knowledge_page(page: str, user: str | None = None)`
 
@@ -89,7 +89,7 @@ Retrieves the full content of a knowledge page by its id (page slug). Use after 
 
 ## Reports
 
-A report (`reports/*.yaml`) names an ordered sequence of already-existing calls — no new execution semantics, no new authority. `run_report` is a deterministic loop over `query()`, optionally attaching a rendered knowledge page per section. See [Report schema](/reference/report-schema) for the file format.
+A report (`reports/*.yaml`) names an ordered sequence of already-existing calls: no new execution semantics, no new authority. `run_report` is a deterministic loop over `query()`, optionally attaching a rendered knowledge page per section. See [Report schema](/reference/report-schema) for the file format.
 
 ### `list_reports(domain: str | None = None)`
 
@@ -99,4 +99,4 @@ A directory listing of every committed report: `id`, `title`, `description`, `ow
 
 Runs every section of a committed report through `query()`, in declared order, and returns an ordered array of section results. Each entry carries the section's `title` and either its **unmodified** `QueryResult` (with an optional attached `narrative`, the rendered body of the section's `narrative_from` knowledge page) or a structured `{code, message, candidates?}` error in place of a result.
 
-A failing section does **not** abort the report: the other sections still return normal results, and the call as a whole never raises for a per-section failure. An unknown `report_id` reuses the existing `unresolved` error code — there is no dedicated "report not found" code. `as_of` is an optional ISO-8601 reference point for finality-watermark evaluation, applied to every section that doesn't set its own.
+A failing section does **not** abort the report: the other sections still return normal results, and the call as a whole never raises for a per-section failure. An unknown `report_id` reuses the existing `unresolved` error code: there is no dedicated "report not found" code. `as_of` is an optional ISO-8601 reference point for finality-watermark evaluation, applied to every section that doesn't set its own.

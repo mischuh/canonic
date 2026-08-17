@@ -22,9 +22,9 @@ orders_rt: intraday provisional mirror of orders (same grain, no order_items)
 | `customers` | 5 | Customer accounts (`country` dimension) |
 | `channels` | 3 | Sales channels |
 | `products` | 5 | Product catalogue (`category` dimension) |
-| `orders` | 10 | Final orders; join target for `revenue`/`order_count` |
-| `orders_rt` | (intraday) | Provisional same-day order estimates; `finality-revenue` coalesces this with `orders` |
-| `order_items` | 17 | Line items; join target for `units_sold` |
+| `orders` | 10 | Final orders, join target for `revenue`/`order_count` |
+| `orders_rt` | (intraday) | Provisional same-day order estimates. `finality-revenue` coalesces this with `orders` |
+| `order_items` | 17 | Line items, join target for `units_sold` |
 
 ## Setup
 
@@ -39,7 +39,7 @@ canonic status
 # Connection: warehouse_pg (postgres)
 ```
 
-`setup.sql` is idempotent; re-running it drops and recreates all tables in the correct order.
+`setup.sql` is idempotent: re-running it drops and recreates all tables in the correct order.
 
 ## Quickstart
 
@@ -74,9 +74,9 @@ Each step proves one Phase 1 exit criterion:
 
 `contracts/guardrails/` ships **3** contracts, not just the one refund filter:
 
-- **`revenue-excludes-refunds`** (`mandatory_filter`): AND-s `status != 'refunded'` into every query touching `orders.total_revenue`. Expected revenue after the guardrail: **3790.50** (7 completed + 1 pending order; the seed data's two refunded orders, totaling 260.00, never appear).
+- **`revenue-excludes-refunds`** (`mandatory_filter`): AND-s `status != 'refunded'` into every query touching `orders.total_revenue`. Expected revenue after the guardrail: **3790.50** (7 completed + 1 pending order. The seed data's two refunded orders, totaling 260.00, never appear).
 - **`board-final-only`** (`restrict_source`): in a `context: board_reporting` query, confines `revenue` to the final `orders` source only, excluding the intraday `orders_rt` estimates.
-- **`finality-revenue`**: not a guardrail kind itself, but the paired finality rule `board-final-only` enforces — it declares `orders` as the `final` realization (watermark `business_day - 1 day`) and `orders_rt` as `provisional`, with `coalescing: "window <= watermark ? final : provisional"`.
+- **`finality-revenue`**: not a guardrail kind itself, but the paired finality rule `board-final-only` enforces: it declares `orders` as the `final` realization (watermark `business_day - 1 day`) and `orders_rt` as `provisional`, with `coalescing: "window <= watermark ? final : provisional"`.
 
 ```json
 // Board reporting confines revenue to the final orders source, dropping today's provisional orders_rt rows
@@ -135,7 +135,7 @@ canonic mcp stop
 { "mcpServers": { "canonic": { "transport": "streamable-http", "url": "http://127.0.0.1:7474/mcp", "headers": { "Authorization": "Bearer your-token-here" } } } }
 ```
 
-The server uses FastMCP's Streamable HTTP transport at `/mcp` (SSE at `/sse` for clients that only support that). Only `--transport http` writes `.canonic/mcp.json`: in stdio mode the MCP client owns the process and no state file is created. `--transport http` is network-reachable, so it requires at least one auth mechanism — a bearer token (`mcp.auth.tokens` in `canonic.yaml` or `--token-ref`) and/or OAuth 2.1 (`mcp.auth.oauth`, for SSO-integrated organizations) — see [Connecting your agent](/mcp-integration/connecting-your-agent#remote-enterprise-deployment) for both.
+The server uses FastMCP's Streamable HTTP transport at `/mcp` (SSE at `/sse` for clients that only support that). Only `--transport http` writes `.canonic/mcp.json`: in stdio mode the MCP client owns the process and no state file is created. `--transport http` is network-reachable, so it requires at least one auth mechanism: a bearer token (`mcp.auth.tokens` in `canonic.yaml` or `--token-ref`) and/or OAuth 2.1 (`mcp.auth.oauth`, for SSO-integrated organizations). See [Connecting your agent](/mcp-integration/connecting-your-agent#remote-enterprise-deployment) for both.
 
 ## Ingestion: keep semantics current
 
@@ -165,11 +165,11 @@ Example CI job:
     CANONIC_PG_PASSWORD: ${{ secrets.CANONIC_PG_PASSWORD }}
 ```
 
-If the live schema drifts from a `human_curated` file (e.g. a column type changes), ingest flags a contradiction but keeps the curated file untouched; see [Ingestion & reconciliation](/concepts/ingestion-and-reconciliation).
+If the live schema drifts from a `human_curated` file (e.g. a column type changes), ingest flags a contradiction but keeps the curated file untouched. See [Ingestion & reconciliation](/concepts/ingestion-and-reconciliation).
 
 ## Evidence connectors beyond Postgres
 
-Postgres introspection tells canonic what tables *exist*; [connectors](/concepts/connectors) tell it what those tables *mean*:
+Postgres introspection tells canonic what tables *exist*. [connectors](/concepts/connectors) tell it what those tables *mean*:
 
 ```yaml
 connections:
@@ -223,7 +223,7 @@ canonic audit
 # latency:        p50 310ms  p95 1240ms  ...
 ```
 
-Every query served appends a `served_answer` event to the local, git-ignored event log; every `canonic ingest` run appends `reconcile_decision` events to the same log. See [Instrumentation & evaluation](/concepts/instrumentation-and-eval#the-event-log) for exactly what is (and isn't) recorded.
+Every query served appends a `served_answer` event to the local, git-ignored event log. Every `canonic ingest` run appends `reconcile_decision` events to the same log. See [Instrumentation & evaluation](/concepts/instrumentation-and-eval#the-event-log) for exactly what is (and isn't) recorded.
 
 ## Air-gapped mode
 

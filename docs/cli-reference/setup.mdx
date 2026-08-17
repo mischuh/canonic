@@ -9,7 +9,7 @@ canonic setup
 
 Bootstraps a new canonic project: name → first connection (connection-tested before proceeding, skippable) → LLM (skippable) → optional schema preview → writes `canonic.yaml` plus scaffold directories and a `.gitignore`.
 
-Both the connection and LLM steps ask "configure now?" (default yes). Declining either leaves `connections: []`/`llm: null` in `canonic.yaml` — nothing downstream requires them up front, and both can be added later from the existing-project menu (below) or by editing `canonic.yaml` directly.
+Both the connection and LLM steps ask "configure now?" (default yes). Declining either leaves `connections: []`/`llm: null` in `canonic.yaml`: nothing downstream requires them up front, and both can be added later from the existing-project menu (below) or by editing `canonic.yaml` directly.
 
 Progress is checkpointed to `.canonic/setup-state.json`, so an interrupted run resumes where it left off. Run inside an already-set-up project, it offers a status/add-connection/generate-contracts/configure-LLM menu instead of overwriting committed files.
 
@@ -19,7 +19,7 @@ Progress is checkpointed to `.canonic/setup-state.json`, so an interrupted run r
 canonic setup --minimal
 ```
 
-Zero-prompt scaffold-only setup: writes a bare `canonic.yaml` (project name only — no connections, no LLM) plus the scaffolded directories, skipping every prompt and the golden path entirely. Refuses if `canonic.yaml` already exists. Use this when you just want a project skeleton to fill in by hand, or before wiring up a connection separately (e.g. a dbt-based source).
+Zero-prompt scaffold-only setup: writes a bare `canonic.yaml` (project name only, no connections, no LLM) plus the scaffolded directories, skipping every prompt and the golden path entirely. Refuses if `canonic.yaml` already exists. Use this when you just want a project skeleton to fill in by hand, or before wiring up a connection separately (e.g. a dbt-based source).
 
 ## What happens after the config is written
 
@@ -27,7 +27,7 @@ If a connection was configured, the wizard continues straight into the golden pa
 
 <Steps>
   <Step title="Bootstrap the first connection">
-    Tier-1 schema introspection produces deterministic semantic sources. You're then asked whether to generate inferred metric contracts now (skippable — they can be generated later from the existing-project menu).
+    Tier-1 schema introspection produces deterministic semantic sources. You're then asked whether to generate inferred metric contracts now (skippable, they can be generated later from the existing-project menu).
   </Step>
   <Step title="Run a first answer">
     A demo metric query returns result rows plus the metadata band (freshness, guardrails, final/provisional).
@@ -39,4 +39,4 @@ If a connection was configured, the wizard continues straight into the golden pa
 
 If no connection was configured (skipped, or `--minimal`), the golden path is skipped entirely and the completion panel points at adding one later.
 
-This is also the command behind bare `canonic` with no subcommand and no `--json`; see [CLI Overview](/cli-reference/overview).
+This is also the command behind bare `canonic` with no subcommand and no `--json`. See [CLI Overview](/cli-reference/overview).

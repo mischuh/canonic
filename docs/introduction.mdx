@@ -24,7 +24,7 @@ $ canonic sql "SELECT SUM(amount) FROM fct_orders"
 │ 4050.50 │
 └─────────┘
 ```
-The problem: this total includes two refunded orders ($260). Refunds are reversals, not revenue — a confident, well-formatted number that's off by 6.4%.
+The problem: this total includes two refunded orders ($260). Refunds are reversals, not revenue: a confident, well-formatted number that's off by 6.4%.
 
 **✅ With canonic (the truth):**
 ```bash
@@ -47,26 +47,26 @@ canonic resolves "revenue" to its canonical definition, compiles the guardrail i
 
 ## What canonic does
 
-canonic sits between your data and your agents as a **context layer**: an auto-built, auto-maintained, version-controlled description of what your data *means* and how to query it *safely*. Agents ask for a metric by name; canonic resolves it to the canonical definition, compiles correct read-only SQL, runs it, and returns the answer **with the caveats that make it trustworthy**: how fresh the data is, which guardrails applied, whether the number is final or provisional.
+canonic sits between your data and your agents as a **context layer**: an auto-built, auto-maintained, version-controlled description of what your data *means* and how to query it *safely*. Agents ask for a metric by name. canonic resolves it to the canonical definition, compiles correct read-only SQL, runs it, and returns the answer **with the caveats that make it trustworthy**: how fresh the data is, which guardrails applied, whether the number is final or provisional.
 
 When canonic isn't sure, it **refuses and asks** instead of guessing. A confidently-wrong answer is the one outcome it's built to never produce.
 
 Connect Claude, Cursor, or any [MCP client](/mcp-integration/connecting-your-agent) and your agent resolves metrics through the same context layer, no separate integration to build.
 
-Every output in these docs is real, captured from a live run, not hand-written; see the [end-to-end example](/end-to-end-example) for the full loop with actual commands and diffs.
+Every output in these docs is real, captured from a live run, not hand-written. See the [end-to-end example](/end-to-end-example) for the full loop with actual commands and diffs.
 
 ## Why canonic, not something else
 
 | Alternative | What goes wrong | With canonic |
 | --- | --- | --- |
-| Giving the agent raw schema/SQL access | Fluency without correctness; it guesses definitions and picks wrong tables | Resolved canonical definitions, enforced guardrails, never a silent wrong number |
-| Hand-building a semantic layer from scratch | Months of modeling before any value | Context auto-drafted from your live schema on day one; you review, not author from zero |
+| Giving the agent raw schema/SQL access | Fluency without correctness: it guesses definitions and picks wrong tables | Resolved canonical definitions, enforced guardrails, never a silent wrong number |
+| Hand-building a semantic layer from scratch | Months of modeling before any value | Context auto-drafted from your live schema on day one: you review, not author from zero |
 | Migrating onto a new metrics platform | Lock-in and a rebuild | canonic **ingests** your dbt (definitions), BI tools (usage evidence), and docs (evidence). It feeds your existing stack, it doesn't replace it |
 | A hosted "AI analytics" SaaS | Your data and definitions leaving your environment | Local-first, fully **air-gapped-capable**: nothing has to leave your machine |
 
 What makes it different in one line: **canonic builds the context for you, keeps it honest, and refuses to lie when it isn't sure.**
 
-canonic is not a BI tool and not a chat interface: it's the layer that feeds the tools you already have (a BI dashboard, an agent, a notebook) correct, governed answers. If you want a place to explore data visually, or a standalone chatbot, canonic isn't that; it's the plumbing underneath one.
+canonic is not a BI tool and not a chat interface: it's the layer that feeds the tools you already have (a BI dashboard, an agent, a notebook) correct, governed answers. If you want a place to explore data visually, or a standalone chatbot, canonic isn't that. It's the plumbing underneath one.
 
 ## The three layers
 
@@ -91,7 +91,7 @@ The key idea: a knowledge page *explains* why "amount includes refunds unless fi
 - **Propose-only.** It never silently edits your context: every change is a reviewable diff anchored to evidence.
 - **Refuse-and-ask.** Ambiguous or unsafe? It returns a structured reason, not a guess.
 - **No LLM in the answer path.** Queries compile deterministically: the same question always produces the same SQL. An LLM only helps *draft* context, never *compute* an answer.
-- **Local-first & air-gapped-capable.** Run entirely on your machine with a local model and local embeddings; nothing has to leave your network.
+- **Local-first & air-gapped-capable.** Run entirely on your machine with a local model and local embeddings. Nothing has to leave your network.
 - **Measurable.** A local event log tracks accuracy, freshness, and answer quality, so "trustworthy" is something you can check, not just claim.
 
 <CardGroup cols={2}>

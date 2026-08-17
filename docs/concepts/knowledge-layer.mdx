@@ -6,7 +6,7 @@ description: "Free-form, searchable, auto-maintained pages that carry business m
 Knowledge pages answer "what does this mean to the business?": definitions, caveats, and policies that a human needs to *trust* an answer, as opposed to semantics (how to query safely) or contracts (what's authoritative and mandatory). See [the split rule](/concepts/three-layers#the-split-rule).
 
 <Note>
-  Retrieval is implemented and reachable today through the MCP tools [`search_knowledge`](/mcp-integration/tools-reference#search-knowledge-query-str-user-str-none-none-limit-int-5) and [`read_knowledge_page`](/mcp-integration/tools-reference#read-knowledge-page-page-str-user-str-none-none) (and via `canonic query`'s underlying service). The CLI's own [`canonic knowledge search`](/cli-reference/knowledge#knowledge-search) command is a stub; see that page for status.
+  Retrieval is implemented and reachable today through the MCP tools [`search_knowledge`](/mcp-integration/tools-reference#search-knowledge-query-str-user-str-none-none-limit-int-5) and [`read_knowledge_page`](/mcp-integration/tools-reference#read-knowledge-page-page-str-user-str-none-none) (and via `canonic query`'s underlying service). The CLI's own [`canonic knowledge search`](/cli-reference/knowledge#knowledge-search) command is a stub. See that page for status.
 </Note>
 
 ## Page format
@@ -44,7 +44,7 @@ Two scopes, defined by path, not by a field you set by hand:
 
 **Strict-additive rule:** a user page can *add* context but can never override or shadow a global one. On a name/topic collision, the global page stays authoritative and the user page is surfaced as a personal annotation attached to it, never a replacement. A user's search sees `global` + their own `user/<id>`, never another user's pages.
 
-Under an active [role policy](/concepts/tenancy-and-access-control), search and page reads are additionally filtered by the caller's `knowledge.allow_tags` — a page whose tags fall entirely outside the allow set is invisible to that role, same treatment as a page outside scope. A role that declares no `knowledge:` block at all defaults to `allow_tags: []`, i.e. zero visible pages, a footgun worth reading about in full under [`RoleDef` fields](/concepts/tenancy-and-access-control#roledef-fields--one-entry-under-roles).
+Under an active [role policy](/concepts/tenancy-and-access-control), search and page reads are additionally filtered by the caller's `knowledge.allow_tags`: a page whose tags fall entirely outside the allow set is invisible to that role, same treatment as a page outside scope. A role that declares no `knowledge:` block at all defaults to `allow_tags: []`, i.e. zero visible pages, a footgun worth reading about in full under [`RoleDef` fields](/concepts/tenancy-and-access-control#roledef-fields-one-entry-under-roles).
 
 ## Retrieval
 
@@ -55,7 +55,7 @@ Search fuses two arms via Reciprocal Rank Fusion:
 
 When embeddings aren't installed, search runs lexical-only and degrades gracefully rather than failing: the same query returns sensible, if less semantically fuzzy, hits. Result ordering is deterministic: the lexical arm and tie-breaking (by page id) never vary run to run.
 
-Each hit's `score` is the RRF-fused value, not a relevance percentage — see [`canonic knowledge search`](/cli-reference/knowledge#reading-score) for how to read it.
+Each hit's `score` is the RRF-fused value, not a relevance percentage. See [`canonic knowledge search`](/cli-reference/knowledge#reading-score) for how to read it.
 
 Page vectors are cached under `.canonic/knowledge-index/`, keyed by a content fingerprint per page: a search only re-embeds pages whose `summary`/`body` changed since the last run, not the whole knowledge base every time. A model swap is detected the same way (via the embedder's identity fingerprint) and triggers a full rebuild rather than mixing vectors from two models.
 
@@ -69,8 +69,8 @@ After a search returns seed hits, an agent can pull connected context by **trave
 | --- | --- |
 | `reference` | Found by search/traversal only. The default. |
 | `caveat` | Auto-surfaced whenever a bound `sl_ref` entity appears in a result: a relevant warning rides along even if nobody searched for it. |
-| `policy` | A business rule/definition page; ranked like `reference` but tagged distinguishably. |
-| `definition` | The canonical prose definition for a term; collisions follow the strict-additive rule. |
+| `policy` | A business rule/definition page, ranked like `reference` but tagged distinguishably. |
+| `definition` | The canonical prose definition for a term. Collisions follow the strict-additive rule. |
 
 A `caveat` page *documents* a risk. If the risk must be *prevented*, not just disclosed, it's promoted to a contract [guardrail](/concepts/contracts-and-guardrails#guardrails): knowledge explains, the contract enforces.
 

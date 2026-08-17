@@ -27,7 +27,7 @@ Each layer has a different owner and a different update cadence:
 - **Knowledge** carries business prose that's also auto-drafted from evidence (dbt descriptions, Notion pages, BI usage), but is meant to be refined by a human over time: it's read-heavy context, not enforcement.
 - **Contracts** decide what's *authoritative* and *mandatory*. This is deliberately human-owned: which of two conflicting "revenue" definitions wins, and which guardrails are non-negotiable, are governance decisions canonic surfaces but never makes for you.
 
-This is also why ingestion is [propose-only](/concepts/ingestion-and-reconciliation): a `human_curated` or `board_approved` fact in any layer is never silently overwritten by new evidence; at most, a conflict is flagged for review.
+This is also why ingestion is [propose-only](/concepts/ingestion-and-reconciliation): a `human_curated` or `board_approved` fact in any layer is never silently overwritten by new evidence. At most, a conflict is flagged for review.
 
 <CardGroup cols={3}>
   <Card title="Semantics" icon="table" href="/concepts/semantics">
