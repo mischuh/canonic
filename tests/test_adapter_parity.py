@@ -23,6 +23,7 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from canonic.core.service import CanonicService
+    from canonic.semantic.models import SemanticSource
 
 
 @pytest.mark.release_gate
@@ -258,3 +259,101 @@ def test_run_report_filters_parity(report_project: Path, monkeypatch: pytest.Mon
 
     assert cli_payload == mcp_payload
     assert cli_payload["sections"][0]["result"]["result"]["rows"] == []
+
+
+# ---------------------------------------------------------------------------
+# Principal-bearing parity (SPEC-E12 "design rule": same payload for the same Principal)
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def scoped_service(
+    orders_source: SemanticSource, monkeypatch: pytest.MonkeyPatch
+) -> CanonicService:
+    """A service with two metrics and a role that only allows one of them."""
+    from canonic.config import CanonicConfig
+    from canonic.contracts.models import (
+        AllowDenyPolicy,
+        CanonicalRef,
+        MetricBinding,
+        RoleDef,
+        RolePolicy,
+        Status,
+    )
+    from canonic.contracts.resolver import ContractResolver
+    from canonic.core.service import CanonicService
+
+    monkeypatch.setenv("PG_PASSWORD", "testpw")
+    revenue = MetricBinding(
+        metric="revenue",
+        canonical=CanonicalRef(source="orders", measure="total_revenue"),
+        status=Status.ACTIVE,
+    )
+    order_count = MetricBinding(
+        metric="order_count",
+        canonical=CanonicalRef(source="orders", measure="order_count"),
+        status=Status.ACTIVE,
+    )
+    roles = RolePolicy(
+        schema_="roles/v1",
+        claim="roles",
+        roles={"merchant_viewer": RoleDef(metrics=AllowDenyPolicy(allow=["revenue"]))},
+    )
+    resolver = ContractResolver(bindings=[revenue, order_count], guardrails=[], roles=roles)
+    config = CanonicConfig.model_validate(
+        {
+            "version": 1,
+            "project": {"name": "test", "default_connection": "warehouse_pg"},
+            "connections": [
+                {
+                    "id": "warehouse_pg",
+                    "type": "postgres",
+                    "params": {
+                        "host": "localhost",
+                        "port": 5432,
+                        "dbname": "testdb",
+                        "user": "test",
+                    },
+                    "credentials_ref": "env:PG_PASSWORD",
+                }
+            ],
+            "llm": {
+                "provider": "openai_compatible",
+                "base_url": "http://localhost/v1",
+                "model": "llama3",
+            },
+        }
+    )
+    return CanonicService(config=config, resolver=resolver, sources=[orders_source])
+
+
+@pytest.mark.asyncio
+async def test_list_metrics_parity_for_scoped_principal(scoped_service: CanonicService) -> None:
+    """MCP ``list_metrics`` under a ``stdio``-style session-fixed Principal returns the same
+    filtered payload as the direct service-level call for that same Principal — both omit
+    the metric the role denies (SPEC-E12 §6, S15 AC1)."""
+    from canonic.contracts.principal import Principal
+
+    principal = Principal(tenant=None, roles=("merchant_viewer",))
+    mcp = build_server(scoped_service, session_principal=principal)
+
+    async with Client(mcp) as client:
+        result = await client.call_tool("list_metrics", {})
+    mcp_payload = result.data
+
+    summaries = scoped_service.list_metrics(principal=principal)
+    dim_catalog: dict = {}
+    metrics_out = []
+    for s in summaries:
+        metric = s.model_dump(exclude={"dimensions"})
+        metric["dimensions"] = [d.name for d in s.dimensions]
+        metrics_out.append(metric)
+        for d in s.dimensions:
+            dim_catalog.setdefault(d.name, d.model_dump())
+    service_payload = {
+        "metrics": metrics_out,
+        "dimensions": [dim_catalog[name] for name in sorted(dim_catalog)],
+    }
+
+    assert mcp_payload == service_payload
+    assert [m["metric"] for m in mcp_payload["metrics"]] == ["revenue"]

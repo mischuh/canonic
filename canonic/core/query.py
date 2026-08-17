@@ -11,8 +11,9 @@ from typing import TYPE_CHECKING, Any, cast
 from canonic.compiler import compile
 from canonic.connectors.base import Capability, require_capability
 from canonic.contract import CONTRACT_SCHEMA
+from canonic.contracts.principal import Principal
 from canonic.core.models import QueryResult
-from canonic.exc import CanonicError
+from canonic.exc import CanonicError, TenantForbidden
 from canonic.feedback.assertion_history import AssertionHistory
 from canonic.feedback.history import BindingOutcomeHistory
 from canonic.instrumentation.models import AnswerEvent, _age_days, _sha256_json
@@ -29,6 +30,8 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+_ANONYMOUS_PRINCIPAL = Principal(tenant=None)
+
 
 class QueryService:
     """Compile and execute semantic queries and raw SQL, emitting answer events."""
@@ -37,25 +40,41 @@ class QueryService:
         self._ctx = ctx
         self._assertions = assertions
 
-    def resolve_metric(self, name: str, context: str | None = None) -> Binding:
+    def resolve_metric(
+        self, name: str, context: str | None = None, *, principal: Principal | None = None
+    ) -> Binding:
         """Resolve a metric name and return the :class:`Binding`.
 
         Raises :class:`canonic.exc.Unresolved` (exit 2) or
-        :class:`canonic.exc.Ambiguous` (exit 3) on failure.
+        :class:`canonic.exc.Ambiguous` (exit 3) on failure — including a name outside
+        *principal*'s effective policy, which raises the same ``Unresolved`` shape as a
+        nonexistent name (SPEC-E12 §3, S15 AC3).
         """
-        return self._ctx.resolve_or_raise(name, context=context)
+        return self._ctx.resolve_or_raise(name, context=context, principal=principal)
 
-    def compile_query(self, query: SemanticQuery) -> CompileResult:
-        """Compile a semantic query to SQL + metadata with no execution (SPEC §2)."""
+    def compile_query(
+        self, query: SemanticQuery, *, principal: Principal | None = None
+    ) -> CompileResult:
+        """Compile a semantic query to SQL + metadata with no execution (SPEC §2).
+
+        ``principal`` is bound by the adapter from a verified token/CLI override and flows
+        straight into :func:`compile` — never accepted on ``query`` itself (SPEC-E12).
+        """
         return compile(
             query,
             self._ctx.resolver,
             self._ctx.sources,
             connection_dialects=self._ctx.connection_dialects,
+            principal=principal,
         )
 
     async def query(
-        self, query: SemanticQuery, *, harness: bool = False, caller: str | None = None
+        self,
+        query: SemanticQuery,
+        *,
+        harness: bool = False,
+        caller: str | None = None,
+        principal: Principal | None = None,
     ) -> QueryResult:
         """Compile and execute a semantic query read-only (SPEC §2).
 
@@ -70,6 +89,10 @@ class QueryService:
         ``caller`` is the verified bearer-token client_id for MCP http-transport calls
         (``None`` for stdio/CLI, which have no auth layer); recorded on the emitted
         answer event for per-user attribution (AMENDMENT-remote-mcp-transport.md).
+
+        ``principal`` is bound by the adapter from a verified token/CLI override — never
+        accepted on ``query`` itself — and flows into :func:`compile` for tenant/role
+        scoping (SPEC-E12).
         """
         started = time.perf_counter()
         compiled: CompileResult | None = None
@@ -90,6 +113,7 @@ class QueryService:
                 self._ctx.resolver,
                 self._ctx.sources,
                 connection_dialects=self._ctx.connection_dialects,
+                principal=principal,
             )
             connection_id = self._ctx.connection_for_sql(compiled)
             if connection_id is not None:
@@ -153,8 +177,37 @@ class QueryService:
             return None
         return AssertionHistory.from_project(self._ctx.project_root)
 
+    def _enforce_run_sql_gate(self, connection: str | None, principal: Principal | None) -> None:
+        """Fail-closed ``run_sql`` gate (SPEC-E12 §6) — raises :class:`TenantForbidden`.
+
+        Runs *before* any connector is opened: a role denying raw SQL, or an active
+        tenancy policy paired with a connection that carries no ``rls_enforced: true``
+        attestation, means the statement is never even attempted.
+        """
+        resolver = self._ctx.resolver
+        bound = principal if principal is not None else _ANONYMOUS_PRINCIPAL
+        effective_policy = resolver.authz_for(bound)
+        if not effective_policy.run_sql:
+            raise TenantForbidden("role denies raw SQL execution (run_sql: false)")
+        if resolver.tenancy_enabled and not effective_policy.tenancy_exempt:
+            target_id = connection or self._ctx.config.project.default_connection
+            conn_cfg = next((c for c in self._ctx.config.connections if c.id == target_id), None)
+            if conn_cfg is None or not conn_cfg.rls_enforced:
+                raise TenantForbidden(
+                    f"run_sql is refused on connection {target_id!r}: a tenancy policy is "
+                    "active and this connection carries no rls_enforced: true attestation "
+                    "(SPEC-E12 §6) — raw SQL bypasses the compiler's tenant predicate "
+                    "injection entirely, so it is only served where the warehouse itself "
+                    "closes the gap"
+                )
+
     async def run_sql(
-        self, sql: str, connection: str | None = None, *, caller: str | None = None
+        self,
+        sql: str,
+        connection: str | None = None,
+        *,
+        caller: str | None = None,
+        principal: Principal | None = None,
     ) -> ResultSet:
         """Execute a raw read-only SQL string on the named connection (SPEC §2).
 
@@ -164,7 +217,15 @@ class QueryService:
         ``caller`` is the verified bearer-token client_id for MCP http-transport calls
         (``None`` for stdio/CLI); recorded on the emitted answer event for per-user
         attribution (AMENDMENT-remote-mcp-transport.md).
+
+        Raw SQL bypasses the compiler entirely, so it never gets a tenant predicate
+        injected — it is served only where a fail-closed gate says the gap is otherwise
+        closed (SPEC-E12 §6): a role with ``run_sql: false`` is refused outright, and with
+        tenancy enabled the target connection must itself attest ``rls_enforced: true``
+        (an out-of-band warehouse-level boundary canonic cannot verify, only trust). Both
+        raise :class:`canonic.exc.TenantForbidden`.
         """
+        self._enforce_run_sql_gate(connection, principal)
         started = time.perf_counter()
         result: ResultSet | None = None
         error_code: str | None = None

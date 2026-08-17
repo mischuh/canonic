@@ -626,7 +626,23 @@ class ContractResolver:
         merge — see :class:`~canonic.contracts.models.RoleDef`); when a principal carries
         several roles, the per-role results are unioned, with deny always winning in the
         final :meth:`EffectivePolicy.metric_allowed`-style check.
+
+        ``principal.system_exempt`` short-circuits straight to an unrestricted, exempt
+        policy, bypassing role lookup entirely — see :attr:`Principal.system_exempt` for
+        why this must not depend on any project's actual ``roles.yaml`` content.
         """
+        if principal.system_exempt:
+            return EffectivePolicy(
+                allow_metrics=frozenset({"*"}),
+                deny_metrics=frozenset(),
+                allow_dimensions=frozenset({"*"}),
+                deny_dimensions=frozenset(),
+                allow_tags=frozenset({"*"}),
+                run_sql=True,
+                tenancy_exempt=True,
+                masking=(),
+                roles=(),
+            )
         if self._roles is None:
             return EffectivePolicy(
                 allow_metrics=frozenset({"*"}),

@@ -33,10 +33,10 @@ def sql(
 
     Non-SELECT statements are rejected with ``READ_ONLY_VIOLATION`` (exit 11).
     """
-    # SPEC-E12 §7: validated + warned here; not yet threaded into service.run_sql (E12 P2).
-    cli_tenant_principal(tenant)
+    # SPEC-E12 §7: --tenant is local-development/platform-operator only, always warns.
+    principal = cli_tenant_principal(tenant)
     service = load_service(ctx)
-    result = asyncio.run(service.run_sql(statement, connection=connection))
+    result = asyncio.run(service.run_sql(statement, connection=connection, principal=principal))
 
     payload = result.model_dump(mode="json")
     if get_cli_context(ctx).json_output:

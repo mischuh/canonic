@@ -8,6 +8,7 @@ from canonic.compiler.joins import build_alias_tree, reachable_dimension_names
 from canonic.compiler.result import TrustInput
 from canonic.contracts.kinds import spec_for
 from canonic.contracts.models import Status
+from canonic.contracts.principal import Principal
 from canonic.core.models import (
     DimensionInfo,
     DomainGroup,
@@ -54,16 +55,28 @@ def _get_domain(binding: MetricBinding, resolver: ContractResolver) -> str:
     return metric
 
 
+_ANONYMOUS_PRINCIPAL = Principal(tenant=None)
+
+
 class DiscoveryService:
     """Read-only metric discovery: summaries, detail, trust worklist, and domain overview."""
 
     def __init__(self, ctx: ServiceContext) -> None:
         self._ctx = ctx
 
-    def list_metrics(self) -> list[MetricSummary]:
-        """Return a summary of every active canonical metric (SPEC §4.1)."""
+    def list_metrics(self, *, principal: Principal | None = None) -> list[MetricSummary]:
+        """Return a summary of every active canonical metric (SPEC §4.1).
+
+        Omits every metric outside *principal*'s effective policy (SPEC-E12 §6, S15 AC1) —
+        an entity the caller cannot query is an entity the caller cannot see listed.
+        """
+        effective_policy = self._ctx.resolver.authz_for(
+            principal if principal is not None else _ANONYMOUS_PRINCIPAL
+        )
         summaries: list[MetricSummary] = []
         for b in self._ctx.resolver.active_bindings():
+            if not effective_policy.metric_allowed(b.metric):
+                continue
             canonical = b.canonical
             spec = spec_for(canonical.kind)
             source: str | None
@@ -101,7 +114,7 @@ class DiscoveryService:
         enriched: list[MetricSummary] = []
         for s in deduped:
             try:
-                detail = self.describe_metric(s.metric)
+                detail = self.describe_metric(s.metric, principal=principal)
                 enriched.append(s.model_copy(update={"dimensions": detail.dimensions}))
             except CanonicError:
                 enriched.append(s)
@@ -131,7 +144,7 @@ class DiscoveryService:
             scores.append((b.metric, TrustScorer.score(static_signals_for([trust_input]))))
         return sorted(scores, key=lambda item: item[0])
 
-    def describe_metric(self, name: str) -> MetricDetail:
+    def describe_metric(self, name: str, *, principal: Principal | None = None) -> MetricDetail:
         """Return grain, dimensions, measures, and freshness for a metric (SPEC §4.1).
 
         ``dimensions`` includes every dimension queryable against this metric — both those
@@ -140,9 +153,11 @@ class DiscoveryService:
         accurately reflects what can be passed as a dimension in a ``query()`` call.
 
         Raises :class:`canonic.exc.Unresolved` or :class:`canonic.exc.Ambiguous` when the
-        name does not resolve to exactly one active binding.
+        name does not resolve to exactly one active binding — including a name outside
+        *principal*'s effective policy, which raises the identical ``Unresolved`` shape
+        rather than a distinct forbidden error (SPEC-E12 §3, S15 AC3).
         """
-        binding = self._ctx.resolve_or_raise(name)
+        binding = self._ctx.resolve_or_raise(name, principal=principal)
         spec = spec_for(binding.kind)
         if spec.is_composite:
             assert binding.components is not None  # noqa: S101
@@ -217,15 +232,25 @@ class DiscoveryService:
             examples=list(binding.binding.examples),
         )
 
-    def get_overview(self, domain: str | None = None) -> OverviewResult:
+    def get_overview(
+        self, domain: str | None = None, *, principal: Principal | None = None
+    ) -> OverviewResult:
         """Return active metrics grouped by domain with plain-language sample questions (S12).
 
         ``domain`` filters to a single owning-source group; omit for all domains.
         Each group carries the source's reachable dimension names and ≥1 sample question
         (templated from binding examples or from dimensions when no usage evidence exists).
+
+        Omits every metric outside *principal*'s effective policy, and any domain group left
+        with no visible metrics as a result (SPEC-E12 §6, S15 AC1).
         """
+        effective_policy = self._ctx.resolver.authz_for(
+            principal if principal is not None else _ANONYMOUS_PRINCIPAL
+        )
         source_to_metrics: dict[str, list[tuple[str, str]]] = {}
         for b in self._ctx.resolver.active_bindings():
+            if not effective_policy.metric_allowed(b.metric):
+                continue
             d = _get_domain(b, self._ctx.resolver)
             source_to_metrics.setdefault(d, [])
             if any(n == b.metric for n, _ in source_to_metrics[d]):

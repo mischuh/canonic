@@ -18,7 +18,7 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from canonic.contracts.models import MaskingRule
 
-__all__ = ["EffectivePolicy", "Principal"]
+__all__ = ["SYSTEM_PRINCIPAL", "EffectivePolicy", "Principal"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -35,6 +35,23 @@ class Principal:
     tenant: str | None
     roles: tuple[str, ...] = ()
     source: str = "unknown"
+    #: Bypasses ``ContractResolver.authz_for``'s role-policy lookup entirely, granting an
+    #: unrestricted, ``tenancy_exempt`` :class:`EffectivePolicy` regardless of whatever
+    #: ``roles.yaml`` the project declares (or lacks). Never set from a verified token, a
+    #: CLI flag, or anything caller-controlled — only :data:`SYSTEM_PRINCIPAL` carries it,
+    #: used by the assertion/CI harness and static report validation, both of which check
+    #: whether something *compiles* against the full, unfiltered dataset rather than serve
+    #: an answer to anyone (SPEC-E12 §7, "assertions run tenant-exempt"). A project-specific
+    #: ``tenancy_exempt: true`` role remains the only caller-reachable way to read cross-tenant.
+    system_exempt: bool = False
+
+
+#: The one caller-unreachable :class:`Principal` in the codebase: canonic's own internal
+#: checks that a query *compiles*, independent of any tenant — the assertion/CI harness
+#: (:mod:`canonic.core.assertions`) and static report validation
+#: (:meth:`canonic.core.reports.ReportService.validate_reports`). Never bound from a token,
+#: a CLI flag, or anything else caller-controlled.
+SYSTEM_PRINCIPAL = Principal(tenant=None, roles=(), source="system", system_exempt=True)
 
 
 _WILDCARD = "*"

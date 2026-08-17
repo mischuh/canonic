@@ -5,11 +5,16 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 from canonic.config import LOCAL_STATE_DIR
+from canonic.contracts.principal import Principal
 
 if TYPE_CHECKING:
     from canonic.core.context import ServiceContext
     from canonic.knowledge.embeddings import Embedder
+    from canonic.knowledge.models import KnowledgePage
     from canonic.knowledge.results import SearchResult
+
+_ANONYMOUS_PRINCIPAL = Principal(tenant=None)
+_WILDCARD_TAG = "*"
 
 
 class KnowledgeService:
@@ -23,18 +28,41 @@ class KnowledgeService:
         self._embedder: Embedder | None = None
         self._embedder_checked = False
 
+    def _tag_visible_pages(
+        self, pages: list[KnowledgePage], principal: Principal | None
+    ) -> list[KnowledgePage]:
+        """Drop pages outside *principal*'s role ``knowledge.allow_tags`` (SPEC-E12 §6, S15 AC2).
+
+        A page is visible when the allow set is the unrestricted wildcard (the default with
+        no role policy loaded, or an explicit ``allow_tags: ["*"]``) or when at least one of
+        its own tags is in the allow set. An untagged page under a restrictive allow set is
+        excluded — an undeclared tag is a policy hole, same fail-closed posture as an
+        undeclared tenancy source (§3 stage 2b), not an implicit pass.
+        """
+        allow_tags = self._ctx.resolver.authz_for(
+            principal if principal is not None else _ANONYMOUS_PRINCIPAL
+        ).allow_tags
+        if _WILDCARD_TAG in allow_tags:
+            return pages
+        return [p for p in pages if any(t in allow_tags for t in p.tags)]
+
     def search_knowledge(
         self,
         query: str,
         *,
         user: str | None = None,
         limit: int = 10,
+        principal: Principal | None = None,
     ) -> SearchResult:
         """Search knowledge pages for business context (E6, P1).
 
         Returns ranked hits (definitions, policies) and any caveats auto-surfaced
         because a hit references their bound semantic entity. Returns an empty
         result when no project root or knowledge directory is available.
+
+        ``principal``'s role ``knowledge.allow_tags`` filters the searchable corpus before
+        ranking (SPEC-E12 §6, S15 AC2) — on top of, not instead of, the existing
+        global/user-scope visibility ``user`` already governs (E6 §4).
         """
         from canonic.knowledge import EntityIndex, KnowledgeSearch, load_knowledge_page
         from canonic.knowledge.results import SearchResult as SR
@@ -46,6 +74,7 @@ class KnowledgeService:
             return SR(hits=[], caveats=[])
 
         pages = [load_knowledge_page(p) for p in sorted(knowledge_root.rglob("*.md"))]
+        pages = self._tag_visible_pages(pages, principal)
         if not pages:
             return SR(hits=[], caveats=[])
 
@@ -79,12 +108,18 @@ class KnowledgeService:
             self._embedder_checked = True
         return self._embedder
 
-    def read_knowledge_page(self, page: str, *, user: str | None = None) -> dict[str, Any]:
+    def read_knowledge_page(
+        self, page: str, *, user: str | None = None, principal: Principal | None = None
+    ) -> dict[str, Any]:
         """Retrieve the full content of a knowledge page by page id with live rendering (E6, P1).
 
         Returns rendered body (with {{ sl:entity.expr }} directives resolved to live SQL),
         drift flag, and staleness metadata. Respects access control.
         Per amendment-knowledge-read-page: body is rendered, meta includes last_validated_at and drift_flag.
+
+        ``principal``'s role ``knowledge.allow_tags`` applies on top of the existing
+        global/user-scope check (SPEC-E12 §6, S15 AC2): a page outside the allow set is
+        refused with :class:`PermissionError`, same as an out-of-scope user page.
         """
         from canonic.knowledge import load_knowledge_page, user_from_path
         from canonic.knowledge.drift import DriftDetector
@@ -113,6 +148,8 @@ class KnowledgeService:
 
         if knowledge_page is None:
             raise KeyError(f"Knowledge page {page!r} not found")
+        if not self._tag_visible_pages([knowledge_page], principal):
+            raise PermissionError(f"role does not permit access to page {page!r}")
 
         # Live entity index for rendering and drift detection (E6 §7).
         entity_index = EntityIndex.from_sources(self._ctx.sources)

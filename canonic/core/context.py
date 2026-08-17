@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING, cast
 
 from canonic.connectors.base import Capability, require_capability
 from canonic.connectors.factory import default_factory
+from canonic.contracts.principal import Principal
 from canonic.contracts.resolver import Ambiguous as ResolverAmbiguous
 from canonic.contracts.resolver import Unresolved as ResolverUnresolved
 from canonic.exc import Ambiguous, Unresolved
@@ -28,6 +29,8 @@ if TYPE_CHECKING:
     from canonic.contracts.resolver import Binding, ContractResolver
     from canonic.instrumentation.events import AnswerEventLog
     from canonic.semantic.models import SemanticSource
+
+_ANONYMOUS_PRINCIPAL = Principal(tenant=None)
 
 logger = logging.getLogger(__name__)
 
@@ -54,12 +57,26 @@ class ServiceContext:
         # name → source for fast lookup (sources have unique names within project)
         self.source_by_name: dict[str, SemanticSource] = {s.name: s for s in sources}
 
-    def resolve_or_raise(self, name: str, context: str | None = None) -> Binding:
+    def resolve_or_raise(
+        self, name: str, context: str | None = None, *, principal: Principal | None = None
+    ) -> Binding:
         """Resolve *name* to a :class:`Binding`, mapping resolver results onto coded exceptions.
 
         Raises :class:`canonic.exc.Unresolved` (exit 2) or :class:`canonic.exc.Ambiguous`
         (exit 3) — the headless error codes the CLI/MCP adapters surface.
+
+        A name outside *principal*'s effective policy also raises :class:`Unresolved`, with
+        the identical message shape a nonexistent name produces — reusing the compiler's
+        stage 1 divergence (SPEC-E12 §3) so ``describe_metric``/``resolve_metric`` never turn
+        into an existence oracle for metrics the caller is not entitled to know about (S15
+        AC3). Checked *before* resolution, mirroring the compiler's ordering. ``principal is
+        None`` still applies whatever ``default_role``/deny-by-default the project's role
+        policy declares for an unauthenticated caller — matching :func:`compile`'s stage 0,
+        which never treats a missing principal as an unrestricted one once a policy is loaded.
         """
+        bound = principal if principal is not None else _ANONYMOUS_PRINCIPAL
+        if not self.resolver.authz_for(bound).metric_allowed(name):
+            raise Unresolved(f"metric {name!r} matches no active binding")
         result = self.resolver.resolve_metric(name, context=context)
         if isinstance(result, ResolverUnresolved):
             raise Unresolved(f"metric {name!r} matches no active binding")

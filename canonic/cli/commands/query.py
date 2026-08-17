@@ -73,11 +73,11 @@ def query(
     and any divergence from its expected result exits 10 (``ASSERTION_FAILED``); without it,
     assertions are informational and never block.
     """
-    # SPEC-E12 §7: validated + warned here; not yet threaded into service.query (E12 P2).
-    cli_tenant_principal(tenant)
+    # SPEC-E12 §7: --tenant is local-development/platform-operator only, always warns.
+    principal = cli_tenant_principal(tenant)
     sq = build_semantic_query(file, metrics, dimensions, filter_, via, limit)
     service = load_service(ctx)
-    result = asyncio.run(service.query(sq, harness=harness))
+    result = asyncio.run(service.query(sq, harness=harness, principal=principal))
 
     # ``mode="json"`` yields JSON-native primitives (Decimal/datetime → str/number)
     # so this payload is byte-identical to the MCP ``query`` tool's serialized result.

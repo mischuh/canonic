@@ -188,7 +188,7 @@ class TestStartStdioTenancyGuard:
     def test_refuses_without_tenant_when_tenancy_enabled(self, project_root: Path) -> None:
         service = _StubService(tenancy_enabled=True)
         with pytest.raises(RuntimeError, match="tenancy policy"):
-            start_stdio(service, project_root, tenant=None)
+            start_stdio(service, project_root, principal=None)
 
     def test_no_tenancy_policy_starts_without_tenant(
         self, project_root: Path, monkeypatch: pytest.MonkeyPatch
@@ -201,17 +201,19 @@ class TestStartStdioTenancyGuard:
         # mcp.run would block; the object returned above has no .run, so calling it
         # would raise — confirm we get past the guard by checking build_server ran.
         with pytest.raises(AttributeError):
-            start_stdio(service, project_root, tenant=None)
+            start_stdio(service, project_root, principal=None)
         assert called.get("built") is True
 
     def test_tenant_given_satisfies_guard_when_tenancy_enabled(
         self, project_root: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
+        from canonic.contracts.principal import Principal
+
         service = _StubService(tenancy_enabled=True)
         called = {}
         monkeypatch.setattr(
             "canonic.mcp.server.build_server", lambda *a, **k: called.setdefault("built", True)
         )
         with pytest.raises(AttributeError):
-            start_stdio(service, project_root, tenant="4711")
+            start_stdio(service, project_root, principal=Principal(tenant="4711"))
         assert called.get("built") is True

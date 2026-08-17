@@ -115,8 +115,8 @@ def run(
     normally — the call as a whole exits 0. With ``--json`` the output matches the MCP
     ``run_report`` tool payload byte-for-byte.
     """
-    # SPEC-E12 §7: validated + warned here; not yet threaded into service.run_report (E12 P2).
-    cli_tenant_principal(tenant)
+    # SPEC-E12 §7: --tenant is local-development/platform-operator only, always warns.
+    principal = cli_tenant_principal(tenant)
     try:
         parsed_filters = [parse_filter_flag(f) for f in filter_ or []]
     except ValueError as exc:
@@ -124,7 +124,9 @@ def run(
 
     service = load_service(ctx)
     result = asyncio.run(
-        service.run_report(report_id, as_of=as_of, filters=parsed_filters, user=user)
+        service.run_report(
+            report_id, as_of=as_of, filters=parsed_filters, user=user, principal=principal
+        )
     )
 
     payload = result.model_dump(mode="json")
