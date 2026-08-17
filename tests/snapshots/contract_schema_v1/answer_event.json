@@ -132,6 +132,38 @@
       "title": "Resolved",
       "type": "object"
     },
+    "roles": {
+      "anyOf": [
+        {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Roles"
+    },
+    "tenancy_exempt": {
+      "default": false,
+      "title": "Tenancy Exempt",
+      "type": "boolean"
+    },
+    "tenant": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Tenant"
+    },
     "trust_score": {
       "anyOf": [
         {

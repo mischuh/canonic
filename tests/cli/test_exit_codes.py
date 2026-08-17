@@ -22,6 +22,7 @@ _CASES: list[tuple[type[exc.CanonicError], int]] = [
     (exc.SchemaMismatch, 12),
     (exc.ConnectionError, 13),
     (exc.ContradictionsFound, 14),
+    (exc.TenantForbidden, 24),
 ]
 
 

@@ -13,14 +13,22 @@ from canonic.compiler.query import SemanticQuery
 from canonic.config import CanonicConfig
 from canonic.connectors.base import Capability, ResultSet
 from canonic.contracts.models import (
+    AllowDenyPolicy,
     AppliesTo,
     CanonicalRef,
     Guardrail,
     GuardrailKind,
     MetricBinding,
+    OnMissingPrincipal,
+    RoleDef,
+    RolePolicy,
+    ScopedSource,
     Severity,
     Status,
+    TenancyPolicy,
+    UndeclaredSource,
 )
+from canonic.contracts.principal import Principal
 from canonic.contracts.resolver import ContractResolver
 from canonic.core.service import CanonicService
 from canonic.exc import Unresolved
@@ -107,6 +115,82 @@ def _make_service(
         resolver=resolver,
         sources=[source],
         event_log=DiskAnswerEventLog(log_root),
+    )
+
+
+def _make_tenant_service(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> CanonicService:
+    """A service with a tenancy + role policy loaded (SPEC-E12 §3), for S16 coverage."""
+    monkeypatch.setenv("PG_PASSWORD", "testpw")
+    binding = MetricBinding(
+        metric="revenue",
+        canonical=CanonicalRef(source="orders", measure="total_revenue"),
+        status=Status.ACTIVE,
+    )
+    source = SemanticSource(
+        name="orders",
+        connection="warehouse_pg",
+        table="analytics.fct_orders",
+        grain=["order_id"],
+        columns=[
+            Column(name="order_id", type="string", nullable=False),
+            Column(name="amount", type="decimal", nullable=False),
+            Column(name="merchant_id", type="string", nullable=False),
+        ],
+        measures=[Measure(name="total_revenue", expr="sum(amount)", additivity="additive")],
+        dimensions=[],
+    )
+    tenancy = TenancyPolicy(
+        schema_="tenancy/v1",
+        claim="merchant_id",
+        on_missing_principal=OnMissingPrincipal.DENY,
+        scoped_sources=[ScopedSource(source="orders", column="merchant_id")],
+        shared_sources=[],
+        undeclared_source=UndeclaredSource.DENY,
+    )
+    roles = RolePolicy(
+        schema_="roles/v1",
+        claim="roles",
+        default_role="merchant_viewer",
+        roles={
+            "merchant_viewer": RoleDef(metrics=AllowDenyPolicy(allow=["revenue"])),
+            "platform_analyst": RoleDef(
+                tenancy_exempt=True, run_sql=True, metrics=AllowDenyPolicy(allow=["*"])
+            ),
+        },
+    )
+    resolver = ContractResolver(bindings=[binding], guardrails=[], tenancy=tenancy, roles=roles)
+    config = CanonicConfig.model_validate(
+        {
+            "version": 1,
+            "project": {"name": "test", "default_connection": "warehouse_pg"},
+            "connections": [
+                {
+                    "id": "warehouse_pg",
+                    "type": "postgres",
+                    "params": {
+                        "host": "localhost",
+                        "port": 5432,
+                        "dbname": "testdb",
+                        "user": "test",
+                    },
+                    "credentials_ref": "env:PG_PASSWORD",
+                }
+            ],
+            "llm": {
+                "provider": "openai_compatible",
+                "base_url": "http://localhost/v1",
+                "model": "llama3",
+            },
+        }
+    )
+    return CanonicService(
+        config=config,
+        resolver=resolver,
+        sources=[source],
+        event_log=DiskAnswerEventLog(tmp_path),
     )
 
 
@@ -224,6 +308,26 @@ async def test_run_sql_without_caller_leaves_user_none(
     assert events[0]["user"] is None
 
 
+async def test_run_sql_records_tenant_and_roles(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """S16 AC1/AC2 for the run_sql escape hatch, not just query()."""
+    svc = _make_tenant_service(monkeypatch, tmp_path)
+
+    class _StubFactory:
+        def for_id(self, _cfg, _cid):
+            return _fake_connector()
+
+    monkeypatch.setattr("canonic.core.context.default_factory", _StubFactory())
+
+    principal = Principal(tenant=None, roles=("platform_analyst",))
+    await svc.run_sql("select 1", principal=principal)
+
+    events = _read_events(tmp_path)
+    assert events[0]["roles"] == ["platform_analyst"]
+    assert events[0]["tenancy_exempt"] is True
+
+
 # ---------------------------------------------------------------------------
 # AC2 — content safety: no SQL text, no rows, reserved fields null
 # ---------------------------------------------------------------------------
@@ -252,6 +356,11 @@ async def test_ac2_log_contains_no_sql_or_rows(
     assert "[6]" not in raw_line
     # No filter literals (the guardrail filter contains "'refunded'")
     assert "refunded" not in raw_line
+    # Carve-out: `tenant` is a verified identifier, not warehouse content (SPEC-E12 §6),
+    # so it is exempt from this "no content" rule and stored verbatim — see
+    # test_s16_ac1_tenant_and_sorted_roles_recorded below. This call has no principal, so
+    # the field is simply null here and doesn't need its own exemption in this assertion.
+    assert json.loads(raw_line)["tenant"] is None
 
     ev = json.loads(raw_line)
     # trust_score is populated from E14 (SPEC-E16 Part 2 §4); cache_hit/over_limit_blocked
@@ -298,6 +407,9 @@ def test_s3_reserved_fields_present_and_null() -> None:
     assert dumped["trust_score"] is None
     assert dumped["cache_hit"] is None
     assert dumped["over_limit_blocked"] is None
+    assert dumped["tenant"] is None
+    assert dumped["roles"] is None
+    assert dumped["tenancy_exempt"] is False
     # Round-trip
     reloaded = AnswerEvent.model_validate(dumped)
     assert reloaded == ev
@@ -315,13 +427,83 @@ def test_s3_populated_reserved_fields_validate() -> None:
         trust_score="trusted",
         cache_hit=True,
         over_limit_blocked=False,
+        tenant="4711",
+        roles=["merchant_viewer"],
+        tenancy_exempt=True,
     )
     dumped = ev.model_dump(mode="json")
     assert dumped["trust_score"] == "trusted"
     assert dumped["cache_hit"] is True
     assert dumped["over_limit_blocked"] is False
+    assert dumped["tenant"] == "4711"
+    assert dumped["roles"] == ["merchant_viewer"]
+    assert dumped["tenancy_exempt"] is True
     reloaded = AnswerEvent.model_validate(dumped)
     assert reloaded == ev
+
+
+# S16 — isolation is provable after the fact (AMENDMENT-tenant-scoping-rbac.md §8).
+
+
+async def test_s16_ac1_tenant_and_sorted_roles_recorded(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    svc = _make_tenant_service(monkeypatch, tmp_path)
+
+    class _StubFactory:
+        def for_id(self, _cfg, _cid):
+            return _fake_connector()
+
+    monkeypatch.setattr("canonic.core.context.default_factory", _StubFactory())
+
+    q = SemanticQuery(metrics=["revenue"])
+    principal = Principal(tenant="4711", roles=("merchant_viewer", "platform_analyst"))
+    await svc.query(q, principal=principal)
+
+    events = _read_events(tmp_path)
+    assert events[0]["tenant"] == "4711"
+    assert events[0]["roles"] == sorted(events[0]["roles"])
+    assert events[0]["roles"] == ["merchant_viewer", "platform_analyst"]
+
+
+async def test_s16_ac2_tenancy_exempt_read_recorded(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    svc = _make_tenant_service(monkeypatch, tmp_path)
+
+    class _StubFactory:
+        def for_id(self, _cfg, _cid):
+            return _fake_connector()
+
+    monkeypatch.setattr("canonic.core.context.default_factory", _StubFactory())
+
+    q = SemanticQuery(metrics=["revenue"])
+    principal = Principal(tenant=None, roles=("platform_analyst",))
+    await svc.query(q, principal=principal)
+
+    events = _read_events(tmp_path)
+    assert events[0]["tenancy_exempt"] is True
+
+
+async def test_no_principal_leaves_tenant_fields_null(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """No principal bound (e.g. no tenancy policy configured) — fields stay reserved-null."""
+    svc = _make_service(monkeypatch, tmp_path)
+
+    class _StubFactory:
+        def for_id(self, _cfg, _cid):
+            return _fake_connector()
+
+    monkeypatch.setattr("canonic.core.context.default_factory", _StubFactory())
+
+    q = SemanticQuery(metrics=["revenue"])
+    await svc.query(q)
+
+    events = _read_events(tmp_path)
+    assert events[0]["tenant"] is None
+    assert events[0]["roles"] is None
+    assert events[0]["tenancy_exempt"] is False
 
 
 # ---------------------------------------------------------------------------

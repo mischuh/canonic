@@ -69,6 +69,14 @@ class AnswerEvent(BaseModel):
     # None for stdio transport and the CLI, which have no auth layer
     # (AMENDMENT-remote-mcp-transport.md).
     user: str | None = None
+    # Tenant/role attribution (SPEC-E12 §6). ``tenant`` is a verified identifier, not
+    # warehouse content, and is stored verbatim regardless of the AC2 "no content" rule
+    # that governs the rest of this event — see the carve-out in
+    # test_ac2_log_contains_no_sql_or_rows. Null when no tenancy/role policy is
+    # configured, or for a caller with no resolvable principal.
+    tenant: str | None = None
+    roles: list[str] | None = None
+    tenancy_exempt: bool = False
     # reserved — null until E13 lands (S3-AC1):
     cache_hit: bool | None = None
     over_limit_blocked: bool | None = None
