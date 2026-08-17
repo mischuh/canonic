@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+import logging
+from typing import TYPE_CHECKING, Any
 
 import sqlglot
+from ruamel.yaml import YAML
 from sqlglot import exp
 from sqlglot.errors import ParseError
 
@@ -16,16 +18,31 @@ from canonic.contracts.loader import (
     load_finality,
     load_guardrails,
     load_metric_bindings,
+    load_role_policy,
+    load_tenancy_policy,
 )
-from canonic.contracts.models import BindingKind, GuardrailKind, MetricBinding, Status
+from canonic.contracts.models import (
+    BindingKind,
+    GuardrailKind,
+    MetricBinding,
+    RolePolicy,
+    Status,
+    TenancyPolicy,
+    UndeclaredSource,
+)
 from canonic.exc import ContractError
 from canonic.semantic.loader import list_semantic_sources
 from canonic.semantic.models import Additivity
 
 if TYPE_CHECKING:
+    from collections.abc import Iterable
     from pathlib import Path
 
 __all__ = ["validate_contracts"]
+
+logger = logging.getLogger(__name__)
+
+_POLICIES_DIR = "contracts/policies"
 
 
 def _validate_composite_binding(
@@ -280,6 +297,119 @@ def _validate_population_filter(
                 )
 
 
+def _line_for_path(raw: Any, path: Iterable[str | int]) -> int | None:
+    """Best-effort 1-based line for a YAML path, walking ruamel's `.lc` data.
+
+    Duplicated from ``canonic/contracts/loader.py`` (private there, and independently
+    duplicated per-module across the loader layer already) because ``validate_contracts``
+    works from already-parsed Pydantic models, not the raw YAML the loaders discard after
+    their own file-level validation — recovering a precise line for a cross-surface check
+    means re-parsing the one file this check concerns.
+    """
+    node = raw
+    line: int | None = None
+    for key in path:
+        lc = getattr(node, "lc", None)
+        data = getattr(lc, "data", None)
+        if not isinstance(data, dict) or key not in data:
+            break
+        line = data[key][0]  # ruamel rows are 0-based
+        try:
+            node = node[key]
+        except (KeyError, IndexError, TypeError):
+            break
+    return None if line is None else line + 1
+
+
+def _validate_tenancy_policy(
+    project_root: Path,
+    tenancy: TenancyPolicy | None,
+    source_columns: dict[str, set[str]],
+    source_names: set[str],
+) -> None:
+    """Cross-surface checks for contracts/policies/tenancy.yaml (SPEC-E12 §9 S18).
+
+    AC1: a scope column that no longer exists on its declared source fails validation
+    with file and line, before any serving — the same "hard error, precise location"
+    rule SPEC-E5-E15 §7 already applies to every other contract surface.
+    AC2: with undeclared_source: deny, every semantic source must appear in exactly one
+    of scoped_sources / shared_sources; a source in neither is a policy hole the compiler
+    would otherwise only discover at query time. undeclared_source: warn logs one warning
+    per orphaned source instead of raising.
+    """
+    if tenancy is None:
+        return
+
+    path = project_root / _POLICIES_DIR / "tenancy.yaml"
+    yaml = YAML()
+    with open(path) as f:
+        raw: Any = yaml.load(f) or {}
+
+    for i, scoped in enumerate(tenancy.scoped_sources):
+        if scoped.source not in source_columns:
+            raise ContractError(
+                f"{path}: tenancy policy scoped_sources[{i}].source {scoped.source!r} "
+                f"does not match any semantic source"
+            )
+        if scoped.column not in source_columns[scoped.source]:
+            line = _line_for_path(raw, ("scoped_sources", i, "column"))
+            where = f"{path}:{line}" if line is not None else str(path)
+            raise ContractError(
+                f"{where}: tenancy policy scope column {scoped.column!r} is not declared "
+                f"as a column on source {scoped.source!r}"
+            )
+
+    declared = {s.source for s in tenancy.scoped_sources} | set(tenancy.shared_sources)
+    undeclared = sorted(source_names - declared)
+    if not undeclared:
+        return
+
+    if tenancy.undeclared_source is UndeclaredSource.DENY:
+        raise ContractError(
+            f"{path}: undeclared_source is 'deny' but source(s) {undeclared} appear in "
+            f"neither scoped_sources nor shared_sources"
+        )
+
+    for source in undeclared:
+        logger.warning(
+            "%s: source %r is neither scoped nor shared (undeclared_source: warn)",
+            path,
+            source,
+        )
+
+
+def _validate_role_policy(
+    project_root: Path,
+    roles: RolePolicy | None,
+    active_names: set[str],
+) -> None:
+    """Cross-surface check for contracts/policies/roles.yaml (SPEC-E12 §9 S18).
+
+    Metric names in a role's metrics.allow/deny must resolve to an active binding or
+    alias, or be the "*" wildcard. `inherits` resolving and being acyclic, and
+    `default_role` being declared, are already enforced by RolePolicy's own
+    model_validator (canonic/contracts/models.py) the moment load_role_policy loads the
+    file — calling that loader from validate_contracts is what brings that existing
+    check onto the write-time validation path; no new logic is needed for it here.
+    """
+    if roles is None:
+        return
+
+    path = project_root / _POLICIES_DIR / "roles.yaml"
+    for role_name, role in roles.roles.items():
+        for list_name, names in (("allow", role.metrics.allow), ("deny", role.metrics.deny)):
+            if names is None:
+                continue
+            for name in names:
+                if name == "*":
+                    continue
+                if name not in active_names:
+                    raise ContractError(
+                        f"{path}: role {role_name!r} metrics.{list_name} names {name!r} "
+                        f"which does not resolve to an active metric binding"
+                    )
+
+
 def validate_contracts(project_root: Path) -> None:
     """Validate all contracts against the live semantic sources.
 
@@ -291,6 +421,12 @@ def validate_contracts(project_root: Path) -> None:
     - Finality rule's realization sources do not exist in semantics/ (§5.1).
     - Assertion's query metrics do not resolve, or its expected values name a column
       that is not one of the query's output columns (metric/dimension) (§5.2).
+    - Tenancy policy scoped_sources[].column does not exist on its source (§9 S18 AC1).
+    - Tenancy policy leaves a semantic source undeclared under undeclared_source: deny
+      (§9 S18 AC2).
+    - Role policy metrics.allow/deny names a metric that does not resolve to an active
+      binding. A role's inherits chain resolving and being acyclic is enforced by
+      RolePolicy itself the moment its file loads (§1.2).
     """
     sources = list_semantic_sources(project_root)
     source_measures: dict[str, set[str]] = {s.name: {m.name for m in s.measures} for s in sources}
@@ -301,6 +437,9 @@ def validate_contracts(project_root: Path) -> None:
     }
     source_grain: dict[str, list[str]] = {s.name: list(s.grain) for s in sources}
     source_names = set(source_measures)
+
+    tenancy = load_tenancy_policy(project_root)
+    roles = load_role_policy(project_root)
 
     bindings = load_metric_bindings(project_root)
     active_metrics = {b.metric for b in bindings if b.status is Status.ACTIVE}
@@ -411,3 +550,6 @@ def validate_contracts(project_root: Path) -> None:
                 f"assertion {assertion.id!r}: query has no dimensions so it returns one row, "
                 f"but expect.rows is {assertion.expect.rows}"
             )
+
+    _validate_tenancy_policy(project_root, tenancy, source_columns, source_names)
+    _validate_role_policy(project_root, roles, active_names)

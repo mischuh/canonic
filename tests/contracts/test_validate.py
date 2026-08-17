@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from typing import TYPE_CHECKING
 
 import pytest
@@ -16,6 +17,32 @@ from tests.contracts.conftest import (
     ORDERS_SEMANTIC_YAML,
     VALID_BINDING_YAML,
 )
+
+# orders, with a merchant_id column so tenancy scoping has something real to check.
+ORDERS_WITH_TENANT_SEMANTIC_YAML = """\
+name: orders
+connection: warehouse_pg
+table: analytics.fct_orders
+grain: [order_id]
+columns:
+  - { name: order_id,    type: string,  nullable: false }
+  - { name: amount,      type: decimal, nullable: false }
+  - { name: status,      type: string,  nullable: false }
+  - { name: merchant_id, type: string,  nullable: false }
+measures:
+  - name: total_revenue
+    expr: "sum(amount)"
+    additivity: additive
+"""
+
+DIM_DATE_SEMANTIC_YAML = """\
+name: dim_date
+connection: warehouse_pg
+table: analytics.dim_date
+grain: [date_id]
+columns:
+  - { name: date_id, type: string, nullable: false }
+"""
 
 CUSTOMER_METRICS_SEMANTIC_YAML = """\
 name: customer_metrics
@@ -137,6 +164,12 @@ class TestValidateContracts:
 
 def _write_assertion(root: Path, name: str, content: str) -> None:
     d = root / "contracts" / "assertions"
+    d.mkdir(parents=True, exist_ok=True)
+    (d / name).write_text(content)
+
+
+def _write_policy(root: Path, name: str, content: str) -> None:
+    d = root / "contracts" / "policies"
     d.mkdir(parents=True, exist_ok=True)
     (d / name).write_text(content)
 
@@ -379,4 +412,163 @@ status: active
         _write_binding(tmp_path, "revenue.yaml", binding)
         _write_semantic(tmp_path, ORDERS_SEMANTIC_YAML)
         with pytest.raises(ContractError, match="revenue"):
+            validate_contracts(tmp_path)
+
+
+VALID_TENANCY_YAML = """\
+schema: tenancy/v1
+claim: merchant_id
+on_missing_principal: deny
+
+scoped_sources:
+  - { source: orders, column: merchant_id }
+
+shared_sources:
+  - dim_date
+
+undeclared_source: deny
+"""
+
+
+class TestValidateTenancyPolicy:
+    """SPEC-E12 §9 S18: tenancy policy cross-surface validation."""
+
+    def test_valid_policy_passes(self, tmp_path: Path) -> None:
+        _write_semantic(tmp_path, ORDERS_WITH_TENANT_SEMANTIC_YAML, name="orders.yaml")
+        _write_semantic(tmp_path, DIM_DATE_SEMANTIC_YAML, name="dim_date.yaml")
+        _write_policy(tmp_path, "tenancy.yaml", VALID_TENANCY_YAML)
+        validate_contracts(tmp_path)  # must not raise
+
+    def test_no_tenancy_policy_no_error(self, tmp_path: Path) -> None:
+        _write_semantic(tmp_path, ORDERS_WITH_TENANT_SEMANTIC_YAML, name="orders.yaml")
+        validate_contracts(tmp_path)  # must not raise when no tenancy.yaml exists
+
+    def test_scope_source_missing_raises(self, tmp_path: Path) -> None:
+        bad = VALID_TENANCY_YAML.replace("source: orders", "source: missing_source")
+        _write_semantic(tmp_path, ORDERS_WITH_TENANT_SEMANTIC_YAML, name="orders.yaml")
+        _write_semantic(tmp_path, DIM_DATE_SEMANTIC_YAML, name="dim_date.yaml")
+        _write_policy(tmp_path, "tenancy.yaml", bad)
+        with pytest.raises(ContractError, match="missing_source"):
+            validate_contracts(tmp_path)
+
+    def test_scope_column_missing_raises_with_line(self, tmp_path: Path) -> None:
+        """AC1: a scope column absent from its source fails with file and line."""
+        bad = VALID_TENANCY_YAML.replace("column: merchant_id", "column: phantom_col")
+        _write_semantic(tmp_path, ORDERS_WITH_TENANT_SEMANTIC_YAML, name="orders.yaml")
+        _write_semantic(tmp_path, DIM_DATE_SEMANTIC_YAML, name="dim_date.yaml")
+        _write_policy(tmp_path, "tenancy.yaml", bad)
+        with pytest.raises(ContractError, match=r"phantom_col") as excinfo:
+            validate_contracts(tmp_path)
+        assert "tenancy.yaml:" in str(excinfo.value)
+
+    def test_undeclared_source_deny_raises(self, tmp_path: Path) -> None:
+        """AC2: a semantic source in neither list fails under undeclared_source: deny."""
+        _write_semantic(tmp_path, ORDERS_WITH_TENANT_SEMANTIC_YAML, name="orders.yaml")
+        _write_semantic(tmp_path, DIM_DATE_SEMANTIC_YAML, name="dim_date.yaml")
+        # orphan_source is declared neither scoped nor shared
+        orphan = """\
+name: orphan_source
+connection: warehouse_pg
+table: analytics.orphan
+grain: [id]
+columns:
+  - { name: id, type: string, nullable: false }
+"""
+        _write_semantic(tmp_path, orphan, name="orphan.yaml")
+        _write_policy(tmp_path, "tenancy.yaml", VALID_TENANCY_YAML)
+        with pytest.raises(ContractError, match="orphan_source"):
+            validate_contracts(tmp_path)
+
+    def test_undeclared_source_warn_logs_instead_of_raising(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        _write_semantic(tmp_path, ORDERS_WITH_TENANT_SEMANTIC_YAML, name="orders.yaml")
+        _write_semantic(tmp_path, DIM_DATE_SEMANTIC_YAML, name="dim_date.yaml")
+        orphan = """\
+name: orphan_source
+connection: warehouse_pg
+table: analytics.orphan
+grain: [id]
+columns:
+  - { name: id, type: string, nullable: false }
+"""
+        _write_semantic(tmp_path, orphan, name="orphan.yaml")
+        warn_policy = VALID_TENANCY_YAML.replace(
+            "undeclared_source: deny", "undeclared_source: warn"
+        )
+        _write_policy(tmp_path, "tenancy.yaml", warn_policy)
+        with caplog.at_level(logging.WARNING):
+            validate_contracts(tmp_path)  # must not raise
+        assert "orphan_source" in caplog.text
+
+
+VALID_ROLES_YAML = """\
+schema: roles/v1
+claim: roles
+default_role: merchant_viewer
+
+roles:
+  merchant_viewer:
+    metrics: { allow: ["revenue"] }
+"""
+
+
+class TestValidateRolePolicy:
+    """SPEC-E12 §9 S18: role policy cross-surface validation."""
+
+    def test_valid_policy_passes(self, tmp_path: Path) -> None:
+        _write_binding(tmp_path, "revenue.yaml", VALID_BINDING_YAML)
+        _write_semantic(tmp_path, ORDERS_SEMANTIC_YAML)
+        _write_policy(tmp_path, "roles.yaml", VALID_ROLES_YAML)
+        validate_contracts(tmp_path)  # must not raise
+
+    def test_no_role_policy_no_error(self, tmp_path: Path) -> None:
+        _write_binding(tmp_path, "revenue.yaml", VALID_BINDING_YAML)
+        _write_semantic(tmp_path, ORDERS_SEMANTIC_YAML)
+        validate_contracts(tmp_path)  # must not raise when no roles.yaml exists
+
+    def test_allow_list_unknown_metric_raises(self, tmp_path: Path) -> None:
+        bad = VALID_ROLES_YAML.replace('allow: ["revenue"]', 'allow: ["ghost_metric"]')
+        _write_binding(tmp_path, "revenue.yaml", VALID_BINDING_YAML)
+        _write_semantic(tmp_path, ORDERS_SEMANTIC_YAML)
+        _write_policy(tmp_path, "roles.yaml", bad)
+        with pytest.raises(ContractError, match="ghost_metric"):
+            validate_contracts(tmp_path)
+
+    def test_deny_list_unknown_metric_raises(self, tmp_path: Path) -> None:
+        bad = VALID_ROLES_YAML.replace(
+            'metrics: { allow: ["revenue"] }',
+            'metrics: { allow: ["revenue"], deny: ["ghost_metric"] }',
+        )
+        _write_binding(tmp_path, "revenue.yaml", VALID_BINDING_YAML)
+        _write_semantic(tmp_path, ORDERS_SEMANTIC_YAML)
+        _write_policy(tmp_path, "roles.yaml", bad)
+        with pytest.raises(ContractError, match="ghost_metric"):
+            validate_contracts(tmp_path)
+
+    def test_wildcard_allow_never_raises(self, tmp_path: Path) -> None:
+        wildcard = VALID_ROLES_YAML.replace('allow: ["revenue"]', 'allow: ["*"]')
+        _write_binding(tmp_path, "revenue.yaml", VALID_BINDING_YAML)
+        _write_semantic(tmp_path, ORDERS_SEMANTIC_YAML)
+        _write_policy(tmp_path, "roles.yaml", wildcard)
+        validate_contracts(tmp_path)  # must not raise
+
+    def test_alias_name_resolves(self, tmp_path: Path) -> None:
+        """VALID_BINDING_YAML declares 'rev' as an alias of revenue (conftest.py)."""
+        alias_policy = VALID_ROLES_YAML.replace('allow: ["revenue"]', 'allow: ["rev"]')
+        _write_binding(tmp_path, "revenue.yaml", VALID_BINDING_YAML)
+        _write_semantic(tmp_path, ORDERS_SEMANTIC_YAML)
+        _write_policy(tmp_path, "roles.yaml", alias_policy)
+        validate_contracts(tmp_path)  # must not raise
+
+    def test_inherits_undeclared_raises_via_validate_contracts(self, tmp_path: Path) -> None:
+        """Smoke test: RolePolicy's own model_validator now fires on the write-time path
+        too, since validate_contracts calls load_role_policy. Deep inherits/cycle
+        coverage lives in tests/contracts/test_policies.py::TestLoadRolePolicy.
+        """
+        bad = VALID_ROLES_YAML + "  merchant_admin:\n    inherits: nonexistent_role\n"
+        _write_binding(tmp_path, "revenue.yaml", VALID_BINDING_YAML)
+        _write_semantic(tmp_path, ORDERS_SEMANTIC_YAML)
+        _write_policy(tmp_path, "roles.yaml", bad)
+        with pytest.raises(ContractError, match="nonexistent_role"):
             validate_contracts(tmp_path)
