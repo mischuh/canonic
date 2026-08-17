@@ -1,0 +1,221 @@
+---
+title: "Guide: Marketplace (Tenant Scoping & RBAC)"
+description: "A multi-merchant marketplace on SQLite demonstrating tenant isolation, role-based authorization, and column masking (SPEC-E12)."
+---
+
+An end-to-end canonic project on a multi-merchant marketplace: one shared SQLite warehouse hosting 5 independent merchants, ~24 months of order history with real growth/decline trends, 4 metric contracts, one enforced guardrail, and a full tenant-scoping / role-based-authorization (RBAC) setup. Unlike the other example projects, this one ships thousands of rows so there is real seasonality, trend, and promotion activity to query.
+
+<Info>Full source: [`examples/marketplace/`](https://github.com/mischuh/canonic/tree/main/examples/marketplace)</Info>
+
+## Schema
+
+```
+SHARED (never tenant-scoped)
+  merchants     merchant_id · merchant_name · category · country
+  dim_date      date_id · year · month · weekday_name · is_weekend · quarter
+  dim_currency  currency_code · currency_name · symbol
+
+TENANT-SCOPED (predicated on merchant_id)
+  customers     customer_id · merchant_id · customer_name · customer_email
+                · customer_phone · country
+  orders        order_id · merchant_id · customer_id · order_date
+                · currency_code · promo_id · status · amount
+  order_items   order_item_id · order_id · merchant_id · sku · quantity
+                · unit_price · line_amount
+
+UNDECLARED (the deliberate policy hole)
+  promotions    promo_id · merchant_id · promo_name · discount_pct
+                · start_date · end_date
+```
+
+5 merchants span 4 countries and 5 categories, with different sizes and trajectories: **Byte Gadgets** (US, electronics) is the largest and visibly growing; **Urban Threads** (GB, apparel) is visibly declining; **Artisan Coffee Co.** (US, coffee), **Green Leaf Botanicals** (DE, home & garden), and **Cozy Candles** (CA, home decor) round out the platform at smaller, roughly flat volumes.
+
+Seed data: 3,092 orders and 6,891 order line items across 1,180 customers, spanning 2024-08-17 through 2026-08-17 (~24 months, kept current — see `END_DATE` in the generator), generated deterministically by [`scripts/generate_marketplace_data.py`](https://github.com/mischuh/canonic/tree/main/scripts/generate_marketplace_data.py) (seeded RNG — reruns produce byte-identical output). Comparing the first full three calendar months against the last three (skipping the partial month at each end of the window): Byte Gadgets grew from 126 orders (Sep–Nov 2024) to 180 (May–Jul 2026); Urban Threads fell from 100 to 63 over the same comparison — both trends are visible in a monthly `order_count` query.
+
+## Setup
+
+```bash
+sqlite3 marketplace.db < setup.sql   # create the database (one-time)
+cd examples/marketplace              # canonic commands must run from here
+canonic status
+# project root:   .../examples/marketplace
+# config version: 1
+# .canonic/:        absent
+# contract:       2.8
+```
+
+## Quickstart
+
+```bash
+canonic ingest --bootstrap --headless      # see "Why --headless" below
+canonic query --metrics revenue --dimensions status --tenant byte-gadgets
+canonic mcp start
+```
+
+<Warning>
+  `canonic.yaml` declares an `llm:` block (matching every other example's shape), but this project's semantics are already fully hand-curated — there is nothing left to draft. Without `--headless`, `canonic ingest --bootstrap` still constructs a real LLM drafter and tries to reach it (here, a local Ollama endpoint) even though grain is deterministic from the declared primary keys, and fails if that endpoint isn't running. `--headless` (or `CI=true`) forces the deterministic `NullLLMDrafter` — zero model calls — which is what this guide's Quickstart uses and what CI itself runs.
+</Warning>
+
+`canonic status`, `canonic ingest --bootstrap --headless`, `canonic query`, and `canonic mcp start` never call the LLM. `--tenant` is a local-development / platform-operator override (SPEC-E12 §7): it always warns, and without it entirely, every query fails closed —
+
+```bash
+$ canonic query --metrics revenue --dimensions status
+error tenant_unresolved: tenancy policy is active but the request carries no resolvable tenant
+# exit 22
+```
+
+— because `contracts/policies/tenancy.yaml` sets `on_missing_principal: deny`.
+
+## Metrics
+
+`contracts/metrics/` ships **4** metric contracts.
+
+| Metric | Source · measure | Notes |
+| --- | --- | --- |
+| `revenue` | `orders.revenue` (`sum(amount)`) | Post-discount order totals; guarded against cancelled orders |
+| `order_count` | `orders.order_count` (`count(order_id)`) | Any status |
+| `aov` | ratio: `revenue / order_count` | `null` on a zero-order period, never a divide-by-zero |
+| `items_sold` | `order_items.items_sold` (`sum(quantity)`) | Platform-only — absent from every merchant role's allow list |
+
+## Guardrail
+
+`contracts/guardrails/` ships **one** enforced guardrail — **`orders-excludes-cancelled`**: `orders.revenue` must never be summed without a `status != 'cancelled'` filter. Cancelled orders were never paid; the guardrail injects the filter automatically, visible in `metadata.guardrails_fired` on every compiled query.
+
+## Tenants & roles
+
+`contracts/policies/tenancy.yaml` scopes `orders`, `order_items`, and `customers` on `merchant_id`; `merchants`, `dim_date`, and `dim_currency` are shared. `contracts/policies/roles.yaml` defines three roles, and `canonic.yaml` carries 5 MCP tokens against two featured merchants (`byte-gadgets`, `urban-threads`) plus one platform-wide token:
+
+| `client_id` | Claims | Role grants |
+| --- | --- | --- |
+| `byte-gadgets-viewer` | `merchant_id: byte-gadgets`, `roles: [merchant_viewer]` | `revenue`/`order_count`/`aov` only, scoped to Byte Gadgets; `customer_email`/`customer_phone` nominally denied (not enforced — see the closing warning) |
+| `byte-gadgets-admin` | `merchant_id: byte-gadgets`, `roles: [merchant_admin]` | Same metrics, scoped to Byte Gadgets; `customer_email` is **masked** (`partial`); `run_sql: true` but still refused (see "run_sql's two gates") |
+| `urban-threads-viewer` | `merchant_id: urban-threads`, `roles: [merchant_viewer]` | Same as byte-gadgets-viewer, scoped to Urban Threads |
+| `urban-threads-admin` | `merchant_id: urban-threads`, `roles: [merchant_admin]` | Same as byte-gadgets-admin, scoped to Urban Threads |
+| `platform-ops` | `roles: [platform_analyst]` (no `merchant_id`) | `tenancy_exempt: true`; every metric (`allow: ["*"]`), every knowledge tag, `run_sql: true` and actually allowed |
+
+`merchant_admin` `inherits: merchant_viewer` (field-level override, not a list-merge): it re-opens `dimensions.deny` to `[]` and adds a `masking` rule instead.
+
+## Querying as merchant A vs merchant B
+
+Both queries use the identical metric/dimension shape — only `--tenant` differs — and return disjoint, differently-sized results because the compiler injects a `merchant_id` predicate for the resolved tenant:
+
+```bash
+$ canonic query --metrics revenue --dimensions status --tenant byte-gadgets
+┏━━━━━━━━━━━┳━━━━━━━━━━━┓
+┃ status    ┃ revenue   ┃
+┡━━━━━━━━━━━╇━━━━━━━━━━━┩
+│ completed │ 752396.64 │
+│ pending   │ 33927.55  │
+│ refunded  │ 32093.53  │
+└───────────┴───────────┘
+
+$ canonic query --metrics revenue --dimensions status --tenant urban-threads
+┏━━━━━━━━━━━┳━━━━━━━━━━━┓
+┃ status    ┃ revenue   ┃
+┡━━━━━━━━━━━╇━━━━━━━━━━━┩
+│ completed │ 118775.72 │
+│ pending   │ 5212.68   │
+│ refunded  │ 3274.98   │
+└───────────┴───────────┘
+```
+
+## Masking in action
+
+`canonic query` has no `--role` flag — roles are only ever bound from a verified MCP token's `roles` claim (SPEC-E12 §7), never a CLI flag. The results below come from the same `CanonicService.query()` call the MCP transport makes, with a `Principal` carrying each token's actual claims:
+
+```
+merchant_viewer (byte-gadgets-viewer's role) — customer_email dimension:
+  abigail.hall419@mailbox.com
+  abigail.harris28@mailbox.com
+
+merchant_admin (byte-gadgets-admin's role) — same dimension, same tenant:
+  ab***
+  ai***
+```
+
+`merchant_viewer`'s `dimensions.deny: [customer_email, customer_phone]` did **not** block the plain-text email — see the warning at the bottom of this page. `merchant_admin`'s `masking: [{ column: customers.customer_email, strategy: partial }]` is what actually redacted it.
+
+## A denied metric
+
+`items_sold` is absent from `merchant_viewer`/`merchant_admin`'s `metrics.allow` list — only `platform_analyst`'s wildcard (`allow: ["*"]`) reaches it:
+
+```
+items_sold as merchant_viewer (byte-gadgets):
+  error unresolved: metric 'items_sold' matches no active binding
+
+items_sold as platform_analyst (no merchant_id claim — cross-merchant):
+  10065 units total, summed across all 5 merchants
+```
+
+A denied metric fails with the exact same `unresolved` shape as a nonexistent one — there is no separate "forbidden metric" error, so a caller can't distinguish "doesn't exist" from "exists but you can't see it."
+
+## The policy hole: promotions
+
+`promotions` carries `merchant_id` but is declared in **neither** `scoped_sources` nor `shared_sources` — deliberately, to demonstrate `undeclared_source`. This project ships with `undeclared_source: warn`, so `canonic validate` stays clean and a query that reaches `promotions` is still served, with a warning attached:
+
+```bash
+$ canonic validate
+WARNING  .../tenancy.yaml: source 'promotions' is neither scoped nor shared (undeclared_source: warn)
+ok: contracts are valid for .../examples/marketplace
+
+$ canonic --json query --metrics revenue --dimensions promo_name --tenant byte-gadgets
+# metadata.warnings:
+# ["source 'promotions' is declared in neither scoped_sources nor shared_sources of the
+#   tenancy policy; serving unfiltered under undeclared_source: warn"]
+```
+
+Flipping `undeclared_source` to `deny` fails **both** gates instead of one — a policy hole this severe is now caught at authoring time, not just at query time (SPEC-E12 §9 S18 AC2, added after this scenario was first specified):
+
+```bash
+$ canonic validate
+error internal_error: .../tenancy.yaml: undeclared_source is 'deny' but source(s)
+['promotions'] appear in neither scoped_sources nor shared_sources
+
+$ canonic query --metrics revenue --dimensions promo_name --tenant byte-gadgets
+error tenant_scope_missing: source 'promotions' is declared in neither scoped_sources
+nor shared_sources of the tenancy policy
+# exit 23
+```
+
+## run_sql's two gates
+
+`run_sql` is refused for two independent reasons (SPEC-E12 §6), both real here:
+
+```bash
+# Gate 1 — the role itself denies raw SQL (merchant_viewer: run_sql: false)
+$ canonic sql "select 1" --tenant byte-gadgets
+error tenant_forbidden: role denies raw SQL execution (run_sql: false)
+# exit 24
+```
+
+```
+# Gate 2 — the role allows it (merchant_admin: run_sql: true), but the connection
+# doesn't attest rls_enforced: true, so raw SQL still bypasses the compiler's tenant
+# predicate injection with nothing to close the gap:
+run_sql as merchant_admin (byte-gadgets):
+  error tenant_forbidden: run_sql is refused on connection 'marketplace_db': a tenancy
+  policy is active and this connection carries no rls_enforced: true attestation
+  (SPEC-E12 §6) — raw SQL bypasses the compiler's tenant predicate injection entirely,
+  so it is only served where the warehouse itself closes the gap
+```
+
+`canonic.yaml` sets `rls_enforced: false` on purpose — this shared SQLite warehouse has no warehouse-native row-level-security layer, so gate 2 stays shut for every non-exempt role. `platform_analyst` (`tenancy_exempt: true`) bypasses gate 2 entirely and its `run_sql` succeeds.
+
+## Files
+
+```
+canonic.yaml                    ← SQLite connection (rls_enforced: false), LLM, 5 MCP tokens
+setup.sql                       ← DDL + generated seed data (see generate_marketplace_data.py)
+semantics/marketplace_db/       ← 7 sources: orders, order_items, customers (scoped),
+                                   merchants, dim_date, dim_currency (shared), promotions
+                                   (deliberately undeclared)
+contracts/metrics/              ← revenue, order_count, aov (ratio), items_sold
+contracts/guardrails/           ← orders-excludes-cancelled.yaml
+contracts/policies/             ← tenancy.yaml + roles.yaml (SPEC-E12)
+knowledge/global/               ← revenue/aov definitions (public/merchant tags) +
+                                   platform-margin-notes.md (platform tag, platform_analyst only)
+```
+
+<Warning>
+  `dimensions.deny` on a role is validated but not yet enforced by the compiler or discovery — only `masking` actually protects a column today.
+</Warning>

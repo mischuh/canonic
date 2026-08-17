@@ -1,0 +1,26 @@
+schema: roles/v1
+claim: roles
+default_role: merchant_viewer
+roles:
+  merchant_viewer:
+    metrics: { allow: ["revenue", "order_count", "aov"] }
+    # NOTE: dimensions.deny is validated but not enforced anywhere in the compiler or
+    # discovery today (see the <Warning> in docs/guides/marketplace.mdx) — declaring it
+    # documents intent, it does not actually block selecting customer_email/customer_phone.
+    dimensions: { deny: ["customer_email", "customer_phone"] }
+    knowledge: { allow_tags: ["public", "merchant"] }
+    run_sql: false
+  merchant_admin:
+    inherits: merchant_viewer      # single inheritance, field-level override, not list-merge
+    dimensions: { deny: [] }
+    masking:
+      - { column: customers.customer_email, strategy: partial }
+    # run_sql: true on purpose — this is the role that demonstrates the SECOND run_sql
+    # gate: even though the role allows raw SQL, marketplace_db carries rls_enforced:
+    # false, so run_sql is still refused with TENANT_FORBIDDEN (SPEC-E12 §6).
+    run_sql: true
+  platform_analyst:
+    tenancy_exempt: true
+    metrics: { allow: ["*"] }
+    knowledge: { allow_tags: ["*"] }   # must be explicit; omitting knowledge: defaults allow_tags to [] = zero visible pages
+    run_sql: true

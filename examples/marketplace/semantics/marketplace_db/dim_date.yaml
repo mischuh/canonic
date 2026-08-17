@@ -1,0 +1,24 @@
+name: dim_date
+connection: marketplace_db
+table: dim_date
+grain: [date_id]
+description: "One row per calendar day, 2024-08-17 through 2026-08-17 (kept current — see END_DATE in scripts/generate_marketplace_data.py). A SHARED dimension: joined freely by any merchant's orders without a tenant predicate."
+
+columns:
+  - { name: date_id,      type: date,   nullable: false }
+  - { name: year,         type: int,    nullable: false }
+  - { name: month,        type: int,    nullable: false }
+  - { name: day,          type: int,    nullable: false }
+  - { name: weekday_name, type: string, nullable: false }
+  - { name: is_weekend,   type: int,    nullable: false }
+  - { name: quarter,      type: int,    nullable: false }
+
+dimensions:
+  - { name: year,         column: year }
+  - { name: month,        column: month }
+  - { name: weekday_name, column: weekday_name }
+  - { name: is_weekend,   column: is_weekend }
+  - { name: quarter,      column: quarter }
+
+meta:
+  provenance: human_curated

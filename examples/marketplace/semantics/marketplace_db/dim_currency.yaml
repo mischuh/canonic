@@ -1,0 +1,17 @@
+name: dim_currency
+connection: marketplace_db
+table: dim_currency
+grain: [currency_code]
+description: "One row per settlement currency used by orders. A SHARED dimension: joined freely without a tenant predicate."
+
+columns:
+  - { name: currency_code, type: string, nullable: false }
+  - { name: currency_name, type: string, nullable: false }
+  - { name: symbol,        type: string, nullable: false }
+
+dimensions:
+  - { name: currency_name, column: currency_name }
+  - { name: symbol,        column: symbol }
+
+meta:
+  provenance: human_curated

@@ -1,0 +1,20 @@
+name: promotions
+connection: marketplace_db
+table: promotions
+grain: [promo_id]
+description: "One row per promotion window. Carries merchant_id but is deliberately declared in NEITHER scoped_sources NOR shared_sources in contracts/policies/tenancy.yaml — a policy hole. Shipped with undeclared_source: warn, so a query that joins into promotions is still served (with a warning) rather than blocked; flipping that setting to deny fails closed instead — canonic validate rejects the project outright, and if that gate were ever bypassed, a query reaching promotions would raise TENANT_SCOPE_MISSING at compile time. See docs/guides/marketplace.mdx 'The policy hole: promotions' for both behaviors."
+
+columns:
+  - { name: promo_id,      type: string,  nullable: false }
+  - { name: merchant_id,   type: string,  nullable: false }
+  - { name: promo_name,    type: string,  nullable: false }
+  - { name: discount_pct,  type: decimal, nullable: false }
+  - { name: start_date,    type: date,    nullable: false }
+  - { name: end_date,      type: date,    nullable: false }
+
+dimensions:
+  - { name: promo_name,   column: promo_name }
+  - { name: discount_pct, column: discount_pct }
+
+meta:
+  provenance: human_curated

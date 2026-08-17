@@ -23,15 +23,19 @@ The query references **names** (metrics, dimensions), never physical tables or c
 
 ## Pipeline stages
 
-1. **Resolve metrics.** Map each metric name → canonical binding → source/measure (or composite components). Unknown/ambiguous → `UNRESOLVED`/`AMBIGUOUS` with candidates.
+0. **Bind the principal** (SPEC-E12 §3, only when a [tenancy/role policy](/concepts/tenancy-and-access-control) is loaded). Resolve the caller's `Principal` into an `EffectivePolicy` before any metric resolution. If tenancy is active and no tenant resolved, fail immediately with `TENANT_UNRESOLVED` — no partial work, no error message that could reveal whether a named metric exists.
+1. **Resolve metrics.** Map each metric name → canonical binding → source/measure (or composite components). Unknown/ambiguous → `UNRESOLVED`/`AMBIGUOUS` with candidates. A metric outside the caller's effective policy is folded into `UNRESOLVED` here too, rather than a distinct forbidden code — see [Tenancy & access control](/concepts/tenancy-and-access-control#compiler-enforcement).
 2. **Resolve dimensions & filters.** Bind to columns on the owning source or a join-reachable source. Unreachable → `UNREACHABLE`.
 3. **Plan the join graph.** From the metric's source, find the minimal join path to every referenced source using only declared `joins`. No path → `UNREACHABLE`; more than one valid path → `AMBIGUOUS_JOIN_PATH`; the compiler never guesses a shortest path or invents a cross join.
+
+**Stage 2b — inject tenant predicates** (only under an active [tenancy policy](/concepts/tenancy-and-access-control#compiler-enforcement)). For every source actually joined into the leaf's plan — not just the metric's owning source — AND `<source>.<column> = :tenant` into the leaf's `WHERE`, ahead of query filters, `population_filter`, and guardrails. A source declared neither scoped nor shared → `TENANT_SCOPE_MISSING`. Built as a real AST node bound to the tenant value, never by string interpolation, so a crafted filter cannot escape its own predicate.
+
 4. **Fanout & additivity analysis.** Detect when a join fans out the grain relative to a measure's source grain, and dispatch to the binding's compilation strategy (below).
 5. **Apply finality & coalescing.** If the metric has a [finality rule](/concepts/contracts-and-guardrails#finality), select the right source(s) for the requested time window and tag output rows `final`/`provisional`.
 6. **Enforce guardrails.** AND-in mandatory filters, apply `restrict_source` for the active `context`. `severity: error` blocks; `warn` annotates.
 7. **Emit SQL.** Build a dialect-neutral AST, then transpile via the [dialect adapter](#dialect-adapter). Read-only (`SELECT`) only, by construction.
-8. **Attach result attributes.** Resolved bindings, guardrails fired, provisional/final mix, per-source freshness, and additivity handling applied.
-9. **Assertion check** (in benchmark/CI mode). Run the emitted SQL and compare to the matching assertion's expected value; divergence beyond tolerance fails.
+8. **Attach result attributes.** Resolved bindings, guardrails fired, provisional/final mix, per-source freshness, and additivity handling applied. Under an active tenancy policy, also a `metadata.scope` block — tenant, scoped/shared sources, roles, `tenancy_exempt` — derived from the predicates actually emitted in stage 2b, not restated from the policy.
+9. **Assertion check** (in benchmark/CI mode). Run the emitted SQL and compare to the matching assertion's expected value; divergence beyond tolerance fails. Runs tenant-exempt against the full, unfiltered dataset — the population an assertion's `expect` was calibrated against — independent of any tenancy policy.
 
 Output shape:
 

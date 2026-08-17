@@ -41,6 +41,7 @@ connections:
 | `params` | `dict[str, Any]` | `{}` | Connector-specific settings such as `host`, `port`, `database`, or `schema`. What's valid here depends entirely on `type`. |
 | `credentials_ref` | `str \| null` | `null` | Where to resolve this connection's secret from, never the secret itself. See below. |
 | `read_only_role` | `str \| null` | `null` | Reserved for a future read-only enforcement mode. Accepted and stored today but not yet consulted by any connector. |
+| `rls_enforced` | `bool` | `false` | Operator attestation that this connection's warehouse enforces row-level security independent of canonic (per-tenant credentials, or warehouse-native RLS). canonic cannot verify this claim, only trust it. Must be `true` for `run_sql` to be served on this connection once a [tenancy policy](/concepts/tenancy-and-access-control) is active — see [the `run_sql` gate](/concepts/tenancy-and-access-control#the-run_sql-gate). |
 
 A connection is how canonic reaches an actual data source. `id` is the name every other file uses to point back at it, `type` picks which connector implementation handles it, and `params` carries whatever that connector needs to connect, host and port for a warehouse, a manifest path for dbt. `credentials_ref` keeps the secret itself out of `canonic.yaml` entirely, instead of a password you write a pointer to where the password actually lives.
 
@@ -160,6 +161,9 @@ mcp:
         token_ref: env:CANONIC_MCP_TOKEN_ALICE
       - client_id: bob
         token_ref: env:CANONIC_MCP_TOKEN_BOB
+      - client_id: merchant-4711-agent
+        token_ref: env:CANONIC_MCP_TOKEN_4711
+        claims: { merchant_id: '4711', roles: [merchant_viewer] }   # SPEC-E12 §7, tenancy/RBAC only
     oauth:
       mode: proxy   # proxy | jwt
       issuer_url: https://idp.example.com
@@ -168,6 +172,9 @@ mcp:
       scopes: [openid, profile, email]
       base_url: https://canonic.internal.example.com       # proxy mode only, the daemon's own public URL
       verify_id_token: false                                # proxy mode only, see below
+      claim_mapping:                                        # SPEC-E12 §7, tenancy/RBAC only
+        merchant_id: https://example.com/merchant_id
+        roles: roles
 ```
 
 | Field | Type | Default | Governs |
@@ -175,6 +182,7 @@ mcp:
 | `auth.tokens` | `list[McpTokenEntry]` | `[]` | Bearer tokens accepted by the MCP daemon's `http` transport, one entry per client. |
 | `auth.tokens[].client_id` | `str` | n/a (required) | Name attributed to that token's caller in `.canonic/events.jsonl`, so usage can be traced per user rather than per daemon instance. |
 | `auth.tokens[].token_ref` | `str` | n/a (required) | Reference to the token's value, never the token itself, resolved the same way as `credentials_ref`. |
+| `auth.tokens[].claims` | `dict[str, Any]` | `{}` | Claims carried by this static token (e.g. `{merchant_id: "4711", roles: ["merchant_viewer"]}`), keyed by the raw claim name a [tenancy/role policy](/concepts/tenancy-and-access-control)'s `claim` field names. Static tokens carry claims inline since there's no IdP to ask. |
 | `auth.oauth` | `McpOAuthConfig \| null` | `null` | OAuth 2.1 auth for the MCP daemon's `http` transport, delegated to `fastmcp`. Independently optional from `auth.tokens` — both configured is a supported state, not just tolerated. |
 | `auth.oauth.mode` | `"proxy" \| "jwt"` | n/a (required) | `proxy`: presents a DCR-compliant OAuth server to MCP clients and relays the login to the upstream IdP (Authorization Code + PKCE) — the mode most SSO deployments use. `jwt`: the IdP hands the client a JWT directly and the daemon only verifies its signature against the IdP's JWKS, no proxy state. |
 | `auth.oauth.issuer_url` | `str` | n/a (required) | The IdP's base URL. In `proxy` mode, `mode: proxy` discovers endpoints from `issuer_url + /.well-known/openid-configuration`. |
@@ -185,6 +193,7 @@ mcp:
 | `auth.oauth.audience` | `str \| null` | `null` | `jwt` mode only. Expected token audience. Recommended: without it, any token the IdP issued for *any* resource is accepted, not just this daemon. |
 | `auth.oauth.jwks_uri` | `str \| null` | `null` | `jwt` mode only. Skips OIDC discovery for IdPs that don't publish `/.well-known/openid-configuration`. |
 | `auth.oauth.verify_id_token` | `bool` | `false` | `proxy` mode only. Verifies the upstream OIDC *id_token* instead of the *access_token*. Rejected in `jwt` mode. See below. |
+| `auth.oauth.claim_mapping` | `dict[str, str]` | `{}` | Maps a [tenancy/role policy](/concepts/tenancy-and-access-control)'s raw `claim` name (e.g. `merchant_id`) to the namespaced claim key the IdP actually issues (e.g. `https://example.com/merchant_id`), which most IdPs require for custom claims. A `claim` absent from this mapping is looked up under its own name unchanged. |
 
 This block only matters for `canonic mcp start --transport http`. The default `stdio` transport is a local subprocess and needs no auth, process-level trust is enough. `http` transport is network-reachable, though, so it refuses to start unless at least one mechanism resolves: a token here (or via the `--token-ref` CLI override) and/or `auth.oauth`. When both are configured, a request is checked against the static token map first (no network call), falling through to OAuth verification if no static token matches — the two stay independently revocable, a token entry by editing `canonic.yaml`, an OAuth-issued token at the IdP. `canonic mcp status` reports which mechanism(s) are active on a running daemon. See [Connecting your agent](/mcp-integration/connecting-your-agent#remote-enterprise-deployment) for the full remote-deployment walkthrough.
 
@@ -202,6 +211,8 @@ Independent of `canonic.yaml` fields, every project scaffolds four committed con
 | `knowledge/` | Markdown pages with YAML frontmatter carrying business meaning. | [Knowledge page schema](/reference/knowledge-schema) |
 | `contracts/` | Human-owned metric bindings, guardrails, finality rules, and assertions. | [Contract schema](/reference/contract-schema) |
 | `raw-sources/` | System-generated, committed audit trail — never hand-edited. | See below. |
+
+`contracts/policies/` (`tenancy.yaml` / `roles.yaml`) is optional — its presence is the feature switch for [tenancy & access control](/concepts/tenancy-and-access-control); a project without it behaves exactly as it did before that layer existed.
 
 ### `raw-sources/<connection-id>/evidence.jsonl`
 

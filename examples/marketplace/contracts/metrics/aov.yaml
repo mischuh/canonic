@@ -1,0 +1,10 @@
+metric: aov
+canonical:
+  kind: ratio
+  numerator: revenue
+  denominator: order_count
+  on_zero_denominator: null
+provenance: human_curated
+label: "Average Order Value"
+aliases: ["average order value", "avg order value"]
+status: active

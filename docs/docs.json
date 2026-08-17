@@ -27,6 +27,7 @@
           "concepts/three-layers",
           "concepts/semantics",
           "concepts/contracts-and-guardrails",
+          "concepts/tenancy-and-access-control",
           "concepts/knowledge-layer",
           "concepts/connectors",
           "concepts/ingestion-and-reconciliation",
@@ -66,6 +67,7 @@
           "guides/dutch-railway",
           "guides/ecommerce",
           "guides/jaffle-shop",
+          "guides/marketplace",
           "guides/rental",
           "guides/saas-analytics"
         ]

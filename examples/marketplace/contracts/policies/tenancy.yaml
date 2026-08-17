@@ -1,0 +1,16 @@
+schema: tenancy/v1
+claim: merchant_id
+on_missing_principal: deny
+scoped_sources:
+  - { source: orders, column: merchant_id }
+  - { source: order_items, column: merchant_id }
+  - { source: customers, column: merchant_id }
+shared_sources: [merchants, dim_date, dim_currency]
+# promotions is deliberately absent from both lists above — a policy hole.
+# undeclared_source: warn (here) keeps `canonic validate`/`canonic ingest` clean: a query
+# that still reaches promotions logs a warning and is served anyway. Flipping this to
+# `deny` fails BOTH earlier — `canonic validate` now rejects the project outright
+# (SPEC-E12 §9 S18 AC2) — and, if that static gate is ever bypassed, at query time too,
+# with TENANT_SCOPE_MISSING (exit 23). See docs/guides/marketplace.mdx
+# "The policy hole: promotions" for both behaviors, captured live.
+undeclared_source: warn
