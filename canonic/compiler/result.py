@@ -19,6 +19,7 @@ __all__ = [
     "RelatedDimension",
     "RelatedMetadata",
     "RelatedMetric",
+    "ScopeMetadata",
     "SourceFreshness",
     "TrustInput",
 ]
@@ -164,6 +165,24 @@ class FinalityMetadata:
 
 
 @dataclass(frozen=True, slots=True)
+class ScopeMetadata:
+    """Tenant/role scoping attached to a compile result (SPEC-E12 §3 stage 8, S16 AC3).
+
+    ``scoped_sources``/``shared_sources`` are derived from the tenant predicates the
+    compiler actually emitted, not from the policy — a source the policy declares scoped
+    but this particular query never joined does not appear in either list. ``tenant`` and
+    ``roles`` are ``None``/empty when no principal was bound; ``tenancy_exempt`` is ``True``
+    only for a cross-tenant read served under a ``tenancy_exempt`` role (§5).
+    """
+
+    tenant: str | None
+    scoped_sources: list[str] = field(default_factory=list)
+    shared_sources: list[str] = field(default_factory=list)
+    roles: list[str] = field(default_factory=list)
+    tenancy_exempt: bool = False
+
+
+@dataclass(frozen=True, slots=True)
 class CompileResult:
     """The compiled query and its result attributes (SPEC-E5-E15 §4).
 
@@ -185,3 +204,4 @@ class CompileResult:
     recompute_at_grain: RecomputeAtGrainMetadata | None = None
     opaque: OpaqueMetadata | None = None
     trust_inputs: list[TrustInput] = field(default_factory=list)
+    scope: ScopeMetadata | None = None

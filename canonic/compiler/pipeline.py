@@ -20,13 +20,15 @@ from canonic.compiler.result import (
     RelatedDimension,
     RelatedMetadata,
     RelatedMetric,
+    ScopeMetadata,
     TrustInput,
 )
-from canonic.contracts.models import BindingKind
+from canonic.contracts.models import BindingKind, OnMissingPrincipal
+from canonic.contracts.principal import Principal
 from canonic.contracts.resolver import Ambiguous as ResolverAmbiguous
 from canonic.contracts.resolver import Binding as ResolverBinding
 from canonic.contracts.resolver import Unresolved as ResolverUnresolved
-from canonic.exc import Ambiguous, Unresolved
+from canonic.exc import Ambiguous, TenantUnresolved, Unresolved
 from canonic.trust.models import TrustTier, tier_meets
 from canonic.trust.scorer import TrustScorer
 from canonic.trust.signals import static_signals_for
@@ -36,6 +38,7 @@ if TYPE_CHECKING:
 
     from canonic.compiler.leaf import LeafPlan
     from canonic.compiler.query import SemanticQuery
+    from canonic.contracts.principal import EffectivePolicy
     from canonic.contracts.resolver import ContractResolver
     from canonic.semantic.models import SemanticSource
 
@@ -188,6 +191,7 @@ def _enforce_required_dimension(
 def _resolve_all_metrics(
     query: SemanticQuery,
     resolver: ContractResolver,
+    effective_policy: EffectivePolicy,
 ) -> list[tuple[str, ResolverBinding]]:
     """Stage 1 — resolve every requested metric before planning anything (AMENDMENT §3.1).
 
@@ -199,6 +203,13 @@ def _resolve_all_metrics(
     ``UNRESOLVED`` takes precedence over ``AMBIGUOUS`` when both occur. An unresolved name
     is the worse failure — the caller has to find a different name, not merely disambiguate
     an existing one — and the ambiguous names ride along in the message so neither is lost.
+
+    A metric outside ``effective_policy`` is folded into ``unresolved`` *before* it is even
+    handed to the resolver (SPEC-E12 §3 stage 1), reusing the plain ``UNRESOLVED`` shape a
+    nonexistent metric produces. This is a deliberate divergence from the project's usual
+    bias toward maximally informative errors: a distinct forbidden code here would turn the
+    error channel into an existence oracle for metric names the caller is not entitled to
+    know about, which is worse than an occasionally-ambiguous "not found".
     """
     resolved: list[tuple[str, ResolverBinding]] = []
     unresolved: list[str] = []
@@ -206,6 +217,9 @@ def _resolve_all_metrics(
     candidates: list[object] = []
 
     for name in query.metrics:
+        if not effective_policy.metric_allowed(name):
+            unresolved.append(name)
+            continue
         result = resolver.resolve_metric(name, query.context)
         if isinstance(result, ResolverUnresolved):
             unresolved.append(name)
@@ -237,9 +251,17 @@ def compile(  # noqa: A001 — the public verb for this capability is "compile"
     sources: list[SemanticSource],
     *,
     connection_dialects: Mapping[str, str] | None = None,
+    principal: Principal | None = None,
     _dedup_leaves: bool = True,
 ) -> CompileResult:
     """Compile a semantic query to read-only SQL and result metadata (SPEC §4).
+
+    ``principal`` is bound by the caller (MCP/CLI adapter) from a verified token, never from
+    ``query`` itself — ``SemanticQuery`` is frozen and snapshot-locked, and accepting tenancy
+    as a query field would let an agent supply its own scope (SPEC-E12, "authorization is a
+    compiler input, never a query field"). ``None`` behaves as an anonymous principal with no
+    tenant and no roles; against a project with no tenancy/role policy loaded this is a no-op
+    and existing single-tenant behavior is unchanged.
 
     ``_dedup_leaves`` is private and exists for one test. Leaf deduplication is an
     optimisation, so the numbers must be identical with it disabled (AMENDMENT §3.2,
@@ -250,11 +272,35 @@ def compile(  # noqa: A001 — the public verb for this capability is "compile"
     """
     sources_by_name = {s.name: s for s in sources}
 
+    # Stage 0 — bind the principal and flatten its effective policy once, before any metric
+    # resolution, so a TENANT_UNRESOLVED failure never runs long enough to leak whether a
+    # named metric exists (SPEC-E12 §3 stage 0).
+    logger.debug("stage 0: binding principal=%s", principal)
+    bound_principal = principal if principal is not None else Principal(tenant=None)
+    effective_policy = resolver.authz_for(bound_principal)
+    stage0_warnings: list[str] = []
+    if (
+        resolver.tenancy_enabled
+        and not effective_policy.tenancy_exempt
+        and bound_principal.tenant is None
+    ):
+        tenancy_policy = resolver.tenancy_policy
+        assert tenancy_policy is not None  # noqa: S101 — tenancy_enabled guarantees this
+        if tenancy_policy.on_missing_principal is OnMissingPrincipal.ALLOW_UNSCOPED:
+            stage0_warnings.append(
+                "no tenant resolved for this request; serving unscoped under "
+                "on_missing_principal: allow_unscoped"
+            )
+        else:
+            raise TenantUnresolved(
+                "tenancy policy is active but the request carries no resolvable tenant"
+            )
+
     # Stage 1 — resolve metric bindings; detect composite kinds and route accordingly.
     logger.debug("stage 1: resolving metric bindings for metrics=%s", query.metrics)
     if not query.metrics:
         raise Unresolved("query requests at least one metric")
-    raw_bindings = _resolve_all_metrics(query, resolver)
+    raw_bindings = _resolve_all_metrics(query, resolver, effective_policy)
 
     # Compute related metadata once here using resolved bindings (all paths get it via
     # dataclasses.replace or direct constructor argument below).
@@ -269,9 +315,11 @@ def compile(  # noqa: A001 — the public verb for this capability is "compile"
     queried_metric_names = {name for name, _ in raw_bindings}
     related = _related(queried_sources, queried_metric_names, query, resolver, sources_by_name)
     trust_inputs = _trust_inputs_for(raw_bindings, resolver)
-    pipeline_warnings = _enforce_min_trust(
-        raw_bindings, resolver, query.context, trust_inputs
-    ) + _enforce_required_dimension(query, raw_bindings, resolver, sources_by_name)
+    pipeline_warnings = (
+        stage0_warnings
+        + _enforce_min_trust(raw_bindings, resolver, query.context, trust_inputs)
+        + _enforce_required_dimension(query, raw_bindings, resolver, sources_by_name)
+    )
 
     # Stages 2-6 — plan every metric into leaves. Which kind a metric is decides the
     # shape of its leaves and nothing else: from here on a ratio, a semi-additive
@@ -279,7 +327,16 @@ def compile(  # noqa: A001 — the public verb for this capability is "compile"
     dialect = _dialect_for_bindings(raw_bindings, sources_by_name, connection_dialects)
     logger.debug("stages 2-6: planning leaves for %d metric(s)", len(raw_bindings))
     planned = [
-        _plan_metric(name, binding, query, resolver, sources_by_name, dialect)
+        _plan_metric(
+            name,
+            binding,
+            query,
+            resolver,
+            sources_by_name,
+            dialect,
+            bound_principal,
+            effective_policy,
+        )
         for name, binding in raw_bindings
     ]
 
@@ -330,6 +387,13 @@ def compile(  # noqa: A001 — the public verb for this capability is "compile"
         partial_additive=_first(planned, "partial_additive"),
         recompute_at_grain=_first(planned, "recompute_at_grain"),
         opaque=_first(planned, "opaque"),
+        scope=ScopeMetadata(
+            tenant=bound_principal.tenant,
+            scoped_sources=sorted(composed.scoped_sources),
+            shared_sources=sorted(composed.shared_sources),
+            roles=list(effective_policy.roles),
+            tenancy_exempt=effective_policy.tenancy_exempt,
+        ),
     )
 
 
@@ -340,19 +404,60 @@ def _plan_metric(
     resolver: ContractResolver,
     sources_by_name: dict[str, SemanticSource],
     dialect: str,
+    principal: Principal,
+    effective_policy: EffectivePolicy,
 ) -> MetricLeaves:
     """Dispatch one metric to the planner for its kind (AMENDMENT §3.3)."""
     if binding.kind in {BindingKind.RATIO, BindingKind.WEIGHTED_AVG}:
-        return plan_composite(query, name, binding, resolver, sources_by_name)
+        return plan_composite(
+            query,
+            name,
+            binding,
+            resolver,
+            sources_by_name,
+            principal=principal,
+            effective_policy=effective_policy,
+        )
     if binding.kind is BindingKind.SEMI_ADDITIVE:
-        return plan_semi_additive(query, name, binding, resolver, sources_by_name)
+        return plan_semi_additive(
+            query,
+            name,
+            binding,
+            resolver,
+            sources_by_name,
+            principal=principal,
+            effective_policy=effective_policy,
+        )
     if binding.kind in {BindingKind.DISTINCT_COUNT, BindingKind.PERCENTILE}:
         return plan_recompute_at_grain(
-            query, name, binding, resolver, sources_by_name, dialect=dialect
+            query,
+            name,
+            binding,
+            resolver,
+            sources_by_name,
+            dialect=dialect,
+            principal=principal,
+            effective_policy=effective_policy,
         )
     if binding.kind is BindingKind.OPAQUE:
-        return plan_opaque(query, name, binding, resolver, sources_by_name)
-    return plan_simple_additive(query, name, binding, resolver, sources_by_name)
+        return plan_opaque(
+            query,
+            name,
+            binding,
+            resolver,
+            sources_by_name,
+            principal=principal,
+            effective_policy=effective_policy,
+        )
+    return plan_simple_additive(
+        query,
+        name,
+        binding,
+        resolver,
+        sources_by_name,
+        principal=principal,
+        effective_policy=effective_policy,
+    )
 
 
 def _first(planned: list[MetricLeaves], field: str) -> Any:

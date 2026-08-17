@@ -46,6 +46,10 @@ class ErrorCode(StrEnum):
     TELEMETRY_NOT_CONFIGURED = "telemetry_not_configured"
     # The telemetry HTTP call itself failed (non-2xx, connection error, timeout).
     TELEMETRY_SEND_FAILED = "telemetry_send_failed"
+    # Tenant scoping / RBAC (SPEC-E12 §3, §5). TENANT_FORBIDDEN is reserved for the
+    # run_sql/role-deny enforcement layer and is not yet assigned.
+    TENANT_UNRESOLVED = "tenant_unresolved"
+    TENANT_SCOPE_MISSING = "tenant_scope_missing"
 
 
 EXIT_CODES: dict[ErrorCode, int] = {
@@ -69,6 +73,8 @@ EXIT_CODES: dict[ErrorCode, int] = {
     ErrorCode.RETRIES_EXHAUSTED: 19,
     ErrorCode.TELEMETRY_NOT_CONFIGURED: 20,
     ErrorCode.TELEMETRY_SEND_FAILED: 21,
+    ErrorCode.TENANT_UNRESOLVED: 22,
+    ErrorCode.TENANT_SCOPE_MISSING: 23,
 }
 
 
@@ -336,6 +342,30 @@ class TelemetrySendError(CanonicError):
     """
 
     code = ErrorCode.TELEMETRY_SEND_FAILED
+
+
+class TenantUnresolved(CanonicError):
+    """A tenancy policy is active but the request carries no resolvable tenant (SPEC-E12 §3, §5).
+
+    Raised at compiler stage 0, before metric resolution, so no error message can reveal
+    whether a named metric exists. ``on_missing_principal: allow_unscoped`` avoids this by
+    appending a warning instead — see :class:`~canonic.contracts.models.OnMissingPrincipal`.
+    """
+
+    code = ErrorCode.TENANT_UNRESOLVED
+
+
+class TenantScopeMissing(CanonicError):
+    """A query reaches a source in neither a tenancy policy's ``scoped_sources`` nor
+    ``shared_sources`` (SPEC-E12 §1.1, §3 stage 2b).
+
+    A source with no tenancy classification is a policy hole, not an unfiltered pass-through:
+    fail closed rather than serve rows nobody reviewed for tenant safety.
+    ``undeclared_source: warn`` avoids this by appending a warning instead, for incremental
+    adoption on an existing project.
+    """
+
+    code = ErrorCode.TENANT_SCOPE_MISSING
 
 
 class EmbeddingUnavailable(CanonicError):

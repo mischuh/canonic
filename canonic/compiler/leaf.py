@@ -34,6 +34,7 @@ from canonic.compiler._helpers import (
     _measure_expr,
     _population_filter_conditions,
     _resolve_dimensions,
+    _tenant_conditions,
 )
 from canonic.compiler.joins import build_alias_tree, plan_joins
 from canonic.compiler.result import FinalityMetadata
@@ -50,6 +51,7 @@ if TYPE_CHECKING:
     from canonic.compiler.joins import JoinEdge
     from canonic.compiler.query import SemanticQuery
     from canonic.compiler.result import FiredGuardrail
+    from canonic.contracts.principal import EffectivePolicy, Principal
     from canonic.contracts.resolver import ContractResolver
     from canonic.semantic.models import Dimension, SemanticSource
 
@@ -67,11 +69,19 @@ __all__ = [
 
 @dataclass(frozen=True, slots=True)
 class LeafContext:
-    """Everything stages 2-6 need that does not vary from one leaf to the next."""
+    """Everything stages 2-6 need that does not vary from one leaf to the next.
+
+    ``principal`` and ``effective_policy`` are bound once in
+    :func:`canonic.compiler.pipeline.compile`'s stage 0 and carried here so every leaf sees
+    them without its own signature change (SPEC-E12 §3) — ``plan_leaf`` reads them straight
+    off ``ctx`` to inject stage 2b's tenant predicates.
+    """
 
     query: SemanticQuery
     resolver: ContractResolver
     sources_by_name: dict[str, SemanticSource]
+    principal: Principal
+    effective_policy: EffectivePolicy
 
 
 @dataclass(frozen=True, slots=True)
@@ -212,6 +222,11 @@ class LeafPlan:
     warnings: tuple[str, ...] = ()
     finality: FinalityMetadata | None = None
     projects_is_final: bool = False
+    #: Sources that received a tenant predicate / were declared tenant-neutral for this leaf
+    #: (SPEC-E12 §3 stage 8). Derived from the predicates actually emitted, not from the
+    #: policy, so S16 AC3 ("lists exactly the sources that received a predicate") holds.
+    scoped_sources: frozenset[str] = frozenset()
+    shared_sources: frozenset[str] = frozenset()
     #: Whether another leaf's measure may be merged into this CTE. False for the kinds
     #: whose builder emits a shape around exactly one measure (a ROW_NUMBER collapse, an
     #: ordered-set quantile): merging a second measure in would silently change what the
@@ -435,9 +450,23 @@ def plan_leaf(
 
     fanout = any(edge.join.relationship in _FANOUT for edge in join_edges)
 
+    # Stage 2b — tenant predicates, injected before query filters so a caller-supplied
+    # filter can never widen what the principal's tenant already narrowed it to (§3, S14).
+    tenant_scoping = _tenant_conditions(
+        resolver,
+        owner,
+        join_edges,
+        alias_to_source,
+        ctx.principal.tenant,
+        ctx.effective_policy,
+    )
+
     # population_filter defines the population this leaf is compiled over (§4.5), and is
     # applied before guardrails so a guardrail narrows an already-scoped population.
-    scoping = _apply_metric_scoping(ctx, owner, metrics, where_conditions, alias_to_source)
+    scoping = _apply_metric_scoping(
+        ctx, owner, metrics, [*tenant_scoping.conditions, *where_conditions], alias_to_source
+    )
+    scoping.warnings = [*tenant_scoping.warnings, *scoping.warnings]
 
     # Stage 5 — finality, evaluated after guardrails so every WHERE condition the leaf
     # carries is re-qualified onto each realization branch.
@@ -553,4 +582,6 @@ def plan_leaf(
         warnings=tuple(scoping.warnings),
         finality=leaf_finality,
         projects_is_final=leaf_finality is not None,
+        scoped_sources=tenant_scoping.scoped_sources,
+        shared_sources=tenant_scoping.shared_sources,
     )

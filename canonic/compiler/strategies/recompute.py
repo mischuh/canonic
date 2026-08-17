@@ -20,6 +20,7 @@ if TYPE_CHECKING:
     from collections.abc import Sequence
 
     from canonic.compiler.query import SemanticQuery
+    from canonic.contracts.principal import EffectivePolicy, Principal
     from canonic.contracts.resolver import Binding as ResolverBinding
     from canonic.contracts.resolver import ContractResolver, RecomputeAtGrainBinding
     from canonic.semantic.models import Dimension, SemanticSource
@@ -45,6 +46,8 @@ def plan_metric(
     sources_by_name: dict[str, SemanticSource],
     *,
     dialect: str = "postgres",
+    principal: Principal,
+    effective_policy: EffectivePolicy,
 ) -> MetricLeaves:
     """Plan a recompute_at_grain metric (distinct_count / percentile) as one leaf (§4.3).
 
@@ -105,7 +108,13 @@ def plan_metric(
     # carries the physical column name so source-wide guardrails (applies_to: { source })
     # still match, without ever colliding with a real measure name.
     leaf = plan_leaf(
-        LeafContext(query=query, resolver=resolver, sources_by_name=sources_by_name),
+        LeafContext(
+            query=query,
+            resolver=resolver,
+            sources_by_name=sources_by_name,
+            principal=principal,
+            effective_policy=effective_policy,
+        ),
         source_name,
         [
             LeafMetric(

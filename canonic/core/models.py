@@ -46,6 +46,7 @@ __all__ = [
     "ReportRunResult",
     "ReportSectionResult",
     "ReportSummary",
+    "ScopeOut",
     "SourceFreshnessOut",
     "TrustScoreOut",
 ]
@@ -108,6 +109,18 @@ class RelatedMetricOut(BaseModel):
 
     name: str
     source: str
+
+
+class ScopeOut(BaseModel):
+    """The ``metadata.scope`` block: tenant/role scoping (SPEC-E12 §3 stage 8, S16 AC3)."""
+
+    model_config = ConfigDict(frozen=True)
+
+    tenant: str | None = None
+    scoped_sources: list[str] = []
+    shared_sources: list[str] = []
+    roles: list[str] = []
+    tenancy_exempt: bool = False
 
 
 class RelatedOut(BaseModel):
@@ -220,6 +233,7 @@ class QueryMetadata(BaseModel):
     finality: FinalityOut | None = None
     related: RelatedOut = RelatedOut()
     trust_score: TrustScoreOut | None = None
+    scope: ScopeOut | None = None
 
     @classmethod
     def from_compile_result(
@@ -291,6 +305,17 @@ class QueryMetadata(BaseModel):
                 ],
             ),
             trust_score=TrustScoreOut(tier=trust.tier.value, reasons=list(trust.reasons)),
+            scope=(
+                ScopeOut(
+                    tenant=compiled.scope.tenant,
+                    scoped_sources=list(compiled.scope.scoped_sources),
+                    shared_sources=list(compiled.scope.shared_sources),
+                    roles=list(compiled.scope.roles),
+                    tenancy_exempt=compiled.scope.tenancy_exempt,
+                )
+                if compiled.scope is not None
+                else None
+            ),
         )
 
 

@@ -157,6 +157,17 @@
             }
           ],
           "default": null
+        },
+        "scope": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ScopeOut"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         }
       },
       "required": [
@@ -300,6 +311,54 @@
         "rows"
       ],
       "title": "ResultSet",
+      "type": "object"
+    },
+    "ScopeOut": {
+      "description": "The ``metadata.scope`` block: tenant/role scoping (SPEC-E12 \u00a73 stage 8, S16 AC3).",
+      "properties": {
+        "tenant": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Tenant"
+        },
+        "scoped_sources": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Scoped Sources",
+          "type": "array"
+        },
+        "shared_sources": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Shared Sources",
+          "type": "array"
+        },
+        "roles": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Roles",
+          "type": "array"
+        },
+        "tenancy_exempt": {
+          "default": false,
+          "title": "Tenancy Exempt",
+          "type": "boolean"
+        }
+      },
+      "title": "ScopeOut",
       "type": "object"
     },
     "SourceFreshnessOut": {
