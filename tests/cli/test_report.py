@@ -220,3 +220,12 @@ def test_run_with_invalid_filter_fails(
 ) -> None:
     result = runner.invoke(app, ["report", "run", "customer_report", "--filter", "not-a-filter"])
     assert result.exit_code != 0
+
+
+def test_run_tenant_flag_warns_and_succeeds(
+    runner: CliRunner, project_dir: Path, fake_connector: None
+) -> None:
+    """--tenant (SPEC-E12 §5, §7) is accepted for direct CLI use and always warns."""
+    result = runner.invoke(app, ["report", "run", "customer_report", "--tenant", "4711"])
+    assert result.exit_code == 0, result.output
+    assert "warning" in result.output.lower()

@@ -159,6 +159,28 @@ class TestTenancyFor:
         assert result.source == "some_untracked_source"
 
 
+class TestPolicyAccessors:
+    """``tenancy_policy`` / ``role_policy`` (SPEC-E12 §5) — the raw loaded policies, for
+    adapters (``canonic.mcp.auth.principal_from_token``) that need the ``claim`` name
+    itself rather than a derived per-source/per-principal decision."""
+
+    def test_none_when_no_policy_loaded(self) -> None:
+        resolver = ContractResolver(bindings=[], guardrails=[])
+        assert resolver.tenancy_policy is None
+        assert resolver.role_policy is None
+
+    def test_returns_the_loaded_policies(self, tmp_path: Path) -> None:
+        _write(tmp_path / "contracts" / "policies" / "tenancy.yaml", VALID_TENANCY_YAML)
+        _write(tmp_path / "contracts" / "policies" / "roles.yaml", VALID_ROLES_YAML)
+        tenancy = load_tenancy_policy(tmp_path)
+        roles = load_role_policy(tmp_path)
+        resolver = ContractResolver(bindings=[], guardrails=[], tenancy=tenancy, roles=roles)
+        assert resolver.tenancy_policy is tenancy
+        assert resolver.tenancy_policy.claim == "merchant_id"
+        assert resolver.role_policy is roles
+        assert resolver.role_policy.claim == "roles"
+
+
 def _resolver_with_roles(tmp_path: Path, roles_yaml: str = VALID_ROLES_YAML) -> ContractResolver:
     _write(tmp_path / "contracts" / "policies" / "roles.yaml", roles_yaml)
     roles = load_role_policy(tmp_path)

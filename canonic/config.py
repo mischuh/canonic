@@ -63,6 +63,13 @@ class Connection(BaseModel):
     params: dict[str, Any] = {}
     credentials_ref: str | None = None
     read_only_role: str | None = None
+    #: Operator attestation that a warehouse-native layer-2 tenant boundary (Postgres/
+    #: Redshift row-level security keyed on a session GUC) is enforced on this connection
+    #: out of band — canonic cannot verify it, only rely on it (SPEC-E12 §4). Gates
+    #: ``run_sql`` under an active tenancy policy: raw SQL bypasses the compiler's
+    #: predicate injection entirely, so it is only served where the warehouse itself
+    #: closes the gap.
+    rls_enforced: bool = False
 
     @field_validator("credentials_ref")
     @classmethod
@@ -245,6 +252,11 @@ class McpTokenEntry(BaseModel):
 
     client_id: str
     token_ref: str
+    #: Claims carried by this static token (e.g. ``{"merchant_id": "4711", "roles":
+    #: ["merchant_viewer"]}``), keyed by the raw claim name a tenancy/role policy's
+    #: ``claim`` field names (SPEC-E12 §7). Static tokens carry claims inline because
+    #: there is no IdP to ask — unlike OAuth, where they arrive in the verified JWT.
+    claims: dict[str, Any] = {}
 
     @field_validator("token_ref")
     @classmethod
@@ -298,6 +310,12 @@ class McpOAuthConfig(BaseModel):
     #: work at all against such IdPs and for `AccessToken.client_id` (used in MCP request
     #: logging) to be a meaningful identity rather than an opaque subject id.
     verify_id_token: bool = False
+    #: Maps a tenancy/role policy's raw ``claim`` name (e.g. ``merchant_id``) to the
+    #: namespaced claim key the IdP actually issues (e.g.
+    #: ``https://example.com/merchant_id``), which most IdPs require for custom claims
+    #: (SPEC-E12 §7). A ``claim`` absent from this mapping is looked up under its own
+    #: name unchanged.
+    claim_mapping: dict[str, str] = {}
 
     @field_validator("issuer_url")
     @classmethod

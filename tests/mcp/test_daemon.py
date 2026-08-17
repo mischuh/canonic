@@ -9,7 +9,7 @@ from pathlib import Path  # noqa: TC003
 import pytest
 
 from canonic import __version__ as CANONIC_VERSION
-from canonic.mcp.daemon import DaemonState, read_state, start_http, status, stop
+from canonic.mcp.daemon import DaemonState, read_state, start_http, start_stdio, status, stop
 
 
 @pytest.fixture
@@ -166,3 +166,52 @@ class TestStartHttpAuth:
             start_http(object(), project_root, auth=None)
         # Fails before ever forking/writing state.
         assert not (project_root / ".canonic" / "mcp.json").exists()
+
+
+class _StubResolver:
+    def __init__(self, *, tenancy_enabled: bool) -> None:
+        self.tenancy_enabled = tenancy_enabled
+
+
+class _StubService:
+    """A minimal stand-in exposing only what ``start_stdio``'s guard reads."""
+
+    def __init__(self, *, tenancy_enabled: bool) -> None:
+        self.resolver = _StubResolver(tenancy_enabled=tenancy_enabled)
+
+
+class TestStartStdioTenancyGuard:
+    """``stdio`` has no per-request auth, so a tenancy policy requires ``--tenant``
+    to bind a principal for the whole session (SPEC-E12 §5, S13 AC3).
+    """
+
+    def test_refuses_without_tenant_when_tenancy_enabled(self, project_root: Path) -> None:
+        service = _StubService(tenancy_enabled=True)
+        with pytest.raises(RuntimeError, match="tenancy policy"):
+            start_stdio(service, project_root, tenant=None)
+
+    def test_no_tenancy_policy_starts_without_tenant(
+        self, project_root: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        service = _StubService(tenancy_enabled=False)
+        called = {}
+        monkeypatch.setattr(
+            "canonic.mcp.server.build_server", lambda *a, **k: called.setdefault("built", True)
+        )
+        # mcp.run would block; the object returned above has no .run, so calling it
+        # would raise — confirm we get past the guard by checking build_server ran.
+        with pytest.raises(AttributeError):
+            start_stdio(service, project_root, tenant=None)
+        assert called.get("built") is True
+
+    def test_tenant_given_satisfies_guard_when_tenancy_enabled(
+        self, project_root: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        service = _StubService(tenancy_enabled=True)
+        called = {}
+        monkeypatch.setattr(
+            "canonic.mcp.server.build_server", lambda *a, **k: called.setdefault("built", True)
+        )
+        with pytest.raises(AttributeError):
+            start_stdio(service, project_root, tenant="4711")
+        assert called.get("built") is True

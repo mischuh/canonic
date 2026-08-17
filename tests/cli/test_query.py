@@ -272,6 +272,16 @@ def test_query_ambiguous_join_without_via_raises(
     assert "ambiguous_join_path" in result.output
 
 
+def test_query_tenant_flag_warns_and_succeeds(
+    runner: CliRunner, project_dir: Path, fake_connector: None
+) -> None:
+    """--tenant (SPEC-E12 §5, §7) is accepted for direct CLI use and always warns."""
+    result = runner.invoke(app, ["query", "--metrics", "revenue", "--tenant", "4711"])
+    assert result.exit_code == 0, result.output
+    assert "warning" in result.output.lower()
+    assert "4711" in result.output
+
+
 def test_query_via_flag_resolves_ambiguous_join(
     runner: CliRunner, ambiguous_project_dir: Path, fake_connector: None
 ) -> None:

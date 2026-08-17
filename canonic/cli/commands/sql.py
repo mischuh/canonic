@@ -11,6 +11,7 @@ from rich.console import Console
 from rich.table import Table
 
 from canonic.cli._errors import get_cli_context, handle_errors
+from canonic.cli._tenant import TenantOption, cli_tenant_principal
 from canonic.cli.commands import load_service
 
 _console = Console()
@@ -26,11 +27,14 @@ def sql(
             "--connection", "-c", help="Connection id (defaults to project.default_connection)."
         ),
     ] = None,
+    tenant: TenantOption = None,
 ) -> None:
     """Execute a read-only SQL string on a named connection.
 
     Non-SELECT statements are rejected with ``READ_ONLY_VIOLATION`` (exit 11).
     """
+    # SPEC-E12 §7: validated + warned here; not yet threaded into service.run_sql (E12 P2).
+    cli_tenant_principal(tenant)
     service = load_service(ctx)
     result = asyncio.run(service.run_sql(statement, connection=connection))
 

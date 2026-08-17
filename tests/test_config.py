@@ -57,6 +57,19 @@ class TestLoadConfig:
         assert cfg.llm.api_key_ref == "env:CANONIC_LLM_KEY"
         assert cfg.telemetry.enabled is False
 
+    def test_rls_enforced_defaults_to_false(self, tmp_path: Path) -> None:
+        cfg = load_config(_canonic_yaml(tmp_path, _VALID))
+        assert cfg.connections[0].rls_enforced is False
+
+    def test_rls_enforced_parsed(self, tmp_path: Path) -> None:
+        """Operator attestation that layer-2 RLS is enforced out of band (SPEC-E12 §4)."""
+        content = _VALID.replace(
+            "    credentials_ref: env:CANONIC_PG_DSN\n",
+            "    credentials_ref: env:CANONIC_PG_DSN\n    rls_enforced: true\n",
+        )
+        cfg = load_config(_canonic_yaml(tmp_path, content))
+        assert cfg.connections[0].rls_enforced is True
+
     def test_missing_file_raises_config_error(self, tmp_path: Path) -> None:
         with pytest.raises(ConfigError, match="not found"):
             load_config(tmp_path / "canonic.yaml")
@@ -225,6 +238,35 @@ class TestMcpAuthConfig:
             load_config(_canonic_yaml(tmp_path, content))
         assert "token_ref" in str(exc_info.value)
 
+    def test_token_claims_default_to_empty(self, tmp_path: Path) -> None:
+        content = (
+            _VALID
+            + "mcp:\n"
+            + "  auth:\n"
+            + "    tokens:\n"
+            + "      - client_id: alice\n"
+            + "        token_ref: env:CANONIC_MCP_TOKEN_ALICE\n"
+        )
+        cfg = load_config(_canonic_yaml(tmp_path, content))
+        assert cfg.mcp.auth.tokens[0].claims == {}
+
+    def test_token_claims_parsed(self, tmp_path: Path) -> None:
+        """Static tokens carry claims inline (SPEC-E12 §7) — no IdP to ask."""
+        content = (
+            _VALID
+            + "mcp:\n"
+            + "  auth:\n"
+            + "    tokens:\n"
+            + "      - client_id: merchant-4711-agent\n"
+            + "        token_ref: env:CANONIC_MCP_TOKEN_ALICE\n"
+            + "        claims:\n"
+            + "          merchant_id: '4711'\n"
+            + "          roles: [merchant_viewer]\n"
+        )
+        cfg = load_config(_canonic_yaml(tmp_path, content))
+        claims = cfg.mcp.auth.tokens[0].claims
+        assert claims == {"merchant_id": "4711", "roles": ["merchant_viewer"]}
+
 
 class TestMcpOAuthConfig:
     """``mcp.auth.oauth`` block (AMENDMENT-oauth-mcp-auth.md)."""
@@ -273,6 +315,40 @@ class TestMcpOAuthConfig:
         assert oauth.mode == McpOAuthMode.JWT
         assert oauth.audience == "canonic-mcp"
         assert oauth.jwks_uri == "https://idp.example.com/jwks.json"
+
+    def test_claim_mapping_defaults_to_empty(self, tmp_path: Path) -> None:
+        content = (
+            _VALID
+            + "mcp:\n"
+            + "  auth:\n"
+            + "    oauth:\n"
+            + "      mode: jwt\n"
+            + "      issuer_url: https://idp.example.com\n"
+        )
+        cfg = load_config(_canonic_yaml(tmp_path, content))
+        assert cfg.mcp.auth.oauth is not None
+        assert cfg.mcp.auth.oauth.claim_mapping == {}
+
+    def test_claim_mapping_parsed(self, tmp_path: Path) -> None:
+        """Namespaced custom claims (SPEC-E12 §7) — most IdPs require this for non-standard
+        claims like a tenant id."""
+        content = (
+            _VALID
+            + "mcp:\n"
+            + "  auth:\n"
+            + "    oauth:\n"
+            + "      mode: jwt\n"
+            + "      issuer_url: https://idp.example.com\n"
+            + "      claim_mapping:\n"
+            + "        merchant_id: https://example.com/merchant_id\n"
+            + "        roles: roles\n"
+        )
+        cfg = load_config(_canonic_yaml(tmp_path, content))
+        assert cfg.mcp.auth.oauth is not None
+        assert cfg.mcp.auth.oauth.claim_mapping == {
+            "merchant_id": "https://example.com/merchant_id",
+            "roles": "roles",
+        }
 
     def test_tokens_and_oauth_compose(self, tmp_path: Path) -> None:
         content = (

@@ -10,15 +10,18 @@ from fastmcp.server.auth.oidc_proxy import OIDCConfiguration, OIDCProxy
 from fastmcp.server.auth.providers.jwt import JWTVerifier
 
 from canonic.config import McpAuthConfig, McpOAuthConfig, McpOAuthMode, McpTokenEntry
+from canonic.contracts.models import RolePolicy, TenancyPolicy
 from canonic.exc import CredentialError
 from canonic.mcp.auth import (
     CLI_OVERRIDE_CLIENT_ID,
     CanonicCompositeVerifier,
     CanonicTokenVerifier,
+    ResolvedToken,
     build_mcp_auth,
     build_oauth_verifier,
     build_token_verifier,
     describe_auth_mechanisms,
+    principal_from_token,
     resolve_tokens,
 )
 
@@ -38,7 +41,28 @@ def auth_config(monkeypatch: pytest.MonkeyPatch) -> McpAuthConfig:
 class TestResolveTokens:
     def test_resolves_each_entry(self, auth_config: McpAuthConfig) -> None:
         tokens = resolve_tokens(auth_config)
-        assert tokens == {"alice-secret": "alice", "bob-secret": "bob"}
+        assert tokens == {
+            "alice-secret": ResolvedToken(client_id="alice"),
+            "bob-secret": ResolvedToken(client_id="bob"),
+        }
+
+    def test_resolves_inline_claims(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Static tokens carry claims inline (SPEC-E12 §7) — no IdP to ask."""
+        monkeypatch.setenv("CANONIC_TEST_TOKEN_MERCHANT", "merchant-secret")
+        config = McpAuthConfig(
+            tokens=[
+                McpTokenEntry(
+                    client_id="merchant-4711-agent",
+                    token_ref="env:CANONIC_TEST_TOKEN_MERCHANT",
+                    claims={"merchant_id": "4711", "roles": ["merchant_viewer"]},
+                )
+            ]
+        )
+        tokens = resolve_tokens(config)
+        assert tokens["merchant-secret"] == ResolvedToken(
+            client_id="merchant-4711-agent",
+            claims={"merchant_id": "4711", "roles": ["merchant_viewer"]},
+        )
 
     def test_empty_config_resolves_empty(self) -> None:
         assert resolve_tokens(McpAuthConfig()) == {}
@@ -46,7 +70,7 @@ class TestResolveTokens:
     def test_extra_token_ref_folded_in(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setenv("CANONIC_TEST_CLI_TOKEN", "cli-secret")
         tokens = resolve_tokens(McpAuthConfig(), extra_token_ref="env:CANONIC_TEST_CLI_TOKEN")
-        assert tokens == {"cli-secret": CLI_OVERRIDE_CLIENT_ID}
+        assert tokens == {"cli-secret": ResolvedToken(client_id=CLI_OVERRIDE_CLIENT_ID)}
 
     def test_unresolvable_ref_raises_credential_error(self) -> None:
         config = McpAuthConfig(
@@ -63,6 +87,23 @@ class TestCanonicTokenVerifier:
         access = await verifier.verify_token("alice-secret")
         assert access is not None
         assert access.client_id == "alice"
+
+    @pytest.mark.asyncio
+    async def test_verified_token_carries_claims(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("CANONIC_TEST_TOKEN_MERCHANT", "merchant-secret")
+        config = McpAuthConfig(
+            tokens=[
+                McpTokenEntry(
+                    client_id="merchant-4711-agent",
+                    token_ref="env:CANONIC_TEST_TOKEN_MERCHANT",
+                    claims={"merchant_id": "4711"},
+                )
+            ]
+        )
+        verifier = CanonicTokenVerifier(resolve_tokens(config))
+        access = await verifier.verify_token("merchant-secret")
+        assert access is not None
+        assert access.claims == {"merchant_id": "4711"}
 
     @pytest.mark.asyncio
     async def test_rejects_unknown_token(self, auth_config: McpAuthConfig) -> None:
@@ -333,3 +374,83 @@ class TestDescribeAuthMechanisms:
             mode=McpOAuthMode.JWT, issuer_url="https://idp.example.com"
         )
         assert describe_auth_mechanisms(auth_config) == ["token", "oauth-jwt"]
+
+
+class TestPrincipalFromToken:
+    """``principal_from_token`` (SPEC-E12 §5, §7) — never reads anything but the
+    verified token's claims.
+    """
+
+    def _token(self, **claims: object) -> AccessToken:
+        return AccessToken(token="t", client_id="merchant-4711-agent", scopes=[], claims=claims)
+
+    def test_neither_policy_configured_returns_none(self) -> None:
+        assert principal_from_token(self._token(), tenancy=None, roles=None) is None
+
+    def test_tenant_read_from_claim(self) -> None:
+        tenancy = TenancyPolicy(
+            schema="tenancy/v1", claim="merchant_id", scoped_sources=[], shared_sources=[]
+        )
+        principal = principal_from_token(
+            self._token(merchant_id="4711"), tenancy=tenancy, roles=None
+        )
+        assert principal is not None
+        assert principal.tenant == "4711"
+        assert principal.roles == ()
+
+    def test_missing_tenant_claim_yields_none_tenant(self) -> None:
+        tenancy = TenancyPolicy(
+            schema="tenancy/v1", claim="merchant_id", scoped_sources=[], shared_sources=[]
+        )
+        principal = principal_from_token(self._token(), tenancy=tenancy, roles=None)
+        assert principal is not None
+        assert principal.tenant is None
+
+    def test_roles_read_from_list_claim(self) -> None:
+        roles = RolePolicy(schema="roles/v1", claim="roles", roles={})
+        principal = principal_from_token(
+            self._token(roles=["merchant_viewer", "merchant_admin"]), tenancy=None, roles=roles
+        )
+        assert principal is not None
+        assert principal.roles == ("merchant_viewer", "merchant_admin")
+
+    def test_roles_read_from_scalar_claim(self) -> None:
+        roles = RolePolicy(schema="roles/v1", claim="role", roles={})
+        principal = principal_from_token(
+            self._token(role="merchant_viewer"), tenancy=None, roles=roles
+        )
+        assert principal is not None
+        assert principal.roles == ("merchant_viewer",)
+
+    def test_missing_roles_claim_yields_empty_roles(self) -> None:
+        roles = RolePolicy(schema="roles/v1", claim="roles", roles={})
+        principal = principal_from_token(self._token(), tenancy=None, roles=roles)
+        assert principal is not None
+        assert principal.roles == ()
+
+    def test_claim_mapping_resolves_namespaced_claim(self) -> None:
+        """OAuth claims are often namespaced; static tokens need no mapping (SPEC-E12 §7)."""
+        tenancy = TenancyPolicy(
+            schema="tenancy/v1", claim="merchant_id", scoped_sources=[], shared_sources=[]
+        )
+        token = self._token(**{"https://example.com/merchant_id": "4711"})
+        principal = principal_from_token(
+            token,
+            tenancy=tenancy,
+            roles=None,
+            claim_mapping={"merchant_id": "https://example.com/merchant_id"},
+        )
+        assert principal is not None
+        assert principal.tenant == "4711"
+
+    def test_both_policies_combine(self) -> None:
+        tenancy = TenancyPolicy(
+            schema="tenancy/v1", claim="merchant_id", scoped_sources=[], shared_sources=[]
+        )
+        roles = RolePolicy(schema="roles/v1", claim="roles", roles={})
+        principal = principal_from_token(
+            self._token(merchant_id="4711", roles=["merchant_viewer"]), tenancy=tenancy, roles=roles
+        )
+        assert principal is not None
+        assert principal.tenant == "4711"
+        assert principal.roles == ("merchant_viewer",)

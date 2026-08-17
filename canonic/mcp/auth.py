@@ -11,7 +11,8 @@ and its caller in ``canonic.cli.commands.mcp``.
 from __future__ import annotations
 
 import hmac
-from typing import TYPE_CHECKING
+from dataclasses import dataclass, field
+from typing import TYPE_CHECKING, Any
 
 from fastmcp.server.auth.auth import AccessToken, AuthProvider, TokenVerifier
 from fastmcp.server.auth.oidc_proxy import OIDCConfiguration, OIDCProxy
@@ -19,21 +20,25 @@ from fastmcp.server.auth.providers.jwt import JWTVerifier
 from pydantic import AnyHttpUrl
 
 from canonic.config import McpOAuthMode
+from canonic.contracts.principal import Principal
 from canonic.credentials import resolve_credential
 
 if TYPE_CHECKING:
     from starlette.routing import Route
 
     from canonic.config import McpAuthConfig, McpOAuthConfig
+    from canonic.contracts.models import RolePolicy, TenancyPolicy
 
 __all__ = [
     "CLI_OVERRIDE_CLIENT_ID",
     "CanonicCompositeVerifier",
     "CanonicTokenVerifier",
+    "ResolvedToken",
     "build_mcp_auth",
     "build_oauth_verifier",
     "build_token_verifier",
     "describe_auth_mechanisms",
+    "principal_from_token",
     "resolve_tokens",
 ]
 
@@ -45,23 +50,43 @@ _OIDC_DISCOVERY_SUFFIX = "/.well-known/openid-configuration"
 CLI_OVERRIDE_CLIENT_ID = "cli-override"
 
 
+@dataclass(frozen=True, slots=True)
+class ResolvedToken:
+    """A verified static token's identity: its ``client_id`` plus any inline claims.
+
+    ``claims`` carries whatever ``mcp.auth.tokens[].claims`` declared (SPEC-E12 §7) —
+    empty for a token with no tenancy/role wiring, or for the ``--token-ref`` CLI
+    override, which has no config entry to carry claims on.
+    """
+
+    client_id: str
+    claims: dict[str, Any] = field(default_factory=dict)
+
+
 def resolve_tokens(
     auth_config: McpAuthConfig, *, extra_token_ref: str | None = None
-) -> dict[str, str]:
-    """Resolve every configured ``token_ref`` into ``{secret_token: client_id}``.
+) -> dict[str, ResolvedToken]:
+    """Resolve every configured ``token_ref`` into ``{secret_token: ResolvedToken}``.
 
     Folds in ``extra_token_ref`` (the ``--token-ref`` CLI override, attributed to
-    :data:`CLI_OVERRIDE_CLIENT_ID`) when given. Raises
+    :data:`CLI_OVERRIDE_CLIENT_ID` with no claims) when given. Raises
     :class:`canonic.exc.CredentialError` if any reference cannot be resolved.
     """
-    tokens = {resolve_credential(entry.token_ref): entry.client_id for entry in auth_config.tokens}
+    tokens = {
+        resolve_credential(entry.token_ref): ResolvedToken(
+            client_id=entry.client_id, claims=entry.claims
+        )
+        for entry in auth_config.tokens
+    }
     if extra_token_ref is not None:
-        tokens[resolve_credential(extra_token_ref)] = CLI_OVERRIDE_CLIENT_ID
+        tokens[resolve_credential(extra_token_ref)] = ResolvedToken(
+            client_id=CLI_OVERRIDE_CLIENT_ID
+        )
     return tokens
 
 
 class CanonicTokenVerifier(TokenVerifier):
-    """Verifies a bearer token against a fixed ``{token: client_id}`` map.
+    """Verifies a bearer token against a fixed ``{token: ResolvedToken}`` map.
 
     Deliberately not FastMCP's own ``StaticTokenVerifier`` — that class's docstring
     warns it is for testing/development only. This verifier resolves its tokens from
@@ -69,14 +94,16 @@ class CanonicTokenVerifier(TokenVerifier):
     constant time.
     """
 
-    def __init__(self, tokens: dict[str, str]) -> None:
+    def __init__(self, tokens: dict[str, ResolvedToken]) -> None:
         super().__init__()
         self._tokens = tokens
 
     async def verify_token(self, token: str) -> AccessToken | None:
-        for candidate, client_id in self._tokens.items():
+        for candidate, resolved in self._tokens.items():
             if hmac.compare_digest(candidate, token):
-                return AccessToken(token=token, client_id=client_id, scopes=[])
+                return AccessToken(
+                    token=token, client_id=resolved.client_id, scopes=[], claims=resolved.claims
+                )
         return None
 
 
@@ -92,6 +119,49 @@ def build_token_verifier(
     if not tokens:
         return None
     return CanonicTokenVerifier(tokens)
+
+
+def principal_from_token(
+    token: AccessToken,
+    *,
+    tenancy: TenancyPolicy | None,
+    roles: RolePolicy | None,
+    claim_mapping: dict[str, str] | None = None,
+) -> Principal | None:
+    """Derive a :class:`Principal` from a verified token's claims (SPEC-E12 §5, §7).
+
+    Reads ``tenancy.claim`` / ``roles.claim`` — never anything client-supplied outside
+    the token — applying ``claim_mapping`` (``mcp.auth.oauth.claim_mapping``) to resolve
+    a namespaced IdP claim key; static tokens need no mapping since their ``claims``
+    dict is already keyed by the policy's own claim names (SPEC-E12 §7).
+
+    Returns ``None`` when neither policy is configured — nothing to derive, matching the
+    "absence is the feature switch" rule the rest of E12 follows. With a policy
+    configured but the token missing the matching claim, the corresponding
+    :class:`Principal` field is left empty (``tenant=None`` / ``roles=()``); callers
+    combine that with ``ContractResolver.tenancy_enabled`` / ``authz_for`` to decide
+    whether the absence is an error (SPEC-E12 §5).
+    """
+    if tenancy is None and roles is None:
+        return None
+
+    mapping = claim_mapping or {}
+    claims = token.claims
+
+    tenant: str | None = None
+    if tenancy is not None:
+        raw_tenant = claims.get(mapping.get(tenancy.claim, tenancy.claim))
+        tenant = str(raw_tenant) if raw_tenant is not None else None
+
+    role_names: tuple[str, ...] = ()
+    if roles is not None:
+        raw_roles = claims.get(mapping.get(roles.claim, roles.claim))
+        if isinstance(raw_roles, list):
+            role_names = tuple(str(r) for r in raw_roles)
+        elif isinstance(raw_roles, str):
+            role_names = (raw_roles,)
+
+    return Principal(tenant=tenant, roles=role_names, source=f"token:{token.client_id}")
 
 
 def _discover_jwks_uri(issuer_url: str) -> str:

@@ -20,11 +20,14 @@ from canonic import __version__ as CANONIC_VERSION
 from canonic.compiler.query import SemanticQuery
 from canonic.contract import CONTRACT_SCHEMA
 from canonic.core.models import CompileOutput
+from canonic.mcp.auth import principal_from_token
 from canonic.mcp.errors import canonic_error_response
 
 if TYPE_CHECKING:
     from fastmcp.server.auth.auth import AuthProvider
 
+    from canonic.contracts.principal import Principal
+    from canonic.contracts.resolver import ContractResolver
     from canonic.core.service import CanonicService
 
 
@@ -37,6 +40,21 @@ def _caller_id() -> str | None:
     """
     token = get_access_token()
     return token.client_id if token is not None else None
+
+
+def _principal(resolver: ContractResolver) -> Principal | None:
+    """The verified Principal for the current request, or ``None`` under stdio or when
+    neither a tenancy nor a role policy is configured for this project (SPEC-E12 §5).
+
+    Derived exclusively from the request's verified :class:`AccessToken` claims via
+    ``resolver.tenancy_policy`` / ``resolver.role_policy`` — never from anything the
+    caller supplies in the tool call itself. Not yet threaded into a tool body: the
+    compiler/service integration that makes this consequential lands in a later phase.
+    """
+    token = get_access_token()
+    if token is None:
+        return None
+    return principal_from_token(token, tenancy=resolver.tenancy_policy, roles=resolver.role_policy)
 
 
 __all__ = ["build_server"]
@@ -420,9 +438,10 @@ def build_server(
             "treat a per-section error as a failure of the whole call; report it alongside "
             "the sections that succeeded. "
             "'filters' (list[str]): SQL WHERE predicates, same format as query()'s filters "
-            "e.g. [\"merchant_id = '123'\"]. Applied additively (AND-ed) onto every section's "
-            "own filters, never replacing them — use this to scope an entire report run to "
-            "one tenant/merchant without editing the report file."
+            "e.g. [\"status = 'active'\"]. Applied additively (AND-ed) onto every section's "
+            "own filters, never replacing them. Do not use this to scope a report to a "
+            "tenant/merchant — tenant isolation is enforced server-side from the caller's "
+            "verified identity and cannot be set or widened by a caller-supplied filter."
         )
     )
     @canonic_error_response

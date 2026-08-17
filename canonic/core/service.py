@@ -142,6 +142,16 @@ class CanonicService:
         self._knowledge = KnowledgeService(ctx)
         self._reports = ReportService(ctx, self._query, self._knowledge)
 
+    @property
+    def resolver(self) -> ContractResolver:
+        """The project's :class:`ContractResolver` (SPEC-E12 §2 — tenancy/role policies).
+
+        Exposed for adapters (``canonic.mcp.server``, ``canonic.mcp.daemon``) that need
+        to derive a :class:`~canonic.contracts.principal.Principal` from a verified token
+        or check ``tenancy_enabled`` before serving, without duplicating resolver wiring.
+        """
+        return self._resolver
+
     @classmethod
     def from_project(cls, root: Path) -> CanonicService:
         """Load config, resolver, and semantic sources from a project root."""

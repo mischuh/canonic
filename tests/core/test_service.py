@@ -26,6 +26,14 @@ if TYPE_CHECKING:
     from canonic.semantic.models import SemanticSource
 
 
+class TestResolverProperty:
+    def test_exposes_the_project_resolver(self, canonic_service: CanonicService) -> None:
+        """SPEC-E12 §5: adapters derive a Principal via ``service.resolver``, not a
+        duplicate resolver wiring of their own."""
+        assert isinstance(canonic_service.resolver, ContractResolver)
+        assert canonic_service.resolver is canonic_service._resolver  # noqa: SLF001
+
+
 class TestListMetrics:
     def test_returns_active_bindings(self, canonic_service: CanonicService) -> None:
         summaries = canonic_service.list_metrics()

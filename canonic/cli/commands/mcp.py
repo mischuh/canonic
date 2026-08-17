@@ -10,6 +10,7 @@ import typer
 from rich.console import Console
 
 from canonic.cli._errors import get_cli_context
+from canonic.cli._tenant import TenantOption, cli_tenant_principal
 from canonic.config import ConfigError, find_project_root, load_config
 
 app = typer.Typer(name="mcp", help="Control the local MCP daemon.")
@@ -100,6 +101,7 @@ def start(
             "canonic.mcp.daemon.start_http. Do not pass this by hand.",
         ),
     ] = False,
+    tenant: TenantOption = None,
 ) -> None:
     """Start the local MCP daemon.
 
@@ -109,7 +111,25 @@ def start(
     auth mechanism (``mcp.auth.tokens`` and/or ``mcp.auth.oauth`` in canonic.yaml, or
     ``--token-ref``) since the daemon becomes network-reachable
     (AMENDMENT-remote-mcp-transport.md, AMENDMENT-oauth-mcp-auth.md).
+
+    ``--tenant`` (SPEC-E12 §5, §7) binds a fixed principal for a ``stdio`` session,
+    required once a tenancy policy is configured since stdio has no per-request auth.
+    It is refused on ``--transport http``: there, every request already derives its own
+    principal from its verified token, so a single daemon-wide tenant would silently
+    apply to every caller regardless of who they are.
     """
+    if tenant is not None and transport == "http":
+        msg = (
+            "--tenant is refused on --transport http: each request already derives its "
+            "own principal from its verified token (SPEC-E12 §5)"
+        )
+        if get_cli_context(ctx).json_output:
+            typer.echo(json.dumps({"error": msg}))
+        else:
+            _console.print(f"[red]error:[/red] {msg}")
+        raise typer.Exit(1)
+    cli_tenant_principal(tenant)
+
     root = _resolve_root(ctx, project)
     json_output = get_cli_context(ctx).json_output
 
@@ -202,7 +222,7 @@ def start(
             else:
                 _console.print(f"MCP daemon started (http {host}:{port})")
         else:
-            start_stdio(service, root, suggestions=suggestions)
+            start_stdio(service, root, suggestions=suggestions, tenant=tenant)
     except RuntimeError as exc:
         msg = str(exc)
         if json_output:
