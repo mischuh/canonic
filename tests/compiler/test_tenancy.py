@@ -6,7 +6,7 @@ Acceptance criteria covered here (AMENDMENT-tenant-scoping-rbac.md §8):
   S13 — the system fails closed (AC1, AC2; AC3 is stdio-refusal, covered in test_daemon.py).
   S14 — the tenant cannot be supplied by the caller (AC1, AC2, AC3).
   S16 — isolation is provable after the fact, via metadata.scope (AC3 here; AC1/AC2 are
-        AnswerEvent fields, covered in test_answer_event.py once Phase 5 wires them).
+        AnswerEvent fields, covered in tests/instrumentation/test_answer_event.py).
 
 Also covers RBAC metric filtering (compiler stage 1) and the tenancy_exempt / allow_unscoped
 escape hatches, which S11-S16 assume but do not separately number.

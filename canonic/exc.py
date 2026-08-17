@@ -46,10 +46,10 @@ class ErrorCode(StrEnum):
     TELEMETRY_NOT_CONFIGURED = "telemetry_not_configured"
     # The telemetry HTTP call itself failed (non-2xx, connection error, timeout).
     TELEMETRY_SEND_FAILED = "telemetry_send_failed"
-    # Tenant scoping / RBAC (SPEC-E12 §3, §5). TENANT_FORBIDDEN is reserved for the
-    # run_sql/role-deny enforcement layer and is not yet assigned.
+    # Tenant scoping / RBAC (SPEC-E12 §3, §5, §6).
     TENANT_UNRESOLVED = "tenant_unresolved"
     TENANT_SCOPE_MISSING = "tenant_scope_missing"
+    TENANT_FORBIDDEN = "tenant_forbidden"
 
 
 EXIT_CODES: dict[ErrorCode, int] = {
@@ -75,6 +75,7 @@ EXIT_CODES: dict[ErrorCode, int] = {
     ErrorCode.TELEMETRY_SEND_FAILED: 21,
     ErrorCode.TENANT_UNRESOLVED: 22,
     ErrorCode.TENANT_SCOPE_MISSING: 23,
+    ErrorCode.TENANT_FORBIDDEN: 24,
 }
 
 
@@ -376,9 +377,10 @@ class TenantForbidden(CanonicError):
     attestation. Unlike :class:`Unresolved`/:class:`TenantScopeMissing`, nothing here is
     an existence oracle — the caller already knows the thing exists, it is simply refused —
     so this is exempt from the "reuse UNRESOLVED's shape" rule that governs stage 1 metric
-    filtering. Carries no wire :class:`ErrorCode` yet: ``ErrorCode.TENANT_FORBIDDEN`` and its
-    exit code land together with the rest of the SPEC-E12 error registry entries.
+    filtering.
     """
+
+    code = ErrorCode.TENANT_FORBIDDEN
 
 
 class EmbeddingUnavailable(CanonicError):

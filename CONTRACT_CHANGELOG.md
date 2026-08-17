@@ -30,6 +30,24 @@ CI (`.github/workflows/contract-schema-guard.yml`,
 
 ## History
 
+## 2.8 (2026-08-17) - MINOR
+
+- ADR/PR: this PR (feat(core): tenant scoping and role-based authorization error
+  registry + AnswerEvent attribution, SPEC-E12 §3, §5, §6)
+- Summary: Adds `tenant_forbidden` (exit 24) to the error registry — raised by the
+  `run_sql` gate when a role denies raw SQL execution (`run_sql: false`) or when
+  tenancy is enabled and the target connection carries no `rls_enforced: true`
+  attestation. `TENANT_UNRESOLVED` (22) and `TENANT_SCOPE_MISSING` (23) were already
+  reserved on `ErrorCode`/`EXIT_CODES` ahead of this bump (compiler-stage raises, SPEC-E12
+  §3). `AnswerEvent` gains three nullable fields — `tenant`, `roles`, `tenancy_exempt` —
+  populated from the verified `Principal` on every served answer and raw-SQL execution,
+  following the same reserved-field discipline as `cache_hit`/`over_limit_blocked`. No
+  change to `SemanticQuery`: a `Principal` is bound by the adapter from a verified token,
+  never accepted as a query field (SPEC-E12, "authorization is a compiler input, never a
+  query field"). Classified MINOR under §4.1: two new error codes and three new nullable
+  event fields are additive; no existing field changes shape and every prior code keeps
+  its exit value.
+
 ## 2.7 (2026-08-14) - MINOR
 
 - ADR/PR: this PR (feat(reports): curated reports — list_reports/run_report,

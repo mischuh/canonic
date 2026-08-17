@@ -152,6 +152,7 @@ class QueryService:
                 outcome_history,
                 assertion_history,
                 caller=caller,
+                principal=principal,
             )
             query_id_var.reset(qid_token)
 
@@ -241,7 +242,7 @@ class QueryService:
         finally:
             await connector.aclose()
             latency_ms = round((time.perf_counter() - started) * 1000)
-            self._emit_sql_event(sql, connection, result, latency_ms, error_code, caller)
+            self._emit_sql_event(sql, connection, result, latency_ms, error_code, caller, principal)
 
     def _emit_answer_event(
         self,
@@ -255,8 +256,12 @@ class QueryService:
         assertion_history: AssertionHistory | None = None,
         *,
         caller: str | None = None,
+        principal: Principal | None = None,
     ) -> None:
         try:
+            effective_policy = self._ctx.resolver.authz_for(
+                principal if principal is not None else _ANONYMOUS_PRINCIPAL
+            )
             freshness: list[dict[str, Any]] = (
                 [
                     {
@@ -295,6 +300,9 @@ class QueryService:
                 if compiled is not None
                 else None,
                 user=caller,
+                tenant=principal.tenant if principal is not None else None,
+                roles=list(effective_policy.roles) or None,
+                tenancy_exempt=effective_policy.tenancy_exempt,
             )
             self._ctx.event_log.append(event)
         except Exception as exc:
@@ -308,6 +316,7 @@ class QueryService:
         latency_ms: int,
         error_code: str | None,
         caller: str | None,
+        principal: Principal | None = None,
     ) -> None:
         """Answer-event counterpart of :meth:`_emit_answer_event` for the raw-SQL escape hatch.
 
@@ -316,6 +325,9 @@ class QueryService:
         directly rather than overloading ``_emit_answer_event``'s signature.
         """
         try:
+            effective_policy = self._ctx.resolver.authz_for(
+                principal if principal is not None else _ANONYMOUS_PRINCIPAL
+            )
             event = AnswerEvent(
                 ts=datetime.now(UTC).isoformat(),
                 contract_schema=CONTRACT_SCHEMA,
@@ -326,6 +338,9 @@ class QueryService:
                 bytes_scanned=result.bytes_scanned if result is not None else None,
                 error=error_code,
                 user=caller,
+                tenant=principal.tenant if principal is not None else None,
+                roles=list(effective_policy.roles) or None,
+                tenancy_exempt=effective_policy.tenancy_exempt,
             )
             self._ctx.event_log.append(event)
         except Exception as exc:
