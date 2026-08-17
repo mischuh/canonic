@@ -42,6 +42,8 @@ from canonic import __version__ as CANONIC_VERSION
 if TYPE_CHECKING:
     from fastmcp.server.auth.auth import AuthProvider
 
+    from canonic.contracts.principal import Principal
+
 __all__ = [
     "DaemonState",
     "DaemonStatus",
@@ -179,7 +181,11 @@ def stop(project_root: Path) -> bool:
 
 
 def start_stdio(
-    service: object, project_root: Path, *, suggestions: bool = False, tenant: str | None = None
+    service: object,
+    project_root: Path,
+    *,
+    suggestions: bool = False,
+    principal: Principal | None = None,
 ) -> None:
     """Run the MCP server in stdio transport mode (foreground, blocks).
 
@@ -189,9 +195,9 @@ def start_stdio(
     ``stdio`` has no per-request auth, so a project with a tenancy policy configured
     has no way to derive a principal for anything served over this transport. Per
     SPEC-E12 §5 (S13 AC3), refuse to start rather than serve unscoped: the caller must
-    pass ``tenant`` (``canonic mcp start --tenant <id>``) to bind one explicitly for the
-    whole session. ``tenant`` is validated here only — threading it into request
-    handling lands with the compiler/service integration (E12 P3/P4).
+    pass ``principal`` (bound from ``canonic mcp start --tenant <id>``) to fix one for the
+    whole session — threaded into ``build_server`` as ``session_principal`` so every tool
+    call in this session scopes to it.
     """
     from canonic.config import load_config
     from canonic.log import _effective_log_params, configure_logging
@@ -207,13 +213,13 @@ def start_stdio(
     configure_logging(level=level, file=file, format=format)
 
     _check_version_on_start(project_root)
-    if service.resolver.tenancy_enabled and tenant is None:  # type: ignore[attr-defined]
+    if service.resolver.tenancy_enabled and principal is None:  # type: ignore[attr-defined]
         raise RuntimeError(
             "a tenancy policy is configured for this project, and stdio transport has no "
             "per-request auth to derive a principal from — pass `canonic mcp start "
             "--tenant <id>` to bind one for this session (SPEC-E12 §5)"
         )
-    mcp = build_server(service, suggestions=suggestions)  # type: ignore[arg-type]
+    mcp = build_server(service, suggestions=suggestions, session_principal=principal)  # type: ignore[arg-type]
     mcp.run(transport="stdio", show_banner=False)
 
 

@@ -128,7 +128,7 @@ def start(
         else:
             _console.print(f"[red]error:[/red] {msg}")
         raise typer.Exit(1)
-    cli_tenant_principal(tenant)
+    principal = cli_tenant_principal(tenant)
 
     root = _resolve_root(ctx, project)
     json_output = get_cli_context(ctx).json_output
@@ -222,7 +222,7 @@ def start(
             else:
                 _console.print(f"MCP daemon started (http {host}:{port})")
         else:
-            start_stdio(service, root, suggestions=suggestions, tenant=tenant)
+            start_stdio(service, root, suggestions=suggestions, principal=principal)
     except RuntimeError as exc:
         msg = str(exc)
         if json_output:

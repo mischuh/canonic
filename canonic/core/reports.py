@@ -11,6 +11,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
+from canonic.contracts.principal import SYSTEM_PRINCIPAL
 from canonic.core.models import (
     ReportNarrative,
     ReportRunResult,
@@ -25,6 +26,7 @@ if TYPE_CHECKING:
     from datetime import datetime
 
     from canonic.compiler import SemanticQuery
+    from canonic.contracts.principal import Principal
     from canonic.core.context import ServiceContext
     from canonic.core.knowledge import KnowledgeService
     from canonic.core.query import QueryService
@@ -89,6 +91,7 @@ class ReportService:
         filters: list[str] | None = None,
         user: str | None = None,
         caller: str | None = None,
+        principal: Principal | None = None,
     ) -> ReportRunResult:
         """Run every section of a committed report through ``core.query``, in order (S16).
 
@@ -100,8 +103,12 @@ class ReportService:
 
         ``filters`` are caller-supplied predicate strings (same shape as
         ``SemanticQuery.filters``) applied additively — AND-ed onto every section's own
-        filters, never replacing them — so a multi-tenant caller can scope an entire
-        report run (e.g. ``["merchant_id = '123'"]``) without editing the report file.
+        filters, never replacing them. They can narrow a report run but never widen or
+        override the caller's actual tenant scope: ``principal`` (bound by the adapter from
+        a verified token, never from ``filters``) flows into every section's ``query()``
+        call and is injected as a separate AST node the compiler binds independently
+        (SPEC-E12 §5, S14 AC1) — so a caller-supplied ``merchant_id = '...'`` filter can
+        only ever be a redundant, narrower restatement of it, never a substitute.
         """
         report = self._find_report(report_id)
 
@@ -109,7 +116,7 @@ class ReportService:
         for section in report.sections:
             effective = self._effective_query(section, report, as_of, filters)
             try:
-                result = await self._query.query(effective, caller=caller)
+                result = await self._query.query(effective, caller=caller, principal=principal)
             except CanonicError as exc:
                 sections.append(ReportSectionResult(title=section.title, error=error_payload(exc)))
                 continue
@@ -117,7 +124,9 @@ class ReportService:
             narrative: ReportNarrative | None = None
             if section.narrative_from is not None:
                 try:
-                    page = self._knowledge.read_knowledge_page(section.narrative_from, user=user)
+                    page = self._knowledge.read_knowledge_page(
+                        section.narrative_from, user=user, principal=principal
+                    )
                 except (KeyError, PermissionError) as exc:
                     error: dict[str, Any] = {"code": "unresolved", "message": str(exc)}
                     sections.append(ReportSectionResult(title=section.title, error=error))
@@ -139,13 +148,19 @@ class ReportService:
         ``narrative_from`` must resolve to an existing knowledge-page id. Raises
         :class:`~canonic.exc.ReportError` naming the report id and section index on
         the first failure (S18) — never a silent skip.
+
+        Compiles with :data:`~canonic.contracts.principal.SYSTEM_PRINCIPAL`: this checks
+        that a report's sections compile at all, independent of any tenant — the same
+        "checks compilation, not who's asking" rationale as the assertion harness
+        (SPEC-E12 §7). Without it, a tenancy policy with ``on_missing_principal: deny``
+        would fail every report's validation regardless of which sources it touches.
         """
         known_pages = self._known_knowledge_page_ids()
         for report in self._load_reports():
             for index, section in enumerate(report.sections):
                 effective = self._effective_query(section, report, as_of=None)
                 try:
-                    self._query.compile_query(effective)
+                    self._query.compile_query(effective, principal=SYSTEM_PRINCIPAL)
                 except CanonicError as exc:
                     raise ReportError(
                         f"report {report.id!r} section {index}: query does not compile: {exc}"

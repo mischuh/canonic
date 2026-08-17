@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from canonic.compiler import compile
+from canonic.contracts.principal import SYSTEM_PRINCIPAL
 from canonic.contracts.resolver import ContractResolver
 from canonic.exc import CanonicError
 
@@ -34,6 +35,13 @@ class AssertionService:
         executable semantic-query form. ``resolver`` overrides the project's curated resolver —
         used by :meth:`run_accuracy_baseline` (SPEC-E16 Part 2 §2) to compile the same query
         against raw schema instead of canon's bindings.
+
+        Always compiles with :data:`~canonic.contracts.principal.SYSTEM_PRINCIPAL`: an
+        assertion checks whether the compiler computes a metric correctly against the full,
+        unfiltered dataset its ``expect`` was calibrated against — tenant scoping is an
+        orthogonal question already covered by S11-S14, never what an assertion measures
+        (SPEC-E12 §7, "assertions run tenant-exempt"). No fixture tenant, no new field on the
+        assertion contract file.
         """
         import dataclasses
 
@@ -45,6 +53,7 @@ class AssertionService:
             resolver or self._ctx.resolver,
             self._ctx.sources,
             connection_dialects=self._ctx.connection_dialects,
+            principal=SYSTEM_PRINCIPAL,
         )
         result = await self._ctx.execute(compiled.sql, self._ctx.connection_for_sql(compiled))
         outcome = match_result(assertion, result, resolved=compiled.resolved)

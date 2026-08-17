@@ -37,6 +37,7 @@ if TYPE_CHECKING:
     from canonic.connectors.base import ResultSet
     from canonic.contracts.assertions import AccuracyReport, AssertionOutcome
     from canonic.contracts.models import Assertion
+    from canonic.contracts.principal import Principal
     from canonic.contracts.resolver import Binding
     from canonic.core.models import (
         MetricDetail,
@@ -171,45 +172,84 @@ class CanonicService:
     # Discovery
     # ------------------------------------------------------------------
 
-    def list_metrics(self) -> list[MetricSummary]:
-        """Return a summary of every active canonical metric (SPEC §4.1)."""
-        return self._discovery.list_metrics()
+    def list_metrics(self, *, principal: Principal | None = None) -> list[MetricSummary]:
+        """Return a summary of every active canonical metric (SPEC §4.1).
+
+        Omits every metric outside ``principal``'s effective policy (SPEC-E12 §6, S15 AC1).
+        """
+        return self._discovery.list_metrics(principal=principal)
 
     def trust_report(self) -> list[tuple[str, TrustScore]]:
         """Static trust tier for every active canonical metric, sorted by name (SPEC-E14 §8)."""
         return self._discovery.trust_report()
 
-    def describe_metric(self, name: str) -> MetricDetail:
-        """Return grain, dimensions, measures, and freshness for a metric (SPEC §4.1)."""
-        return self._discovery.describe_metric(name)
+    def describe_metric(self, name: str, *, principal: Principal | None = None) -> MetricDetail:
+        """Return grain, dimensions, measures, and freshness for a metric (SPEC §4.1).
 
-    def get_overview(self, domain: str | None = None) -> OverviewResult:
-        """Return active metrics grouped by domain with sample questions (S12)."""
-        return self._discovery.get_overview(domain)
+        Raises the same ``Unresolved`` shape for a name outside ``principal``'s effective
+        policy as for a nonexistent name (SPEC-E12 §3, S15 AC3).
+        """
+        return self._discovery.describe_metric(name, principal=principal)
+
+    def get_overview(
+        self, domain: str | None = None, *, principal: Principal | None = None
+    ) -> OverviewResult:
+        """Return active metrics grouped by domain with sample questions (S12).
+
+        Omits every metric outside ``principal``'s effective policy (SPEC-E12 §6, S15 AC1).
+        """
+        return self._discovery.get_overview(domain, principal=principal)
 
     # ------------------------------------------------------------------
     # Query
     # ------------------------------------------------------------------
 
-    def resolve_metric(self, name: str, context: str | None = None) -> Binding:
-        """Resolve a metric name and return the :class:`Binding` (raises on unresolved/ambiguous)."""
-        return self._query.resolve_metric(name, context=context)
+    def resolve_metric(
+        self, name: str, context: str | None = None, *, principal: Principal | None = None
+    ) -> Binding:
+        """Resolve a metric name and return the :class:`Binding` (raises on unresolved/ambiguous).
 
-    def compile_query(self, query: SemanticQuery) -> CompileResult:
-        """Compile a semantic query to SQL + metadata with no execution (SPEC §2)."""
-        return self._query.compile_query(query)
+        Raises the same ``Unresolved`` shape for a name outside ``principal``'s effective
+        policy as for a nonexistent name (SPEC-E12 §3, S15 AC3).
+        """
+        return self._query.resolve_metric(name, context=context, principal=principal)
+
+    def compile_query(
+        self, query: SemanticQuery, *, principal: Principal | None = None
+    ) -> CompileResult:
+        """Compile a semantic query to SQL + metadata with no execution (SPEC §2).
+
+        ``principal`` is bound by the adapter from a verified token/CLI override, never
+        from ``query`` itself, and drives the compiler's tenant/role scoping (SPEC-E12).
+        """
+        return self._query.compile_query(query, principal=principal)
 
     async def query(
-        self, query: SemanticQuery, *, harness: bool = False, caller: str | None = None
+        self,
+        query: SemanticQuery,
+        *,
+        harness: bool = False,
+        caller: str | None = None,
+        principal: Principal | None = None,
     ) -> QueryResult:
         """Compile and execute a semantic query read-only (SPEC §2)."""
-        return await self._query.query(query, harness=harness, caller=caller)
+        return await self._query.query(query, harness=harness, caller=caller, principal=principal)
 
     async def run_sql(
-        self, sql: str, connection: str | None = None, *, caller: str | None = None
+        self,
+        sql: str,
+        connection: str | None = None,
+        *,
+        caller: str | None = None,
+        principal: Principal | None = None,
     ) -> ResultSet:
-        """Execute a raw read-only SQL string on the named connection (SPEC §2)."""
-        return await self._query.run_sql(sql, connection, caller=caller)
+        """Execute a raw read-only SQL string on the named connection (SPEC §2).
+
+        Raises :class:`~canonic.exc.TenantForbidden` when ``principal``'s role denies raw
+        SQL, or when tenancy is enabled and the connection carries no ``rls_enforced: true``
+        attestation (SPEC-E12 §6).
+        """
+        return await self._query.run_sql(sql, connection, caller=caller, principal=principal)
 
     # ------------------------------------------------------------------
     # Assertions (SPEC-Fuller-E15 §3) — the oracle for E16's accuracy harness
@@ -249,13 +289,20 @@ class CanonicService:
         *,
         user: str | None = None,
         limit: int = 10,
+        principal: Principal | None = None,
     ) -> SearchResult:
-        """Search knowledge pages for business context (E6, P1)."""
-        return self._knowledge.search_knowledge(query, user=user, limit=limit)
+        """Search knowledge pages for business context (E6, P1).
 
-    def read_knowledge_page(self, page: str, *, user: str | None = None) -> dict[str, Any]:
+        ``principal``'s role ``knowledge.allow_tags`` filters the searchable corpus, on top
+        of the existing global/user-scope visibility ``user`` governs (SPEC-E12 §6, S15 AC2).
+        """
+        return self._knowledge.search_knowledge(query, user=user, limit=limit, principal=principal)
+
+    def read_knowledge_page(
+        self, page: str, *, user: str | None = None, principal: Principal | None = None
+    ) -> dict[str, Any]:
         """Retrieve the full content of a knowledge page with live rendering (E6, P1)."""
-        return self._knowledge.read_knowledge_page(page, user=user)
+        return self._knowledge.read_knowledge_page(page, user=user, principal=principal)
 
     # ------------------------------------------------------------------
     # Reports (AMENDMENT-curated-reports, P1)
@@ -273,10 +320,20 @@ class CanonicService:
         filters: list[str] | None = None,
         user: str | None = None,
         caller: str | None = None,
+        principal: Principal | None = None,
     ) -> ReportRunResult:
-        """Run every section of a committed report through ``query``, in order."""
+        """Run every section of a committed report through ``query``, in order.
+
+        ``principal`` flows into every section's ``query()`` call; caller-supplied
+        ``filters`` narrow but never widen it (SPEC-E12 §5, S14 AC1).
+        """
         return await self._reports.run_report(
-            report_id, as_of=as_of, filters=filters, user=user, caller=caller
+            report_id,
+            as_of=as_of,
+            filters=filters,
+            user=user,
+            caller=caller,
+            principal=principal,
         )
 
     def validate_reports(self) -> None:

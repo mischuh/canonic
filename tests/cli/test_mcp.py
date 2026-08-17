@@ -237,11 +237,11 @@ def test_tenant_passed_through_on_stdio(runner: CliRunner, project_dir: Path) ->
     assert result.exit_code == 0, result.output
     assert "warning" in result.output.lower()
     mock_start_stdio.assert_called_once()
-    assert mock_start_stdio.call_args.kwargs["tenant"] == "4711"
+    assert mock_start_stdio.call_args.kwargs["principal"].tenant == "4711"
 
 
 def test_no_tenant_stdio_unaffected(runner: CliRunner, project_dir: Path) -> None:
-    """Without --tenant, stdio start is unchanged (no warning, tenant=None passed through)."""
+    """Without --tenant, stdio start is unchanged (no warning, principal=None passed through)."""
     with (
         patch(_PATCH_SERVICE) as mock_cls,
         patch(_PATCH_START_STDIO) as mock_start_stdio,
@@ -252,7 +252,7 @@ def test_no_tenant_stdio_unaffected(runner: CliRunner, project_dir: Path) -> Non
 
     assert result.exit_code == 0, result.output
     mock_start_stdio.assert_called_once()
-    assert mock_start_stdio.call_args.kwargs["tenant"] is None
+    assert mock_start_stdio.call_args.kwargs["principal"] is None
 
 
 # ---------------------------------------------------------------------------

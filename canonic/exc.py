@@ -368,6 +368,19 @@ class TenantScopeMissing(CanonicError):
     code = ErrorCode.TENANT_SCOPE_MISSING
 
 
+class TenantForbidden(CanonicError):
+    """The caller's own policy denies something the caller can already see (SPEC-E12 §5, §6).
+
+    Raised for ``run_sql`` when the role denies raw SQL (``run_sql: false``) or when
+    tenancy is enabled and the target connection carries no ``rls_enforced: true``
+    attestation. Unlike :class:`Unresolved`/:class:`TenantScopeMissing`, nothing here is
+    an existence oracle — the caller already knows the thing exists, it is simply refused —
+    so this is exempt from the "reuse UNRESOLVED's shape" rule that governs stage 1 metric
+    filtering. Carries no wire :class:`ErrorCode` yet: ``ErrorCode.TENANT_FORBIDDEN`` and its
+    exit code land together with the rest of the SPEC-E12 error registry entries.
+    """
+
+
 class EmbeddingUnavailable(CanonicError):
     """Raised when the embedding runtime is asked to embed while unavailable (SPEC-E10 §5).
 
