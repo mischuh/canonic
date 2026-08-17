@@ -131,6 +131,8 @@ class ComposeResult:
     freshness: list[SourceFreshness]
     finality: FinalityMetadata | None
     cte_count: int
+    scoped_sources: frozenset[str] = frozenset()
+    shared_sources: frozenset[str] = frozenset()
 
 
 @dataclass(slots=True)
@@ -143,6 +145,8 @@ class _Physical:
     fired: list[FiredGuardrail] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
     used_sources: set[str] = field(default_factory=set)
+    scoped_sources: set[str] = field(default_factory=set)
+    shared_sources: set[str] = field(default_factory=set)
     finality: FinalityMetadata | None = None
 
     @property
@@ -191,6 +195,8 @@ def _merge_into(target: _Physical, leaf: LeafPlan) -> None:
     target.fired.extend(g for g in leaf.fired if g.id not in seen_ids)
     target.warnings.extend(w for w in leaf.warnings if w not in target.warnings)
     target.used_sources |= leaf.used_sources
+    target.scoped_sources |= leaf.scoped_sources
+    target.shared_sources |= leaf.shared_sources
     if leaf.finality is not None:
         target.finality = leaf.finality
 
@@ -440,6 +446,8 @@ def _result(
         ],
         finality=_merge_finality(physical),
         cte_count=cte_count,
+        scoped_sources=frozenset(s for p in physical for s in p.scoped_sources),
+        shared_sources=frozenset(s for p in physical for s in p.shared_sources),
     )
 
 

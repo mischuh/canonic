@@ -15,6 +15,8 @@
   "structured_output_unsupported": 17,
   "telemetry_not_configured": 20,
   "telemetry_send_failed": 21,
+  "tenant_scope_missing": 23,
+  "tenant_unresolved": 22,
   "unreachable": 4,
   "unresolved": 2,
   "unsupported_measure": 6,

@@ -18,8 +18,15 @@ from canonic.compiler.result import (
     FiredGuardrail,
     SourceFreshness,
 )
-from canonic.contracts.models import Severity
-from canonic.exc import Ambiguous, FanoutUnsafe, GuardrailBlock, Unresolved
+from canonic.contracts.models import Severity, UndeclaredSource
+from canonic.contracts.resolver import ScopeRule, Shared, Undeclared
+from canonic.exc import (
+    Ambiguous,
+    FanoutUnsafe,
+    GuardrailBlock,
+    TenantScopeMissing,
+    Unresolved,
+)
 from canonic.exc import Unreachable as UnreachableError
 from canonic.semantic.models import Additivity, Measure, NormalizedType, Relationship
 
@@ -29,6 +36,7 @@ if TYPE_CHECKING:
 
     from canonic.compiler.query import SemanticQuery
     from canonic.contracts.models import FinalityRule, Guardrail
+    from canonic.contracts.principal import EffectivePolicy
     from canonic.contracts.resolver import ContractResolver
     from canonic.semantic.models import Dimension, SemanticSource
 
@@ -178,6 +186,93 @@ def _population_filter_conditions(
     parsed = _parse(population_filter)
     bound, _ = _qualify_columns(parsed, sources_by_name, owner, alias_to_source)
     return [bound]
+
+
+@dataclass(frozen=True, slots=True)
+class TenantScoping:
+    """Per-leaf tenant predicates plus which sources they touched (SPEC-E12 §3 stage 2b)."""
+
+    conditions: list[exp.Expression]
+    scoped_sources: frozenset[str]
+    shared_sources: frozenset[str]
+    warnings: list[str] = field(default_factory=list)
+
+
+def _tenant_conditions(
+    resolver: ContractResolver,
+    owner: str,
+    join_edges: list[JoinEdge],
+    alias_to_source: dict[str, str],
+    tenant: str | None,
+    effective_policy: EffectivePolicy,
+) -> TenantScoping:
+    """Stage 2b — inject a tenant predicate for every scoped source already in the leaf's
+    join plan (AMENDMENT-tenant-scoping-rbac.md §3).
+
+    Only the aliases the leaf actually joins are considered — ``[owner, *(e.alias for e in
+    join_edges)]``, never the full ``alias_to_source`` map, which also holds every
+    join-reachable-but-unjoined alias. Predicating an unjoined alias would emit SQL
+    referencing a table with no FROM/JOIN clause. This is the mirror image of
+    :func:`_guardrail_join_sources`: a guardrail predicate may *pull in* a join target,
+    tenancy never does — it only ever narrows a join the query already needed.
+
+    The predicate is built as an ``exp.EQ`` AST node bound to ``tenant`` directly, never by
+    parsing an interpolated string, which is what closes S14 AC3 (a crafted filter cannot
+    escape its own predicate) by construction.
+
+    A ``tenancy_exempt`` principal (§5, the platform-operator escape hatch) bypasses every
+    check here — no predicate, no ``Undeclared`` enforcement — since that role is defined as
+    the one sanctioned way to read across tenants.
+    """
+    if effective_policy.tenancy_exempt:
+        return TenantScoping(conditions=[], scoped_sources=frozenset(), shared_sources=frozenset())
+
+    conditions: list[exp.Expression] = []
+    scoped: set[str] = set()
+    shared: set[str] = set()
+    warnings: list[str] = []
+    for alias in (owner, *(edge.alias for edge in join_edges)):
+        source_name = alias_to_source.get(alias, alias)
+        resolution = resolver.tenancy_for(source_name)
+        if isinstance(resolution, ScopeRule):
+            # No principal tenant only happens under on_missing_principal: allow_unscoped
+            # (a hard-missing tenant already raised TenantUnresolved in stage 0) — the
+            # caller has already been warned once about serving unscoped in that case.
+            if tenant is None:
+                continue
+            conditions.append(
+                cast(
+                    "exp.Expression",
+                    exp.EQ(
+                        this=exp.column(resolution.column, table=alias),
+                        expression=exp.Literal.string(tenant),
+                    ),
+                )
+            )
+            scoped.add(source_name)
+        elif isinstance(resolution, Shared):
+            shared.add(source_name)
+        else:
+            assert isinstance(resolution, Undeclared)  # noqa: S101 — exhaustive over ScopeResolution
+            policy = resolver.tenancy_policy
+            assert policy is not None  # noqa: S101 — Undeclared only returned when a policy loaded
+            if policy.undeclared_source is UndeclaredSource.WARN:
+                warnings.append(
+                    f"source {source_name!r} is declared in neither scoped_sources nor "
+                    f"shared_sources of the tenancy policy; serving unfiltered under "
+                    f"undeclared_source: warn"
+                )
+            else:
+                raise TenantScopeMissing(
+                    f"source {source_name!r} is declared in neither scoped_sources nor "
+                    f"shared_sources of the tenancy policy"
+                )
+    return TenantScoping(
+        conditions=conditions,
+        scoped_sources=frozenset(scoped),
+        shared_sources=frozenset(shared),
+        warnings=warnings,
+    )
 
 
 def _block_or_warn(guardrail: Guardrail, *, candidates: Sequence[str] | None = None) -> str:

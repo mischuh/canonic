@@ -16,6 +16,7 @@ if TYPE_CHECKING:
 
     from canonic.compiler.joins import JoinEdge
     from canonic.compiler.query import SemanticQuery
+    from canonic.contracts.principal import EffectivePolicy, Principal
     from canonic.contracts.resolver import Binding as ResolverBinding
     from canonic.contracts.resolver import ContractResolver
     from canonic.semantic.models import Dimension, SemanticSource
@@ -37,6 +38,9 @@ def plan_metric(
     binding: ResolverBinding,
     resolver: ContractResolver,
     sources_by_name: dict[str, SemanticSource],
+    *,
+    principal: Principal,
+    effective_policy: EffectivePolicy,
 ) -> MetricLeaves:
     """Plan an opaque metric as one leaf — served at native grain only, never re-aggregated (§4.4).
 
@@ -85,7 +89,13 @@ def plan_metric(
         )
 
     leaf = plan_leaf(
-        LeafContext(query=query, resolver=resolver, sources_by_name=sources_by_name),
+        LeafContext(
+            query=query,
+            resolver=resolver,
+            sources_by_name=sources_by_name,
+            principal=principal,
+            effective_policy=effective_policy,
+        ),
         source_name,
         [
             LeafMetric(

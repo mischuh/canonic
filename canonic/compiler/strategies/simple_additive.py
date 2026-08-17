@@ -15,6 +15,7 @@ from canonic.exc import Unresolved
 if TYPE_CHECKING:
     from canonic.compiler.query import SemanticQuery
     from canonic.contracts.models import FinalityRule
+    from canonic.contracts.principal import EffectivePolicy, Principal
     from canonic.contracts.resolver import Binding as ResolverBinding
     from canonic.contracts.resolver import ContractResolver
     from canonic.semantic.models import SemanticSource
@@ -54,6 +55,9 @@ def plan_metric(
     binding: ResolverBinding,
     resolver: ContractResolver,
     sources_by_name: dict[str, SemanticSource],
+    *,
+    principal: Principal,
+    effective_policy: EffectivePolicy,
 ) -> MetricLeaves:
     """Plan a plain additive metric as one leaf aggregating to the requested dimensions.
 
@@ -68,7 +72,13 @@ def plan_metric(
         resolved=resolved, population_filter=binding.binding.canonical.population_filter
     )
     leaf = plan_leaf(
-        LeafContext(query=query, resolver=resolver, sources_by_name=sources_by_name),
+        LeafContext(
+            query=query,
+            resolver=resolver,
+            sources_by_name=sources_by_name,
+            principal=principal,
+            effective_policy=effective_policy,
+        ),
         resolved.source,
         [leaf_metric],
         finality_metric=queried_name,

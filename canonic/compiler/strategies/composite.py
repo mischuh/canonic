@@ -12,6 +12,7 @@ from canonic.exc import Unresolved, UnsupportedMeasure
 
 if TYPE_CHECKING:
     from canonic.compiler.query import SemanticQuery
+    from canonic.contracts.principal import EffectivePolicy, Principal
     from canonic.contracts.resolver import Binding as ResolverBinding
     from canonic.contracts.resolver import ComponentBindings, ContractResolver
     from canonic.semantic.models import SemanticSource
@@ -24,6 +25,8 @@ def _plan_leaf(
     query: SemanticQuery,
     resolver: ContractResolver,
     sources_by_name: dict[str, SemanticSource],
+    principal: Principal,
+    effective_policy: EffectivePolicy,
     population_filter: str | None = None,
 ) -> LeafPlan:
     """Bind one single-kind component to its measure, then plan it as a leaf.
@@ -52,7 +55,13 @@ def _plan_leaf(
         )
 
     return plan_leaf(
-        LeafContext(query=query, resolver=resolver, sources_by_name=sources_by_name),
+        LeafContext(
+            query=query,
+            resolver=resolver,
+            sources_by_name=sources_by_name,
+            principal=principal,
+            effective_policy=effective_policy,
+        ),
         source_name,
         [
             LeafMetric(
@@ -95,6 +104,9 @@ def plan_metric(
     composite: ResolverBinding,
     resolver: ContractResolver,
     sources_by_name: dict[str, SemanticSource],
+    *,
+    principal: Principal,
+    effective_policy: EffectivePolicy,
 ) -> MetricLeaves:
     """Plan a composable_post_agg metric: a leaf per component, divided after aggregation.
 
@@ -120,6 +132,8 @@ def plan_metric(
             query,
             resolver,
             sources_by_name,
+            principal,
+            effective_policy,
             _combine_population_filters(
                 composite_pop_filter, component.binding.canonical.population_filter
             ),
