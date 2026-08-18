@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.22.1](https://github.com/mischuh/canonic/compare/v0.22.0...v0.22.1) (2026-08-17)
+
+
+### Documentation
+
+* tighten prose style and drop internal spec citations ([#306](https://github.com/mischuh/canonic/issues/306)) ([1e1b4eb](https://github.com/mischuh/canonic/commit/1e1b4eb0101cc04c1b1d34bb3cabe8cb3023e5d2))
+
 ## [0.22.0](https://github.com/mischuh/canonic/compare/v0.21.0...v0.22.0) (2026-08-17)
 
 
