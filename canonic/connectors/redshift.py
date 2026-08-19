@@ -17,20 +17,29 @@ used unchanged.  Key behavioral differences from the PostgreSQL connector:
 the relations it returns (see ``canonic.connectors.relation_filter``), and
 ``params["fetch_column_stats"]`` (bool, default False) to additionally merge
 zero-scan cardinality/null-ratio stats from ``pg_stats`` onto each column.
+
+This is the first connector to support a dynamic ``credentials_ref``
+(``provider:aws-iam-redshift``, see ``canonic.credentials``). Where a static ref is
+resolved once and baked into the engine URL, a provider-backed one is resolved on
+*every* connect: a Redshift IAM credential lives about 15–60 minutes, so a DSN built
+at startup goes stale mid-session. Every connect therefore goes through
+``_acquire()``, which refreshes an expiring credential off the event loop before
+handing it to the driver via SQLAlchemy's ``do_connect`` hook.
 """
 
 from __future__ import annotations
 
 import logging
 import re
+from contextlib import asynccontextmanager
 from datetime import date, datetime
 from decimal import Decimal
 from typing import TYPE_CHECKING, Any
 
-from sqlalchemy import URL, make_url, text
+from sqlalchemy import URL, event, make_url, text
 from sqlalchemy.dialects import registry as _dialect_registry
 from sqlalchemy.dialects.postgresql.asyncpg import PGDialect_asyncpg
-from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
+from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine, create_async_engine
 
 from canonic.connectors.base import (
     AcquisitionTier,
@@ -47,9 +56,11 @@ from canonic.connectors.base import (
 )
 from canonic.connectors.readonly import assert_read_only
 from canonic.connectors.relation_filter import filter_relations
-from canonic.credentials import resolve_credential
+from canonic.credentials import credential_source
 
 if TYPE_CHECKING:
+    from collections.abc import AsyncIterator
+
     from canonic.config import Connection
 
 logger = logging.getLogger(__name__)
@@ -228,20 +239,8 @@ class RedshiftConnector(ConnectorBase):
 
     def __init__(self, connection: Connection) -> None:
         params = connection.params
-        credential = resolve_credential(connection.credentials_ref)
-        if credential.startswith(
-            ("redshift://", "redshift+asyncpg://", "postgres://", "postgresql://")
-        ):
-            self._url = make_url(credential).set(drivername="redshift+asyncpg")
-        else:
-            self._url = URL.create(
-                "redshift+asyncpg",
-                username=params.get("user"),
-                password=credential,
-                host=params.get("host"),
-                port=int(params.get("port", _DEFAULT_PORT)),
-                database=params.get("dbname") or params.get("database"),
-            )
+        self._credentials = credential_source(connection.credentials_ref, params=params)
+        self._url = self._build_url(params)
         search_path = _resolve_search_path(params)
         self._connect_args: dict[str, object] = {}
         if search_path:
@@ -259,15 +258,83 @@ class RedshiftConnector(ConnectorBase):
         self._connection_id = connection.id
         self._engine: AsyncEngine | None = None
 
+    def _build_url(self, params: dict[str, Any]) -> URL:
+        """Build the engine URL for this connection.
+
+        A provider-backed credential is deliberately absent from the URL: it expires,
+        so it is injected per connect by :meth:`_inject_credential` instead of being
+        baked in here once. A static credential keeps the previous behavior, including
+        accepting a full DSN as the resolved secret.
+        """
+        if self._credentials.is_dynamic:
+            return URL.create(
+                "redshift+asyncpg",
+                username=params.get("db_user") or params.get("user"),
+                host=params.get("host"),
+                port=int(params.get("port", _DEFAULT_PORT)),
+                database=params.get("dbname") or params.get("database"),
+            )
+        credential = self._credentials.cached_value().value
+        if credential.startswith(
+            ("redshift://", "redshift+asyncpg://", "postgres://", "postgresql://")
+        ):
+            return make_url(credential).set(drivername="redshift+asyncpg")
+        return URL.create(
+            "redshift+asyncpg",
+            username=params.get("user"),
+            password=credential,
+            host=params.get("host"),
+            port=int(params.get("port", _DEFAULT_PORT)),
+            database=params.get("dbname") or params.get("database"),
+        )
+
     @property
     def dsn(self) -> str:
-        """The async SQLAlchemy DSN (password rendered, for diagnostics/tests)."""
+        """The async SQLAlchemy DSN (password rendered, for diagnostics/tests).
+
+        A provider-backed connection renders without a password: there is no fixed one,
+        the credential is fetched per connect.
+        """
         return self._url.render_as_string(hide_password=False)
 
     def _get_engine(self) -> AsyncEngine:
         if self._engine is None:
             self._engine = create_async_engine(self._url, connect_args=self._connect_args)
+            if self._credentials.is_dynamic:
+                event.listen(self._engine.sync_engine, "do_connect", self._inject_credential)
         return self._engine
+
+    def _inject_credential(
+        self,
+        dialect: object,
+        conn_rec: object,
+        cargs: tuple[Any, ...],
+        cparams: dict[str, Any],
+    ) -> None:
+        """Stamp the currently held credential onto the driver's connect arguments.
+
+        Runs inside SQLAlchemy's greenlet on the event-loop thread, so it must not
+        block: the fetch already happened in :meth:`_acquire`. Redshift IAM also
+        rotates the *user*, so a provider that returns one overrides the configured
+        ``db_user``.
+        """
+        credential = self._credentials.cached_value()
+        cparams["password"] = credential.value
+        if credential.username is not None:
+            cparams["user"] = credential.username
+
+    @asynccontextmanager
+    async def _acquire(self) -> AsyncIterator[AsyncConnection]:
+        """Open a connection, refreshing an expiring credential first.
+
+        The refresh runs off the event loop (the vendor SDK call is blocking) and is a
+        no-op for a static credential or one that is still comfortably valid, so two
+        connects inside a token's lifetime cost a single fetch. A failed fetch raises
+        here and the connect never happens — no silent reuse of a dead credential.
+        """
+        await self._credentials.arefresh()
+        async with self._get_engine().connect() as conn:
+            yield conn
 
     async def aclose(self) -> None:
         """Dispose the underlying engine and its connection pool."""
@@ -285,16 +352,14 @@ class RedshiftConnector(ConnectorBase):
 
     async def test_connection(self) -> Health:
         try:
-            engine = self._get_engine()
-            async with engine.connect() as conn:
+            async with self._acquire() as conn:
                 await conn.execute(text("SELECT 1"))
         except Exception as exc:  # by contract test_connection reports, never raises
             return Health(status="error", message=str(exc))
         return Health(status="ok")
 
     async def introspect_schema(self) -> list[RelationSchema]:
-        engine = self._get_engine()
-        async with engine.connect() as conn:
+        async with self._acquire() as conn:
             relations = await self._fetch_relations(conn)
             relations = filter_relations(relations, self._schemas_filter, self._tables_filter)
             columns = await self._fetch_columns(conn)
@@ -515,8 +580,7 @@ class RedshiftConnector(ConnectorBase):
         # Redshift does not support SET LOCAL default_transaction_read_only; the
         # parse-level assert_read_only() guard below is the enforcement mechanism.
         assert_read_only(sql)
-        engine = self._get_engine()
-        async with engine.connect() as conn, conn.begin():
+        async with self._acquire() as conn, conn.begin():
             await conn.execute(text(f"SET LOCAL statement_timeout = {self._statement_timeout_ms}"))
             result = await conn.stream(text(sql))
             keys = list(result.keys())
@@ -535,8 +599,7 @@ class RedshiftConnector(ConnectorBase):
         """
         if not _SAFE_RELATION.match(relation):
             raise ValueError(f"unsafe relation identifier: {relation!r}")
-        engine = self._get_engine()
-        async with engine.connect() as conn, conn.begin():
+        async with self._acquire() as conn, conn.begin():
             raw = await conn.get_raw_connection()
             asyncpg_conn = raw.driver_connection
             stmt = await asyncpg_conn.prepare(f"SELECT * FROM {relation} WHERE false")  # type: ignore[union-attr]

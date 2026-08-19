@@ -98,6 +98,21 @@ class TestLoadConfig:
         cfg = load_config(_canonic_yaml(tmp_path, content))
         assert cfg.connections[0].credentials_ref == "keyring:pg-secret"
 
+    def test_provider_ref_accepted_on_a_connection(self, tmp_path: Path) -> None:
+        content = _VALID.replace("env:CANONIC_PG_DSN", "provider:aws-iam-redshift")
+        cfg = load_config(_canonic_yaml(tmp_path, content))
+        assert cfg.connections[0].credentials_ref == "provider:aws-iam-redshift"
+
+    def test_provider_ref_rejected_for_the_llm_api_key(self, tmp_path: Path) -> None:
+        # llm.api_key_ref is resolved once and held for the life of the process, so a
+        # self-expiring provider credential there would silently go stale.
+        content = _VALID.replace(
+            "api_key_ref: env:CANONIC_LLM_KEY", "api_key_ref: provider:aws-iam-redshift"
+        )
+        with pytest.raises(ConfigError) as exc_info:
+            load_config(_canonic_yaml(tmp_path, content))
+        assert "api_key_ref" in str(exc_info.value)
+
     def test_file_ref_accepted(self, tmp_path: Path) -> None:
         content = _VALID.replace("env:CANONIC_PG_DSN", "file:.canonic/secrets/pg")
         cfg = load_config(_canonic_yaml(tmp_path, content))
@@ -224,6 +239,21 @@ class TestMcpAuthConfig:
             ("alice", "env:CANONIC_MCP_TOKEN_ALICE"),
             ("bob", "keyring:mcp-bob"),
         ]
+
+    def test_provider_token_ref_raises(self, tmp_path: Path) -> None:
+        # Inbound MCP client auth is a different trust direction from outbound warehouse
+        # auth; provider: refs belong only on connections.
+        content = (
+            _VALID
+            + "mcp:\n"
+            + "  auth:\n"
+            + "    tokens:\n"
+            + "      - client_id: alice\n"
+            + "        token_ref: provider:aws-iam-redshift\n"
+        )
+        with pytest.raises(ConfigError) as exc_info:
+            load_config(_canonic_yaml(tmp_path, content))
+        assert "token_ref" in str(exc_info.value)
 
     def test_literal_token_ref_raises(self, tmp_path: Path) -> None:
         content = (
