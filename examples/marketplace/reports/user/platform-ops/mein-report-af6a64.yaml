@@ -1,0 +1,26 @@
+id: mein-report-af6a64
+title: Mein Report
+sections:
+- title: revenue by merchants.country and category
+  query:
+    metrics:
+    - revenue
+    - order_count
+    dimensions:
+    - merchants.country
+    - category
+    filters: []
+    via:
+    - merchants
+  id: revenue-by-merchants-country-and-category-f580d8
+- title: revenue by merchant name and category
+  query:
+    metrics:
+    - revenue
+    dimensions:
+    - merchant_name
+    - category
+    filters: []
+    via:
+    - merchants
+  id: revenue-by-merchant-name-and-category-d17722
