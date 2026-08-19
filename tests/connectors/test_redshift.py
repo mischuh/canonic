@@ -10,16 +10,19 @@ expected to log a warning and be skipped gracefully.
 from __future__ import annotations
 
 import logging
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import asyncpg
 import pytest
 from sqlalchemy.exc import DBAPIError
 
+import canonic.credentials
 from canonic.config import Connection
 from canonic.connectors.base import AcquisitionTier, Capability
 from canonic.connectors.redshift import RedshiftConnector, _normalize_type, _resolve_search_path
-from canonic.exc import ReadOnlyViolation
+from canonic.credentials import CredentialProviderRegistry, ResolvedCredential
+from canonic.exc import CredentialError, ReadOnlyViolation, UnknownCredentialProvider
 
 
 class TestTypeMapping:
@@ -121,6 +124,155 @@ class TestConnectorSurface:
         connector = RedshiftConnector(conn)
         assert connector.dsn.startswith("redshift+asyncpg://")
         assert "my-cluster.us-east-1.redshift.amazonaws.com" in connector.dsn
+
+
+class _FakeRedshiftIamProvider:
+    """Stands in for the AWS provider, issuing a numbered token with a chosen lifetime.
+
+    ``ttl`` shorter than ``REFRESH_SKEW`` models a credential that is already past its
+    usable life by the time the next connect asks for it — the "more than the token's
+    TTL between calls" case, without making the test wait.
+    """
+
+    def __init__(self, *, ttl: timedelta = timedelta(minutes=15)) -> None:
+        self.calls = 0
+        self._ttl = ttl
+
+    def get(self) -> ResolvedCredential:
+        self.calls += 1
+        return ResolvedCredential(
+            value=f"token-{self.calls}",
+            expires_at=datetime.now(UTC) + self._ttl,
+            username=f"IAM:role-{self.calls}",
+        )
+
+
+class _FailingProvider:
+    """A provider whose underlying AWS call always fails."""
+
+    def get(self) -> ResolvedCredential:
+        raise CredentialError("GetClusterCredentials denied")
+
+
+def _register(monkeypatch: pytest.MonkeyPatch, provider: object) -> None:
+    """Make ``provider:fake-iam`` resolve to ``provider`` instead of touching AWS."""
+    registry = CredentialProviderRegistry()
+    registry.register("fake-iam", lambda params: provider)
+    monkeypatch.setattr(canonic.credentials, "default_provider_registry", registry)
+
+
+@pytest.fixture
+def fake_provider(monkeypatch: pytest.MonkeyPatch) -> _FakeRedshiftIamProvider:
+    provider = _FakeRedshiftIamProvider()
+    _register(monkeypatch, provider)
+    return provider
+
+
+def _provider_backed_connection() -> Connection:
+    return Connection(
+        id="rs",
+        type="redshift",
+        params={
+            "host": "127.0.0.1",
+            # Port 1 is refused immediately, so a connect attempt fails without a live
+            # database and without waiting on a timeout.
+            "port": 1,
+            "dbname": "analytics",
+            "db_user": "canonic_ro",
+            "region": "eu-central-1",
+        },
+        credentials_ref="provider:fake-iam",
+    )
+
+
+class TestProviderBackedCredentials:
+    """A ``provider:`` credentials_ref resolves per connect, not once at construction."""
+
+    def test_construction_performs_no_fetch(self, fake_provider: _FakeRedshiftIamProvider) -> None:
+        RedshiftConnector(_provider_backed_connection())
+        assert fake_provider.calls == 0
+
+    def test_dsn_carries_no_password(self, fake_provider: _FakeRedshiftIamProvider) -> None:
+        # There is no fixed password to bake in — it is injected per connect.
+        connector = RedshiftConnector(_provider_backed_connection())
+        dsn = connector.dsn
+        assert dsn.startswith("redshift+asyncpg://")
+        assert "canonic_ro@127.0.0.1:1/analytics" in dsn
+        assert "token-" not in dsn
+
+    def test_injects_password_and_temporary_user(
+        self, fake_provider: _FakeRedshiftIamProvider
+    ) -> None:
+        # Redshift IAM rotates the user alongside the password, so both are stamped onto
+        # the driver's connect arguments.
+        connector = RedshiftConnector(_provider_backed_connection())
+        connector._credentials.fetch_if_stale()  # type: ignore[union-attr]
+        cparams: dict[str, Any] = {"user": "canonic_ro"}
+
+        connector._inject_credential(None, None, (), cparams)
+
+        assert cparams == {"user": "IAM:role-1", "password": "token-1"}
+
+    async def test_second_connect_inside_ttl_reuses_the_credential(
+        self, fake_provider: _FakeRedshiftIamProvider
+    ) -> None:
+        # S2/AC1: two connects within the credential's TTL cost one fetch.
+        connector = RedshiftConnector(_provider_backed_connection())
+
+        await connector.test_connection()
+        await connector.test_connection()
+
+        assert fake_provider.calls == 1
+        await connector.aclose()
+
+    async def test_connect_after_ttl_fetches_a_fresh_credential(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # S1/AC1: with more than the token's TTL between connects, the second connect
+        # uses a freshly fetched credential rather than the first one.
+        provider = _FakeRedshiftIamProvider(ttl=timedelta(seconds=5))
+        _register(monkeypatch, provider)
+        connector = RedshiftConnector(_provider_backed_connection())
+
+        await connector.test_connection()
+        await connector.test_connection()
+
+        assert provider.calls == 2
+        assert connector._credentials.cached_value().value == "token-2"  # type: ignore[union-attr]
+        await connector.aclose()
+
+    async def test_fetch_failure_is_reported_as_an_unhealthy_connection(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # S4/AC1: the provider's error surfaces and the connect never happens.
+        _register(monkeypatch, _FailingProvider())
+        connector = RedshiftConnector(_provider_backed_connection())
+
+        health = await connector.test_connection()
+
+        assert health.status == "error"
+        assert "GetClusterCredentials denied" in (health.message or "")
+
+    async def test_fetch_failure_propagates_out_of_a_query(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # Unlike test_connection, run_read_only_sql reports failure by raising.
+        _register(monkeypatch, _FailingProvider())
+        connector = RedshiftConnector(_provider_backed_connection())
+
+        with pytest.raises(CredentialError, match="denied"):
+            await connector.run_read_only_sql("SELECT 1")
+
+    def test_unknown_provider_name_fails_loud(self) -> None:
+        # S3/AC1: no silent fallback; the error names what is registered.
+        conn = Connection(
+            id="rs",
+            type="redshift",
+            params={"host": "h", "dbname": "db"},
+            credentials_ref="provider:does-not-exist",
+        )
+        with pytest.raises(UnknownCredentialProvider, match="does-not-exist"):
+            RedshiftConnector(conn)
 
 
 class TestSearchPathPrecedence:

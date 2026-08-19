@@ -20,6 +20,14 @@ if TYPE_CHECKING:
 
 KNOWN_VERSIONS: frozenset[int] = frozenset({1})
 _REF_PATTERN = re.compile(r"^(env:|keyring:|file:)")
+#: A connection's ``credentials_ref`` additionally accepts ``provider:<name>``, which
+#: resolves through a registered credential provider on every connect instead of once
+#: at startup (see ``canonic.credentials``). Deliberately *not* folded into
+#: ``_REF_PATTERN``: the inbound-auth refs (``mcp.auth.tokens[].token_ref``,
+#: ``mcp.auth.oauth.client_secret_ref``) and ``llm.api_key_ref`` are resolved once and
+#: held for the life of the process, so a self-expiring provider credential there would
+#: silently go stale rather than refresh.
+_CONNECTION_REF_PATTERN = re.compile(r"^(env:|keyring:|file:|provider:)")
 
 #: Committed context directories scaffolded for every project (SPEC E1 §2).
 CONTEXT_DIRS: tuple[str, ...] = ("semantics", "knowledge", "contracts", "reports", "raw-sources")
@@ -61,6 +69,13 @@ class Connection(BaseModel):
     id: str
     type: str
     params: dict[str, Any] = {}
+    #: Where this connection's secret is resolved from, never the secret itself.
+    #: ``env:``/``keyring:``/``file:`` resolve once to a fixed string; ``provider:<name>``
+    #: resolves through a registered credential provider on every connect, for warehouses
+    #: whose credentials expire (Redshift IAM, and later Snowflake/BigQuery). The
+    #: parameters a provider needs to do its fetch (``region``, ``cluster_id``,
+    #: ``db_user``, …) live in ``params`` and are not secrets, the same way a ``file:``
+    #: path is not a secret.
     credentials_ref: str | None = None
     read_only_role: str | None = None
     #: Operator attestation that a warehouse-native layer-2 tenant boundary (Postgres/
@@ -76,8 +91,10 @@ class Connection(BaseModel):
     def _reject_literal_secret(cls, v: str | None) -> str | None:
         # File-based connectors (e.g. dbt manifests) carry no secret; omitting the
         # ref is allowed. When present it must still be a reference, never a literal.
-        if v is not None and not _REF_PATTERN.match(v):
-            raise ValueError("must be a reference (env:…, keyring:…, file:…), not a literal secret")
+        if v is not None and not _CONNECTION_REF_PATTERN.match(v):
+            raise ValueError(
+                "must be a reference (env:…, keyring:…, file:…, provider:…), not a literal secret"
+            )
         return v
 
 

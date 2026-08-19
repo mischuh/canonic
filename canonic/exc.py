@@ -399,6 +399,22 @@ class CredentialError(CanonicError):
     """Raised when a credentials_ref cannot be resolved to a secret."""
 
 
+class UnknownCredentialProvider(CredentialError):
+    """A ``provider:`` credentials_ref names a provider with nothing registered under it.
+
+    Subclasses :class:`CredentialError` so existing credential-error handling still
+    catches it, while callers that care can catch this specifically. The message lists
+    the registered provider names — no silent fallback, mirroring
+    :class:`UnknownConnectorType` for connector types.
+    """
+
+    def __init__(self, name: str, *, known: Sequence[str]) -> None:
+        self.name = name
+        self.known = tuple(known)
+        listed = ", ".join(self.known) or "(none)"
+        super().__init__(f"unknown credential provider {name!r}; registered providers: {listed}")
+
+
 class EvalDatasetError(CanonicError):
     """Raised when a baseline dataset, candidates file, or task arg is invalid (SPEC-E10 §7, GH-66).
 

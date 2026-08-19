@@ -166,7 +166,7 @@ def add(
         str | None,
         typer.Option(
             "--credentials-ref",
-            help="Credential reference (env:VAR, keyring:service, file:path).",
+            help="Credential reference (env:VAR, keyring:service, file:path, provider:name).",
         ),
     ] = None,
     set_default: Annotated[

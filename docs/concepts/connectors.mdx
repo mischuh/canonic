@@ -18,6 +18,18 @@ default_factory.register("metabase", MetabaseConnector)
 
 An unregistered `type` raises `UnknownConnectorType` (exit `13`) listing what *is* registered, never a silent fallback. Manage connections with [`canonic connection`](/cli-reference/connection).
 
+## The credential provider registry
+
+Credentials resolve through a second registry with the same shape. A `credentials_ref` of `env:`, `keyring:` or `file:` resolves once to a fixed string. A `provider:<name>` ref instead selects a registered credential provider, which fetches a short-lived credential from a cloud issuer and reports its expiry:
+
+```python
+registry.register("aws-iam-redshift", make_aws_iam_redshift_provider)
+```
+
+Caching and refresh live once, in the layer that wraps every provider, so no provider reimplements expiry arithmetic and no connector reimplements caching. An unregistered name raises `UnknownCredentialProvider` listing what is registered, mirroring `UnknownConnectorType`.
+
+The consequence for a connector is *when* it resolves its credential. A static ref can be baked into a connection string at startup. A provider-backed one cannot: a 15 minute Redshift IAM credential is dead long before a daemon is, so the connector resolves on every connect instead. `redshift` is the first connector that does this, and any future provider-backed connector inherits the same rule. See [dynamic credentials](/reference/config-schema#dynamic-credentials) for the configuration surface.
+
 ## Three classes of connector
 
 ### Queryable (primary)

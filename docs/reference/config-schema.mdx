@@ -45,7 +45,7 @@ connections:
 
 A connection is how canonic reaches an actual data source. `id` is the name every other file uses to point back at it, `type` picks which connector implementation handles it, and `params` carries whatever that connector needs to connect, host and port for a warehouse, a manifest path for dbt. `credentials_ref` keeps the secret itself out of `canonic.yaml` entirely, instead of a password you write a pointer to where the password actually lives.
 
-- `credentials_ref` (and `llm.api_key_ref`) must be a reference, one of `env:`, `keyring:`, or `file:`, never a literal secret. Config validation rejects a literal outright.
+- `credentials_ref` must be a reference, one of `env:`, `keyring:`, `file:`, or `provider:`, never a literal secret. Config validation rejects a literal outright. `llm.api_key_ref` and the MCP auth refs accept the same schemes minus `provider:`, see [Dynamic credentials](#dynamic-credentials) below.
 - Postgres/Redshift connections additionally recognize `schema`/`schemas` (search path) and `tables` (glob patterns narrowing introspection), plus `fetch_column_stats: true` to merge zero-scan cardinality/null-ratio stats into the returned schema (a no-op on SQLite/DuckDB).
 - `dbt` connections recognize `manifest_path` (path to the compiled `manifest.json`, default `manifest.json`) and `target_connection` (the id of the physical, queryable connection whose tables this manifest describes, see [Connectors](/concepts/connectors#definition)). `target_connection` must name a connection actually declared in `connections[]`. An unknown id fails config validation at load time. Omitting it falls back to the dbt connection's own id.
 
@@ -54,6 +54,39 @@ A connection is how canonic reaches an actual data source. `id` is the name ever
     type: dbt
     params: { manifest_path: dbt/manifest.json, target_connection: warehouse_pg }
 ```
+
+### Dynamic credentials
+
+`env:`, `keyring:` and `file:` all resolve once, to a fixed string that stays valid until someone rotates it by hand. That does not fit a credential the cloud provider issues with a built-in expiry. A Redshift IAM credential lives roughly 15 to 60 minutes, so a connection string built when the daemon starts is dead well before the daemon is.
+
+`provider:<name>` covers that case. The name selects a registered credential provider, which fetches a fresh credential from the issuer and reports when it expires. Canonic caches it and refetches shortly before it runs out, so a long-lived daemon keeps working without an operator touching anything.
+
+```yaml
+connections:
+  - id: warehouse_rs
+    type: redshift
+    params:
+      cluster_id: analytics-cluster
+      db_user: canonic_ro
+      region: eu-central-1
+      host: analytics-cluster.abc123.eu-central-1.redshift.amazonaws.com
+      dbname: analytics
+    credentials_ref: provider:aws-iam-redshift
+```
+
+No secret value appears in `canonic.yaml`. `cluster_id`, `db_user` and `region` are not secrets, they tell the provider *how* to fetch a credential, the same way a `file:` path is not a secret.
+
+| Provider | Fetches | Required params |
+| --- | --- | --- |
+| `aws-iam-redshift` | Redshift IAM credentials, provisioned (`GetClusterCredentials`) or serverless (`GetCredentials`) | `cluster_id` + `db_user`, or `workgroup_name`. Optional: `region`, `dbname`, `duration_seconds` (default 3600), `auto_create` |
+
+Things worth knowing before you reach for it:
+
+- **Redshift only, today.** `provider:` refs are resolved on every connect, and Redshift is the only connector that does that so far. Pointing another connector at one fails with a clear error rather than silently freezing the first credential it ever saw.
+- **Not for inbound auth.** `llm.api_key_ref`, `mcp.auth.tokens[].token_ref` and `mcp.auth.oauth.client_secret_ref` are resolved once at startup and held. A provider credential there would go stale rather than refresh, so config validation rejects it.
+- **`aws-iam-redshift` needs boto3**, which canonic does not install. `pip install boto3`. Credentials for the AWS call itself come from the standard boto3 chain (instance role, `AWS_PROFILE`, environment).
+- **Rejected under `air_gapped: true`.** Fetching from AWS is network egress, which is what that mode exists to prevent.
+- **Nothing is written to disk.** A fetched credential lives in memory for the life of the process that fetched it. A CLI invocation and a running daemon each fetch their own.
 
 ## `llm`
 

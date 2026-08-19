@@ -109,8 +109,18 @@ def test_check_ref_local_rejects_remote_schemes(ref: str) -> None:
         EgressPolicy().check_ref_local(ref, what="llm.api_key_ref")
 
 
+def test_check_ref_local_rejects_provider_scheme() -> None:
+    # A credential provider fetches from a cloud issuer (AWS STS, an OAuth endpoint),
+    # which is exactly the egress air-gapped mode exists to prevent.
+    with pytest.raises(AirGappedViolation, match="non-local secret scheme"):
+        EgressPolicy().check_ref_local(
+            "provider:aws-iam-redshift", what="connections[warehouse].credentials_ref"
+        )
+
+
 def test_local_ref_schemes_match_credentials_layer() -> None:
-    # Guard against drift: the local schemes mirror what credentials.py recognizes.
+    # Guard against drift: these are the schemes credentials.py resolves entirely
+    # on-machine. ``provider:`` is deliberately absent — it resolves over the network.
     assert set(LOCAL_REF_SCHEMES) == {"env", "keyring", "file"}
 
 
