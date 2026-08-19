@@ -1,0 +1,15 @@
+id: revenue-by-merchants-country-and-category-f580d8
+title: revenue by merchants.country and category
+sections:
+- title: revenue by merchants.country and category
+  query:
+    metrics:
+    - revenue
+    - order_count
+    dimensions:
+    - merchants.country
+    - category
+    filters: []
+    via:
+    - merchants
+  id: revenue-by-merchants-country-and-category-f580d8
