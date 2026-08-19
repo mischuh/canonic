@@ -1,0 +1,14 @@
+id: revenue-by-merchant-name-and-category-d17722
+title: revenue by merchant name and category
+sections:
+- title: revenue by merchant name and category
+  query:
+    metrics:
+    - revenue
+    dimensions:
+    - merchant_name
+    - category
+    filters: []
+    via:
+    - merchants
+  id: revenue-by-merchant-name-and-category-d17722
