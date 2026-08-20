@@ -1,7 +1,7 @@
 id: mein-report-af6a64
 title: Mein Report
 sections:
-- title: revenue by merchants.country and category
+- title: Reveneue by Merchants Country and Category
   query:
     metrics:
     - revenue
@@ -13,14 +13,26 @@ sections:
     via:
     - merchants
   id: revenue-by-merchants-country-and-category-f580d8
-- title: Top Revenue per Merchant Category (Customer Path)
+- title: Revenue by Customer Country and Merchant Category (Customer Path)
   query:
     metrics:
     - revenue
+    - order_count
     dimensions:
+    - customers.country
     - merchants.category
     filters: []
     via:
     - customers
     - merchants
-  id: top-revenue-per-category-customer-path-a797e5
+  id: revenue-by-customer-country-and-merchant-category-customer-path-d30438
+- title: Revenue by Merchant
+  query:
+    metrics:
+    - revenue
+    dimensions:
+    - merchant_name
+    filters: []
+    via:
+    - merchants
+  id: revenue-by-merchant-308b50
