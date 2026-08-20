@@ -13,3 +13,14 @@ sections:
     via:
     - merchants
   id: revenue-by-merchants-country-and-category-f580d8
+- title: Top Revenue per Merchant Category (Customer Path)
+  query:
+    metrics:
+    - revenue
+    dimensions:
+    - merchants.category
+    filters: []
+    via:
+    - customers
+    - merchants
+  id: top-revenue-per-category-customer-path-a797e5
