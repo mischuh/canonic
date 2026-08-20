@@ -1,0 +1,15 @@
+id: top-revenue-per-country-customer-path-a797e5
+title: Top Revenue per Country (Customer Path)
+question: Welche Region verkauft am meisten?
+sections:
+- title: Top Revenue per Country (Customer Path)
+  query:
+    metrics:
+    - revenue
+    dimensions:
+    - merchants.country
+    filters: []
+    via:
+    - customers
+    - merchants
+  id: top-revenue-per-country-customer-path-a797e5
