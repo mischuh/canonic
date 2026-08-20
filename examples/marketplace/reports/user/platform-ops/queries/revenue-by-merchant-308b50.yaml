@@ -1,0 +1,14 @@
+id: revenue-by-merchant-308b50
+title: Revenue by Merchant
+question: Which merchants are generating the most revenue?
+sections:
+- title: Revenue by Merchant
+  query:
+    metrics:
+    - revenue
+    dimensions:
+    - merchant_name
+    filters: []
+    via:
+    - merchants
+  id: revenue-by-merchant-308b50
