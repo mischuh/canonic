@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.23.0](https://github.com/mischuh/canonic/compare/v0.22.1...v0.23.0) (2026-08-19)
+
+
+### Features
+
+* **credentials:** resolve dynamic connector credentials per connect ([#308](https://github.com/mischuh/canonic/issues/308)) ([e016ca9](https://github.com/mischuh/canonic/commit/e016ca931f0ce4ac19779dc6fd1918074712c4a9))
+
 ## [0.22.1](https://github.com/mischuh/canonic/compare/v0.22.0...v0.22.1) (2026-08-17)
 
 
