@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.23.1](https://github.com/mischuh/canonic/compare/v0.23.0...v0.23.1) (2026-08-21)
+
+
+### Documentation
+
+* add tenancy & roles section to homepage ([#310](https://github.com/mischuh/canonic/issues/310)) ([8228dcb](https://github.com/mischuh/canonic/commit/8228dcb2449786235dfdbdabde525aeb9f0b5721))
+
 ## [0.23.0](https://github.com/mischuh/canonic/compare/v0.22.1...v0.23.0) (2026-08-19)
 
 
