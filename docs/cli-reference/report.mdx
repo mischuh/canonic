@@ -1,9 +1,9 @@
 ---
 title: "canonic report"
-description: "List and run curated, committed reports."
+description: "List, run, and manage curated and personal reports."
 ---
 
-`canonic report` operates on `reports/*.yaml`: committed, git-reviewed definitions of a named, ordered sequence of `query()` calls. A report is composition over the semantic/knowledge/contracts layers, not a fourth kind of fact: it declares no SQL behavior, no meaning, and no authority of its own.
+`canonic report` operates on `reports/**/*.yaml`: named, ordered sequences of `query()` calls. `reports/global/*.yaml` are committed, git-reviewed definitions maintained by the data team; `reports/user/<id>/*.yaml` are personal reports a caller composes from their own [saved queries](/cli-reference/query-sql-assert#canonic-query-save-list-delete), self-service, no PR review. A report is composition over the semantic/knowledge/contracts layers either way, not a fourth kind of fact: it declares no SQL behavior, no meaning, and no authority of its own.
 
 <Note>
   `canonic report` used to be an alias for the event-log diagnostics command now named [`canonic audit`](/cli-reference/status-report#canonic-audit). A bare `canonic report` (no subcommand) prints a pointer to `canonic audit` instead of silently doing something else.
@@ -14,13 +14,32 @@ description: "List and run curated, committed reports."
 ```bash
 canonic report list
 canonic report list --domain orders
+canonic report list --user alice          # global/ + alice's own personal reports (the default)
+canonic report list --user alice --mine   # alice's personal reports only
+canonic report list --user alice --global # global/ only
 ```
 
 | Flag | Description |
 | --- | --- |
 | `--domain` | Filter to reports declaring this `domain` field. |
+| `--user` | Requesting user id, to see your own personal reports alongside `global/`. |
+| `--mine` / `--global` / `--all` | Mutually exclusive scope filter. Default (`--all`, no flag) is both scopes. |
 
-A directory listing only: `id`, `title`, `description`, `owner`, `domain` per committed report, no execution, no per-section detail. `--json` output matches the MCP `list_reports` tool payload byte-for-byte.
+A directory listing only: `id`, `title`, `description`, `owner`, `domain`, `scope` (`"global"` or `"user:<id>"`) per report, no execution, no per-section detail. Never includes saved queries — see [`canonic query list`](/cli-reference/query-sql-assert#canonic-query-save-list-delete). `--json` output matches the MCP `list_reports` tool payload byte-for-byte.
+
+## `canonic report describe`
+
+```bash
+canonic report describe customer_report
+canonic report describe q1-summary-7c2e01 --user alice
+```
+
+| Argument / Flag | Description |
+| --- | --- |
+| `report_id` | Report or saved-query id to describe (positional). |
+| `--user` | Requesting user id, to see your own personal reports. |
+
+Shows a report's sections — `id`, `title`, `metrics`, `dimensions` — **without running anything**: no query execution, no cost. The read-only counterpart to `run`; use it to find a section's stable `id` for `canonic report update --remove-section`, or to answer "what's in this report" without pulling data. `--json` output matches the MCP `describe_report` tool payload byte-for-byte.
 
 ## `canonic report run`
 
@@ -71,10 +90,28 @@ Units sold by product type
 ...
 ```
 
-This example report (`examples/jaffle-shop/reports/customer_report.yaml`) mixes several things a single report commonly needs: a multi-metric section (`revenue` + `order_count` together), a composite `ratio` metric (`avg_revenue`), a section joined through a different source (`units_sold` via `order_items` → `products`), a filtered section (store revenue for the first half of January), and sections with and without an attached narrative, proving none of it needs special-casing in `run_report` itself.
+This example report (`examples/jaffle-shop/reports/global/customer_report.yaml`) mixes several things a single report commonly needs: a multi-metric section (`revenue` + `order_count` together), a composite `ratio` metric (`avg_revenue`), a section joined through a different source (`units_sold` via `order_items` → `products`), a filtered section (store revenue for the first half of January), and sections with and without an attached narrative, proving none of it needs special-casing in `run_report` itself.
+
+## `canonic report compose` / `update` / `delete`
+
+Self-service management of a caller's own personal reports under `reports/user/<id>/`. No PR/merge review required — but every write is still an attributed git commit, so the audit trail is preserved. All three are refused (same `unresolved` handling as an unknown report id) for a `global/` report or another user's personal report, and refused with `TENANT_FORBIDDEN` (exit 24) when the caller's role denies `manage_saved_content` — see [The `manage_saved_content` gate](/concepts/tenancy-and-access-control#the-manage_saved_content-gate).
+
+```bash
+canonic report compose --title "Q1 summary" --from revenue-by-segment-a3f19c --from churn-q1-88bd21 --user alice
+canonic report update q1-summary-7c2e01 --add-from new-metric-4f0a12 --remove-section revenue-by-segment-a3f19c --user alice
+canonic report delete q1-summary-7c2e01 --user alice
+```
+
+| Command | Flags | Description |
+| --- | --- | --- |
+| `compose --title <t> --from <id> [--from <id> ...]` | `--user`, `--tenant` | Assembles N of the caller's own saved queries (see `canonic query save`) into a new personal report. Each source query's section is **copied in, not referenced** — editing or deleting the source query afterwards never changes this report. |
+| `update <report-id> [--add-from <id> ...] [--remove-section <id> ...]` | `--user`, `--tenant` | Appends saved-query sections (same copy-not-reference semantics as `compose`) and/or removes sections by their stable section `id`, in place — run `canonic report describe <report-id>` first to find a section's `id`. The report's `id` and untouched sections are unchanged. |
+| `delete <report-id>` | `--user`, `--tenant` | Removes the report file. Cannot reach `queries/*.yaml` even by mistake — deleting a report never deletes the queries it was built from. Removing a `global/` report happens only through the standard PR-review workflow, not this command. |
+
+`--tenant` is the same local-development/platform-operator override described in [Tenancy & access control](/concepts/tenancy-and-access-control#--tenant-cli-override); it carries no role claim, so once a role policy is loaded these commands still need a `default_role` granting `manage_saved_content` to succeed from the CLI.
 
 ## `canonic validate` and reports
 
-[`canonic validate`](/cli-reference/status-report#canonic-validate) also validates every committed `reports/*.yaml`: each section's query must compile against the current semantic layer (dry-run, no execution) and each `narrative_from` must resolve to an existing knowledge page. A metric rename that breaks a report is caught in the same `canonic validate` run (and the same PR) that already catches it for `semantics/`/`contracts/`.
+[`canonic validate`](/cli-reference/status-report#canonic-validate) also validates every committed `reports/**/*.yaml`, across both scopes and `queries/`: each section's query must compile against the current semantic layer (dry-run, no execution) and each `narrative_from` must resolve to an existing knowledge page. A metric rename that breaks a report is caught in the same `canonic validate` run (and the same PR) that already catches it for `semantics/`/`contracts/`.
 
-See [Report schema](/reference/report-schema) for the `reports/*.yaml` file format.
+See [Report schema](/reference/report-schema) for the `reports/**/*.yaml` file format and directory layout.

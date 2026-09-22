@@ -582,6 +582,7 @@ class RoleDef(BaseModel):
     knowledge: KnowledgePolicy = KnowledgePolicy()
     run_sql: bool = False
     tenancy_exempt: bool = False
+    manage_saved_content: bool = False
     masking: list[MaskingRule] = []
 
 

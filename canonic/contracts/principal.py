@@ -77,6 +77,7 @@ class EffectivePolicy:
     allow_tags: frozenset[str]
     run_sql: bool
     tenancy_exempt: bool
+    manage_saved_content: bool
     masking: tuple[MaskingRule, ...] = ()
     roles: tuple[str, ...] = ()
 

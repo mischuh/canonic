@@ -43,9 +43,11 @@ __all__ = [
     "RelatedMetricOut",
     "RelatedOut",
     "ReportNarrative",
+    "ReportRef",
     "ReportRunResult",
     "ReportSectionResult",
     "ReportSummary",
+    "SavedQuerySummary",
     "ScopeOut",
     "SourceFreshnessOut",
     "TrustScoreOut",
@@ -203,12 +205,23 @@ class DomainGroup(BaseModel):
     sample_questions: list[str]
 
 
+class ReportRef(BaseModel):
+    """One report's discovery entry in ``get_overview.reports`` (S24 AC2)."""
+
+    model_config = ConfigDict(frozen=True)
+
+    id: str
+    title: str
+    scope: str  # "global" or "user:<id>"
+
+
 class OverviewResult(BaseModel):
     """Result of get_overview: metrics grouped by domain (SPEC §4.1 S12)."""
 
     model_config = ConfigDict(frozen=True)
 
     domains: list[DomainGroup]
+    reports: list[ReportRef] = []
 
 
 class Compiled(BaseModel):
@@ -370,7 +383,11 @@ class CompileOutput(BaseModel):
 
 
 class ReportSummary(BaseModel):
-    """One committed report's directory-listing entry, as returned by ``list_reports``."""
+    """One report's directory-listing entry, as returned by ``list_reports``.
+
+    ``scope`` is ``"global"`` for a data-team report or ``"user:<id>"`` for a personal one
+    (AMENDMENT-user-scoped-queries-reports §1).
+    """
 
     model_config = ConfigDict(frozen=True)
 
@@ -379,6 +396,19 @@ class ReportSummary(BaseModel):
     description: str | None = None
     owner: str | None = None
     domain: str | None = None
+    scope: str = "global"
+
+
+class SavedQuerySummary(BaseModel):
+    """One saved query's directory-listing entry, as returned by ``list_saved_queries`` (S20)."""
+
+    model_config = ConfigDict(frozen=True)
+
+    id: str
+    title: str
+    question: str | None = None
+    metrics: list[str]
+    dimensions: list[str] = []
 
 
 class ReportNarrative(BaseModel):
@@ -405,6 +435,7 @@ class ReportSectionResult(BaseModel):
 
     model_config = ConfigDict(frozen=True)
 
+    id: str | None = None
     title: str
     result: QueryResult | None = None
     narrative: ReportNarrative | None = None
@@ -418,3 +449,25 @@ class ReportRunResult(BaseModel):
 
     report_id: str
     sections: list[ReportSectionResult]
+
+
+class ReportSectionInfo(BaseModel):
+    """One section's static definition, as returned by ``describe_report`` — no execution."""
+
+    model_config = ConfigDict(frozen=True)
+
+    id: str | None = None
+    title: str
+    metrics: list[str]
+    dimensions: list[str] = []
+    narrative_from: str | None = None
+
+
+class ReportStructure(BaseModel):
+    """The ``describe_report`` response: a report's section definitions, unexecuted."""
+
+    model_config = ConfigDict(frozen=True)
+
+    report_id: str
+    title: str
+    sections: list[ReportSectionInfo]

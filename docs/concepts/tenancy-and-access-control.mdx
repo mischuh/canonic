@@ -89,6 +89,7 @@ roles:
 | `dimensions` | `AllowDenyPolicy` | `{allow: null, deny: []}` | Which dimension names this role may query. **Declared but not enforced today: see warning below.** |
 | `knowledge` | `KnowledgePolicy` | `{allow_tags: []}` | `allow_tags`: which knowledge-page tags this role may search/read. **Defaults to zero pages: see warning below.** |
 | `run_sql` | `bool` | `false` | Whether this role may call the `run_sql` escape hatch at all (a separate, additional gate from `rls_enforced`, see [The `run_sql` gate](#the-run_sql-gate)). |
+| `manage_saved_content` | `bool` | `false` | Whether this role may call any of the six self-service saved-query/personal-report capabilities (`save_query`, `list_saved_queries`, `delete_query`, `compose_report`, `update_report`, `delete_report`), see [The `manage_saved_content` gate](#the-manage_saved_content-gate). |
 | `tenancy_exempt` | `bool` | `false` | Bypasses tenant-predicate injection entirely, the one caller-reachable way to read across tenants. Deliberately ugly to write, and every use is recorded on the answer event. See [Instrumentation](#instrumentation) below. |
 | `masking` | `list[MaskingRule]` | `[]` | Column-level masking rules. See [Masking](#masking). |
 
@@ -187,6 +188,22 @@ Masking applies after granularity bucketing (for time dimensions), so the SELECT
 <Warning>
 `rls_enforced: true` is an **operator attestation** that the warehouse itself enforces the tenant boundary out of band: per-tenant credentials, or warehouse-native row-level security keyed on a session variable. canonic cannot verify this claim. It only trusts it. Setting it to `true` on a connection that doesn't actually enforce RLS re-opens exactly the hole `run_sql` is otherwise gated against.
 </Warning>
+
+## The `manage_saved_content` gate
+
+Not every caller who can read canonic's data should be able to manage their own saved queries and personal reports — `save_query`, `list_saved_queries`, `delete_query`, `compose_report`, `update_report`, and `delete_report` (see [Saved queries and personal reports](/reference/report-schema#saved-queries-and-personal-reports)) are gated as one group, fail-closed, the same shape as the `run_sql` gate: a role with `manage_saved_content: false` (the default) is refused outright with `TENANT_FORBIDDEN`, checked before any other validation (missing identity, unknown id) runs.
+
+```yaml
+roles:
+  viewer:
+    metrics: { allow: ["revenue", "order_count"] }
+    manage_saved_content: false   # the default — spelled out here for clarity
+  analyst:
+    inherits: viewer
+    manage_saved_content: true    # may save/list/delete their own queries and reports
+```
+
+With no role policy loaded at all, this capability is unrestricted, matching every other gate's "absence is the feature switch" rule. Once a policy is loaded, an unauthenticated caller (no principal, or a CLI `--tenant` override, which never carries roles) resolves to the anonymous principal — denied, unless `default_role` grants it.
 
 ## `--tenant` CLI override
 

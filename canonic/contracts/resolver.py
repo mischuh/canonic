@@ -640,6 +640,7 @@ class ContractResolver:
                 allow_tags=frozenset({"*"}),
                 run_sql=True,
                 tenancy_exempt=True,
+                manage_saved_content=True,
                 masking=(),
                 roles=(),
             )
@@ -652,6 +653,7 @@ class ContractResolver:
                 allow_tags=frozenset({"*"}),
                 run_sql=True,
                 tenancy_exempt=False,
+                manage_saved_content=True,
                 masking=(),
                 roles=(),
             )
@@ -669,6 +671,7 @@ class ContractResolver:
                 allow_tags=frozenset(),
                 run_sql=False,
                 tenancy_exempt=False,
+                manage_saved_content=False,
                 masking=(),
                 roles=(),
             )
@@ -698,6 +701,7 @@ class ContractResolver:
             allow_tags=frozenset(allow_tags),
             run_sql=any(role.run_sql for role in flattened),
             tenancy_exempt=any(role.tenancy_exempt for role in flattened),
+            manage_saved_content=any(role.manage_saved_content for role in flattened),
             masking=tuple(sorted(masking, key=lambda m: (m.column, m.strategy))),
             roles=known_role_names,
         )
@@ -721,7 +725,15 @@ class ContractResolver:
             current = self._roles.roles[current.inherits]
             chain.append(current)
 
-        overridable = ("metrics", "dimensions", "knowledge", "run_sql", "tenancy_exempt", "masking")
+        overridable = (
+            "metrics",
+            "dimensions",
+            "knowledge",
+            "run_sql",
+            "tenancy_exempt",
+            "manage_saved_content",
+            "masking",
+        )
         resolved: dict[str, Any] = {}
         for role in reversed(chain):
             fields_set = role.model_fields_set

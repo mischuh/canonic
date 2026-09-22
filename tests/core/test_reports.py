@@ -130,7 +130,7 @@ def _write_knowledge_page(project_root: Path) -> None:
 
 
 def _write_report(project_root: Path, content: str, name: str = "customer_report.yaml") -> None:
-    reports_dir = project_root / "reports"
+    reports_dir = project_root / "reports" / "global"
     reports_dir.mkdir(parents=True, exist_ok=True)
     (reports_dir / name).write_text(content)
 
@@ -172,6 +172,7 @@ class TestListReports:
         assert s.description == "desc"
         assert s.owner == "data-team"
         assert s.domain == "orders"
+        assert s.scope == "global"
 
     def test_domain_filter(self, report_service: CanonicService, tmp_path: Path) -> None:
         _write_report(
@@ -300,6 +301,64 @@ class TestRunReport:
         result = await report_service.run_report("customer_report")
         rs = result.sections[0].result.result
         assert {tuple(row) for row in rs.rows} == {("paid", 150.00)}
+
+    async def test_section_id_is_included_in_the_result(
+        self, report_service: CanonicService, tmp_path: Path
+    ) -> None:
+        """run_report's section id must round-trip so update_report(remove_sections=...) is
+        discoverable from the run output, not just from describe_report."""
+        _write_report(
+            tmp_path,
+            "id: customer_report\ntitle: Customer Report\nsections:\n"
+            "  - title: Revenue\n    query: {metrics: [revenue], dimensions: [status]}\n"
+            "    id: revenue-section\n",
+        )
+        result = await report_service.run_report("customer_report")
+        assert result.sections[0].id == "revenue-section"
+
+    async def test_section_without_id_stays_none(
+        self, report_service: CanonicService, tmp_path: Path
+    ) -> None:
+        """Hand-authored global/ sections may omit id — must not error, stays None."""
+        _write_report(
+            tmp_path,
+            "id: customer_report\ntitle: Customer Report\nsections:\n"
+            "  - title: Revenue\n    query: {metrics: [revenue], dimensions: [status]}\n",
+        )
+        result = await report_service.run_report("customer_report")
+        assert result.sections[0].id is None
+
+
+class TestDescribeReport:
+    def test_returns_section_metadata_without_executing(
+        self, report_service: CanonicService, tmp_path: Path
+    ) -> None:
+        _write_report(
+            tmp_path,
+            "id: customer_report\ntitle: Customer Report\nsections:\n"
+            "  - title: Revenue by status\n"
+            "    query: {metrics: [revenue], dimensions: [status]}\n"
+            "    id: revenue-section\n"
+            "  - title: Orders by segment\n"
+            "    query: {metrics: [order_count], dimensions: [segment]}\n",
+        )
+        structure = report_service.describe_report("customer_report")
+        assert structure.report_id == "customer_report"
+        assert structure.title == "Customer Report"
+        assert [s.title for s in structure.sections] == ["Revenue by status", "Orders by segment"]
+        assert structure.sections[0].id == "revenue-section"
+        assert structure.sections[0].metrics == ["revenue"]
+        assert structure.sections[0].dimensions == ["status"]
+        assert structure.sections[1].id is None
+
+    def test_unknown_report_id_raises_report_not_found(
+        self, report_service: CanonicService
+    ) -> None:
+        from canonic.exc import ErrorCode
+
+        with pytest.raises(ReportNotFound) as exc:
+            report_service.describe_report("does_not_exist")
+        assert exc.value.code is ErrorCode.UNRESOLVED
 
 
 class TestValidateReports:

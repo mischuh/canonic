@@ -1,9 +1,9 @@
 ---
 title: "Report schema"
-description: "Every field in a reports/*.yaml curated report."
+description: "Every field in a reports/**/*.yaml report or saved query."
 ---
 
-A report (`reports/<id>.yaml`) is a committed YAML file, validated against `Report` at load time and on every `canonic validate` run. It names an ordered sequence of sections, each an unmodified `SemanticQuery` (the same shape a `query()` call or a `-f`/`--file` JSON query file accepts) plus an optional attached narrative. See [`canonic report`](/cli-reference/report) for running one.
+A report (`reports/global/<id>.yaml` or `reports/user/<id>/<report-id>.yaml`) is a committed YAML file, validated against `Report` at load time and on every `canonic validate` run. It names an ordered sequence of sections, each an unmodified `SemanticQuery` (the same shape a `query()` call or a `-f`/`--file` JSON query file accepts) plus an optional attached narrative. See [`canonic report`](/cli-reference/report) for running one.
 
 ```yaml
 id: customer_report
@@ -20,6 +20,22 @@ sections:
     narrative_from: retention-definition
 ```
 
+## Directory layout and scope
+
+```text
+reports/
+├── global/*.yaml               # data-team maintained, PR-reviewed — unchanged
+└── user/<user-id>/
+    ├── queries/*.yaml           # atomic saved queries (save_query/list_saved_queries/delete_query)
+    └── *.yaml                   # personal composed reports (compose_report/update_report/delete_report)
+```
+
+Scope and owner are derived from a file's path, never read from the file itself — the same rule [`knowledge/global/` vs `knowledge/user/<id>/`](/concepts/knowledge-layer) already applies. A caller sees `global/` plus their own `user/<id>/`, never another user's. An unscoped, flat `reports/<id>.yaml` is rejected — every file must sit under `global/` or `user/<id>/`.
+
+`user/<id>/` is self-service: `save_query`/`delete_query`/`compose_report`/`update_report`/`delete_report` write and delete there without a PR/merge review, but every write is still an attributed git commit — the audit trail is preserved without the human review gate. `global/` is unchanged: PR-reviewed, no self-service write path. A saved query in `queries/` and a composed report in the report root are physically separate sub-paths, so `delete_report` can never remove the queries it was built from (and vice versa for `delete_query` against a report).
+
+There is no global scope for saved queries in v1 — a raw, ad hoc query is inherently personal; anything meant to be broadly useful and reviewed is, by definition, a curated `global/` report.
+
 ## Top-level fields
 
 | Field | Type | Default | Governs |
@@ -30,6 +46,7 @@ sections:
 | `owner` | `str \| null` | `null` | Free text, informational only, not used for access control. |
 | `domain` | `str \| null` | `null` | Optional grouping key, filters `list_reports(domain=...)`. |
 | `context` | `str \| null` | `null` | Reuses the existing guardrail `context` tag: no new guardrail kind. Merged into every section that doesn't set its own `query.context`. |
+| `question` | `str \| null` | `null` | Plain-language phrasing, set by `save_query(question=...)`. Feeds the query's domain `sample_questions` in `get_overview` — the query itself is never listed under `get_overview`'s `reports` field. |
 | `sections` | `list[ReportSection]` | required, min 1 | The ordered sections `run_report` executes. |
 
 ## `ReportSection`
@@ -39,6 +56,7 @@ sections:
 | `title` | `str` | required | Shown alongside this section's result in `run_report`'s response. |
 | `query` | `SemanticQuery` | required | The exact same shape `query()`/`compile_query()` accept: `metrics`, `dimensions`, `filters`, `via`, `context`, `limit`, `as_of`. |
 | `narrative_from` | `str \| null` | `null` | An existing knowledge-page id. When set, `run_report` attaches that page's **rendered** body (live `{{ sl:entity.expr }}` definitions substituted, never the raw template) to this section's result. |
+| `id` | `str \| null` | `null` | Stable section id, set by `compose_report`/`update_report` so `update_report(remove_sections=[...])` can address it. Optional and omitted on hand-authored `global/` sections. |
 
 A section's `query.context` and `query.as_of`, when set, always win over the report-level `context` and the `run_report(as_of=...)` call argument: the report/call-level values only fill in when the section itself doesn't specify one.
 
@@ -50,7 +68,24 @@ A section's `query.context` and `query.as_of`, when set, always win over the rep
 
 A report introduces no new execution semantics (`run_report` is a deterministic loop over `core.query`) and no new authority: it cannot declare a canonical binding, introduce a metric, or relax/add a guardrail. It can only reference entities that already resolve. It carries no layout, chart type, or rendering. Its output is an ordered array of unmodified `QueryResult` objects, so presentation stays the concern of whichever adapter or downstream consumer renders the response.
 
-There is also no per-report access control today: canonic's guardrails (`min_trust`, `context`) govern whether a *query* is correct/trusted enough to answer, not whether a given caller may invoke a given *report* at all.
+There is no per-report *authorization* today beyond the path-based scope split above: canonic's guardrails (`min_trust`, `context`) govern whether a *query* is correct/trusted enough to answer, not whether a given caller may invoke a given report at all.
+
+## Saved queries and personal reports
+
+Beyond the committed `global/` reports above, a caller can save an individual query for later reuse and assemble several saved queries into a personal, multi-section report — self-service, no PR review, under their own `reports/user/<id>/`:
+
+| Capability | Summary |
+| --- | --- |
+| `save_query(query, title?, question?)` | Validates the query compiles, writes a one-section file to `reports/user/<own-id>/queries/<id>.yaml`. |
+| `list_saved_queries()` | Directory listing of the caller's own saved queries. Never `global/`, never another user's. |
+| `delete_query(query_id)` | Removes a saved query. Refused outside the caller's own scope. |
+| `compose_report(title, [query-id, ...])` | Copies N of the caller's own saved queries' sections into a new report file — copied, not referenced, so editing or deleting a source query afterwards never changes the report. |
+| `update_report(report_id, add_from?, remove_sections?)` | Appends (same copy-not-reference semantics) and/or removes sections, by their stable `id`, on an existing personal report. |
+| `delete_report(report_id)` | Removes a personal report file. Cannot reach `queries/*.yaml` even by mistake — the two are physically separate sub-paths. |
+
+`list_reports`/`get_overview` see both scopes; `list_saved_queries` and the two delete capabilities stay namespace-strict (a saved-query id and a report id never resolve into each other). See [`canonic query`](/cli-reference/query-sql-assert) and [`canonic report`](/cli-reference/report) for the CLI surface.
+
+All six capabilities are gated as one group by the caller's role: a role with `manage_saved_content: false` (the default once a role policy is loaded) is refused every one of them with `TENANT_FORBIDDEN`, before any other check runs. See [The `manage_saved_content` gate](/concepts/tenancy-and-access-control#the-manage_saved_content-gate).
 
 ## Validation
 

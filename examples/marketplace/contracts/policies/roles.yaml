@@ -10,6 +10,8 @@ roles:
     dimensions: { deny: ["customer_email", "customer_phone"] }
     knowledge: { allow_tags: ["public", "merchant"] }
     run_sql: false
+    # manage_saved_content: false (the default) — a read-only merchant viewer may run
+    # queries but not accumulate their own saved queries/personal reports.
   merchant_admin:
     inherits: merchant_viewer      # single inheritance, field-level override, not list-merge
     dimensions: { deny: [] }
@@ -17,10 +19,14 @@ roles:
       - { column: customers.customer_email, strategy: partial }
     # run_sql: true on purpose — this is the role that demonstrates the SECOND run_sql
     # gate: even though the role allows raw SQL, marketplace_db carries rls_enforced:
-    # false, so run_sql is still refused with TENANT_FORBIDDEN (SPEC-E12 §6).
+    # false, so run_sql is still refused with TENANT_FORBIDDEN.
     run_sql: true
+    # a merchant's own admin may save/compose queries into personal reports under their
+    # own reports/user/<id>/ scope — still isolated to that merchant
+    manage_saved_content: true
   platform_analyst:
     tenancy_exempt: true
     metrics: { allow: ["*"] }
     knowledge: { allow_tags: ["*"] }   # must be explicit; omitting knowledge: defaults allow_tags to [] = zero visible pages
     run_sql: true
+    manage_saved_content: true

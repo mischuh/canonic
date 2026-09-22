@@ -3,7 +3,7 @@ title: "MCP tools reference"
 description: "The tools canonic's MCP server registers, grouped by purpose."
 ---
 
-The MCP server (`canonic/mcp/server.py`) registers 13 tools. Each does transport translation only: parse arguments, call the same core service the CLI calls, serialize the result. No resolution, compilation, or execution logic lives in the MCP layer itself.
+The MCP server (`canonic/mcp/server.py`) registers 20 tools. Each does transport translation only: parse arguments, call the same core service the CLI calls, serialize the result. No resolution, compilation, or execution logic lives in the MCP layer itself.
 
 | Tool | What it's for |
 | --- | --- |
@@ -18,8 +18,15 @@ The MCP server (`canonic/mcp/server.py`) registers 13 tools. Each does transport
 | `run_sql` | Read-only SQL escape hatch. |
 | `search_knowledge` | Search knowledge pages for business context. |
 | `read_knowledge_page` | Read the full content of one knowledge page. |
-| `list_reports` | Discover curated reports maintained by the data team. |
-| `run_report` | Run a curated report's sections and return ordered results. |
+| `list_reports` | Discover reports visible to the caller: curated (`global`) + their own (`user:<id>`). |
+| `describe_report` | Show a report's section titles, ids, metrics, and dimensions without running it. |
+| `run_report` | Run a report or saved query's sections and return ordered results. |
+| `save_query` | Save the current query for later reuse under the caller's own scope. |
+| `list_saved_queries` | List the caller's own saved queries. |
+| `delete_query` | Remove a caller-owned saved query, never a report. |
+| `compose_report` | Assemble saved queries into a new personal report. |
+| `update_report` | Add/remove sections on an existing personal report. |
+| `delete_report` | Remove a caller-owned personal report, never a query. |
 
 ## Session / contract
 
@@ -37,9 +44,9 @@ Declares the contract-schema major version your client was built against. The da
 
 ## Discovery
 
-### `get_overview(domain: str | None = None)`
+### `get_overview(domain: str | None = None, user: str | None = None)`
 
-The recommended first call: active metrics grouped by domain with plain-language sample questions, so an agent (or a human) can see what's askable before drilling into `list_metrics` or `query`. Pass `domain` to narrow to one owning-source group.
+The recommended first call: active metrics grouped by domain with plain-language sample questions, so an agent (or a human) can see what's askable before drilling into `list_metrics` or `query`. Pass `domain` to narrow to one owning-source group. Also returns a `reports` field: every report visible to `user` (`global/` plus their own), each tagged with its `scope`. Raw saved queries are not listed there — `get_overview` answers "what can I ask", not "what have I personally saved" — but a saved query carrying a `question` still feeds its domain's `sample_questions`.
 
 ### `list_metrics()`
 
@@ -89,14 +96,46 @@ Retrieves the full content of a knowledge page by its id (page slug). Use after 
 
 ## Reports
 
-A report (`reports/*.yaml`) names an ordered sequence of already-existing calls: no new execution semantics, no new authority. `run_report` is a deterministic loop over `query()`, optionally attaching a rendered knowledge page per section. See [Report schema](/reference/report-schema) for the file format.
+A report (`reports/global/*.yaml` or `reports/user/<id>/*.yaml`) names an ordered sequence of already-existing calls: no new execution semantics, no new authority. `run_report` is a deterministic loop over `query()`, optionally attaching a rendered knowledge page per section. See [Report schema](/reference/report-schema) for the file format and scope split.
 
-### `list_reports(domain: str | None = None)`
+### `list_reports(domain: str | None = None, user: str | None = None)`
 
-A directory listing of every committed report: `id`, `title`, `description`, `owner`, `domain`. No execution, no per-section detail. Pass `domain` to narrow to reports declaring a matching `domain` field. Call this when a user asks for a report by name (e.g. "the customer report") rather than an ad-hoc question, then call `run_report()` with the matching id.
+A directory listing of every report visible to `user`: `global/` plus their own `user/<id>/` (never another user's, never `queries/`). Each entry carries `id`, `title`, `description`, `owner`, `domain`, `scope` (`"global"` or `"user:<id>"`). No execution, no per-section detail. Pass `domain` to narrow to reports declaring a matching `domain` field. Call this when a user asks for a report by name (e.g. "the customer report", "my Q1 report") rather than an ad-hoc question, then call `run_report()` with the matching id.
 
-### `run_report(report_id: str, as_of: str | None = None, user: str | None = None)`
+### `describe_report(report_id: str, user: str | None = None)`
 
-Runs every section of a committed report through `query()`, in declared order, and returns an ordered array of section results. Each entry carries the section's `title` and either its **unmodified** `QueryResult` (with an optional attached `narrative`, the rendered body of the section's `narrative_from` knowledge page) or a structured `{code, message, candidates?}` error in place of a result.
+Returns `report_id`'s section definitions — `title`, stable section `id`, `metrics`, `dimensions`, `narrative_from` — **without running anything**: no query execution, no cost. The read-only counterpart to `run_report()`; use it to discover a section's `id` for `update_report(remove_sections=...)`, or to answer "what's in this report" without pulling data. Same resolution scope as `run_report()`: a committed report or a saved query, `global/` plus the caller's own scope.
 
-A failing section does **not** abort the report: the other sections still return normal results, and the call as a whole never raises for a per-section failure. An unknown `report_id` reuses the existing `unresolved` error code: there is no dedicated "report not found" code. `as_of` is an optional ISO-8601 reference point for finality-watermark evaluation, applied to every section that doesn't set its own.
+### `run_report(report_id: str, as_of: str | None = None, filters: list[str] | None = None, user: str | None = None)`
+
+Runs every section of a report **or a saved query** through `query()`, in declared order, and returns an ordered array of section results. Each entry carries the section's `id` (its stable section id, `null` for hand-authored `global/` sections that predate it), `title`, and either its **unmodified** `QueryResult` (with an optional attached `narrative`, the rendered body of the section's `narrative_from` knowledge page) or a structured `{code, message, candidates?}` error in place of a result.
+
+A failing section does **not** abort the report: the other sections still return normal results, and the call as a whole never raises for a per-section failure. An unknown `report_id` — including one owned by a different user — reuses the existing `unresolved` error code: there is no dedicated "report not found" code. `as_of` is an optional ISO-8601 reference point for finality-watermark evaluation, applied to every section that doesn't set its own; `filters` is additive, AND-ed onto every section's own filters.
+
+## Saved queries and personal reports
+
+Self-service, under the caller's own `reports/user/<id>/` — no PR/merge review required, but every write is still an attributed git commit. `global/` reports are unaffected: still PR-reviewed, with no self-service write path. All six tools below are gated as one group by the caller's role: `manage_saved_content: false` (the default once a role policy is loaded) refuses every one of them with `TENANT_FORBIDDEN`, see [The `manage_saved_content` gate](/concepts/tenancy-and-access-control#the-manage_saved_content-gate).
+
+### `save_query(query: dict, title: str | None = None, question: str | None = None, user: str | None = None)`
+
+Same `query` dict shape as `query()`. Validates it compiles, then saves it under the caller's own scope. `question` is a plain-language phrasing, surfaced later in `get_overview()`'s `sample_questions` for its metric's domain — the saved query itself is never listed under `get_overview`'s `reports` field.
+
+### `list_saved_queries(user: str | None = None)`
+
+Lists the caller's own saved queries only — never another user's, never a committed report. Use the returned `id` with `run_report()`, `describe_report()`, `compose_report()`, `update_report()`, or `delete_query()`.
+
+### `delete_query(query_id: str, user: str | None = None)`
+
+Deletes one of the caller's own saved queries. Refused for another user's query or for a report id (committed or personal) — never deletes a report.
+
+### `compose_report(title: str, query_ids: list[str], user: str | None = None)`
+
+Assembles two or more of the caller's own saved queries into a new personal report. Each source query's section is **copied in, not referenced** — editing or deleting the source query afterwards never changes this report. Returns the new report's summary, including its `id` for `run_report()`.
+
+### `update_report(report_id: str, add_from: list[str] | None = None, remove_sections: list[str] | None = None, user: str | None = None)`
+
+Adds and/or removes sections on one of the caller's own existing personal reports, in place — the report's `id` is unchanged. `add_from` copies additional saved-query sections onto the end (same freeze-at-copy-time semantics as `compose_report`). `remove_sections` drops sections by their stable section `id` — call `describe_report(report_id)` first to see each section's `id` (also visible in `run_report`'s output; usually the same id as the saved query it was composed from). Refused for a `global/` report or another user's personal report.
+
+### `delete_report(report_id: str, user: str | None = None)`
+
+Deletes one of the caller's own personal reports. Never deletes the saved queries it was composed from, and is refused for a `global/` report, another user's report, or a saved-query id.

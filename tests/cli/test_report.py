@@ -105,7 +105,7 @@ def project_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     contracts = tmp_path / "contracts" / "metrics"
     contracts.mkdir(parents=True)
     (contracts / "revenue.yaml").write_text(_REVENUE_YAML)
-    reports = tmp_path / "reports"
+    reports = tmp_path / "reports" / "global"
     reports.mkdir(parents=True)
     (reports / "customer_report.yaml").write_text(_REPORT_YAML)
     monkeypatch.setenv("CANONIC_PW", "test")
@@ -147,6 +147,7 @@ def test_list_json_output_shape(runner: CliRunner, project_dir: Path) -> None:
                 "description": "desc",
                 "owner": None,
                 "domain": None,
+                "scope": "global",
             }
         ]
     }
@@ -156,6 +157,30 @@ def test_list_domain_filter_excludes_non_matching(runner: CliRunner, project_dir
     result = runner.invoke(app, ["report", "list", "--domain", "nope"])
     assert result.exit_code == 0, result.output
     assert "no reports found" in result.output.lower()
+
+
+def test_describe_shows_section_metadata_without_running(
+    runner: CliRunner, project_dir: Path
+) -> None:
+    result = runner.invoke(app, ["report", "describe", "customer_report"])
+    assert result.exit_code == 0, result.output
+    assert "Revenue by status" in result.output
+
+
+def test_describe_json_output_shape(runner: CliRunner, project_dir: Path) -> None:
+    result = runner.invoke(app, ["--json", "report", "describe", "customer_report"])
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.output)
+    assert payload["report_id"] == "customer_report"
+    section = payload["sections"][0]
+    assert section["title"] == "Revenue by status"
+    assert section["metrics"] == ["revenue"]
+    assert section["dimensions"] == ["status"]
+
+
+def test_describe_unknown_report_id_fails(runner: CliRunner, project_dir: Path) -> None:
+    result = runner.invoke(app, ["report", "describe", "does_not_exist"])
+    assert result.exit_code != 0
 
 
 def test_run_exits_zero_and_renders_table(
@@ -229,3 +254,101 @@ def test_run_tenant_flag_warns_and_succeeds(
     result = runner.invoke(app, ["report", "run", "customer_report", "--tenant", "4711"])
     assert result.exit_code == 0, result.output
     assert "warning" in result.output.lower()
+
+
+def _saved_query_id(runner: CliRunner, user: str = "alice") -> str:
+    saved = runner.invoke(app, ["--json", "query", "save", "--metrics", "revenue", "--user", user])
+    return json.loads(saved.output)["id"]
+
+
+class TestReportComposeUpdateDelete:
+    """S22, S23, S25: ``canonic report compose/update/delete`` — personal reports."""
+
+    def test_compose_and_list_mine(
+        self, runner: CliRunner, project_dir: Path, fake_connector: None
+    ) -> None:
+        qid = _saved_query_id(runner)
+        result = runner.invoke(
+            app, ["report", "compose", "--title", "Alice Q1", "--from", qid, "--user", "alice"]
+        )
+        assert result.exit_code == 0, result.output
+
+        mine = runner.invoke(app, ["--json", "report", "list", "--user", "alice", "--mine"])
+        payload = json.loads(mine.output)
+        assert len(payload["reports"]) == 1
+        assert payload["reports"][0]["scope"] == "user:alice"
+
+    def test_default_list_includes_global_and_mine(
+        self, runner: CliRunner, project_dir: Path, fake_connector: None
+    ) -> None:
+        qid = _saved_query_id(runner)
+        runner.invoke(
+            app, ["report", "compose", "--title", "Alice Q1", "--from", qid, "--user", "alice"]
+        )
+        listed = runner.invoke(app, ["--json", "report", "list", "--user", "alice"])
+        ids = {r["id"] for r in json.loads(listed.output)["reports"]}
+        assert "customer_report" in ids  # global
+        assert len(ids) == 2  # + alice's personal report
+
+    def test_global_flag_excludes_personal(
+        self, runner: CliRunner, project_dir: Path, fake_connector: None
+    ) -> None:
+        qid = _saved_query_id(runner)
+        runner.invoke(
+            app, ["report", "compose", "--title", "Alice Q1", "--from", qid, "--user", "alice"]
+        )
+        listed = runner.invoke(app, ["--json", "report", "list", "--user", "alice", "--global"])
+        payload = json.loads(listed.output)
+        assert [r["id"] for r in payload["reports"]] == ["customer_report"]
+
+    def test_update_add_from_and_remove_section(
+        self, runner: CliRunner, project_dir: Path, fake_connector: None
+    ) -> None:
+        qid1 = _saved_query_id(runner)
+        composed = runner.invoke(
+            app, ["--json", "report", "compose", "--title", "R", "--from", qid1, "--user", "alice"]
+        )
+        report_id = json.loads(composed.output)["id"]
+
+        result = runner.invoke(
+            app,
+            [
+                "report",
+                "update",
+                report_id,
+                "--remove-section",
+                qid1,
+                "--add-from",
+                qid1,
+                "--user",
+                "alice",
+            ],
+        )
+        assert result.exit_code == 0, result.output
+
+    def test_delete_never_deletes_source_query(
+        self, runner: CliRunner, project_dir: Path, fake_connector: None
+    ) -> None:
+        qid = _saved_query_id(runner)
+        composed = runner.invoke(
+            app, ["--json", "report", "compose", "--title", "R", "--from", qid, "--user", "alice"]
+        )
+        report_id = json.loads(composed.output)["id"]
+
+        result = runner.invoke(app, ["report", "delete", report_id, "--user", "alice"])
+        assert result.exit_code == 0, result.output
+
+        listed_queries = runner.invoke(app, ["--json", "query", "list", "--user", "alice"])
+        assert json.loads(listed_queries.output)["queries"][0]["id"] == qid
+
+    def test_delete_refused_for_another_users_report(
+        self, runner: CliRunner, project_dir: Path, fake_connector: None
+    ) -> None:
+        qid = _saved_query_id(runner)
+        composed = runner.invoke(
+            app, ["--json", "report", "compose", "--title", "R", "--from", qid, "--user", "alice"]
+        )
+        report_id = json.loads(composed.output)["id"]
+
+        result = runner.invoke(app, ["report", "delete", report_id, "--user", "bob"])
+        assert result.exit_code != 0

@@ -31,6 +31,24 @@ canonic query --file query.json --harness
   If a `--dimensions` name exists on more than one join-reachable source, the query fails with `ambiguous` and a `candidates` list of `alias.dimension` values to qualify with. See [Resolving `ambiguous`](/reference/error-codes#resolving-ambiguous). If a metric's join path to a dimension's source is itself ambiguous (more than one route through declared `joins`), the query instead fails with `ambiguous_join_path` and a `candidates` list of alias sequences: pass one as `--via` (e.g. `--via dim_customer,dim_sales_rep`) to select that path.
 </Note>
 
+## `canonic query save` / `list` / `delete`
+
+Save the current query for later reuse under your own scope — self-service, no PR review, but every write is still an attributed git commit. See [Report schema](/reference/report-schema#saved-queries-and-personal-reports) for the underlying file format and [`canonic report compose`](/cli-reference/report#canonic-report-compose-update-delete) to assemble several saved queries into a personal report. `save`/`list`/`delete` are refused with `TENANT_FORBIDDEN` (exit 24) when the caller's role denies `manage_saved_content` — see [The `manage_saved_content` gate](/concepts/tenancy-and-access-control#the-manage_saved_content-gate).
+
+```bash
+canonic query save --metrics revenue --dimensions segment --title "Revenue by segment" --question "What was revenue by segment?" --user alice
+canonic query list --user alice
+canonic query delete revenue-by-segment-a3f19c --user alice
+```
+
+| Command | Flags | Description |
+| --- | --- | --- |
+| `save` | `-f`/`--file` or `--metrics`/`--dimensions`/`--filter`/`--via`/`--limit` (same rules as the bare form), `--title`, `--question`, `--user`, `--tenant` | Validates the query compiles, then writes it to `reports/user/<own-id>/queries/<id>.yaml`. `--question` is a plain-language phrasing, surfaced later in `get_overview`'s `sample_questions`. |
+| `list` | `--user`, `--tenant` | Directory listing of the caller's own saved queries only — never another user's, never a composed report. |
+| `delete <query-id>` | `--user`, `--tenant` | Removes a saved query. Refused outside the caller's own scope, or against a report id — never removes a report. |
+
+`--user` is required on all three: writing under an implicit, unidentified scope is refused rather than silently defaulting anywhere. `--tenant` is the same local-development/platform-operator override described in [Tenancy & access control](/concepts/tenancy-and-access-control#--tenant-cli-override); it carries no role claim, so once a role policy is loaded these commands still need a `default_role` granting `manage_saved_content` to succeed from the CLI.
+
 ## `canonic sql`
 
 Execute a read-only SQL string on a named connection, the escape hatch for when no metric/dimension covers the question.

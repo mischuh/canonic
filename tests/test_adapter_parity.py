@@ -178,7 +178,7 @@ def report_project(tmp_path: Path) -> Path:
     (metrics / "revenue.yaml").write_text(
         "metric: revenue\ncanonical:\n  source: orders\n  measure: total_revenue\nstatus: active\n"
     )
-    reports = tmp_path / "reports"
+    reports = tmp_path / "reports" / "global"
     reports.mkdir(parents=True)
     (reports / "customer_report.yaml").write_text(
         "id: customer_report\ntitle: Customer Report\nsections:\n"
@@ -259,6 +259,72 @@ def test_run_report_filters_parity(report_project: Path, monkeypatch: pytest.Mon
 
     assert cli_payload == mcp_payload
     assert cli_payload["sections"][0]["result"]["result"]["rows"] == []
+
+
+def test_scoped_list_reports_parity(report_project: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """CLI ``report list --user`` and the MCP ``list_reports`` tool agree on scope (S24 AC1)."""
+    import json
+
+    from typer.testing import CliRunner
+
+    from canonic.cli.app import app
+    from canonic.core.service import CanonicService
+
+    monkeypatch.chdir(report_project)
+    saved = CliRunner().invoke(
+        app,
+        ["--json", "query", "save", "--metrics", "revenue", "--user", "alice"],
+        catch_exceptions=False,
+    )
+    query_id = json.loads(saved.stdout)["id"]
+    CliRunner().invoke(
+        app,
+        ["report", "compose", "--title", "Alice Q1", "--from", query_id, "--user", "alice"],
+        catch_exceptions=False,
+    )
+
+    cli = CliRunner().invoke(
+        app, ["--json", "report", "list", "--user", "alice"], catch_exceptions=False
+    )
+    cli_payload = json.loads(cli.stdout)
+
+    async def _mcp_list_reports(service: CanonicService) -> object:
+        mcp = build_server(service)
+        async with Client(mcp) as client:
+            result = await client.call_tool("list_reports", {"user": "alice"})
+        return result.data
+
+    import asyncio
+
+    service = CanonicService.from_project(report_project)
+    mcp_payload = asyncio.run(_mcp_list_reports(service))
+
+    assert cli_payload == mcp_payload
+    assert {r["scope"] for r in cli_payload["reports"]} == {"global", "user:alice"}
+
+
+def test_list_saved_queries_parity(report_project: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """MCP ``list_saved_queries`` and the direct service path agree (S20)."""
+    import asyncio
+
+    from canonic.core.service import CanonicService
+
+    async def _run() -> None:
+        service = CanonicService.from_project(report_project)
+        await service.save_query(SemanticQuery(metrics=["revenue"]), user="alice")
+
+        mcp = build_server(service)
+        async with Client(mcp) as client:
+            result = await client.call_tool("list_saved_queries", {"user": "alice"})
+        mcp_payload = result.data
+
+        summaries = service.list_saved_queries(user="alice")
+        service_payload = {"queries": [s.model_dump(mode="json") for s in summaries]}
+        assert mcp_payload == service_payload
+        assert len(mcp_payload["queries"]) == 1
+
+    monkeypatch.chdir(report_project)
+    asyncio.run(_run())
 
 
 # ---------------------------------------------------------------------------

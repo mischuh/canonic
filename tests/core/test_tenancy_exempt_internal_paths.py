@@ -178,8 +178,8 @@ def test_validate_reports_runs_exempt_under_deny_by_default_tenancy(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    reports_dir = tmp_path / "reports"
-    reports_dir.mkdir()
+    reports_dir = tmp_path / "reports" / "global"
+    reports_dir.mkdir(parents=True)
     (reports_dir / "revenue_report.yaml").write_text(
         "id: revenue_report\ntitle: Revenue Report\nsections:\n"
         "  - title: Revenue\n    query: {metrics: [revenue]}\n"

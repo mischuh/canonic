@@ -108,8 +108,8 @@ def test_validate_report_with_unresolvable_metric_fails(
     """S18 AC1: a report section referencing a metric that does not resolve fails, naming
     the report id and section index."""
     _write_valid_orders_project(project_dir)
-    (project_dir / "reports").mkdir(parents=True)
-    (project_dir / "reports" / "r.yaml").write_text(
+    (project_dir / "reports" / "global").mkdir(parents=True)
+    (project_dir / "reports" / "global" / "r.yaml").write_text(
         "id: r\ntitle: R\nsections:\n"
         "  - title: ok\n    query: {metrics: [revenue]}\n"
         "  - title: bad\n    query: {metrics: [does_not_resolve]}\n"
@@ -126,8 +126,8 @@ def test_validate_report_with_dangling_narrative_from_fails(
 ) -> None:
     """S18 AC2: a narrative_from pointing at a nonexistent knowledge page fails validation."""
     _write_valid_orders_project(project_dir)
-    (project_dir / "reports").mkdir(parents=True)
-    (project_dir / "reports" / "r.yaml").write_text(
+    (project_dir / "reports" / "global").mkdir(parents=True)
+    (project_dir / "reports" / "global" / "r.yaml").write_text(
         "id: r\ntitle: R\nsections:\n"
         "  - title: ok\n    query: {metrics: [revenue]}\n"
         "    narrative_from: does-not-exist\n"
@@ -140,8 +140,8 @@ def test_validate_report_with_dangling_narrative_from_fails(
 
 def test_validate_report_passes_alongside_contracts(runner: CliRunner, project_dir: Path) -> None:
     _write_valid_orders_project(project_dir)
-    (project_dir / "reports").mkdir(parents=True)
-    (project_dir / "reports" / "r.yaml").write_text(
+    (project_dir / "reports" / "global").mkdir(parents=True)
+    (project_dir / "reports" / "global" / "r.yaml").write_text(
         "id: r\ntitle: R\nsections:\n  - title: ok\n    query: {metrics: [revenue]}\n"
     )
 

@@ -80,20 +80,41 @@ def test_list_returns_all_sorted(tmp_path: Path) -> None:
     _write(
         tmp_path,
         "id: b_report\ntitle: B\nsections:\n  - title: s\n    query: {metrics: [revenue]}\n",
-        name="reports/b.yaml",
+        name="reports/global/b.yaml",
     )
     _write(
         tmp_path,
         "id: a_report\ntitle: A\nsections:\n  - title: s\n    query: {metrics: [revenue]}\n",
-        name="reports/a.yaml",
+        name="reports/global/a.yaml",
     )
     reports = list_reports(tmp_path)
-    assert [r.id for r in reports] == ["a_report", "b_report"]  # loaded in file-path sort order
+    # loaded in file-path sort order
+    assert [r.report.id for r in reports] == ["a_report", "b_report"]
+    assert all(r.scope.value == "global" and r.owner is None for r in reports)
 
 
-def test_list_rejects_duplicate_id(tmp_path: Path) -> None:
+def test_list_rejects_duplicate_id_in_same_namespace(tmp_path: Path) -> None:
     body = "id: dup\ntitle: T\nsections:\n  - title: s\n    query: {metrics: [revenue]}\n"
-    _write(tmp_path, body, name="reports/one.yaml")
-    _write(tmp_path, body, name="reports/two.yaml")
-    with pytest.raises(ReportError, match="duplicate report id 'dup'"):
+    _write(tmp_path, body, name="reports/global/one.yaml")
+    _write(tmp_path, body, name="reports/global/two.yaml")
+    with pytest.raises(ReportError, match="duplicate id 'dup'"):
+        list_reports(tmp_path)
+
+
+def test_list_allows_same_id_across_namespaces(tmp_path: Path) -> None:
+    """alice and bob (and a report vs. a query) may share an id — namespaced by directory."""
+    body = "id: shared\ntitle: T\nsections:\n  - title: s\n    query: {metrics: [revenue]}\n"
+    _write(tmp_path, body, name="reports/global/shared.yaml")
+    _write(tmp_path, body, name="reports/user/alice/shared.yaml")
+    _write(tmp_path, body, name="reports/user/bob/shared.yaml")
+    _write(tmp_path, body, name="reports/user/alice/queries/shared.yaml")
+    reports = list_reports(tmp_path)
+    assert len(reports) == 4
+
+
+def test_list_rejects_unscoped_flat_layout(tmp_path: Path) -> None:
+    """The pre-amendment flat reports/*.yaml layout is a clean break, not implicit global."""
+    body = "id: r\ntitle: T\nsections:\n  - title: s\n    query: {metrics: [revenue]}\n"
+    _write(tmp_path, body, name="reports/customer_report.yaml")
+    with pytest.raises(ReportError, match="unscoped or unrecognized"):
         list_reports(tmp_path)

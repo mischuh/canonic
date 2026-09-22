@@ -88,12 +88,12 @@ This happens because `contracts/policies/tenancy.yaml` sets `on_missing_principa
 | `client_id` | Claims | Role grants |
 | --- | --- | --- |
 | `byte-gadgets-viewer` | `merchant_id: byte-gadgets`, `roles: [merchant_viewer]` | `revenue`/`order_count`/`aov` only, scoped to Byte Gadgets, `customer_email`/`customer_phone` nominally denied (not enforced: see the closing warning) |
-| `byte-gadgets-admin` | `merchant_id: byte-gadgets`, `roles: [merchant_admin]` | Same metrics, scoped to Byte Gadgets, `customer_email` is **masked** (`partial`), `run_sql: true` but still refused (see "run_sql's two gates") |
+| `byte-gadgets-admin` | `merchant_id: byte-gadgets`, `roles: [merchant_admin]` | Same metrics, scoped to Byte Gadgets, `customer_email` is **masked** (`partial`), `run_sql: true` but still refused (see "run_sql's two gates"), may save/compose their own queries and reports (`manage_saved_content: true`) |
 | `urban-threads-viewer` | `merchant_id: urban-threads`, `roles: [merchant_viewer]` | Same as byte-gadgets-viewer, scoped to Urban Threads |
 | `urban-threads-admin` | `merchant_id: urban-threads`, `roles: [merchant_admin]` | Same as byte-gadgets-admin, scoped to Urban Threads |
-| `platform-ops` | `roles: [platform_analyst]` (no `merchant_id`) | `tenancy_exempt: true`, every metric (`allow: ["*"]`), every knowledge tag, `run_sql: true` and actually allowed |
+| `platform-ops` | `roles: [platform_analyst]` (no `merchant_id`) | `tenancy_exempt: true`, every metric (`allow: ["*"]`), every knowledge tag, `run_sql: true` and actually allowed, `manage_saved_content: true` |
 
-`merchant_admin` `inherits: merchant_viewer` (field-level override, not a list-merge): it re-opens `dimensions.deny` to `[]` and adds a `masking` rule instead.
+`merchant_admin` `inherits: merchant_viewer` (field-level override, not a list-merge): it re-opens `dimensions.deny` to `[]`, adds a `masking` rule, and grants `manage_saved_content` instead. `merchant_viewer` leaves `manage_saved_content` at its default `false` — a plain viewer may run ad hoc queries but not accumulate their own saved queries/personal reports (see [The `manage_saved_content` gate](/concepts/tenancy-and-access-control#the-manage_saved_content-gate)); `save_query`/`compose_report`/etc. as a `byte-gadgets-viewer` token fails with `tenant_forbidden` the same way `run_sql` does for that role.
 
 ## Querying as merchant A vs merchant B
 

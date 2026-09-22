@@ -298,3 +298,84 @@ def test_query_via_flag_resolves_ambiguous_join(
         ],
     )
     assert result.exit_code == 0, result.output
+
+
+class TestQuerySaveListDelete:
+    """S19-S21: ``canonic query save/list/delete`` — personal saved queries."""
+
+    def test_save_writes_and_reports_the_id(
+        self, runner: CliRunner, project_dir: Path, fake_connector: None
+    ) -> None:
+        result = runner.invoke(app, ["query", "save", "--metrics", "revenue", "--user", "alice"])
+        assert result.exit_code == 0, result.output
+        assert "saved" in result.output.lower()
+
+    def test_save_json_output_then_listable(
+        self, runner: CliRunner, project_dir: Path, fake_connector: None
+    ) -> None:
+        result = runner.invoke(
+            app,
+            [
+                "--json",
+                "query",
+                "save",
+                "--metrics",
+                "revenue",
+                "--title",
+                "Revenue",
+                "--user",
+                "alice",
+            ],
+        )
+        assert result.exit_code == 0, result.output
+        payload = json.loads(result.output)
+        assert payload["title"] == "Revenue"
+
+        listed = runner.invoke(app, ["--json", "query", "list", "--user", "alice"])
+        assert json.loads(listed.output)["queries"][0]["id"] == payload["id"]
+
+    def test_save_without_user_fails(
+        self, runner: CliRunner, project_dir: Path, fake_connector: None
+    ) -> None:
+        result = runner.invoke(app, ["query", "save", "--metrics", "revenue"])
+        assert result.exit_code != 0
+
+    def test_list_isolates_users(
+        self, runner: CliRunner, project_dir: Path, fake_connector: None
+    ) -> None:
+        runner.invoke(app, ["query", "save", "--metrics", "revenue", "--user", "alice"])
+        bob_listed = runner.invoke(app, ["--json", "query", "list", "--user", "bob"])
+        assert json.loads(bob_listed.output)["queries"] == []
+
+    def test_delete_removes_the_query(
+        self, runner: CliRunner, project_dir: Path, fake_connector: None
+    ) -> None:
+        saved = runner.invoke(
+            app, ["--json", "query", "save", "--metrics", "revenue", "--user", "alice"]
+        )
+        query_id = json.loads(saved.output)["id"]
+
+        result = runner.invoke(app, ["query", "delete", query_id, "--user", "alice"])
+        assert result.exit_code == 0, result.output
+
+        listed = runner.invoke(app, ["--json", "query", "list", "--user", "alice"])
+        assert json.loads(listed.output)["queries"] == []
+
+    def test_delete_refused_for_another_users_query(
+        self, runner: CliRunner, project_dir: Path, fake_connector: None
+    ) -> None:
+        saved = runner.invoke(
+            app, ["--json", "query", "save", "--metrics", "revenue", "--user", "alice"]
+        )
+        query_id = json.loads(saved.output)["id"]
+
+        result = runner.invoke(app, ["query", "delete", query_id, "--user", "bob"])
+        assert result.exit_code != 0
+
+    def test_bare_query_form_still_works_alongside_subcommands(
+        self, runner: CliRunner, project_dir: Path, fake_connector: None
+    ) -> None:
+        """The group-with-a-default-action shape must not break the pre-existing bare form."""
+        result = runner.invoke(app, ["query", "--metrics", "revenue"])
+        assert result.exit_code == 0, result.output
+        assert "1234.5" in result.output

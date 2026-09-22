@@ -21,10 +21,13 @@ from canonic.config import CanonicConfig, Connection, load_config
 from canonic.contracts import ContractResolver
 from canonic.core.assertions import AssertionService
 from canonic.core.context import ServiceContext
-from canonic.core.discovery import DiscoveryService
+from canonic.core.discovery import DiscoveryService, domain_for_metric
+from canonic.core.gitwrite import FilesystemContentWriter, GitContentWriter
 from canonic.core.knowledge import KnowledgeService
+from canonic.core.models import ReportRef
 from canonic.core.query import QueryService
 from canonic.core.reports import ReportService
+from canonic.core.saved import SavedContentService
 from canonic.instrumentation.events import AnswerEventLog, DiskAnswerEventLog, NullAnswerEventLog
 from canonic.semantic.loader import list_semantic_sources
 
@@ -39,13 +42,16 @@ if TYPE_CHECKING:
     from canonic.contracts.models import Assertion
     from canonic.contracts.principal import Principal
     from canonic.contracts.resolver import Binding
+    from canonic.core.gitwrite import ContentWriter
     from canonic.core.models import (
         MetricDetail,
         MetricSummary,
         OverviewResult,
         QueryResult,
         ReportRunResult,
+        ReportStructure,
         ReportSummary,
+        SavedQuerySummary,
     )
     from canonic.knowledge.results import SearchResult
     from canonic.semantic.models import SemanticSource
@@ -142,6 +148,12 @@ class CanonicService:
         self._query = QueryService(ctx, self._assertions)
         self._knowledge = KnowledgeService(ctx)
         self._reports = ReportService(ctx, self._query, self._knowledge)
+        writer: ContentWriter = (
+            GitContentWriter(project_root)
+            if project_root is not None
+            else FilesystemContentWriter()
+        )
+        self._saved = SavedContentService(ctx, self._query, writer)
 
     @property
     def resolver(self) -> ContractResolver:
@@ -192,13 +204,37 @@ class CanonicService:
         return self._discovery.describe_metric(name, principal=principal)
 
     def get_overview(
-        self, domain: str | None = None, *, principal: Principal | None = None
+        self,
+        domain: str | None = None,
+        *,
+        user: str | None = None,
+        principal: Principal | None = None,
     ) -> OverviewResult:
         """Return active metrics grouped by domain with sample questions (S12).
 
         Omits every metric outside ``principal``'s effective policy (SPEC-E12 §6, S15 AC1).
+
+        ``reports`` lists every report visible to ``user`` (``global/`` + their own scope,
+        never ``queries/``), each tagged with its scope (S24 AC2). When ``user`` is given, a
+        saved query carrying a ``question`` feeds its domain's ``sample_questions`` — it is not
+        itself listed under ``reports`` (S24 AC3).
         """
-        return self._discovery.get_overview(domain, principal=principal)
+        report_refs = [
+            ReportRef(id=s.id, title=s.title, scope=s.scope)
+            for s in self._reports.list_reports(domain, user=user)
+        ]
+        extra_questions: dict[str, list[str]] = {}
+        if user is not None:
+            for saved in self._saved.list_saved_queries(user=user):
+                if saved.question is None or not saved.metrics:
+                    continue
+                metric_domain = domain_for_metric(saved.metrics[0], self._resolver)
+                if metric_domain is None:
+                    continue
+                extra_questions.setdefault(metric_domain, []).append(saved.question)
+        return self._discovery.get_overview(
+            domain, principal=principal, reports=report_refs, extra_questions=extra_questions
+        )
 
     # ------------------------------------------------------------------
     # Query
@@ -308,9 +344,15 @@ class CanonicService:
     # Reports (AMENDMENT-curated-reports, P1)
     # ------------------------------------------------------------------
 
-    def list_reports(self, domain: str | None = None) -> list[ReportSummary]:
-        """Directory listing of committed reports (AMENDMENT-curated-reports)."""
-        return self._reports.list_reports(domain)
+    def list_reports(
+        self, domain: str | None = None, *, user: str | None = None
+    ) -> list[ReportSummary]:
+        """Directory listing of reports visible to ``user``: ``global/`` + their own scope.
+
+        Never includes ``queries/`` content — use ``list_saved_queries`` for that (S20 AC2,
+        S24 AC1).
+        """
+        return self._reports.list_reports(domain, user=user)
 
     async def run_report(
         self,
@@ -336,6 +378,83 @@ class CanonicService:
             principal=principal,
         )
 
+    def describe_report(self, report_id: str, *, user: str | None = None) -> ReportStructure:
+        """Return *report_id*'s section definitions (id, title, metrics, dimensions), unexecuted.
+
+        The read-only counterpart to ``run_report``: how to discover a section's stable ``id``
+        for ``update_report(remove_sections=...)`` without paying for query execution.
+        """
+        return self._reports.describe_report(report_id, user=user)
+
     def validate_reports(self) -> None:
         """Validate every committed report's sections compile and narrative refs resolve."""
         self._reports.validate_reports()
+
+    # ------------------------------------------------------------------
+    # Saved queries + personal reports (AMENDMENT-user-scoped-queries-reports, S19-S23, S25)
+    # ------------------------------------------------------------------
+
+    async def save_query(
+        self,
+        query: SemanticQuery,
+        *,
+        title: str | None = None,
+        question: str | None = None,
+        user: str | None = None,
+        principal: Principal | None = None,
+    ) -> SavedQuerySummary:
+        """Validate ``query`` compiles, then save it under the caller's own ``queries/`` (S19).
+
+        Raises :class:`~canonic.exc.TenantForbidden` when ``principal``'s role denies
+        ``manage_saved_content``.
+        """
+        return await self._saved.save_query(
+            query, title=title, question=question, user=user, principal=principal
+        )
+
+    def list_saved_queries(
+        self, *, user: str | None = None, principal: Principal | None = None
+    ) -> list[SavedQuerySummary]:
+        """Directory listing of the caller's own saved queries only (S20)."""
+        return self._saved.list_saved_queries(user=user, principal=principal)
+
+    async def delete_query(
+        self, query_id: str, *, user: str | None = None, principal: Principal | None = None
+    ) -> None:
+        """Remove one of the caller's own saved queries; refused outside their own scope (S21)."""
+        await self._saved.delete_query(query_id, user=user, principal=principal)
+
+    async def compose_report(
+        self,
+        title: str,
+        from_: list[str],
+        *,
+        user: str | None = None,
+        principal: Principal | None = None,
+    ) -> ReportSummary:
+        """Assemble N of the caller's own saved queries into a new personal report (S22)."""
+        return await self._saved.compose_report(title, from_, user=user, principal=principal)
+
+    async def update_report(
+        self,
+        report_id: str,
+        *,
+        add_from: list[str] | None = None,
+        remove_sections: list[str] | None = None,
+        user: str | None = None,
+        principal: Principal | None = None,
+    ) -> ReportSummary:
+        """Append and/or remove sections on an existing personal report in place (S25)."""
+        return await self._saved.update_report(
+            report_id,
+            add_from=add_from,
+            remove_sections=remove_sections,
+            user=user,
+            principal=principal,
+        )
+
+    async def delete_report(
+        self, report_id: str, *, user: str | None = None, principal: Principal | None = None
+    ) -> None:
+        """Remove one of the caller's own personal reports, never a query (S23)."""
+        await self._saved.delete_report(report_id, user=user, principal=principal)

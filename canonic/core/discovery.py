@@ -16,6 +16,7 @@ from canonic.core.models import (
     MetricRef,
     MetricSummary,
     OverviewResult,
+    ReportRef,
     SourceFreshnessOut,
 )
 from canonic.core.overview import questions_for_group
@@ -53,6 +54,19 @@ def _get_domain(binding: MetricBinding, resolver: ContractResolver) -> str:
         if src is not None:
             return src
     return metric
+
+
+def domain_for_metric(metric: str, resolver: ContractResolver) -> str | None:
+    """The owning domain for an active metric name, or ``None`` if it does not resolve.
+
+    Used to fold a saved query's ``question`` (S24 AC3) into the same domain grouping
+    ``get_overview`` already uses (:func:`_get_domain`) — a metric that no longer resolves (a
+    stale saved query) is silently skipped rather than raising.
+    """
+    for b in resolver.bindings_for(metric):
+        if b.metric == metric and b.status is Status.ACTIVE:
+            return _get_domain(b, resolver)
+    return None
 
 
 _ANONYMOUS_PRINCIPAL = Principal(tenant=None)
@@ -233,7 +247,12 @@ class DiscoveryService:
         )
 
     def get_overview(
-        self, domain: str | None = None, *, principal: Principal | None = None
+        self,
+        domain: str | None = None,
+        *,
+        principal: Principal | None = None,
+        reports: list[ReportRef] | None = None,
+        extra_questions: dict[str, list[str]] | None = None,
     ) -> OverviewResult:
         """Return active metrics grouped by domain with plain-language sample questions (S12).
 
@@ -243,6 +262,10 @@ class DiscoveryService:
 
         Omits every metric outside *principal*'s effective policy, and any domain group left
         with no visible metrics as a result (SPEC-E12 §6, S15 AC1).
+
+        ``reports`` (S24 AC2) and ``extra_questions`` (S24 AC3, domain name → additional
+        questions) are computed by the facade — this service stays free of any report/saved-query
+        knowledge — and are merged in verbatim.
         """
         effective_policy = self._ctx.resolver.authz_for(
             principal if principal is not None else _ANONYMOUS_PRINCIPAL
@@ -274,15 +297,19 @@ class DiscoveryService:
                         examples = list(b.examples)
                         break
                 metrics_with_examples.append((label, examples))
+            questions = questions_for_group(metrics_with_examples, dim_names)
+            questions.extend(
+                q for q in (extra_questions or {}).get(src_name, []) if q not in questions
+            )
             groups.append(
                 DomainGroup(
                     name=src_name,
                     metrics=metric_refs,
                     dimensions=dim_names,
-                    sample_questions=questions_for_group(metrics_with_examples, dim_names),
+                    sample_questions=questions,
                 )
             )
-        return OverviewResult(domains=groups)
+        return OverviewResult(domains=groups, reports=reports or [])
 
     def _reachable_dimensions(self, source_name: str) -> list[DimensionInfo]:
         """All dimensions queryable from *source_name* via its declared join graph.

@@ -1,6 +1,6 @@
 """FastMCP server — thin adapter over :class:`canonic.core.service.CanonicService` (SPEC E8 §4).
 
-This module registers the six P0 MCP tools. Each tool does transport translation
+This module registers the project's MCP tools. Each tool does transport translation
 only: parse arguments, call the service, serialise the result. No resolution,
 compilation, or execution logic lives here (SPEC §2.1).
 
@@ -107,8 +107,14 @@ _INSTRUCTIONS = (
     "when you do.\n\n"
     "NAMED REPORTS — if the user asks for a report by name (e.g. 'the customer report', "
     "'the management report', 'run my weekly report') rather than an ad-hoc question, call "
-    "list_reports() first to see what is committed, then run_report(report_id) instead of "
-    "reconstructing the sections yourself from list_metrics()/query().\n\n"
+    "list_reports() first to see what is visible (curated + the user's own personal reports), "
+    "then run_report(report_id) instead of reconstructing the sections yourself from "
+    "list_metrics()/query().\n\n"
+    "SAVING QUERIES AND PERSONAL REPORTS — if the user asks to save a query for later, or to "
+    "build their own report from queries they've already run, use save_query() and "
+    "compose_report() rather than telling them this isn't possible. These write to the "
+    "user's own scope, not the curated reports/ directory, and need no approval step. Always "
+    "pass the requesting user's identity as 'user' if you have it.\n\n"
     "RAW SQL (run_sql) — only use this when no metric/dimension in list_metrics() covers the "
     "question. Prefer query()/compile_query() whenever a metric exists: they route joins "
     "through the resolved join graph and apply guardrails (e.g. against fan-out from "
@@ -214,14 +220,16 @@ def build_server(
     @mcp.tool(
         description=(
             "Agent entry point: active metrics grouped by domain with plain-language sample "
-            "questions. Call this first to understand what is askable. "
+            "questions, plus a 'reports' list (curated + your own personal reports, each "
+            "tagged with its scope). Call this first to understand what is askable. "
             "Pass 'domain' to narrow to one owning-source group."
         )
     )
     @canonic_error_response
-    async def get_overview(domain: str | None = None) -> dict[str, Any]:
+    async def get_overview(domain: str | None = None, user: str | None = None) -> dict[str, Any]:
+        principal = _principal(service.resolver, session_principal)
         overview = service.get_overview(
-            domain=domain, principal=_principal(service.resolver, session_principal)
+            domain=domain, user=_effective_user(principal, user), principal=principal
         )
         return overview.model_dump(mode="json")
 
@@ -461,17 +469,40 @@ def build_server(
 
     @mcp.tool(
         description=(
-            "Discover curated reports maintained by the data team: a directory listing of "
-            "id, title, description, and owner for every committed report. Call this when a "
-            "user asks for a named report (e.g. 'the customer report', 'the management "
-            "report') rather than an ad-hoc question — then call run_report() with the "
-            "matching id. Pass 'domain' to narrow to one owning-source group."
+            "Discover reports: a directory listing of id, title, description, owner, and "
+            "scope ('global' for data-team curated, 'user:<id>' for your own personal ones) "
+            "for every report visible to you. Call this when a user asks for a named report "
+            "(e.g. 'the customer report', 'my Q1 report') rather than an ad-hoc question — "
+            "then call run_report() with the matching id. Never lists saved queries — see "
+            "list_saved_queries() for those. Pass 'domain' to narrow to one owning-source group. "
+            "For a report's section-level detail (titles, section ids, metrics, dimensions) "
+            "without running it, see describe_report()."
         )
     )
     @canonic_error_response
-    async def list_reports(domain: str | None = None) -> dict[str, Any]:
-        summaries = service.list_reports(domain=domain)
+    async def list_reports(domain: str | None = None, user: str | None = None) -> dict[str, Any]:
+        principal = _principal(service.resolver, session_principal)
+        summaries = service.list_reports(domain=domain, user=_effective_user(principal, user))
         return {"reports": [s.model_dump(mode="json") for s in summaries]}
+
+    # ------------------------------------------------------------------
+    # Tool: describe_report  (AMENDMENT-user-scoped-queries-reports, S25 follow-up)
+    # ------------------------------------------------------------------
+
+    @mcp.tool(
+        description=(
+            "Inspect a report's sections (title, stable section id, metrics, dimensions) "
+            "without running anything — no query execution, no cost. Use this, not "
+            "run_report(), when the only thing you need is a section's id for "
+            "update_report(remove_sections=...), or to answer 'what's in this report' without "
+            "pulling data."
+        )
+    )
+    @canonic_error_response
+    async def describe_report(report_id: str, user: str | None = None) -> dict[str, Any]:
+        principal = _principal(service.resolver, session_principal)
+        structure = service.describe_report(report_id, user=_effective_user(principal, user))
+        return structure.model_dump(mode="json")
 
     # ------------------------------------------------------------------
     # Tool: run_report  (AMENDMENT-curated-reports, P1)
@@ -513,5 +544,149 @@ def build_server(
             principal=principal,
         )
         return result.model_dump(mode="json")
+
+    # ------------------------------------------------------------------
+    # Tool: save_query  (AMENDMENT-user-scoped-queries-reports, S19)
+    # ------------------------------------------------------------------
+
+    @mcp.tool(
+        description=(
+            "Save a query (same dict shape as query()'s 'query' argument) for later reuse, "
+            "under your own personal scope — no data-team review required. Validates the "
+            "query compiles before saving. 'title' and 'question' (a plain-language phrasing, "
+            "surfaced later in get_overview()'s sample_questions) are both optional."
+        )
+    )
+    @canonic_error_response
+    async def save_query(
+        query: dict[str, Any],
+        title: str | None = None,
+        question: str | None = None,
+        user: str | None = None,
+    ) -> dict[str, Any]:
+        sq = SemanticQuery.model_validate(query)
+        principal = _principal(service.resolver, session_principal)
+        summary = await service.save_query(
+            sq,
+            title=title,
+            question=question,
+            user=_effective_user(principal, user),
+            principal=principal,
+        )
+        return summary.model_dump(mode="json")
+
+    # ------------------------------------------------------------------
+    # Tool: list_saved_queries  (AMENDMENT-user-scoped-queries-reports, S20)
+    # ------------------------------------------------------------------
+
+    @mcp.tool(
+        description=(
+            "List your own saved queries — never another user's, never a committed report. "
+            "Use the returned id with compose_report(), update_report(), or delete_query()."
+        )
+    )
+    @canonic_error_response
+    async def list_saved_queries(user: str | None = None) -> dict[str, Any]:
+        principal = _principal(service.resolver, session_principal)
+        summaries = service.list_saved_queries(
+            user=_effective_user(principal, user), principal=principal
+        )
+        return {"queries": [s.model_dump(mode="json") for s in summaries]}
+
+    # ------------------------------------------------------------------
+    # Tool: delete_query  (AMENDMENT-user-scoped-queries-reports, S21, S23)
+    # ------------------------------------------------------------------
+
+    @mcp.tool(
+        description=(
+            "Delete one of your own saved queries. Refused for another user's query or for a "
+            "committed/personal report id — never deletes a report."
+        )
+    )
+    @canonic_error_response
+    async def delete_query(query_id: str, user: str | None = None) -> dict[str, Any]:
+        principal = _principal(service.resolver, session_principal)
+        await service.delete_query(
+            query_id, user=_effective_user(principal, user), principal=principal
+        )
+        return {"deleted": query_id}
+
+    # ------------------------------------------------------------------
+    # Tool: compose_report  (AMENDMENT-user-scoped-queries-reports, S22)
+    # ------------------------------------------------------------------
+
+    @mcp.tool(
+        description=(
+            "Assemble two or more of your own saved queries (see list_saved_queries()) into "
+            "a new personal report, under your own scope. Each source query's definition is "
+            "copied in, frozen at compose time — later editing or deleting a source query "
+            "never changes this report. Returns the new report's id for run_report(). "
+            "query_ids must be a JSON array of saved-query id strings, e.g. "
+            'compose_report(title="Q1 summary", query_ids=["revenue-by-segment-a3f19c", '
+            '"churn-q1-88bd21"]) — not a single comma-joined string.'
+        )
+    )
+    @canonic_error_response
+    async def compose_report(
+        title: str, query_ids: list[str], user: str | None = None
+    ) -> dict[str, Any]:
+        principal = _principal(service.resolver, session_principal)
+        summary = await service.compose_report(
+            title, query_ids, user=_effective_user(principal, user), principal=principal
+        )
+        return summary.model_dump(mode="json")
+
+    # ------------------------------------------------------------------
+    # Tool: update_report  (AMENDMENT-user-scoped-queries-reports, S25)
+    # ------------------------------------------------------------------
+
+    @mcp.tool(
+        description=(
+            "Add and/or remove sections on one of your own existing personal reports, in "
+            "place — the report's id is unchanged. 'add_from' copies additional saved-query "
+            "sections onto the end (same freeze-at-copy-time semantics as compose_report). "
+            "'remove_sections' drops sections by their stable section id — call "
+            "describe_report(report_id) first to see each section's id (usually the same id "
+            "as the saved query it was composed from). Refused for a global report or "
+            "another user's personal report. Both add_from and remove_sections, when given, "
+            'must be JSON arrays of id strings, e.g. add_from=["new-metric-4f0a12"] — not a '
+            "single comma-joined string."
+        )
+    )
+    @canonic_error_response
+    async def update_report(
+        report_id: str,
+        add_from: list[str] | None = None,
+        remove_sections: list[str] | None = None,
+        user: str | None = None,
+    ) -> dict[str, Any]:
+        principal = _principal(service.resolver, session_principal)
+        summary = await service.update_report(
+            report_id,
+            add_from=add_from,
+            remove_sections=remove_sections,
+            user=_effective_user(principal, user),
+            principal=principal,
+        )
+        return summary.model_dump(mode="json")
+
+    # ------------------------------------------------------------------
+    # Tool: delete_report  (AMENDMENT-user-scoped-queries-reports, S23)
+    # ------------------------------------------------------------------
+
+    @mcp.tool(
+        description=(
+            "Delete one of your own personal reports. Never deletes the saved queries it was "
+            "composed from, and is refused for a global report, another user's report, or a "
+            "saved query id."
+        )
+    )
+    @canonic_error_response
+    async def delete_report(report_id: str, user: str | None = None) -> dict[str, Any]:
+        principal = _principal(service.resolver, session_principal)
+        await service.delete_report(
+            report_id, user=_effective_user(principal, user), principal=principal
+        )
+        return {"deleted": report_id}
 
     return mcp

@@ -30,6 +30,32 @@ CI (`.github/workflows/contract-schema-guard.yml`,
 
 ## History
 
+## 2.9 (2026-08-19) - MINOR
+
+- ADR/PR: this PR (feat(reports): user-scoped saved queries and personal reports,
+  AMENDMENT-user-scoped-queries-reports)
+- Summary: Extends `reports/` with a `global/` (unchanged, PR-reviewed) vs
+  `user/<id>/` (self-service) scope split, mirroring E6 §4's existing
+  `knowledge/global/` vs `knowledge/user/<id>/` pattern; `user/<id>/queries/` holds
+  atomic saved queries in a sub-path `delete_report` can never reach, and vice versa
+  for `delete_query`. Adds six additive capabilities — `save_query`,
+  `list_saved_queries`, `delete_query`, `compose_report`, `update_report`,
+  `delete_report` — plus matching CLI (`canonic query save/list/delete`, `canonic
+  report compose/update/delete`) and MCP adapters. `list_reports`/`get_overview` gain
+  a `user` parameter and scope-tag their results (`"global"` / `"user:<id>"`);
+  `get_overview` gains a `reports` field. `ReportSection` gains an optional `id`
+  (backward compatible: hand-authored `global/` sections may omit it) and `Report`
+  gains an optional `question`. `RoleDef` gains an additive `manage_saved_content: bool
+  = false` field (default preserves prior behavior when no role policy is loaded —
+  unrestricted, same posture as `run_sql`); the six new capabilities are gated by it,
+  fail-closed, reusing the existing `run_sql`-gate pattern and `TenantForbidden`. No
+  change to the four frozen P0 surfaces (`SemanticQuery`/`compile`, `QueryResult`,
+  error registry, resolver hooks); no new error codes — out-of-scope access reuses the
+  existing `unresolved` not-found handling, matching `ReportNotFound`, and the new role
+  gate reuses `TENANT_FORBIDDEN`. Classified MINOR under §4.1: every addition is purely
+  additive, and the pre-amendment flat `reports/*.yaml` layout is a clean-break
+  migration (not yet in general use) rather than a shape change to a shipped surface.
+
 ## 2.8 (2026-08-17) - MINOR
 
 - ADR/PR: this PR (feat(core): tenant scoping and role-based authorization error
