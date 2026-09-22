@@ -28,6 +28,9 @@ dependencies = [
 embeddings = [
     "sentence-transformers>=3.0",
 ]
+tasks = [
+    "fastmcp[tasks]",
+]
 
 [project.scripts]
 canonic = "canonic.cli.app:app"
@@ -67,6 +70,13 @@ ignore_missing_imports = false
 # checkout without the extra installed must still type-check.
 [[tool.mypy.overrides]]
 module = ["boto3", "botocore.*"]
+ignore_missing_imports = true
+
+# fastmcp[tasks] (the fastmcp_tasks distribution) is an optional extra scoped to the
+# http profile's background-task support. build_server imports it lazily behind a
+# clear install error, so a checkout without the extra installed must still type-check.
+[[tool.mypy.overrides]]
+module = ["fastmcp_tasks", "fastmcp_tasks.*"]
 ignore_missing_imports = true
 
 [tool.ruff]

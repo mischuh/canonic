@@ -195,6 +195,23 @@ def start(
                 raise typer.Exit(1)
             auth_mechanisms = describe_auth_mechanisms(cfg.mcp.auth, extra_token_ref=token_ref)
 
+            if cfg.mcp.tasks.enabled:
+                import importlib.util
+
+                if importlib.util.find_spec("fastmcp_tasks") is None:
+                    msg = (
+                        "mcp.tasks.enabled is set, but the tasks extra is not installed — run "
+                        'pip install "canonic[tasks]"'
+                    )
+                    if json_output:
+                        typer.echo(json.dumps({"error": msg}))
+                    else:
+                        # msg names a pip extra (canonic[tasks]) — print it unmarked so
+                        # rich doesn't parse the brackets as a markup tag and eat them.
+                        _console.print("[red]error:[/red]", end=" ")
+                        _console.print(msg, markup=False)
+                    raise typer.Exit(1)
+
             if child:
                 # Already the detached process spawned by start_http (via `--_child`):
                 # run in the foreground, don't spawn yet another child.
@@ -209,6 +226,8 @@ def start(
                     auth=auth,
                     suggestions=suggestions,
                     claim_mapping=claim_mapping,
+                    tasks=cfg.mcp.tasks.enabled,
+                    tasks_url=cfg.mcp.tasks.url,
                 )
                 return
 
@@ -237,7 +256,11 @@ def start(
         if json_output:
             typer.echo(json.dumps({"error": msg}))
         else:
-            _console.print(f"[red]error:[/red] {msg}")
+            # msg is exception text from deeper in the stack and may itself contain
+            # square brackets (e.g. a pip extra like canonic[tasks]) — print it
+            # unmarked so rich doesn't parse them as a markup tag and eat them.
+            _console.print("[red]error:[/red]", end=" ")
+            _console.print(msg, markup=False)
         raise typer.Exit(1) from exc
 
 
