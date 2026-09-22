@@ -208,6 +208,9 @@ mcp:
       claim_mapping:                                        # tenancy/RBAC only
         merchant_id: https://example.com/merchant_id
         roles: roles
+      identity_assertion:                                   # proxy mode only, headless/agentic clients
+        trusted_issuers: [https://login.acme-corp.com]
+        audience: canonic-mcp
 ```
 
 | Field | Type | Default | Governs |
@@ -227,6 +230,9 @@ mcp:
 | `auth.oauth.jwks_uri` | `str \| null` | `null` | `jwt` mode only. Skips OIDC discovery for IdPs that don't publish `/.well-known/openid-configuration`. |
 | `auth.oauth.verify_id_token` | `bool` | `false` | `proxy` mode only. Verifies the upstream OIDC *id_token* instead of the *access_token*. Rejected in `jwt` mode. See below. |
 | `auth.oauth.claim_mapping` | `dict[str, str]` | `{}` | Maps a [tenancy/role policy](/concepts/tenancy-and-access-control)'s raw `claim` name (e.g. `merchant_id`) to the namespaced claim key the IdP actually issues (e.g. `https://example.com/merchant_id`), which most IdPs require for custom claims. A `claim` absent from this mapping is looked up under its own name unchanged. |
+| `auth.oauth.identity_assertion` | `McpIdentityAssertionConfig \| null` | `null` | `proxy` mode only. Accepts an IdP-signed identity assertion (SEP-990 ID-JAG) in place of the interactive Authorization Code + PKCE flow, for headless/agentic clients that already hold an established identity from the IdP. Rejected in `jwt` mode. |
+| `auth.oauth.identity_assertion.trusted_issuers` | `list[str]` | n/a (required, non-empty) | Issuer (`iss`) values the proxy accepts on an assertion. Each entry must start with `http://` or `https://`. |
+| `auth.oauth.identity_assertion.audience` | `str \| null` | `null` | Expected `aud` value on the assertion. Defaults to this daemon's own issuer identifier when omitted. |
 
 This block only matters for `canonic mcp start --transport http`. The default `stdio` transport is a local subprocess and needs no auth, process-level trust is enough. `http` transport is network-reachable, though, so it refuses to start unless at least one mechanism resolves: a token here (or via the `--token-ref` CLI override) and/or `auth.oauth`. When both are configured, a request is checked against the static token map first (no network call), falling through to OAuth verification if no static token matches: the two stay independently revocable, a token entry by editing `canonic.yaml`, an OAuth-issued token at the IdP. `canonic mcp status` reports which mechanism(s) are active on a running daemon. See [Connecting your agent](/mcp-integration/connecting-your-agent#remote-enterprise-deployment) for the full remote-deployment walkthrough.
 

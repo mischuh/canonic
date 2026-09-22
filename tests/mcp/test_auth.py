@@ -9,7 +9,13 @@ from fastmcp.server.auth.auth import AccessToken, AuthProvider
 from fastmcp.server.auth.oidc_proxy import OIDCConfiguration, OIDCProxy
 from fastmcp.server.auth.providers.jwt import JWTVerifier
 
-from canonic.config import McpAuthConfig, McpOAuthConfig, McpOAuthMode, McpTokenEntry
+from canonic.config import (
+    McpAuthConfig,
+    McpIdentityAssertionConfig,
+    McpOAuthConfig,
+    McpOAuthMode,
+    McpTokenEntry,
+)
 from canonic.contracts.models import RolePolicy, TenancyPolicy
 from canonic.exc import CredentialError
 from canonic.mcp.auth import (
@@ -242,6 +248,57 @@ class TestBuildOAuthVerifier:
         # id_token verification is on: needed for IdPs with opaque access tokens
         # (Google, GitHub, ...) and for client_id to be a meaningful identity claim.
         assert verifier._uses_alternate_verification() is True
+
+    def test_proxy_mode_without_identity_assertion_leaves_it_unset(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("CANONIC_TEST_OAUTH_SECRET", "oauth-client-secret")
+        _stub_discovery(
+            monkeypatch,
+            issuer="https://idp.example.com",
+            authorization_endpoint="https://idp.example.com/authorize",
+            token_endpoint="https://idp.example.com/token",
+            jwks_uri="https://idp.example.com/jwks.json",
+        )
+        config = McpOAuthConfig(
+            mode=McpOAuthMode.PROXY,
+            issuer_url="https://idp.example.com",
+            client_id="canonic-mcp",
+            client_secret_ref="env:CANONIC_TEST_OAUTH_SECRET",
+            base_url="https://canonic.internal.example.com",
+        )
+        verifier = build_oauth_verifier(config)
+        assert isinstance(verifier, OIDCProxy)
+        assert verifier._identity_assertion is None
+
+    def test_proxy_mode_wires_identity_assertion(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """S20 AC3 — a configured ``identity_assertion`` reaches ``OIDCProxy`` so the
+        proxy accepts an IdP-signed assertion (SEP-990 ID-JAG) in addition to the
+        interactive flow, for headless/agentic clients."""
+        monkeypatch.setenv("CANONIC_TEST_OAUTH_SECRET", "oauth-client-secret")
+        _stub_discovery(
+            monkeypatch,
+            issuer="https://idp.example.com",
+            authorization_endpoint="https://idp.example.com/authorize",
+            token_endpoint="https://idp.example.com/token",
+            jwks_uri="https://idp.example.com/jwks.json",
+        )
+        config = McpOAuthConfig(
+            mode=McpOAuthMode.PROXY,
+            issuer_url="https://idp.example.com",
+            client_id="canonic-mcp",
+            client_secret_ref="env:CANONIC_TEST_OAUTH_SECRET",
+            base_url="https://canonic.internal.example.com",
+            identity_assertion=McpIdentityAssertionConfig(
+                trusted_issuers=["https://login.acme-corp.com"], audience="canonic-mcp"
+            ),
+        )
+        verifier = build_oauth_verifier(config)
+        assert isinstance(verifier, OIDCProxy)
+        assertion = verifier._identity_assertion
+        assert assertion is not None
+        assert assertion.trusted_issuers == ["https://login.acme-corp.com"]
+        assert assertion.audience == "canonic-mcp"
 
 
 class _RecordingOAuthProvider(AuthProvider):

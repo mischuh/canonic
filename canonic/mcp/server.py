@@ -44,13 +44,18 @@ def _caller_id() -> str | None:
 
 
 def _principal(
-    resolver: ContractResolver, session_principal: Principal | None = None
+    resolver: ContractResolver,
+    session_principal: Principal | None = None,
+    claim_mapping: dict[str, str] | None = None,
 ) -> Principal | None:
     """The verified Principal for the current request (SPEC-E12 §5).
 
     Under ``http`` transport, derived exclusively from this request's verified
     :class:`AccessToken` claims via ``resolver.tenancy_policy`` / ``resolver.role_policy`` —
-    never from anything the caller supplies in the tool call itself. ``stdio`` has no
+    never from anything the caller supplies in the tool call itself. ``claim_mapping``
+    (``mcp.auth.oauth.claim_mapping``, see ``build_server``) resolves a namespaced IdP
+    claim key to the policy's own ``claim`` name; unused for a static-token caller, whose
+    ``claims`` dict is already keyed by the policy's own names. ``stdio`` has no
     per-request auth to derive from at all, so ``session_principal`` (bound once for the
     whole session from ``canonic mcp start --tenant <id>``, see ``build_server``) is used
     instead — ``None`` there means the project has no tenancy/role policy configured (the
@@ -60,7 +65,12 @@ def _principal(
     token = get_access_token()
     if token is None:
         return session_principal
-    return principal_from_token(token, tenancy=resolver.tenancy_policy, roles=resolver.role_policy)
+    return principal_from_token(
+        token,
+        tenancy=resolver.tenancy_policy,
+        roles=resolver.role_policy,
+        claim_mapping=claim_mapping,
+    )
 
 
 def _effective_user(principal: Principal | None, user: str | None) -> str | None:
@@ -156,6 +166,7 @@ def build_server(
     suggestions: bool = False,
     auth: AuthProvider | None = None,
     session_principal: Principal | None = None,
+    claim_mapping: dict[str, str] | None = None,
 ) -> FastMCP:
     """Return a :class:`FastMCP` instance with all P0 tools registered against *service*.
 
@@ -169,6 +180,11 @@ def build_server(
     bound once for the whole session from ``canonic mcp start --tenant <id>`` (SPEC-E12
     §5, §7), since ``stdio`` has no per-request auth to derive one from. Ignored under
     ``http``, where every request derives its own principal from its verified token.
+
+    ``claim_mapping`` is ``mcp.auth.oauth.claim_mapping`` (SPEC-E12 §7): the ``http``/OAuth
+    counterpart to ``session_principal``, resolving a namespaced IdP claim key to a
+    tenancy/role policy's own ``claim`` name for every request's derived
+    :class:`Principal`. Unused under ``stdio`` or a static-token caller.
     """
     mcp: FastMCP = FastMCP(
         "canonic", version=CANONIC_VERSION, instructions=_INSTRUCTIONS, auth=auth
@@ -228,7 +244,7 @@ def build_server(
     @canonic_error_response
     async def get_overview(domain: str | None = None) -> dict[str, Any]:
         overview = service.get_overview(
-            domain=domain, principal=_principal(service.resolver, session_principal)
+            domain=domain, principal=_principal(service.resolver, session_principal, claim_mapping)
         )
         return overview.model_dump(mode="json")
 
@@ -247,7 +263,9 @@ def build_server(
     )
     @canonic_error_response
     async def list_metrics() -> dict[str, Any]:
-        summaries = service.list_metrics(principal=_principal(service.resolver, session_principal))
+        summaries = service.list_metrics(
+            principal=_principal(service.resolver, session_principal, claim_mapping)
+        )
         dim_catalog: dict[str, dict[str, Any]] = {}
         metrics_out: list[dict[str, Any]] = []
         for s in summaries:
@@ -269,7 +287,7 @@ def build_server(
     @canonic_error_response
     async def describe_metric(name: str) -> dict[str, Any]:
         detail = service.describe_metric(
-            name, principal=_principal(service.resolver, session_principal)
+            name, principal=_principal(service.resolver, session_principal, claim_mapping)
         )
         return detail.model_dump(mode="json")
 
@@ -286,7 +304,9 @@ def build_server(
     @canonic_error_response
     async def resolve_metric(name: str, context: str | None = None) -> dict[str, Any]:
         binding = service.resolve_metric(
-            name, context=context, principal=_principal(service.resolver, session_principal)
+            name,
+            context=context,
+            principal=_principal(service.resolver, session_principal, claim_mapping),
         )
         return {
             "metric": binding.metric,
@@ -326,7 +346,7 @@ def build_server(
     async def compile_query(query: dict[str, Any]) -> dict[str, Any]:
         sq = SemanticQuery.model_validate(query)
         result = service.compile_query(
-            sq, principal=_principal(service.resolver, session_principal)
+            sq, principal=_principal(service.resolver, session_principal, claim_mapping)
         )
         response = CompileOutput.from_compile_result(result).model_dump(mode="json")
         if suggestions:
@@ -368,7 +388,9 @@ def build_server(
     async def query(query: dict[str, Any]) -> dict[str, Any]:
         sq = SemanticQuery.model_validate(query)
         result = await service.query(
-            sq, caller=_caller_id(), principal=_principal(service.resolver, session_principal)
+            sq,
+            caller=_caller_id(),
+            principal=_principal(service.resolver, session_principal, claim_mapping),
         )
         response = result.model_dump(mode="json")
         if suggestions:
@@ -393,7 +415,7 @@ def build_server(
             sql,
             connection=connection,
             caller=_caller_id(),
-            principal=_principal(service.resolver, session_principal),
+            principal=_principal(service.resolver, session_principal, claim_mapping),
         )
         return result.model_dump(mode="json")
 
@@ -418,7 +440,7 @@ def build_server(
         user: str | None = None,
         limit: int = 5,
     ) -> dict[str, Any]:
-        principal = _principal(service.resolver, session_principal)
+        principal = _principal(service.resolver, session_principal, claim_mapping)
         result = service.search_knowledge(
             query, user=_effective_user(principal, user), limit=limit, principal=principal
         )
@@ -457,7 +479,7 @@ def build_server(
     )
     @canonic_error_response
     async def read_knowledge_page(page: str, user: str | None = None) -> dict[str, Any]:
-        principal = _principal(service.resolver, session_principal)
+        principal = _principal(service.resolver, session_principal, claim_mapping)
         return service.read_knowledge_page(
             page, user=_effective_user(principal, user), principal=principal
         )
@@ -509,7 +531,7 @@ def build_server(
     ) -> dict[str, Any]:
         from datetime import datetime
 
-        principal = _principal(service.resolver, session_principal)
+        principal = _principal(service.resolver, session_principal, claim_mapping)
         parsed_as_of = datetime.fromisoformat(as_of) if as_of is not None else None
         result = await service.run_report(
             report_id,

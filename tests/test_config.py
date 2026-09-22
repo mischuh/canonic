@@ -541,6 +541,91 @@ class TestMcpOAuthConfig:
         assert cfg.mcp.auth.oauth is not None
         assert cfg.mcp.auth.oauth.verify_id_token is False
 
+    def test_identity_assertion_defaults_to_none(self, tmp_path: Path) -> None:
+        content = (
+            _VALID
+            + "mcp:\n"
+            + "  auth:\n"
+            + "    oauth:\n"
+            + "      mode: proxy\n"
+            + "      issuer_url: https://idp.example.com\n"
+            + "      client_id: canonic-mcp\n"
+            + "      base_url: https://canonic.internal.example.com\n"
+        )
+        cfg = load_config(_canonic_yaml(tmp_path, content))
+        assert cfg.mcp.auth.oauth is not None
+        assert cfg.mcp.auth.oauth.identity_assertion is None
+
+    def test_identity_assertion_parsed(self, tmp_path: Path) -> None:
+        content = (
+            _VALID
+            + "mcp:\n"
+            + "  auth:\n"
+            + "    oauth:\n"
+            + "      mode: proxy\n"
+            + "      issuer_url: https://idp.example.com\n"
+            + "      client_id: canonic-mcp\n"
+            + "      base_url: https://canonic.internal.example.com\n"
+            + "      identity_assertion:\n"
+            + "        trusted_issuers: [https://login.acme-corp.com]\n"
+            + "        audience: canonic-mcp\n"
+        )
+        cfg = load_config(_canonic_yaml(tmp_path, content))
+        assert cfg.mcp.auth.oauth is not None
+        assertion = cfg.mcp.auth.oauth.identity_assertion
+        assert assertion is not None
+        assert assertion.trusted_issuers == ["https://login.acme-corp.com"]
+        assert assertion.audience == "canonic-mcp"
+
+    def test_identity_assertion_requires_at_least_one_issuer(self, tmp_path: Path) -> None:
+        content = (
+            _VALID
+            + "mcp:\n"
+            + "  auth:\n"
+            + "    oauth:\n"
+            + "      mode: proxy\n"
+            + "      issuer_url: https://idp.example.com\n"
+            + "      client_id: canonic-mcp\n"
+            + "      base_url: https://canonic.internal.example.com\n"
+            + "      identity_assertion:\n"
+            + "        trusted_issuers: []\n"
+        )
+        with pytest.raises(ConfigError) as exc_info:
+            load_config(_canonic_yaml(tmp_path, content))
+        assert "trusted_issuers" in str(exc_info.value)
+
+    def test_identity_assertion_rejects_non_http_issuer(self, tmp_path: Path) -> None:
+        content = (
+            _VALID
+            + "mcp:\n"
+            + "  auth:\n"
+            + "    oauth:\n"
+            + "      mode: proxy\n"
+            + "      issuer_url: https://idp.example.com\n"
+            + "      client_id: canonic-mcp\n"
+            + "      base_url: https://canonic.internal.example.com\n"
+            + "      identity_assertion:\n"
+            + "        trusted_issuers: [login.acme-corp.com]\n"
+        )
+        with pytest.raises(ConfigError) as exc_info:
+            load_config(_canonic_yaml(tmp_path, content))
+        assert "trusted_issuers" in str(exc_info.value)
+
+    def test_jwt_mode_rejects_identity_assertion(self, tmp_path: Path) -> None:
+        content = (
+            _VALID
+            + "mcp:\n"
+            + "  auth:\n"
+            + "    oauth:\n"
+            + "      mode: jwt\n"
+            + "      issuer_url: https://idp.example.com\n"
+            + "      identity_assertion:\n"
+            + "        trusted_issuers: [https://login.acme-corp.com]\n"
+        )
+        with pytest.raises(ConfigError) as exc_info:
+            load_config(_canonic_yaml(tmp_path, content))
+        assert "identity_assertion" in str(exc_info.value)
+
 
 class TestLLMProviders:
     """Multi-provider ``llm.provider`` validation (SPEC-E10 §2)."""
@@ -703,6 +788,42 @@ class TestAirGapped:
             + "    oauth:\n"
             + "      mode: jwt\n"
             + "      issuer_url: http://localhost:9000\n"
+            + "runtime:\n  air_gapped: true\n"
+        )
+        cfg = load_config(_canonic_yaml(tmp_path, content))
+        assert cfg.mcp.auth.oauth is not None
+
+    def test_air_gapped_blocks_public_identity_assertion_issuer(self, tmp_path: Path) -> None:
+        content = (
+            _VALID
+            + "mcp:\n"
+            + "  auth:\n"
+            + "    oauth:\n"
+            + "      mode: proxy\n"
+            + "      issuer_url: http://localhost:9000\n"
+            + "      client_id: canonic-mcp\n"
+            + "      base_url: http://localhost:9001\n"
+            + "      identity_assertion:\n"
+            + "        trusted_issuers: [https://login.acme-corp.com]\n"
+            + "runtime:\n  air_gapped: true\n"
+        )
+        with pytest.raises(AirGappedViolation) as exc:
+            load_config(_canonic_yaml(tmp_path, content))
+        assert exc.value.exit_code == 18
+        assert "mcp.auth.oauth.identity_assertion.trusted_issuers" in str(exc.value)
+
+    def test_air_gapped_allows_local_identity_assertion_issuer(self, tmp_path: Path) -> None:
+        content = (
+            _VALID
+            + "mcp:\n"
+            + "  auth:\n"
+            + "    oauth:\n"
+            + "      mode: proxy\n"
+            + "      issuer_url: http://localhost:9000\n"
+            + "      client_id: canonic-mcp\n"
+            + "      base_url: http://localhost:9001\n"
+            + "      identity_assertion:\n"
+            + "        trusted_issuers: [http://localhost:9000]\n"
             + "runtime:\n  air_gapped: true\n"
         )
         cfg = load_config(_canonic_yaml(tmp_path, content))

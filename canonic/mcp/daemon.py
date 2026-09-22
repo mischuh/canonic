@@ -398,6 +398,7 @@ def serve_http_foreground(
     *,
     auth: AuthProvider,
     suggestions: bool = False,
+    claim_mapping: dict[str, str] | None = None,
 ) -> None:
     """Run the uvicorn HTTP daemon in the current process (blocks until stopped).
 
@@ -405,6 +406,10 @@ def serve_http_foreground(
     (``canonic mcp start --transport http --_child``) — that process was created via
     ``exec()``, not ``os.fork()``, so it is safe here to touch DNS/TLS/logging from any
     thread. Do not call this directly from a long-lived multi-threaded process.
+
+    ``claim_mapping`` is ``cfg.mcp.auth.oauth.claim_mapping`` (SPEC-E12 §7), resolved by
+    the caller (which already has ``cfg`` in scope) and forwarded into ``build_server``
+    so every request's derived ``Principal`` reads namespaced IdP claims correctly.
     """
     from canonic.config import load_config
     from canonic.log import _effective_log_params, configure_logging
@@ -419,7 +424,12 @@ def serve_http_foreground(
         level, file, format = _effective_log_params("WARNING", None)
     configure_logging(level=level, file=file, format=format)
 
-    mcp = build_server(service, suggestions=suggestions, auth=auth)  # type: ignore[arg-type]
+    mcp = build_server(
+        service,  # type: ignore[arg-type]
+        suggestions=suggestions,
+        auth=auth,
+        claim_mapping=claim_mapping,
+    )
     import asyncio
 
     # stateless_http=True: no session IDs are issued or expected, so restarting the

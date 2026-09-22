@@ -16,6 +16,7 @@ from canonic.contracts.models import (
     CanonicalRef,
     MetricBinding,
     RolePolicy,
+    ScopedSource,
     Status,
     TenancyPolicy,
 )
@@ -90,6 +91,52 @@ def _ambiguous_service(monkeypatch: pytest.MonkeyPatch) -> CanonicService:
         }
     )
     return CanonicService(config=config, resolver=resolver, sources=[owner, hop_a, hop_b, dim])
+
+
+def _tenancy_service(
+    orders_source: SemanticSource, monkeypatch: pytest.MonkeyPatch
+) -> CanonicService:
+    """A CanonicService with 'orders' tenant-scoped on its 'region' column.
+
+    Reuses the shared ``orders_source`` fixture's existing 'region' column as the
+    tenant-scoping column rather than declaring a new source, since only the wiring
+    (not the real-world column semantics) is under test here.
+    """
+    monkeypatch.setenv("PG_PASSWORD", "testpw")
+    binding = MetricBinding(
+        metric="revenue",
+        canonical=CanonicalRef(source="orders", measure="total_revenue"),
+        status=Status.ACTIVE,
+    )
+    resolver = ContractResolver(
+        bindings=[binding],
+        guardrails=[],
+        tenancy=TenancyPolicy(
+            schema="tenancy/v1",
+            claim="merchant_id",
+            scoped_sources=[ScopedSource(source="orders", column="region")],
+        ),
+    )
+    config = CanonicConfig.model_validate(
+        {
+            "version": 1,
+            "project": {"name": "test", "default_connection": "warehouse_pg"},
+            "connections": [
+                {
+                    "id": "warehouse_pg",
+                    "type": "postgres",
+                    "params": {
+                        "host": "localhost",
+                        "port": 5432,
+                        "dbname": "testdb",
+                        "user": "test",
+                    },
+                    "credentials_ref": "env:PG_PASSWORD",
+                }
+            ],
+        }
+    )
+    return CanonicService(config=config, resolver=resolver, sources=[orders_source])
 
 
 def test_build_server_defaults_to_no_auth(canonic_service: CanonicService) -> None:
@@ -312,3 +359,107 @@ class TestPrincipal:
         assert principal is not None
         assert principal.tenant == "4711"
         assert principal.roles == ("merchant_viewer",)
+
+    def test_claim_mapping_resolves_namespaced_claim(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """S21 AC1 regression: ``_principal`` previously dropped ``claim_mapping``
+        entirely, so a namespaced IdP claim never resolved even when configured
+        (AMENDMENT-fastmcp4-adoption §3.3)."""
+        resolver = ContractResolver(
+            bindings=[],
+            guardrails=[],
+            tenancy=TenancyPolicy(
+                schema="tenancy/v1", claim="merchant_id", scoped_sources=[], shared_sources=[]
+            ),
+        )
+        token = AccessToken(
+            token="t",
+            client_id="merchant-4711-agent",
+            scopes=[],
+            claims={"https://example.com/merchant_id": "4711"},
+        )
+        monkeypatch.setattr("canonic.mcp.server.get_access_token", lambda: token)
+        principal = _principal(
+            resolver, claim_mapping={"merchant_id": "https://example.com/merchant_id"}
+        )
+        assert principal is not None
+        assert principal.tenant == "4711"
+
+
+class TestClaimMappingWiring:
+    """S21 AC1 — ``build_server(..., claim_mapping=...)`` reaches every tool call's
+    derived ``Principal``, end to end through the FastMCP ``Client``. Regression
+    coverage for the broken pass-through: the roles/tenancy claim was already read
+    correctly by ``principal_from_token`` (see ``TestPrincipalFromToken`` in
+    ``tests/mcp/test_auth.py``), but ``build_server``/``_principal`` never forwarded
+    ``claim_mapping`` to it before this fix, so a namespaced IdP claim silently
+    resolved to no tenant/roles in production.
+    """
+
+    @pytest.mark.asyncio
+    async def test_namespaced_tenant_claim_resolved_via_claim_mapping(
+        self, orders_source: SemanticSource, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        service = _tenancy_service(orders_source, monkeypatch)
+        token = AccessToken(
+            token="t",
+            client_id="merchant-4711-agent",
+            scopes=[],
+            claims={"https://example.com/merchant_id": "4711"},
+        )
+        monkeypatch.setattr("canonic.mcp.server.get_access_token", lambda: token)
+        mcp = build_server(
+            service, claim_mapping={"merchant_id": "https://example.com/merchant_id"}
+        )
+        async with Client(mcp) as client:
+            result = await client.call_tool("compile_query", {"query": {"metrics": ["revenue"]}})
+        assert result.data["metadata"]["scope"]["tenant"] == "4711"
+        assert '"orders"."region" = \'4711\'' in result.data["compiled"]["sql"]
+
+    @pytest.mark.asyncio
+    async def test_without_claim_mapping_namespaced_claim_is_unresolved(
+        self, orders_source: SemanticSource, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Without ``claim_mapping``, the namespaced key never matches ``merchant_id``,
+        so the tenant is unresolved and refused under the default
+        ``on_missing_principal: deny`` — the exact failure this PR fixes."""
+        service = _tenancy_service(orders_source, monkeypatch)
+        token = AccessToken(
+            token="t",
+            client_id="merchant-4711-agent",
+            scopes=[],
+            claims={"https://example.com/merchant_id": "4711"},
+        )
+        monkeypatch.setattr("canonic.mcp.server.get_access_token", lambda: token)
+        mcp = build_server(service)  # no claim_mapping
+        async with Client(mcp) as client:
+            result = await client.call_tool("compile_query", {"query": {"metrics": ["revenue"]}})
+        assert result.data["code"] == "tenant_unresolved"
+
+    @pytest.mark.asyncio
+    async def test_tool_listing_is_not_filtered_by_role(
+        self, orders_source: SemanticSource, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """S21 AC2 — role-based authorization gates what a query can *read*, never
+        which tools the adapter advertises. A caller with no role at all still sees
+        every tool; a metric-level deny (``ContractResolver.authz_for``) is enforced
+        inside the tool body on the next call, not by hiding the tool itself."""
+        service = _tenancy_service(orders_source, monkeypatch)
+        mcp = build_server(service)
+        async with Client(mcp) as client:
+            tools = await client.list_tools()
+        names = {t.name for t in tools}
+        assert names == {
+            "contract_info",
+            "negotiate_contract",
+            "get_overview",
+            "list_metrics",
+            "describe_metric",
+            "resolve_metric",
+            "compile_query",
+            "query",
+            "run_sql",
+            "search_knowledge",
+            "read_knowledge_page",
+            "list_reports",
+            "run_report",
+        }
