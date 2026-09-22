@@ -22,6 +22,7 @@ from canonic.contract import CONTRACT_SCHEMA
 from canonic.core.models import CompileOutput
 from canonic.mcp.auth import principal_from_token
 from canonic.mcp.errors import canonic_error_response
+from canonic.mcp.extensions import ContractExtension
 
 if TYPE_CHECKING:
     from fastmcp.server.auth.auth import AuthProvider
@@ -172,6 +173,7 @@ def build_server(
     mcp: FastMCP = FastMCP(
         "canonic", version=CANONIC_VERSION, instructions=_INSTRUCTIONS, auth=auth
     )
+    mcp.add_extension(ContractExtension())
 
     # ------------------------------------------------------------------
     # Tool: list_metrics
@@ -181,7 +183,10 @@ def build_server(
         description=(
             "Return the serving contract version and Canonic package version this daemon "
             "runs. Call this at session start to confirm compatibility and check whether the "
-            "daemon is up to date (relevant when launched via uvx)."
+            "daemon is up to date (relevant when launched via uvx). Clients that support the "
+            "'app.getcanonic/contract' MCP extension get the same version advertised in "
+            "capabilities and enforced per request without an extra call; this tool is the "
+            "fallback for clients that do not."
         )
     )
     async def contract_info() -> dict[str, str]:
@@ -194,7 +199,9 @@ def build_server(
     @mcp.tool(
         description=(
             "Declare the contract_schema MAJOR your client was built against. "
-            "The daemon accepts iff client MAJOR == server MAJOR; otherwise fails fast."
+            "The daemon accepts iff client MAJOR == server MAJOR; otherwise fails fast. "
+            "Fallback for clients that do not support the 'app.getcanonic/contract' MCP "
+            "extension, which enforces the same rule per request without an extra call."
         )
     )
     async def negotiate_contract(contract_major: int) -> dict[str, Any]:

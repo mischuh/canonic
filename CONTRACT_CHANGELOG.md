@@ -30,6 +30,16 @@ CI (`.github/workflows/contract-schema-guard.yml`,
 
 ## History
 
+## 2.9 (2026-09-22) - MINOR
+
+- ADR/PR: this PR (feat(mcp): advertise contract_schema as an MCP server extension,
+  AMENDMENT-fastmcp4-adoption §2, S19)
+- Summary: No change to any frozen field set. Recorded because `contract_schema` is
+  now also advertised under `capabilities.extensions["app.getcanonic/contract"]` on
+  both MCP protocol eras, and enforced per request for clients that opt in, in
+  addition to the existing `contract_info`/`negotiate_contract` tools kept as a
+  fallback.
+
 ## 2.8 (2026-08-17) - MINOR
 
 - ADR/PR: this PR (feat(core): tenant scoping and role-based authorization error
