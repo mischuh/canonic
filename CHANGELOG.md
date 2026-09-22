@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.24.0](https://github.com/mischuh/canonic/compare/v0.23.1...v0.24.0) (2026-09-22)
+
+
+### Features
+
+* **mcp:** accept IdP identity assertions in OAuth proxy mode ([#315](https://github.com/mischuh/canonic/issues/315)) ([a358370](https://github.com/mischuh/canonic/commit/a358370505ab2eecd84446f2bb8a53472dc9a838))
+* **mcp:** adopt FastMCP 4 and serve both MCP protocol eras ([#313](https://github.com/mischuh/canonic/issues/313)) ([ad63387](https://github.com/mischuh/canonic/commit/ad63387b85f6ea7813bf5efecd6e78dc9f5cab62))
+* **mcp:** advertise contract_schema as an MCP server extension ([#314](https://github.com/mischuh/canonic/issues/314)) ([1155628](https://github.com/mischuh/canonic/commit/1155628e421abfd042dbb357b2bc32dc574c93ad))
+* **mcp:** emit conservative listing cache hints ([#317](https://github.com/mischuh/canonic/issues/317)) ([036ac03](https://github.com/mischuh/canonic/commit/036ac034b097f97e7796c760d101ef53f7f19032))
+
 ## [0.23.1](https://github.com/mischuh/canonic/compare/v0.23.0...v0.23.1) (2026-08-21)
 
 
