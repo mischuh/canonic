@@ -183,6 +183,18 @@ mcp:
 
 This is additive, not a replacement: a client that doesn't declare the tasks capability still gets the same synchronous response as before, on the same tool. Requires the `canonic[tasks]` extra (`pip install "canonic[tasks]"`). The daemon refuses to start with a clear error if `mcp.tasks.enabled: true` is set and the extra isn't installed. Not available under `--transport stdio`, a local subprocess has no reason to hold a request open in the first place. See [config schema](/reference/config-schema#mcp) for the full field list.
 
+### Listing cache hints
+
+A conforming client may cache `list_metrics`/`describe_metric`/tool listings for `mcp.cache_ttl_seconds` (default 300) before re-fetching, cutting round trips for a client that re-lists frequently:
+
+```yaml
+# canonic.yaml
+mcp:
+  cache_ttl_seconds: 0   # disables the hint entirely, the default is 300
+```
+
+The hint is scoped `private` always, never shared across callers, since a shared cache would leak one caller's listing to another once tenancy or role-scoped tools are in play. Tool call results (`query`, `run_sql`, `run_report` answers) are untouched, only listings. Honoring the hint is opt-in and modern-era-only on the client side, so a legacy client or one that doesn't ask for caching is unaffected either way.
+
 ### Environment variables for credentials
 
 If a connection's `credentials_ref` points at `env:SOME_VAR` (e.g. a database password), that variable must be readable by the spawned `canonic` process. GUI-launched MCP clients (Claude Desktop, Cursor, etc.) start the process with a minimal environment. They do **not** source your shell profile (`~/.zshrc`, `~/.bash_profile`), so an `export` that works in your terminal will not reach the daemon. Pass the variable explicitly via the config's `env` field instead:

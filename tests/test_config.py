@@ -676,6 +676,30 @@ class TestMcpTasksConfig:
         assert "mcp.tasks.url" in str(exc_info.value)
 
 
+class TestMcpCacheTtlSeconds:
+    """``mcp.cache_ttl_seconds`` (AMENDMENT-fastmcp4-adoption §5, S23, S24)."""
+
+    def test_default_when_absent(self, tmp_path: Path) -> None:
+        cfg = load_config(_canonic_yaml(tmp_path, _VALID))
+        assert cfg.mcp.cache_ttl_seconds == 300
+
+    def test_custom_value_parsed(self, tmp_path: Path) -> None:
+        content = _VALID + "mcp:\n  cache_ttl_seconds: 60\n"
+        cfg = load_config(_canonic_yaml(tmp_path, content))
+        assert cfg.mcp.cache_ttl_seconds == 60
+
+    def test_zero_disables_and_is_accepted(self, tmp_path: Path) -> None:
+        content = _VALID + "mcp:\n  cache_ttl_seconds: 0\n"
+        cfg = load_config(_canonic_yaml(tmp_path, content))
+        assert cfg.mcp.cache_ttl_seconds == 0
+
+    def test_negative_value_rejected(self, tmp_path: Path) -> None:
+        content = _VALID + "mcp:\n  cache_ttl_seconds: -1\n"
+        with pytest.raises(ConfigError) as exc_info:
+            load_config(_canonic_yaml(tmp_path, content))
+        assert "mcp.cache_ttl_seconds" in str(exc_info.value)
+
+
 class TestLLMProviders:
     """Multi-provider ``llm.provider`` validation (SPEC-E10 §2)."""
 

@@ -187,6 +187,7 @@ def build_server(
     claim_mapping: dict[str, str] | None = None,
     tasks: bool = False,
     tasks_url: str | None = None,
+    cache_ttl_seconds: int = 300,
 ) -> FastMCP:
     """Return a :class:`FastMCP` instance with all P0 tools registered against *service*.
 
@@ -213,9 +214,22 @@ def build_server(
     backend URL), used only when ``mcp.tasks.backend`` is ``redis``; ``None`` falls back
     to FastMCP's in-memory backend. Never set from ``stdio`` (S22 AC4): a local
     subprocess has no reason to hold requests open in the first place.
+
+    ``cache_ttl_seconds`` (``mcp.cache_ttl_seconds``, S23/S24) is a SEP-2549 client-side
+    cache hint applied uniformly to every listing (``tools/list``, ``resources/list``,
+    ``prompts/list``, ``server/discover``); ``0`` disables it entirely, restoring
+    byte-identical output to a server that never set one. Never paired with a
+    ``cache_scope`` of ``"public"`` — a shared client cache across callers would leak
+    one caller's listing to another once tenancy/role-scoped tools exist, so the hint
+    always defaults to FastMCP's ``"private"`` scope. Tool call results are untouched;
+    this affects only how long a client may treat a listing as fresh.
     """
     mcp: FastMCP = FastMCP(
-        "canonic", version=CANONIC_VERSION, instructions=_INSTRUCTIONS, auth=auth
+        "canonic",
+        version=CANONIC_VERSION,
+        instructions=_INSTRUCTIONS,
+        auth=auth,
+        cache_ttl=cache_ttl_seconds or None,
     )
     mcp.add_extension(ContractExtension())
     if tasks:

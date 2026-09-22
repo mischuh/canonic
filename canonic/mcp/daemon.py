@@ -275,6 +275,7 @@ def start_stdio(
     from canonic.log import _effective_log_params, configure_logging
     from canonic.mcp.server import build_server
 
+    cfg = None
     try:
         cfg = load_config(project_root / "canonic.yaml")
         level, file, format = _effective_log_params(
@@ -291,7 +292,12 @@ def start_stdio(
             "per-request auth to derive a principal from — pass `canonic mcp start "
             "--tenant <id>` to bind one for this session (SPEC-E12 §5)"
         )
-    mcp = build_server(service, suggestions=suggestions, session_principal=principal)  # type: ignore[arg-type]
+    mcp = build_server(
+        service,  # type: ignore[arg-type]
+        suggestions=suggestions,
+        session_principal=principal,
+        cache_ttl_seconds=cfg.mcp.cache_ttl_seconds if cfg is not None else 300,
+    )
     mcp.run(transport="stdio", show_banner=False)
 
 
@@ -416,11 +422,17 @@ def serve_http_foreground(
     ``tasks``/``tasks_url`` are ``cfg.mcp.tasks.enabled``/``cfg.mcp.tasks.url`` (S22),
     forwarded into ``build_server`` the same way — this function is ``http``-only, so
     ``stdio`` (``start_stdio``) never passes them (S22 AC4).
+
+    ``cache_ttl_seconds`` (``cfg.mcp.cache_ttl_seconds``, S23/S24) is re-read from this
+    function's own config reload rather than threaded from the caller like ``tasks`` —
+    it needs no CLI-level fail-closed check the way ``tasks`` does, so there is nothing
+    for the caller to decide ahead of time.
     """
     from canonic.config import load_config
     from canonic.log import _effective_log_params, configure_logging
     from canonic.mcp.server import build_server
 
+    cfg = None
     try:
         cfg = load_config(project_root / "canonic.yaml")
         level, file, format = _effective_log_params(
@@ -437,6 +449,7 @@ def serve_http_foreground(
         claim_mapping=claim_mapping,
         tasks=tasks,
         tasks_url=tasks_url,
+        cache_ttl_seconds=cfg.mcp.cache_ttl_seconds if cfg is not None else 300,
     )
     import asyncio
 

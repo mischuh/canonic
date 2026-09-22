@@ -456,6 +456,18 @@ class McpConfig(BaseModel):
 
     auth: McpAuthConfig = McpAuthConfig()
     tasks: McpTasksConfig = McpTasksConfig()
+    #: SEP-2549 client-side cache hint applied uniformly to every listing
+    #: (``tools/list``, ``resources/list``, ``prompts/list``, ``server/discover``),
+    #: never to individual tool results. ``0`` disables the hint entirely, restoring
+    #: byte-identical output to a server that never set one.
+    cache_ttl_seconds: int = 300
+
+    @field_validator("cache_ttl_seconds")
+    @classmethod
+    def _validate_cache_ttl_seconds(cls, v: int) -> int:
+        if v < 0:
+            raise ValueError("mcp.cache_ttl_seconds must be >= 0")
+        return v
 
 
 class YamlConfigSource(PydanticBaseSettingsSource):
