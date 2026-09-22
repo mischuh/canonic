@@ -271,6 +271,7 @@ def status(ctx: typer.Context) -> None:
             "version_mismatch": s.version_mismatch,
             "auth_enabled": s.auth_enabled,
             "auth_mechanisms": s.auth_mechanisms,
+            "fastmcp_version": s.fastmcp_version,
         }
         typer.echo(json.dumps(payload))
         return
@@ -294,6 +295,8 @@ def status(ctx: typer.Context) -> None:
             auth_desc = "none"
         _console.print(f"  auth:      {auth_desc}")
     _console.print(f"  version:   {s.version}")
+    if s.fastmcp_version:
+        _console.print(f"  fastmcp:   {s.fastmcp_version}")
     _console.print(f"  started:   {s.started_at}")
     if s.version_mismatch:
         _console.print(

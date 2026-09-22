@@ -299,3 +299,52 @@ def test_status_text_shows_auth_mechanisms(runner: CliRunner, project_dir: Path)
 
     assert result.exit_code == 0, result.output
     assert "token, oauth-jwt" in result.output
+
+
+def test_status_reports_fastmcp_version(runner: CliRunner, project_dir: Path) -> None:
+    """AMENDMENT-fastmcp4-adoption §1.3: an operator can tell which FastMCP major a
+    running daemon serves, which is what decides whether it speaks the sessionless era.
+    """
+    (project_dir / ".canonic").mkdir(exist_ok=True)
+    state = DaemonState(
+        pid=os.getpid(),
+        version="0.0.0",
+        transport="http",
+        host="127.0.0.1",
+        port=7474,
+        started_at="2026-01-01T00:00:00+00:00",
+        auth_enabled=True,
+        fastmcp_version="4.0.5",
+    )
+    (project_dir / ".canonic" / "mcp.json").write_text(state.to_json())
+
+    assert (
+        json.loads(runner.invoke(app, ["--json", "mcp", "status"]).output)["fastmcp_version"]
+        == "4.0.5"
+    )
+    assert "fastmcp:   4.0.5" in runner.invoke(app, ["mcp", "status"]).output
+
+
+def test_status_tolerates_state_file_without_fastmcp_version(
+    runner: CliRunner, project_dir: Path
+) -> None:
+    """A state file written by a pre-upgrade daemon still parses, reporting no version."""
+    (project_dir / ".canonic").mkdir(exist_ok=True)
+    (project_dir / ".canonic" / "mcp.json").write_text(
+        json.dumps(
+            {
+                "pid": os.getpid(),
+                "version": "0.0.0",
+                "transport": "http",
+                "host": "127.0.0.1",
+                "port": 7474,
+                "started_at": "2026-01-01T00:00:00+00:00",
+                "auth_enabled": True,
+            }
+        )
+    )
+
+    result = runner.invoke(app, ["--json", "mcp", "status"])
+
+    assert result.exit_code == 0, result.output
+    assert json.loads(result.output)["fastmcp_version"] is None

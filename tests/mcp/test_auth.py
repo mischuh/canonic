@@ -248,10 +248,17 @@ class _RecordingOAuthProvider(AuthProvider):
     """A minimal real ``AuthProvider`` standing in for the OAuth side of S17 tests."""
 
     def __init__(self) -> None:
-        super().__init__()
+        super().__init__(required_scopes=["upstream:read"])
         self.verify_calls: list[str] = []
         self.set_mcp_path_calls: list[str | None] = []
         self._routes = ["authorize-route", "token-route"]
+
+    @property
+    def scopes_supported(self) -> list[str]:
+        return ["upstream:read", "upstream:write"]
+
+    def get_challenge_scopes(self, required_scopes: list[str] | None = None) -> list[str]:
+        return [f"idp/{scope}" for scope in (required_scopes or self.required_scopes)]
 
     async def verify_token(self, token: str) -> AccessToken | None:
         self.verify_calls.append(token)
@@ -319,6 +326,20 @@ class TestCanonicCompositeVerifier:
         verifier, oauth = composite
         verifier.set_mcp_path("/mcp")
         assert oauth.set_mcp_path_calls == ["/mcp"]
+
+    def test_scope_advertisement_delegates_to_oauth(
+        self,
+        composite: tuple[CanonicCompositeVerifier, _RecordingOAuthProvider],
+    ) -> None:
+        """The OAuth side owns how its authorization server spells scopes.
+
+        Without delegation the 401 challenge would carry this wrapper's own inherited
+        scope list, telling a client to request scopes the IdP does not know.
+        """
+        verifier, oauth = composite
+        assert verifier.scopes_supported == oauth.scopes_supported
+        assert verifier.challenge_scopes == ["idp/upstream:read"]
+        assert verifier.get_challenge_scopes(["upstream:write"]) == ["idp/upstream:write"]
 
 
 class TestBuildMcpAuth:

@@ -7,6 +7,12 @@ on:
 
 env:
   TZ: UTC
+  # Fail the suite on any camelCase wire-field read left over from FastMCP 3, rather
+  # than letting the compatibility bridge paper over it until upstream removes it.
+  FASTMCP_MCP_CAMELCASE_COMPAT: "false"
+  # FastMCP 4 checks PyPI for a newer release by default. CI has no use for that and
+  # it puts a network call on every run.
+  FASTMCP_CHECK_FOR_UPDATES: "off"
 
 jobs:
   check:

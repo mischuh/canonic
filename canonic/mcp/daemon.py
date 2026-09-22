@@ -27,6 +27,7 @@ file so a mismatch is surfaced immediately (SPEC §4.2 AC2).
 from __future__ import annotations
 
 import contextlib
+import importlib.metadata
 import json
 import os
 import signal
@@ -85,6 +86,12 @@ class DaemonState:
     #: file written before this field existed still parses (``read_state`` does
     #: ``DaemonState(**data)``).
     auth_mechanisms: list[str] = field(default_factory=list)
+    #: FastMCP version this daemon runs, e.g. ``"4.0.5"``. Lets an operator tell which
+    #: side of the FastMCP 3 to 4 cut-over a running daemon is on, which decides whether
+    #: it serves the sessionless protocol era and whether ``proxy``-mode clients had to
+    #: re-authorize (AMENDMENT-fastmcp4-adoption §1.3). Defaults to ``""`` so a state
+    #: file written before this field existed still parses.
+    fastmcp_version: str = ""
 
     def to_json(self) -> str:
         return json.dumps(asdict(self), indent=2)
@@ -105,6 +112,15 @@ class DaemonStatus:
     current_version: str | None = None
     auth_enabled: bool = False
     auth_mechanisms: list[str] = field(default_factory=list)
+    fastmcp_version: str | None = None
+
+
+def fastmcp_version() -> str:
+    """The installed FastMCP version, or ``"unknown"`` when it cannot be determined."""
+    try:
+        return importlib.metadata.version("fastmcp")
+    except importlib.metadata.PackageNotFoundError:
+        return "unknown"
 
 
 def _state_path(project_root: Path) -> Path:
@@ -168,6 +184,7 @@ def status(project_root: Path) -> DaemonStatus:
         current_version=current,
         auth_enabled=state.auth_enabled,
         auth_mechanisms=state.auth_mechanisms,
+        fastmcp_version=state.fastmcp_version or None,
     )
 
 
@@ -368,6 +385,7 @@ def start_http(
         started_at=datetime.now(UTC).isoformat(),
         auth_enabled=True,
         auth_mechanisms=auth_mechanisms or [],
+        fastmcp_version=fastmcp_version(),
     )
     _write_state(project_root, state)
 

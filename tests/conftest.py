@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING, Any
 
 import litellm
 import pytest
+from fastmcp import Client, FastMCP
 
 from canonic.config import CanonicConfig
 from canonic.contracts.models import (
@@ -24,6 +25,7 @@ from canonic.semantic.models import Column, Dimension, Measure, SemanticSource
 
 if TYPE_CHECKING:
     from collections.abc import Callable
+    from pathlib import Path
 
 
 def _response(content: str) -> SimpleNamespace:
@@ -155,3 +157,73 @@ def canonic_service(
         }
     )
     return CanonicService(config=config, resolver=resolver, sources=[orders_source])
+
+
+#: The MCP protocol eras a FastMCP 4 daemon serves simultaneously
+#: (AMENDMENT-fastmcp4-adoption §1.4). ``"sessionless"`` is what `mode="auto"` picks
+#: against a FastMCP 4 server: no `initialize`, every request self-contained.
+#: ``"handshake"`` pins the pre-2026-07-28 behavior current agent clients still use.
+MCP_ERAS = ("handshake", "sessionless")
+
+
+def mcp_client(server: FastMCP, era: str) -> Client:
+    """A FastMCP ``Client`` for *server* pinned to one protocol era.
+
+    Every tool must behave identically on both eras, so tests that assert on payloads
+    parametrize over :data:`MCP_ERAS` rather than taking whichever era the client
+    negotiates by default.
+    """
+    if era == "handshake":
+        return Client(server, mode="legacy")
+    if era == "sessionless":
+        return Client(server, mode="2026-07-28")
+    raise ValueError(f"unknown MCP era: {era!r}")
+
+
+@pytest.fixture
+def report_project(tmp_path: Path) -> Path:
+    """A minimal DuckDB-backed project with one committed report — no live network DB needed.
+
+    Distinct from ``canonic_service`` (root conftest): ``run_report`` executes its
+    section's query for real, which needs an actual connection, not just a resolver
+    and semantic sources in memory.
+    """
+    import duckdb
+
+    db_path = tmp_path / "warehouse.duckdb"
+    con = duckdb.connect(str(db_path))
+    con.execute(
+        "CREATE TABLE orders (order_id INTEGER, amount DECIMAL(12,2), status VARCHAR);"
+        "INSERT INTO orders VALUES (1, 100.00, 'paid');"
+    )
+    con.close()
+
+    (tmp_path / "canonic.yaml").write_text(
+        "version: 1\n"
+        "project:\n  name: test\n  default_connection: warehouse_duckdb\n"
+        "connections:\n"
+        f"  - id: warehouse_duckdb\n    type: duckdb\n    params: {{path: {db_path}}}\n"
+        "llm:\n  provider: openai_compatible\n  base_url: http://localhost/v1\n  model: llama3\n"
+    )
+    sem = tmp_path / "semantics" / "warehouse_duckdb"
+    sem.mkdir(parents=True)
+    (sem / "orders.yaml").write_text(
+        "name: orders\nconnection: warehouse_duckdb\ntable: orders\ngrain: [order_id]\n"
+        "columns:\n  - {name: order_id, type: int, nullable: false}\n"
+        "  - {name: amount, type: decimal, nullable: false}\n"
+        "  - {name: status, type: string, nullable: false}\n"
+        "measures:\n  - {name: total_revenue, expr: 'sum(amount)', additivity: additive}\n"
+        "dimensions:\n  - {name: status, column: status}\n"
+    )
+    metrics = tmp_path / "contracts" / "metrics"
+    metrics.mkdir(parents=True)
+    (metrics / "revenue.yaml").write_text(
+        "metric: revenue\ncanonical:\n  source: orders\n  measure: total_revenue\nstatus: active\n"
+    )
+    reports = tmp_path / "reports"
+    reports.mkdir(parents=True)
+    (reports / "customer_report.yaml").write_text(
+        "id: customer_report\ntitle: Customer Report\nsections:\n"
+        "  - title: Revenue by status\n    query: {metrics: [revenue], dimensions: [status]}\n"
+    )
+    return tmp_path
