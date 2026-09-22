@@ -290,6 +290,36 @@ class McpOAuthMode(StrEnum):
     JWT = "jwt"
 
 
+class McpIdentityAssertionConfig(BaseModel):
+    """IdP-signed identity assertion (SEP-990 ID-JAG) accepted by ``mcp.auth.oauth`` in
+    ``proxy`` mode (AMENDMENT-fastmcp4-adoption §3.1).
+
+    Lets a client present a short-lived, IdP-signed assertion of an already-established
+    identity instead of running the full Authorization Code + PKCE flow interactively —
+    the pattern headless/agentic clients need. Passed straight through to FastMCP's
+    ``OIDCProxy(identity_assertion=...)``; signature and replay verification are
+    upstream's, not canonic's, to reimplement.
+    """
+
+    #: Issuer values the proxy accepts on an assertion. Non-empty: an identity assertion
+    #: with no trusted issuer configured would accept an assertion from anyone.
+    trusted_issuers: list[str] = Field(min_length=1)
+    #: Expected ``aud`` value on the assertion. ``None`` defaults to this server's own
+    #: issuer identifier (FastMCP's default), which is the right value for most setups.
+    audience: str | None = None
+
+    @field_validator("trusted_issuers")
+    @classmethod
+    def _validate_trusted_issuers_scheme(cls, v: list[str]) -> list[str]:
+        for issuer in v:
+            if not (issuer.startswith("http://") or issuer.startswith("https://")):
+                raise ValueError(
+                    "mcp.auth.oauth.identity_assertion.trusted_issuers entries must start "
+                    "with http:// or https://"
+                )
+        return v
+
+
 class McpOAuthConfig(BaseModel):
     """OAuth 2.1 auth for the MCP daemon's ``http`` transport (AMENDMENT-oauth-mcp-auth).
 
@@ -333,6 +363,10 @@ class McpOAuthConfig(BaseModel):
     #: (SPEC-E12 §7). A ``claim`` absent from this mapping is looked up under its own
     #: name unchanged.
     claim_mapping: dict[str, str] = {}
+    #: ``proxy`` mode only. Accepts IdP-signed identity assertions (SEP-990 ID-JAG) in
+    #: addition to the interactive Authorization Code + PKCE flow, for headless/agentic
+    #: clients that already hold an established identity from the IdP.
+    identity_assertion: McpIdentityAssertionConfig | None = None
 
     @field_validator("issuer_url")
     @classmethod
@@ -362,6 +396,8 @@ class McpOAuthConfig(BaseModel):
                 raise ValueError("mcp.auth.oauth.base_url is not used in jwt mode")
             if self.verify_id_token:
                 raise ValueError("mcp.auth.oauth.verify_id_token is not used in jwt mode")
+            if self.identity_assertion is not None:
+                raise ValueError("mcp.auth.oauth.identity_assertion is not used in jwt mode")
         return self
 
 
@@ -463,6 +499,11 @@ class CanonicConfig(BaseSettings):
                 policy.check_ref_local(
                     oauth.client_secret_ref, what="mcp.auth.oauth.client_secret_ref"
                 )
+            if oauth.identity_assertion is not None:
+                for issuer in oauth.identity_assertion.trusted_issuers:
+                    policy.check_url(
+                        issuer, what="mcp.auth.oauth.identity_assertion.trusted_issuers"
+                    )
         return self
 
     @model_validator(mode="after")

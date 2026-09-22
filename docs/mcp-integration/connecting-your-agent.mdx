@@ -139,6 +139,24 @@ mcp:
 
 `canonic mcp status` reports which mechanism(s) are active on a running daemon (e.g. `token, oauth-proxy`), useful for confirming a deployment matches its intended config. TLS termination is expected to happen at a reverse proxy/ingress in front of the daemon, not in the daemon itself.
 
+**Headless/agentic clients**: `mode: proxy` also accepts an IdP-signed identity assertion (SEP-990 ID-JAG) in place of the interactive Authorization Code + PKCE flow, for a client that already holds an established identity from the IdP and cannot open a browser to log in:
+
+```yaml
+mcp:
+  auth:
+    oauth:
+      mode: proxy
+      issuer_url: https://idp.example.com
+      client_id: canonic-mcp
+      client_secret_ref: env:CANONIC_OAUTH_CLIENT_SECRET
+      base_url: https://canonic.internal.example.com
+      identity_assertion:
+        trusted_issuers: [https://login.acme-corp.com]
+        audience: canonic-mcp   # optional, defaults to this daemon's own issuer identifier
+```
+
+Prefer this over a static `mcp.auth.tokens` entry for an agentic client that already participates in your IdP: identity stays centrally revocable and per-caller, instead of a shared secret to distribute and rotate by hand. Static tokens remain fully supported for pipelines or clients with no IdP identity of their own, and the two compose on the same daemon, same as `tokens` and `oauth` do generally. Signature and replay verification of the assertion itself is FastMCP's, not canonic's, to reimplement.
+
 <Warning>
 In `proxy` mode, check whether your IdP issues opaque (non-JWT) access tokens: Google and GitHub both do, and some Okta setups too. `OIDCProxy` verifies the upstream access token by default (`verify_id_token: false`), and an opaque one fails that outright. Set `verify_id_token: true` to verify the OIDC id_token instead, which is always a standard JWT. This also decides what `client_id` looks like in `.canonic/events.jsonl`: the access token's `client_id`/`azp`/`sub` claim by default, often an opaque subject id, versus the id_token's, which reliably carries `sub`/`email` and is what you want if per-user attribution in logs is the point of switching to OAuth in the first place.
 </Warning>

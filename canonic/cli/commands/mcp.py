@@ -200,7 +200,16 @@ def start(
                 # run in the foreground, don't spawn yet another child.
                 from canonic.mcp.daemon import serve_http_foreground
 
-                serve_http_foreground(service, root, host, port, auth=auth, suggestions=suggestions)
+                claim_mapping = cfg.mcp.auth.oauth.claim_mapping if cfg.mcp.auth.oauth else None
+                serve_http_foreground(
+                    service,
+                    root,
+                    host,
+                    port,
+                    auth=auth,
+                    suggestions=suggestions,
+                    claim_mapping=claim_mapping,
+                )
                 return
 
             start_http(

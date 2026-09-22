@@ -14,6 +14,7 @@ import hmac
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
+from fastmcp.server.auth import IdentityAssertion
 from fastmcp.server.auth.auth import AccessToken, AuthProvider, TokenVerifier
 from fastmcp.server.auth.oidc_proxy import OIDCConfiguration, OIDCProxy
 from fastmcp.server.auth.providers.jwt import JWTVerifier
@@ -196,7 +197,9 @@ def build_oauth_verifier(oauth_config: McpOAuthConfig) -> AuthProvider:
       (Authorization Code + PKCE). ``verify_id_token`` controls whether the upstream
       *access* token (default) or *id_token* is what gets verified — see
       :attr:`McpOAuthConfig.verify_id_token` for why an IdP with opaque access tokens
-      needs the latter.
+      needs the latter. When ``identity_assertion`` is configured, the proxy also
+      accepts an IdP-signed identity assertion (SEP-990 ID-JAG) in place of the
+      interactive flow, for headless/agentic clients.
 
     Raises :class:`canonic.exc.CredentialError` if ``client_secret_ref`` cannot be
     resolved, or :class:`RuntimeError` if IdP discovery fails.
@@ -218,6 +221,14 @@ def build_oauth_verifier(oauth_config: McpOAuthConfig) -> AuthProvider:
     )
     assert oauth_config.client_id is not None  # enforced by McpOAuthConfig validation
     assert oauth_config.base_url is not None  # enforced by McpOAuthConfig validation
+    identity_assertion = (
+        IdentityAssertion(
+            trusted_issuers=oauth_config.identity_assertion.trusted_issuers,
+            audience=oauth_config.identity_assertion.audience,
+        )
+        if oauth_config.identity_assertion is not None
+        else None
+    )
     return OIDCProxy(
         config_url=discovery_url,
         client_id=oauth_config.client_id,
@@ -225,6 +236,7 @@ def build_oauth_verifier(oauth_config: McpOAuthConfig) -> AuthProvider:
         base_url=oauth_config.base_url,
         required_scopes=oauth_config.scopes or None,
         verify_id_token=oauth_config.verify_id_token,
+        identity_assertion=identity_assertion,
     )
 
 
