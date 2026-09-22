@@ -243,6 +243,11 @@ class CanonicCompositeVerifier(AuthProvider):
     ``AuthProvider.get_middleware`` binds ``BearerAuthBackend(self)``, routing every
     request's bearer token through this class's own ``verify_token`` (static-first,
     OAuth-fallback) rather than the OAuth provider's alone.
+
+    ``scopes_supported`` and ``get_challenge_scopes`` delegate for the same reason as
+    the routes: the OAuth provider is the only side that knows how its authorization
+    server spells scopes, so a 401 challenge assembled from this wrapper's own
+    (inherited) scope list would tell a client to request the wrong ones.
     """
 
     def __init__(self, static: CanonicTokenVerifier, oauth: AuthProvider) -> None:
@@ -259,6 +264,13 @@ class CanonicCompositeVerifier(AuthProvider):
         if access is not None:
             return access
         return await self._oauth.verify_token(token)
+
+    @property
+    def scopes_supported(self) -> list[str]:
+        return self._oauth.scopes_supported
+
+    def get_challenge_scopes(self, required_scopes: list[str] | None = None) -> list[str]:
+        return self._oauth.get_challenge_scopes(required_scopes)
 
     def get_routes(self, mcp_path: str | None = None) -> list[Route]:
         return self._oauth.get_routes(mcp_path)

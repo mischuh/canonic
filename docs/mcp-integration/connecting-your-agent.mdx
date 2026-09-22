@@ -143,6 +143,10 @@ mcp:
 In `proxy` mode, check whether your IdP issues opaque (non-JWT) access tokens: Google and GitHub both do, and some Okta setups too. `OIDCProxy` verifies the upstream access token by default (`verify_id_token: false`), and an opaque one fails that outright. Set `verify_id_token: true` to verify the OIDC id_token instead, which is always a standard JWT. This also decides what `client_id` looks like in `.canonic/events.jsonl`: the access token's `client_id`/`azp`/`sub` claim by default, often an opaque subject id, versus the id_token's, which reliably carries `sub`/`email` and is what you want if per-user attribution in logs is the point of switching to OAuth in the first place.
 </Warning>
 
+<Warning>
+Upgrading a `proxy`-mode deployment from a canonic release built on FastMCP 3 to one built on FastMCP 4 is a one-time re-authorization event, if and only if your `issuer_url` differs from the daemon's public base URL. FastMCP 4 stamps `issuer_url` into the `iss` claim of the tokens it mints, so tokens minted before the upgrade no longer validate and every client, including its refresh token, has to log in again. Deployments where the two URLs are equal are unaffected. Announce the window before restarting, and confirm afterwards with `canonic mcp status`, which reports the FastMCP version the running daemon serves.
+</Warning>
+
 <Note>
 In `proxy` mode, the daemon keeps its OAuth client registrations and signing key in memory by default. Restarting the daemon (`canonic mcp stop && canonic mcp start`) drops any Dynamic Client Registration state and invalidates previously minted tokens. Clients transparently re-register and re-authenticate, but an in-flight session is disrupted. `jwt` mode has no such state: it only verifies tokens against the IdP's JWKS.
 </Note>

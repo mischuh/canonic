@@ -17,7 +17,6 @@ from pathlib import Path  # noqa: TC003 — used at runtime in fixtures
 from typing import TYPE_CHECKING, Any
 
 import pytest
-from fastmcp import Client
 from typer.testing import CliRunner
 
 from canonic.cli.app import app
@@ -26,6 +25,7 @@ from canonic.contracts.models import CanonicalRef, MetricBinding
 from canonic.contracts.resolver import ContractResolver
 from canonic.core.service import CanonicService
 from canonic.mcp.server import build_server
+from tests.conftest import MCP_ERAS, mcp_client
 
 from .conftest import EXPECTED_REVENUE
 
@@ -42,9 +42,11 @@ def _canonical(payload: Any) -> str:
     return json.dumps(payload, sort_keys=True, default=str)
 
 
-async def _mcp_call(service: CanonicService, tool: str, args: Mapping[str, Any]) -> Any:
+async def _mcp_call(
+    service: CanonicService, tool: str, args: Mapping[str, Any], era: str = "sessionless"
+) -> Any:
     mcp = build_server(service)
-    async with Client(mcp) as client:
+    async with mcp_client(mcp, era) as client:
         result = await client.call_tool(tool, dict(args))
     return result.data
 
@@ -88,8 +90,9 @@ async def test_query_revenue(e2e_service: CanonicService) -> None:
 
 
 @pytest.mark.release_gate
-def test_parity(e2e_project: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """CLI ``--json query`` and the MCP ``query`` tool emit identical payloads."""
+@pytest.mark.parametrize("era", MCP_ERAS)
+def test_parity(e2e_project: Path, monkeypatch: pytest.MonkeyPatch, era: str) -> None:
+    """CLI ``--json query`` and the MCP ``query`` tool emit identical payloads on both eras."""
     import asyncio
 
     monkeypatch.chdir(e2e_project)
@@ -101,7 +104,7 @@ def test_parity(e2e_project: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     cli_payload = json.loads(cli.stdout)
 
     service = CanonicService.from_project(e2e_project)
-    mcp_payload = asyncio.run(_mcp_call(service, "query", {"query": _REVENUE_QUERY}))
+    mcp_payload = asyncio.run(_mcp_call(service, "query", {"query": _REVENUE_QUERY}, era))
 
     assert _canonical(cli_payload) == _canonical(mcp_payload)
     assert str(cli_payload["result"]["rows"][0][0]) == EXPECTED_REVENUE
@@ -125,8 +128,9 @@ def test_query_flags_match_file_parity(e2e_project: Path, monkeypatch: pytest.Mo
 
 
 @pytest.mark.release_gate
-def test_run_sql_parity(e2e_project: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """CLI ``--json sql`` and the MCP ``run_sql`` tool emit identical payloads for a SELECT."""
+@pytest.mark.parametrize("era", MCP_ERAS)
+def test_run_sql_parity(e2e_project: Path, monkeypatch: pytest.MonkeyPatch, era: str) -> None:
+    """CLI ``--json sql`` and the MCP ``run_sql`` tool emit identical payloads on both eras."""
     import asyncio
 
     monkeypatch.chdir(e2e_project)
@@ -137,7 +141,7 @@ def test_run_sql_parity(e2e_project: Path, monkeypatch: pytest.MonkeyPatch) -> N
     cli_payload = json.loads(cli.stdout)
 
     service = CanonicService.from_project(e2e_project)
-    mcp_payload = asyncio.run(_mcp_call(service, "run_sql", {"sql": statement}))
+    mcp_payload = asyncio.run(_mcp_call(service, "run_sql", {"sql": statement}, era))
 
     assert _canonical(cli_payload) == _canonical(mcp_payload)
     assert cli_payload["rows"], "expected at least one row"

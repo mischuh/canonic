@@ -225,3 +225,4 @@ specs/
 vids/
 .vscode/settings.json
 .claude/settings.json
+canonic.code-workspace
