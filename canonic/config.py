@@ -401,6 +401,40 @@ class McpOAuthConfig(BaseModel):
         return self
 
 
+class McpTasksBackend(StrEnum):
+    """Which Docket backend ``mcp.tasks`` runs task execution on."""
+
+    MEMORY = "memory"
+    REDIS = "redis"
+
+
+class McpTasksConfig(BaseModel):
+    """Background-task execution for ``query``/``run_sql``/``run_report`` on ``http``
+    transport (AMENDMENT-fastmcp4-adoption §4, S22).
+
+    A task-enabled tool still answers synchronously for a client that doesn't opt in
+    (FastMCP's ``task=True`` is "optional", not "required"); enabling this only lets a
+    client that declares the ``io.modelcontextprotocol/tasks`` capability poll a
+    long-running query instead of holding the request open. Never applies to ``stdio``
+    transport (S22 AC4): a local subprocess has no reason to hold requests open in the
+    first place.
+    """
+
+    enabled: bool = False
+    backend: McpTasksBackend = McpTasksBackend.MEMORY
+    #: Docket backend URL. Required (and only used) when ``backend`` is ``redis`` — the
+    #: ``memory`` backend is single-process and takes no URL.
+    url: str | None = None
+
+    @model_validator(mode="after")
+    def _validate_backend_url(self) -> McpTasksConfig:
+        if self.backend == McpTasksBackend.REDIS and self.url is None:
+            raise ValueError("mcp.tasks.url is required when mcp.tasks.backend is redis")
+        if self.backend == McpTasksBackend.MEMORY and self.url is not None:
+            raise ValueError("mcp.tasks.url is not used when mcp.tasks.backend is memory")
+        return self
+
+
 class McpAuthConfig(BaseModel):
     """Auth for the MCP daemon's ``http`` transport (AMENDMENT-remote-mcp-transport,
     AMENDMENT-oauth-mcp-auth).
@@ -421,6 +455,7 @@ class McpConfig(BaseModel):
     """The ``mcp:`` block from canonic.yaml."""
 
     auth: McpAuthConfig = McpAuthConfig()
+    tasks: McpTasksConfig = McpTasksConfig()
 
 
 class YamlConfigSource(PydanticBaseSettingsSource):

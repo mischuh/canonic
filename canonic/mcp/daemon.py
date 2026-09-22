@@ -399,6 +399,8 @@ def serve_http_foreground(
     auth: AuthProvider,
     suggestions: bool = False,
     claim_mapping: dict[str, str] | None = None,
+    tasks: bool = False,
+    tasks_url: str | None = None,
 ) -> None:
     """Run the uvicorn HTTP daemon in the current process (blocks until stopped).
 
@@ -410,6 +412,10 @@ def serve_http_foreground(
     ``claim_mapping`` is ``cfg.mcp.auth.oauth.claim_mapping`` (SPEC-E12 §7), resolved by
     the caller (which already has ``cfg`` in scope) and forwarded into ``build_server``
     so every request's derived ``Principal`` reads namespaced IdP claims correctly.
+
+    ``tasks``/``tasks_url`` are ``cfg.mcp.tasks.enabled``/``cfg.mcp.tasks.url`` (S22),
+    forwarded into ``build_server`` the same way — this function is ``http``-only, so
+    ``stdio`` (``start_stdio``) never passes them (S22 AC4).
     """
     from canonic.config import load_config
     from canonic.log import _effective_log_params, configure_logging
@@ -429,6 +435,8 @@ def serve_http_foreground(
         suggestions=suggestions,
         auth=auth,
         claim_mapping=claim_mapping,
+        tasks=tasks,
+        tasks_url=tasks_url,
     )
     import asyncio
 
