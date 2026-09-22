@@ -205,6 +205,40 @@ def test_start_http_with_token_ref_succeeds(
 
 
 # ---------------------------------------------------------------------------
+# --transport http mcp.tasks fail-closed (AMENDMENT-fastmcp4-adoption §4, S22)
+# ---------------------------------------------------------------------------
+
+
+def test_start_http_tasks_enabled_without_extra_exits_error(
+    runner: CliRunner, tmp_path: Path, monkeypatch
+) -> None:
+    """mcp.tasks.enabled without the ``tasks`` extra installed is a hard, clear error.
+
+    ``fastmcp_tasks`` is genuinely not installed in the test environment (it's an
+    optional extra scoped to this feature), so this exercises the real check rather
+    than a mocked one.
+    """
+    (tmp_path / "canonic.yaml").write_text(_VALID_CONFIG + "mcp:\n  tasks:\n    enabled: true\n")
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("CANONIC_TEST_MCP_TOKEN", "s3cr3t")
+
+    with (
+        patch(_PATCH_SERVICE) as mock_cls,
+        patch(_PATCH_START_HTTP) as mock_start_http,
+        patch("canonic.cli.commands.mcp._save_last_project"),
+    ):
+        mock_cls.from_project.return_value = _mock_service()
+        result = runner.invoke(
+            app,
+            ["mcp", "start", "--transport", "http", "--token-ref", "env:CANONIC_TEST_MCP_TOKEN"],
+        )
+
+    assert result.exit_code == 1
+    assert "canonic[tasks]" in result.output
+    mock_start_http.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
 # --tenant flag (SPEC-E12 §5, §7)
 # ---------------------------------------------------------------------------
 

@@ -8,6 +8,7 @@ from canonic.config import (
     CanonicConfig,
     ConfigError,
     McpOAuthMode,
+    McpTasksBackend,
     find_project_root,
     load_config,
 )
@@ -625,6 +626,78 @@ class TestMcpOAuthConfig:
         with pytest.raises(ConfigError) as exc_info:
             load_config(_canonic_yaml(tmp_path, content))
         assert "identity_assertion" in str(exc_info.value)
+
+
+class TestMcpTasksConfig:
+    """``mcp.tasks`` block (AMENDMENT-fastmcp4-adoption §4, S22)."""
+
+    def test_defaults_when_block_absent(self, tmp_path: Path) -> None:
+        cfg = load_config(_canonic_yaml(tmp_path, _VALID))
+        assert cfg.mcp.tasks.enabled is False
+        assert cfg.mcp.tasks.backend == McpTasksBackend.MEMORY
+        assert cfg.mcp.tasks.url is None
+
+    def test_memory_backend_parsed(self, tmp_path: Path) -> None:
+        content = _VALID + "mcp:\n  tasks:\n    enabled: true\n"
+        cfg = load_config(_canonic_yaml(tmp_path, content))
+        assert cfg.mcp.tasks.enabled is True
+        assert cfg.mcp.tasks.backend == McpTasksBackend.MEMORY
+        assert cfg.mcp.tasks.url is None
+
+    def test_redis_backend_requires_url(self, tmp_path: Path) -> None:
+        content = _VALID + "mcp:\n  tasks:\n    enabled: true\n    backend: redis\n"
+        with pytest.raises(ConfigError) as exc_info:
+            load_config(_canonic_yaml(tmp_path, content))
+        assert "mcp.tasks.url" in str(exc_info.value)
+
+    def test_redis_backend_with_url_parsed(self, tmp_path: Path) -> None:
+        content = (
+            _VALID
+            + "mcp:\n"
+            + "  tasks:\n"
+            + "    enabled: true\n"
+            + "    backend: redis\n"
+            + "    url: redis://localhost:6379/0\n"
+        )
+        cfg = load_config(_canonic_yaml(tmp_path, content))
+        assert cfg.mcp.tasks.backend == McpTasksBackend.REDIS
+        assert cfg.mcp.tasks.url == "redis://localhost:6379/0"
+
+    def test_memory_backend_rejects_url(self, tmp_path: Path) -> None:
+        content = (
+            _VALID
+            + "mcp:\n"
+            + "  tasks:\n"
+            + "    enabled: true\n"
+            + "    url: redis://localhost:6379/0\n"
+        )
+        with pytest.raises(ConfigError) as exc_info:
+            load_config(_canonic_yaml(tmp_path, content))
+        assert "mcp.tasks.url" in str(exc_info.value)
+
+
+class TestMcpCacheTtlSeconds:
+    """``mcp.cache_ttl_seconds`` (AMENDMENT-fastmcp4-adoption §5, S23, S24)."""
+
+    def test_default_when_absent(self, tmp_path: Path) -> None:
+        cfg = load_config(_canonic_yaml(tmp_path, _VALID))
+        assert cfg.mcp.cache_ttl_seconds == 300
+
+    def test_custom_value_parsed(self, tmp_path: Path) -> None:
+        content = _VALID + "mcp:\n  cache_ttl_seconds: 60\n"
+        cfg = load_config(_canonic_yaml(tmp_path, content))
+        assert cfg.mcp.cache_ttl_seconds == 60
+
+    def test_zero_disables_and_is_accepted(self, tmp_path: Path) -> None:
+        content = _VALID + "mcp:\n  cache_ttl_seconds: 0\n"
+        cfg = load_config(_canonic_yaml(tmp_path, content))
+        assert cfg.mcp.cache_ttl_seconds == 0
+
+    def test_negative_value_rejected(self, tmp_path: Path) -> None:
+        content = _VALID + "mcp:\n  cache_ttl_seconds: -1\n"
+        with pytest.raises(ConfigError) as exc_info:
+            load_config(_canonic_yaml(tmp_path, content))
+        assert "mcp.cache_ttl_seconds" in str(exc_info.value)
 
 
 class TestLLMProviders:

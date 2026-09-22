@@ -141,6 +141,24 @@ _INSTRUCTIONS = (
 )
 
 
+def _require_tasks_extension() -> Any:
+    """Import ``TasksExtension``, translating its absence into an actionable error.
+
+    ``fastmcp[tasks]`` is an optional extra (``canonic[tasks]``) scoped to the ``http``
+    profile's background-task support (AMENDMENT-fastmcp4-adoption §4, S22); most
+    projects never enable ``mcp.tasks`` and shouldn't need the extra worker stack it
+    pulls in installed.
+    """
+    try:
+        from fastmcp_tasks import TasksExtension
+    except ImportError as exc:
+        raise RuntimeError(
+            "mcp.tasks.enabled is set, but the tasks extra is not installed — run "
+            'pip install "canonic[tasks]"'
+        ) from exc
+    return TasksExtension
+
+
 def _format_suggestions(related: dict[str, Any]) -> str | None:
     """Format metadata.related into a verbatim-relay string for small models."""
     dims = related.get("unused_dimensions", [])
@@ -167,6 +185,9 @@ def build_server(
     auth: AuthProvider | None = None,
     session_principal: Principal | None = None,
     claim_mapping: dict[str, str] | None = None,
+    tasks: bool = False,
+    tasks_url: str | None = None,
+    cache_ttl_seconds: int = 300,
 ) -> FastMCP:
     """Return a :class:`FastMCP` instance with all P0 tools registered against *service*.
 
@@ -185,11 +206,35 @@ def build_server(
     counterpart to ``session_principal``, resolving a namespaced IdP claim key to a
     tenancy/role policy's own ``claim`` name for every request's derived
     :class:`Principal`. Unused under ``stdio`` or a static-token caller.
+
+    ``tasks`` (``mcp.tasks.enabled``) registers the ``io.modelcontextprotocol/tasks``
+    extension and runs ``query``, ``run_sql`` and ``run_report`` as optionally-async
+    tools, so a client that declares the tasks capability can poll a long-running query
+    instead of holding the request open. ``tasks_url`` is ``mcp.tasks.url`` (the Docket
+    backend URL), used only when ``mcp.tasks.backend`` is ``redis``; ``None`` falls back
+    to FastMCP's in-memory backend. Never set from ``stdio`` (S22 AC4): a local
+    subprocess has no reason to hold requests open in the first place.
+
+    ``cache_ttl_seconds`` (``mcp.cache_ttl_seconds``, S23/S24) is a SEP-2549 client-side
+    cache hint applied uniformly to every listing (``tools/list``, ``resources/list``,
+    ``prompts/list``, ``server/discover``); ``0`` disables it entirely, restoring
+    byte-identical output to a server that never set one. Never paired with a
+    ``cache_scope`` of ``"public"`` — a shared client cache across callers would leak
+    one caller's listing to another once tenancy/role-scoped tools exist, so the hint
+    always defaults to FastMCP's ``"private"`` scope. Tool call results are untouched;
+    this affects only how long a client may treat a listing as fresh.
     """
     mcp: FastMCP = FastMCP(
-        "canonic", version=CANONIC_VERSION, instructions=_INSTRUCTIONS, auth=auth
+        "canonic",
+        version=CANONIC_VERSION,
+        instructions=_INSTRUCTIONS,
+        auth=auth,
+        cache_ttl=cache_ttl_seconds or None,
     )
     mcp.add_extension(ContractExtension())
+    if tasks:
+        TasksExtension = _require_tasks_extension()
+        mcp.add_extension(TasksExtension(url=tasks_url))
 
     # ------------------------------------------------------------------
     # Tool: list_metrics
@@ -382,7 +427,8 @@ def build_server(
             "canonical name and re-issue. "
             "When the response contains a 'suggestions' key, relay that text verbatim to the "
             "user as a follow-up after presenting the results."
-        )
+        ),
+        task=tasks,
     )
     @canonic_error_response
     async def query(query: dict[str, Any]) -> dict[str, Any]:
@@ -407,7 +453,8 @@ def build_server(
         description=(
             "Execute a read-only SQL SELECT on a named connection (or the project default). "
             "Rejects non-SELECT statements with READ_ONLY_VIOLATION."
-        )
+        ),
+        task=tasks,
     )
     @canonic_error_response
     async def run_sql(sql: str, connection: str | None = None) -> dict[str, Any]:
@@ -520,7 +567,8 @@ def build_server(
             "own filters, never replacing them. Do not use this to scope a report to a "
             "tenant/merchant — tenant isolation is enforced server-side from the caller's "
             "verified identity and cannot be set or widened by a caller-supplied filter."
-        )
+        ),
+        task=tasks,
     )
     @canonic_error_response
     async def run_report(

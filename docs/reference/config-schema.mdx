@@ -211,6 +211,11 @@ mcp:
       identity_assertion:                                   # proxy mode only, headless/agentic clients
         trusted_issuers: [https://login.acme-corp.com]
         audience: canonic-mcp
+  tasks:                                                    # http transport only
+    enabled: false
+    backend: memory   # memory | redis
+    url: null          # required (and only used) when backend is redis
+  cache_ttl_seconds: 300   # 0 disables listing cache hints entirely
 ```
 
 | Field | Type | Default | Governs |
@@ -233,6 +238,10 @@ mcp:
 | `auth.oauth.identity_assertion` | `McpIdentityAssertionConfig \| null` | `null` | `proxy` mode only. Accepts an IdP-signed identity assertion (SEP-990 ID-JAG) in place of the interactive Authorization Code + PKCE flow, for headless/agentic clients that already hold an established identity from the IdP. Rejected in `jwt` mode. |
 | `auth.oauth.identity_assertion.trusted_issuers` | `list[str]` | n/a (required, non-empty) | Issuer (`iss`) values the proxy accepts on an assertion. Each entry must start with `http://` or `https://`. |
 | `auth.oauth.identity_assertion.audience` | `str \| null` | `null` | Expected `aud` value on the assertion. Defaults to this daemon's own issuer identifier when omitted. |
+| `tasks.enabled` | `bool` | `false` | Runs `query`, `run_sql` and `run_report` as optionally-async tools on `http` transport, so a client that declares the `io.modelcontextprotocol/tasks` capability can poll a long-running query instead of holding the request open. A client that doesn't opt in still gets a synchronous result. Requires the `canonic[tasks]` extra installed. The daemon refuses to start otherwise. Never applies to `stdio`. |
+| `tasks.backend` | `"memory" \| "redis"` | `"memory"` | The Docket backend running task state. `memory` is single-process, good enough for one daemon instance. `redis` coordinates tasks across multiple daemon processes/workers. |
+| `tasks.url` | `str \| null` | `null` | Docket backend URL (e.g. `redis://localhost:6379/0`). Required when `backend` is `redis`, rejected when `backend` is `memory`. |
+| `cache_ttl_seconds` | `int` | `300` | How long (in seconds) a client may treat a listing (`tools/list`, `resources/list`, `prompts/list`, `server/discover`) as fresh, a SEP-2549 client-side cache hint applied uniformly across all four. `0` disables the hint entirely, byte-identical to a server that never set one. Must be `>= 0`. The scope is always `private`, never shared across callers, and tool call results are unaffected, only listings. |
 
 This block only matters for `canonic mcp start --transport http`. The default `stdio` transport is a local subprocess and needs no auth, process-level trust is enough. `http` transport is network-reachable, though, so it refuses to start unless at least one mechanism resolves: a token here (or via the `--token-ref` CLI override) and/or `auth.oauth`. When both are configured, a request is checked against the static token map first (no network call), falling through to OAuth verification if no static token matches: the two stay independently revocable, a token entry by editing `canonic.yaml`, an OAuth-issued token at the IdP. `canonic mcp status` reports which mechanism(s) are active on a running daemon. See [Connecting your agent](/mcp-integration/connecting-your-agent#remote-enterprise-deployment) for the full remote-deployment walkthrough.
 

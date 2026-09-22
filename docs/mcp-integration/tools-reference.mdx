@@ -23,12 +23,22 @@ The MCP server (`canonic/mcp/server.py`) registers 13 tools. Each does transport
 
 ## Session / contract
 
+A client that supports MCP server extensions (SEP-2133) does not need either tool below: canonic advertises its contract version under `capabilities.extensions["app.getcanonic/contract"]` on connect, on both protocol eras:
+
+```json
+{
+  "app.getcanonic/contract": {"schema": "2.9", "major": 2, "minor": 9}
+}
+```
+
+A client that declares its own `major`/`minor` for a request gets a MAJOR mismatch, or a MINOR above what the server implements, rejected before the tool body runs, with no extra round trip. `contract_info` and `negotiate_contract` are the fallback for a client without extension support.
+
 ### `contract_info`
 
 Returns the serving contract version this daemon implements. Call at session start to confirm compatibility.
 
 ```json
-{"contract_schema": "2.3"}
+{"contract_schema": "2.9"}
 ```
 
 ### `negotiate_contract(contract_major: int)`
