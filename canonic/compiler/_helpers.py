@@ -161,18 +161,48 @@ def _resolve_dimensions(
     return resolved
 
 
+def _denied_filter_columns(
+    sources_by_name: dict[str, SemanticSource],
+    effective_policy: EffectivePolicy,
+) -> frozenset[tuple[str, str]]:
+    """``(source, physical column)`` pairs backing a dimension the policy denies."""
+    return frozenset(
+        (src.name, dim.column)
+        for src in sources_by_name.values()
+        for dim in src.dimensions
+        if not effective_policy.dimension_allowed(dim.name)
+    )
+
+
 def _bind_filters(
     filters: list[str],
     sources_by_name: dict[str, SemanticSource],
     owner: str,
     alias_to_source: dict[str, str] | None = None,
+    effective_policy: EffectivePolicy | None = None,
 ) -> tuple[list[exp.Expression], set[str]]:
-    """Parse filter strings, qualify referenced names to their owning source alias."""
+    """Parse filter strings, qualify referenced names to their owning source alias.
+
+    With ``effective_policy``, a filter that reads a column backing a denied dimension is
+    rejected with the same ``UNREACHABLE`` shape as an unknown name. Comparing on the
+    physical column, not the dimension name, closes the bypass of filtering on the raw
+    column name or through a table qualifier. Otherwise ``WHERE customer_email = 'x'``
+    would let a caller probe the value of a column it may not select.
+    """
+    denied = (
+        _denied_filter_columns(sources_by_name, effective_policy)
+        if effective_policy is not None
+        else frozenset()
+    )
     conditions: list[exp.Expression] = []
     used: set[str] = set()
     for raw in filters:
         parsed = _parse(raw)
         bound, sources = _qualify_columns(parsed, sources_by_name, owner, alias_to_source)
+        for col in bound.find_all(exp.Column):
+            alias = col.table
+            if (((alias_to_source or {}).get(alias, alias)), col.name) in denied:
+                raise UnreachableError(f"filter references unknown name {col.name!r}")
         conditions.append(bound)
         used |= sources
     return conditions, used

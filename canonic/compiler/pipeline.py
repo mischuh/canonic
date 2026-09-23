@@ -540,7 +540,11 @@ def _related(
     raw_metrics: list[RelatedMetric] = []
     for src_name in sorted(queried_sources):
         for metric_name in resolver.metrics_for_source(src_name):
-            if metric_name not in queried_metric_names and metric_name not in seen_metrics:
+            if (
+                metric_name not in queried_metric_names
+                and metric_name not in seen_metrics
+                and effective_policy.metric_allowed(metric_name)
+            ):
                 seen_metrics.add(metric_name)
                 raw_metrics.append(RelatedMetric(name=metric_name, source=src_name))
     sibling_metrics = sorted(raw_metrics, key=lambda m: m.name)[:_RELATED_CAP]

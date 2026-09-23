@@ -98,11 +98,7 @@ roles:
 
 When a principal holds several roles, each field is the union of what every assigned role grants or denies, with `deny` winning in the final check regardless of how many roles are in play.
 
-`dimensions.deny` (and `dimensions.allow`) is enforced at query time and in discovery. A query that groups by a denied dimension fails with the same `UNREACHABLE` error an undeclared dimension produces, so the error does not reveal that the name exists. Denied dimensions are also left out of `describe_metric`, `get_overview` and the related-dimension suggestions. A join-qualified name such as `pickup.city` is matched against a bare `deny: [city]`. `masking` (below) is the complementary tool: it lets a column be queried but rewrites its *value*.
-
-<Warning>
-`dimensions.deny` gates the `dimensions` of a query, not `filters`. A filter expression that references a denied column is not yet rejected.
-</Warning>
+`dimensions.deny` (and `dimensions.allow`) is enforced at query time and in discovery. A query that groups by a denied dimension, or filters on the column behind one, fails with the same `UNREACHABLE` error an undeclared name produces, so the error does not reveal that the name exists. Denied dimensions are also left out of `describe_metric`, `get_overview` and the related-dimension suggestions, and metrics outside a role's allow list are left out of the related-metric suggestions. A join-qualified name such as `pickup.city` is matched against a bare `deny: [city]`. `masking` (below) is the complementary tool: it lets a column be queried but rewrites its *value*.
 
 <Warning>
 A role that declares no `knowledge:` block at all gets `allow_tags: []` by default, meaning that role sees **zero** knowledge pages. This is the opposite of the "no role policy loaded" case, which is fully unrestricted. A role meant to see everything (an internal/platform role, say) must explicitly set `knowledge: { allow_tags: ["*"] }`. Simply omitting the block is a footgun, not a no-op.
