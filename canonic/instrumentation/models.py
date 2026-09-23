@@ -12,6 +12,7 @@ from pydantic import BaseModel, ConfigDict, model_validator
 
 __all__ = [
     "AnswerEvent",
+    "AnswerEventUser",
     "AnswerOutcomeEvent",
     "FunnelEvent",
     "FunnelMilestone",
@@ -41,6 +42,20 @@ def _age_days(last_validated_at: str | None) -> int | None:
         return None
 
 
+class AnswerEventUser(BaseModel):
+    """``AnswerEvent.user`` for an identity-asserted call (AMENDMENT-e12-identity-assertion-principal).
+
+    ``subject`` is the asserted employee whose :class:`~canonic.contracts.principal.Principal`
+    scoped the query. ``acted_via`` is the calling agent's own ``client_id``. Every other
+    auth path keeps ``user`` a plain string, since subject and caller are the same there.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    subject: str
+    acted_via: str
+
+
 class AnswerEvent(BaseModel):
     """One served-answer record appended to ``.canonic/events.jsonl`` (SPEC-E16 §3).
 
@@ -67,8 +82,10 @@ class AnswerEvent(BaseModel):
     trust_score: str | None = None
     # Verified caller identity (bearer-token client_id) for MCP http-transport calls;
     # None for stdio transport and the CLI, which have no auth layer
-    # (AMENDMENT-remote-mcp-transport.md).
-    user: str | None = None
+    # (AMENDMENT-remote-mcp-transport.md). An identity-asserted call records the
+    # asserted employee and the calling agent separately as an AnswerEventUser
+    # (AMENDMENT-e12-identity-assertion-principal).
+    user: str | AnswerEventUser | None = None
     # Tenant/role attribution (SPEC-E12 §6). ``tenant`` is a verified identifier, not
     # warehouse content, and is stored verbatim regardless of the AC2 "no content" rule
     # that governs the rest of this event — see the carve-out in

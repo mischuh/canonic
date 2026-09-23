@@ -37,7 +37,7 @@ if TYPE_CHECKING:
     from canonic.connectors.base import ResultSet
     from canonic.contracts.assertions import AccuracyReport, AssertionOutcome
     from canonic.contracts.models import Assertion
-    from canonic.contracts.principal import Principal
+    from canonic.contracts.principal import Caller, Principal
     from canonic.contracts.resolver import Binding
     from canonic.core.models import (
         MetricDetail,
@@ -229,7 +229,7 @@ class CanonicService:
         query: SemanticQuery,
         *,
         harness: bool = False,
-        caller: str | None = None,
+        caller: Caller | None = None,
         principal: Principal | None = None,
     ) -> QueryResult:
         """Compile and execute a semantic query read-only (SPEC §2)."""
@@ -240,7 +240,7 @@ class CanonicService:
         sql: str,
         connection: str | None = None,
         *,
-        caller: str | None = None,
+        caller: Caller | None = None,
         principal: Principal | None = None,
     ) -> ResultSet:
         """Execute a raw read-only SQL string on the named connection (SPEC §2).
@@ -319,7 +319,7 @@ class CanonicService:
         as_of: datetime | None = None,
         filters: list[str] | None = None,
         user: str | None = None,
-        caller: str | None = None,
+        caller: Caller | None = None,
         principal: Principal | None = None,
     ) -> ReportRunResult:
         """Run every section of a committed report through ``query``, in order.

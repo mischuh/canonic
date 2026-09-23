@@ -26,7 +26,7 @@ if TYPE_CHECKING:
     from datetime import datetime
 
     from canonic.compiler import SemanticQuery
-    from canonic.contracts.principal import Principal
+    from canonic.contracts.principal import Caller, Principal
     from canonic.core.context import ServiceContext
     from canonic.core.knowledge import KnowledgeService
     from canonic.core.query import QueryService
@@ -90,7 +90,7 @@ class ReportService:
         as_of: datetime | None = None,
         filters: list[str] | None = None,
         user: str | None = None,
-        caller: str | None = None,
+        caller: Caller | None = None,
         principal: Principal | None = None,
     ) -> ReportRunResult:
         """Run every section of a committed report through ``core.query``, in order (S16).

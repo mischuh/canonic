@@ -20,27 +20,29 @@ from canonic import __version__ as CANONIC_VERSION
 from canonic.compiler.query import SemanticQuery
 from canonic.contract import CONTRACT_SCHEMA
 from canonic.core.models import CompileOutput
-from canonic.mcp.auth import principal_from_token
+from canonic.mcp.auth import caller_from_token, principal_from_token
 from canonic.mcp.errors import canonic_error_response
 from canonic.mcp.extensions import ContractExtension
 
 if TYPE_CHECKING:
     from fastmcp.server.auth.auth import AuthProvider
 
-    from canonic.contracts.principal import Principal
+    from canonic.contracts.principal import Caller, Principal
     from canonic.contracts.resolver import ContractResolver
     from canonic.core.service import CanonicService
 
 
-def _caller_id() -> str | None:
-    """The verified client_id for the current request, or ``None`` under stdio.
+def _caller() -> Caller | None:
+    """The verified :class:`Caller` for the current request, or ``None`` under stdio.
 
     ``stdio`` transport has no ``AccessToken`` (no auth layer); ``http`` transport
     always has one once a request is authenticated (unauthenticated requests never
-    reach a tool body — FastMCP's auth middleware rejects them with 401 first).
+    reach a tool body — FastMCP's auth middleware rejects them with 401 first). For an
+    identity-asserted token the caller is the asserted employee, acting via the agent's
+    ``client_id`` (see :func:`canonic.mcp.auth.caller_from_token`).
     """
     token = get_access_token()
-    return token.client_id if token is not None else None
+    return caller_from_token(token) if token is not None else None
 
 
 def _principal(
@@ -82,9 +84,14 @@ def _effective_user(principal: Principal | None, user: str | None) -> str | None
     identity to read their personal knowledge pages (SPEC-E12 §1, the ``search_knowledge``/
     ``read_knowledge_page``/``run_report`` vulnerability this epic closes). With no principal
     bound (no policy configured, or ``stdio``), ``user`` is accepted as before — unchanged
-    behavior for existing single-tenant projects.
+    behavior for existing single-tenant projects. For an identity-asserted token the
+    verified identity is the asserted employee, so their personal pages are the ones
+    visible, never the calling agent's.
     """
-    return _caller_id() if principal is not None else user
+    if principal is None:
+        return user
+    caller = _caller()
+    return caller.id if caller is not None else None
 
 
 __all__ = ["build_server"]
@@ -435,7 +442,7 @@ def build_server(
         sq = SemanticQuery.model_validate(query)
         result = await service.query(
             sq,
-            caller=_caller_id(),
+            caller=_caller(),
             principal=_principal(service.resolver, session_principal, claim_mapping),
         )
         response = result.model_dump(mode="json")
@@ -461,7 +468,7 @@ def build_server(
         result = await service.run_sql(
             sql,
             connection=connection,
-            caller=_caller_id(),
+            caller=_caller(),
             principal=_principal(service.resolver, session_principal, claim_mapping),
         )
         return result.model_dump(mode="json")
@@ -586,7 +593,7 @@ def build_server(
             as_of=parsed_as_of,
             filters=filters,
             user=_effective_user(principal, user),
-            caller=_caller_id(),
+            caller=_caller(),
             principal=principal,
         )
         return result.model_dump(mode="json")

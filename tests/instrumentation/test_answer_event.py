@@ -28,7 +28,7 @@ from canonic.contracts.models import (
     TenancyPolicy,
     UndeclaredSource,
 )
-from canonic.contracts.principal import Principal
+from canonic.contracts.principal import Caller, Principal
 from canonic.contracts.resolver import ContractResolver
 from canonic.core.service import CanonicService
 from canonic.exc import Unresolved
@@ -261,7 +261,7 @@ async def test_query_caller_attributed_on_event(
     monkeypatch.setattr("canonic.core.context.default_factory", _StubFactory())
 
     q = SemanticQuery(metrics=["revenue"])
-    await svc.query(q, caller="alice")
+    await svc.query(q, caller=Caller(id="alice"))
 
     events = _read_events(tmp_path)
     assert events[0]["user"] == "alice"
@@ -278,7 +278,7 @@ async def test_run_sql_emits_event_with_caller(
 
     monkeypatch.setattr("canonic.core.context.default_factory", _StubFactory())
 
-    await svc.run_sql("select 1", caller="bob")
+    await svc.run_sql("select 1", caller=Caller(id="bob"))
 
     events = _read_events(tmp_path)
     assert len(events) == 1
