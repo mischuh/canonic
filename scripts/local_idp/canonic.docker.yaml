@@ -1,0 +1,77 @@
+# Docker-only overlay for examples/marketplace/canonic.yaml (mounted over it by
+# scripts/local_idp/docker-compose.yml). Not used outside that compose setup — issuer_url
+# and base_url below are only valid inside/around that Docker network. See
+# scripts/local_idp/README.md.
+
+version: 1
+
+project:
+  name: marketplace-demo
+  default_connection: marketplace_db
+
+connections:
+  - id: marketplace_db
+    type: sqlite
+    params:
+      path: marketplace.db   # created by: sqlite3 marketplace.db < setup.sql
+    # Deliberately false: this shared SQLite warehouse has no warehouse-native
+    # row-level-security layer, so run_sql stays refused for any non-exempt role once
+    # tenancy is active — see docs/guides/marketplace.mdx "run_sql's two gates".
+    rls_enforced: false
+
+llm:
+  provider: openai_compatible
+  base_url: http://127.0.0.1:11434/v1   # Ollama; swap for any OpenAI-compatible endpoint
+  model: gemma-4-e2b-it-4bit
+  api_key_ref: env:CANONIC_LLM_API_KEY
+
+mcp:
+  auth:
+    tokens:
+      - client_id: byte-gadgets-viewer
+        token_ref: env:CANONIC_MCP_TOKEN_BYTE_GADGETS_VIEWER
+        claims: { merchant_id: 'byte-gadgets', roles: [merchant_viewer] }
+      - client_id: byte-gadgets-admin
+        token_ref: env:CANONIC_MCP_TOKEN_BYTE_GADGETS_ADMIN
+        claims: { merchant_id: 'byte-gadgets', roles: [merchant_admin] }
+      - client_id: urban-threads-viewer
+        token_ref: env:CANONIC_MCP_TOKEN_URBAN_THREADS_VIEWER
+        claims: { merchant_id: 'urban-threads', roles: [merchant_viewer] }
+      - client_id: urban-threads-admin
+        token_ref: env:CANONIC_MCP_TOKEN_URBAN_THREADS_ADMIN
+        claims: { merchant_id: 'urban-threads', roles: [merchant_admin] }
+      - client_id: platform-ops
+        token_ref: env:CANONIC_MCP_TOKEN_PLATFORM_OPS
+        claims: { roles: [platform_analyst] }   # no merchant_id claim: tenancy_exempt reads across all merchants
+    # Local Keycloak IdP (scripts/local_idp/keycloak/canonic-realm.json). issuer_url is
+    # "localhost" on purpose, not the compose service name "keycloak": Keycloak's discovery
+    # document echoes back whatever host it was queried with, and that document is what the
+    # browser gets redirected to for login, so it must resolve from the browser's side too.
+    # The canonic container only resolves "localhost:8080" to Keycloak itself because it
+    # shares Keycloak's network namespace (network_mode: service:keycloak in
+    # docker-compose.yml) — see scripts/local_idp/README.md.
+    oauth:
+      mode: proxy
+      issuer_url: http://localhost:8080/realms/canonic
+      client_id: canonic-mcp
+      client_secret_ref: env:CANONIC_OAUTH_CLIENT_SECRET
+      base_url: http://localhost:7474
+
+embeddings:
+  model: all-MiniLM-L6-v2
+
+reconcile:
+  strict_contradictions: false
+  auto_apply:
+    enabled: false
+
+telemetry:
+  enabled: false
+
+runtime:
+  air_gapped: false
+
+logging:
+  level: INFO
+  format: json
+  file: .canonic/canonic.log

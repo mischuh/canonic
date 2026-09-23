@@ -1,0 +1,101 @@
+{
+  "realm": "canonic",
+  "enabled": true,
+  "sslRequired": "none",
+  "registrationAllowed": false,
+  "roles": {
+    "realm": [
+      { "name": "merchant_viewer", "description": "Read-only access to one merchant's scoped metrics." },
+      { "name": "merchant_admin", "description": "Unmasked access to one merchant's scoped metrics, run_sql allowed." },
+      { "name": "platform_analyst", "description": "Tenancy-exempt access across all merchants." }
+    ]
+  },
+  "clients": [
+    {
+      "clientId": "canonic-mcp",
+      "name": "Canonic MCP daemon (local dev)",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "publicClient": false,
+      "clientAuthenticatorType": "client-secret",
+      "secret": "local-dev-secret",
+      "standardFlowEnabled": true,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": false,
+      "redirectUris": ["http://localhost:7474/*"],
+      "webOrigins": ["http://localhost:7474"],
+      "protocolMappers": [
+        {
+          "name": "roles",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-realm-role-mapper",
+          "consentRequired": false,
+          "config": {
+            "multivalued": "true",
+            "userinfo.token.claim": "true",
+            "id.token.claim": "true",
+            "access.token.claim": "true",
+            "claim.name": "roles",
+            "jsonType.label": "String"
+          }
+        },
+        {
+          "name": "merchant_id",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-attribute-mapper",
+          "consentRequired": false,
+          "config": {
+            "user.attribute": "merchant_id",
+            "claim.name": "merchant_id",
+            "jsonType.label": "String",
+            "id.token.claim": "true",
+            "access.token.claim": "true",
+            "userinfo.token.claim": "true"
+          }
+        }
+      ]
+    }
+  ],
+  "users": [
+    {
+      "username": "byte-gadgets-viewer",
+      "enabled": true,
+      "emailVerified": true,
+      "credentials": [{ "type": "password", "value": "viewer", "temporary": false }],
+      "realmRoles": ["merchant_viewer"],
+      "attributes": { "merchant_id": ["byte-gadgets"] }
+    },
+    {
+      "username": "byte-gadgets-admin",
+      "enabled": true,
+      "emailVerified": true,
+      "credentials": [{ "type": "password", "value": "admin", "temporary": false }],
+      "realmRoles": ["merchant_admin"],
+      "attributes": { "merchant_id": ["byte-gadgets"] }
+    },
+    {
+      "username": "urban-threads-viewer",
+      "enabled": true,
+      "emailVerified": true,
+      "credentials": [{ "type": "password", "value": "viewer", "temporary": false }],
+      "realmRoles": ["merchant_viewer"],
+      "attributes": { "merchant_id": ["urban-threads"] }
+    },
+    {
+      "username": "urban-threads-admin",
+      "enabled": true,
+      "emailVerified": true,
+      "credentials": [{ "type": "password", "value": "admin", "temporary": false }],
+      "realmRoles": ["merchant_admin"],
+      "attributes": { "merchant_id": ["urban-threads"] }
+    },
+    {
+      "username": "platform-ops",
+      "enabled": true,
+      "emailVerified": true,
+      "credentials": [{ "type": "password", "value": "platform", "temporary": false }],
+      "realmRoles": ["platform_analyst"]
+    }
+  ]
+}
