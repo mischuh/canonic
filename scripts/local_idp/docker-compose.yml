@@ -1,0 +1,55 @@
+# Local Identity Provider for testing Canonic's MCP role/permission (RBAC) enforcement
+# end-to-end against a real OAuth 2.1 login flow. See README.md for the full walkthrough.
+#
+# Brings up:
+#   - keycloak: a real OIDC IdP, pre-seeded with the canonic-mcp client, the marketplace
+#     example's roles (merchant_viewer/merchant_admin/platform_analyst) and five test users.
+#   - canonic:  the MCP http daemon, built from the repo's own Dockerfile, serving
+#     examples/marketplace with mcp.auth.oauth wired to the keycloak service above.
+services:
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.0
+    command: ["start-dev", "--import-realm"]
+    environment:
+      KEYCLOAK_ADMIN: admin
+      KEYCLOAK_ADMIN_PASSWORD: admin
+    volumes:
+      - ./keycloak/canonic-realm.json:/opt/keycloak/data/import/canonic-realm.json:ro
+    ports:
+      # 7474 is canonic's, published here because canonic shares this service's network
+      # namespace below (network_mode: service:keycloak) rather than getting its own.
+      - "8080:8080"
+      - "7474:7474"
+
+  canonic:
+    build:
+      context: ../..
+      dockerfile: Dockerfile
+    depends_on:
+      - keycloak
+    # Keycloak's OIDC discovery document reports its endpoints using whatever Host header
+    # the discovery request was made with (dev mode has hostname-strict checking off), and
+    # that same document is what the *browser* gets redirected to for login. issuer_url
+    # below uses "localhost:8080" so those redirect URLs are something the browser (on the
+    # host machine) can actually resolve — but "localhost" only means that from inside a
+    # container when the container shares that host-published port's namespace. Sharing
+    # keycloak's network namespace here (instead of the default per-service one, reachable
+    # only via the "keycloak" Compose DNS name) is what makes "localhost:8080" resolve to
+    # Keycloak from inside this container too, not just from the browser. See README.md.
+    network_mode: "service:keycloak"
+    entrypoint: ["/bin/sh", "/entrypoint.sh"]
+    environment:
+      # Matches the "secret" of the canonic-mcp client in canonic-realm.json. Local-dev
+      # only — never a real secret, never shipped outside this compose file.
+      CANONIC_OAUTH_CLIENT_SECRET: local-dev-secret
+      # Fallback static bearer tokens (mcp.auth.tokens in canonic.docker.yaml), composed
+      # alongside oauth so a quick curl-based sanity check doesn't require a browser login.
+      CANONIC_MCP_TOKEN_BYTE_GADGETS_VIEWER: byte-gadgets-viewer-local-dev
+      CANONIC_MCP_TOKEN_BYTE_GADGETS_ADMIN: byte-gadgets-admin-local-dev
+      CANONIC_MCP_TOKEN_URBAN_THREADS_VIEWER: urban-threads-viewer-local-dev
+      CANONIC_MCP_TOKEN_URBAN_THREADS_ADMIN: urban-threads-admin-local-dev
+      CANONIC_MCP_TOKEN_PLATFORM_OPS: platform-ops-local-dev
+    volumes:
+      - ../../examples/marketplace:/data/marketplace
+      - ./canonic.docker.yaml:/data/marketplace/canonic.yaml:ro
+      - ./entrypoint.sh:/entrypoint.sh:ro

@@ -128,6 +128,8 @@ GUI-launched clients (Claude Desktop, Cursor) don't source your shell profile, s
 
 See [Connecting your agent](https://docs.getcanonic.app/mcp-integration/connecting-your-agent) for remote/enterprise deployment (`--transport http`, per-client bearer tokens) and the [tools reference](https://docs.getcanonic.app/mcp-integration/tools-reference).
 
+Want a full example with a real identity provider, including role/tenant enforcement end-to-end? [`scripts/local_idp`](scripts/local_idp) spins up a local Keycloak plus a dockerized canonic serving the [marketplace example](examples/marketplace) via OAuth 2.1, so you can log in as differently-scoped test users and see masking, `run_sql` gating, and tenancy scoping applied live.
+
 ## What you can rely on
 
 - **Read-only.** canonic never mutates your warehouse.
