@@ -102,10 +102,20 @@ class EffectivePolicy:
         return _WILDCARD in self.allow_metrics or name in self.allow_metrics
 
     def dimension_allowed(self, name: str) -> bool:
-        """True if ``name`` is granted by some assigned role and denied by none."""
-        if name in self.deny_dimensions:
+        """True if ``name`` is granted by some assigned role and denied by none.
+
+        A join-qualified name (``pickup.city``) is matched on both its full form and its
+        bare dimension name (``city``), so a role that denies ``city`` cannot be sidestepped
+        by addressing the same dimension through a join alias.
+        """
+        bare = name.rsplit(".", 1)[-1]
+        if name in self.deny_dimensions or bare in self.deny_dimensions:
             return False
-        return _WILDCARD in self.allow_dimensions or name in self.allow_dimensions
+        return (
+            _WILDCARD in self.allow_dimensions
+            or name in self.allow_dimensions
+            or bare in self.allow_dimensions
+        )
 
     def tag_allowed(self, tag: str) -> bool:
         """True if a knowledge page tagged ``tag`` is visible to this policy."""

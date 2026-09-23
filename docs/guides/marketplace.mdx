@@ -87,7 +87,7 @@ This happens because `contracts/policies/tenancy.yaml` sets `on_missing_principa
 
 | `client_id` | Claims | Role grants |
 | --- | --- | --- |
-| `byte-gadgets-viewer` | `merchant_id: byte-gadgets`, `roles: [merchant_viewer]` | `revenue`/`order_count`/`aov` only, scoped to Byte Gadgets, `customer_email`/`customer_phone` nominally denied (not enforced: see the closing warning) |
+| `byte-gadgets-viewer` | `merchant_id: byte-gadgets`, `roles: [merchant_viewer]` | `revenue`/`order_count`/`aov` only, scoped to Byte Gadgets, `customer_email`/`customer_phone` denied as dimensions |
 | `byte-gadgets-admin` | `merchant_id: byte-gadgets`, `roles: [merchant_admin]` | Same metrics, scoped to Byte Gadgets, `customer_email` is **masked** (`partial`), `run_sql: true` but still refused (see "run_sql's two gates") |
 | `urban-threads-viewer` | `merchant_id: urban-threads`, `roles: [merchant_viewer]` | Same as byte-gadgets-viewer, scoped to Urban Threads |
 | `urban-threads-admin` | `merchant_id: urban-threads`, `roles: [merchant_admin]` | Same as byte-gadgets-admin, scoped to Urban Threads |
@@ -125,15 +125,14 @@ $ canonic query --metrics revenue --dimensions status --tenant urban-threads
 
 ```
 merchant_viewer (byte-gadgets-viewer's role), customer_email dimension:
-  abigail.hall419@mailbox.com
-  abigail.harris28@mailbox.com
+  error unreachable: dimension 'customer_email' is not declared on any reachable source
 
 merchant_admin (byte-gadgets-admin's role), same dimension, same tenant:
   ab***
   ai***
 ```
 
-`merchant_viewer`'s `dimensions.deny: [customer_email, customer_phone]` did **not** block the plain-text email. See the warning at the bottom of this page. `merchant_admin`'s `masking: [{ column: customers.customer_email, strategy: partial }]` is what actually redacted it.
+`merchant_viewer`'s `dimensions.deny: [customer_email, customer_phone]` rejects the query outright, with the same error a nonexistent dimension produces. `merchant_admin` re-opens the dimension (`deny: []`) and its `masking: [{ column: customers.customer_email, strategy: partial }]` redacts the value instead.
 
 ## A denied metric
 
@@ -217,5 +216,5 @@ knowledge/global/               ← revenue/aov definitions (public/merchant tag
 ```
 
 <Warning>
-  `dimensions.deny` on a role is validated but not yet enforced by the compiler or discovery. Only `masking` actually protects a column today.
+  `dimensions.deny` gates the `dimensions` of a query, not `filters`. A filter expression that references a denied column is not yet rejected.
 </Warning>

@@ -98,8 +98,10 @@ roles:
 
 When a principal holds several roles, each field is the union of what every assigned role grants or denies, with `deny` winning in the final check regardless of how many roles are in play.
 
+`dimensions.deny` (and `dimensions.allow`) is enforced at query time and in discovery. A query that groups by a denied dimension fails with the same `UNREACHABLE` error an undeclared dimension produces, so the error does not reveal that the name exists. Denied dimensions are also left out of `describe_metric`, `get_overview` and the related-dimension suggestions. A join-qualified name such as `pickup.city` is matched against a bare `deny: [city]`. `masking` (below) is the complementary tool: it lets a column be queried but rewrites its *value*.
+
 <Warning>
-`RoleDef.dimensions` (`allow`/`deny`) is parsed, validated, and exposed via `EffectivePolicy.dimension_allowed()`, but nothing in the compiler, discovery, or MCP serving path actually calls that method. Declaring `dimensions.deny` on a role today has **no runtime effect** on what a query returns. The only mechanism that actually protects a column at query time is `masking` (below), which is narrower: it rewrites/nulls a column's *value*, it does not prevent the column from being requested at all.
+`dimensions.deny` gates the `dimensions` of a query, not `filters`. A filter expression that references a denied column is not yet rejected.
 </Warning>
 
 <Warning>
