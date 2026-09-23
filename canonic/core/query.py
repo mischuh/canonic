@@ -11,12 +11,12 @@ from typing import TYPE_CHECKING, Any, cast
 from canonic.compiler import compile
 from canonic.connectors.base import Capability, require_capability
 from canonic.contract import CONTRACT_SCHEMA
-from canonic.contracts.principal import Principal
+from canonic.contracts.principal import Caller, Principal
 from canonic.core.models import QueryResult
 from canonic.exc import CanonicError, TenantForbidden
 from canonic.feedback.assertion_history import AssertionHistory
 from canonic.feedback.history import BindingOutcomeHistory
-from canonic.instrumentation.models import AnswerEvent, _age_days, _sha256_json
+from canonic.instrumentation.models import AnswerEvent, AnswerEventUser, _age_days, _sha256_json
 from canonic.log import query_id_var
 from canonic.trust.scorer import trust_for_compiled
 
@@ -31,6 +31,15 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 _ANONYMOUS_PRINCIPAL = Principal(tenant=None)
+
+
+def _event_user(caller: Caller | None) -> str | AnswerEventUser | None:
+    """``AnswerEvent.user`` for ``caller``: a plain id unless an agent acted for someone."""
+    if caller is None:
+        return None
+    if caller.acted_via is None:
+        return caller.id
+    return AnswerEventUser(subject=caller.id, acted_via=caller.acted_via)
 
 
 class QueryService:
@@ -73,7 +82,7 @@ class QueryService:
         query: SemanticQuery,
         *,
         harness: bool = False,
-        caller: str | None = None,
+        caller: Caller | None = None,
         principal: Principal | None = None,
     ) -> QueryResult:
         """Compile and execute a semantic query read-only (SPEC §2).
@@ -86,9 +95,10 @@ class QueryService:
         are still evaluated for instrumentation (logged to the answer-event stream so E16 can
         spot stale assertions) but never block the result.
 
-        ``caller`` is the verified bearer-token client_id for MCP http-transport calls
-        (``None`` for stdio/CLI, which have no auth layer); recorded on the emitted
-        answer event for per-user attribution (AMENDMENT-remote-mcp-transport.md).
+        ``caller`` is the verified identity for MCP http-transport calls (``None`` for
+        stdio/CLI, which have no auth layer). It is recorded on the emitted answer event
+        for per-user attribution (AMENDMENT-remote-mcp-transport.md,
+        AMENDMENT-e12-identity-assertion-principal).
 
         ``principal`` is bound by the adapter from a verified token/CLI override — never
         accepted on ``query`` itself — and flows into :func:`compile` for tenant/role
@@ -207,7 +217,7 @@ class QueryService:
         sql: str,
         connection: str | None = None,
         *,
-        caller: str | None = None,
+        caller: Caller | None = None,
         principal: Principal | None = None,
     ) -> ResultSet:
         """Execute a raw read-only SQL string on the named connection (SPEC §2).
@@ -215,9 +225,9 @@ class QueryService:
         ``connection`` defaults to the project's ``default_connection``.
         Raises :class:`canonic.exc.ReadOnlyViolation` (exit 11) for non-SELECT.
 
-        ``caller`` is the verified bearer-token client_id for MCP http-transport calls
-        (``None`` for stdio/CLI); recorded on the emitted answer event for per-user
-        attribution (AMENDMENT-remote-mcp-transport.md).
+        ``caller`` is the verified identity for MCP http-transport calls (``None`` for
+        stdio/CLI). It is recorded on the emitted answer event for per-user attribution
+        (AMENDMENT-remote-mcp-transport.md, AMENDMENT-e12-identity-assertion-principal).
 
         Raw SQL bypasses the compiler entirely, so it never gets a tenant predicate
         injected — it is served only where a fail-closed gate says the gap is otherwise
@@ -255,7 +265,7 @@ class QueryService:
         outcome_history: BindingOutcomeHistory | None = None,
         assertion_history: AssertionHistory | None = None,
         *,
-        caller: str | None = None,
+        caller: Caller | None = None,
         principal: Principal | None = None,
     ) -> None:
         try:
@@ -299,7 +309,7 @@ class QueryService:
                 ).tier.value
                 if compiled is not None
                 else None,
-                user=caller,
+                user=_event_user(caller),
                 tenant=principal.tenant if principal is not None else None,
                 roles=list(effective_policy.roles) or None,
                 tenancy_exempt=effective_policy.tenancy_exempt,
@@ -315,7 +325,7 @@ class QueryService:
         result: ResultSet | None,
         latency_ms: int,
         error_code: str | None,
-        caller: str | None,
+        caller: Caller | None,
         principal: Principal | None = None,
     ) -> None:
         """Answer-event counterpart of :meth:`_emit_answer_event` for the raw-SQL escape hatch.
@@ -337,7 +347,7 @@ class QueryService:
                 latency_ms=latency_ms,
                 bytes_scanned=result.bytes_scanned if result is not None else None,
                 error=error_code,
-                user=caller,
+                user=_event_user(caller),
                 tenant=principal.tenant if principal is not None else None,
                 roles=list(effective_policy.roles) or None,
                 tenancy_exempt=effective_policy.tenancy_exempt,

@@ -32,6 +32,8 @@ over_limit_blocked: null
 
 Under an active [tenancy/role policy](/concepts/tenancy-and-access-control), a served-answer event also carries `tenant` (`str | null`), `roles` (`list[str] | null`, sorted), and `tenancy_exempt` (`bool`, default `false`), populated for every `query()` and `run_sql` call, not just `query()`. `tenant` is the one exception to this page's "no content, ever" rule above: it's a verified identifier, not warehouse content, so it's stored verbatim rather than hashed, which is what makes per-tenant attribution, cost accounting, and breach forensics possible from the log at all. Every `tenancy_exempt: true` event is a cross-tenant read and should be treated as alertable. All three are `null`/`false` when no tenancy or role policy is configured.
 
+`user` is the verified caller on the `http` transport and `null` on stdio and the CLI. It's a plain string (the token's `client_id`) for static tokens and OAuth logins. For a call made with an [identity assertion](/mcp-integration/connecting-your-agent), where an agent acts for an employee, it's an object instead: `{"subject": "<employee>", "acted_via": "<agent client_id>"}`. `subject` is the employee whose tenant and roles scoped the answer, and `acted_via` is the agent that made the call.
+
 A `reconcile_decision` event (add/edit/prune/contradiction/no-op, with tier, confidence, and anchored evidence) shares the same substrate: one store backs both serving and ingest traceability.
 
 ### Outcome capture: `answer_outcome`

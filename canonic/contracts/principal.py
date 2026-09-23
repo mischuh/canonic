@@ -18,7 +18,7 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from canonic.contracts.models import MaskingRule
 
-__all__ = ["SYSTEM_PRINCIPAL", "EffectivePolicy", "Principal"]
+__all__ = ["SYSTEM_PRINCIPAL", "Caller", "EffectivePolicy", "Principal"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -52,6 +52,21 @@ class Principal:
 #: (:meth:`canonic.core.reports.ReportService.validate_reports`). Never bound from a token,
 #: a CLI flag, or anything else caller-controlled.
 SYSTEM_PRINCIPAL = Principal(tenant=None, roles=(), source="system", system_exempt=True)
+
+
+@dataclass(frozen=True, slots=True)
+class Caller:
+    """Who a verified request is attributed to, for answer events and personal knowledge.
+
+    ``id`` is the identity the answer is *for*: the token's ``client_id`` for a static,
+    ``JWTVerifier`` or ``OIDCProxy`` token, or the asserted employee's subject for an
+    identity-asserted token (AMENDMENT-e12-identity-assertion-principal). ``acted_via``
+    is the calling agent's own ``client_id`` and is set only on the identity-assertion
+    path, the one path where "for whom" and "who called" differ.
+    """
+
+    id: str
+    acted_via: str | None = None
 
 
 _WILDCARD = "*"

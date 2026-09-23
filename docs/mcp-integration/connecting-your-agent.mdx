@@ -155,6 +155,8 @@ mcp:
         audience: canonic-mcp   # optional, defaults to this daemon's own issuer identifier
 ```
 
+Under a [tenancy or role policy](/concepts/tenancy-and-access-control#principal-binding), the IdP must sign the tenancy and role claims into the assertion itself, since canonic reads the principal from the verified assertion's claims (after `claim_mapping`) and from nothing else. The answer is scoped to the employee named in the assertion, not to the agent, and `.canonic/events.jsonl` records both: `"user": {"subject": "<employee>", "acted_via": "<agent client_id>"}`.
+
 Prefer this over a static `mcp.auth.tokens` entry for an agentic client that already participates in your IdP: identity stays centrally revocable and per-caller, instead of a shared secret to distribute and rotate by hand. Static tokens remain fully supported for pipelines or clients with no IdP identity of their own, and the two compose on the same daemon, same as `tokens` and `oauth` do generally. Signature and replay verification of the assertion itself is FastMCP's, not canonic's, to reimplement.
 
 <Warning>

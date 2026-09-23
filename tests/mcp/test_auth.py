@@ -4,10 +4,18 @@ AMENDMENT-remote-mcp-transport, AMENDMENT-oauth-mcp-auth).
 
 from __future__ import annotations
 
+import time
+import uuid
+
 import pytest
 from fastmcp.server.auth.auth import AccessToken, AuthProvider
+from fastmcp.server.auth.identity_assertion import ID_JAG_TYP
+from fastmcp.server.auth.oauth_proxy.proxy import _ID_JAG_GRANT_MARKER
 from fastmcp.server.auth.oidc_proxy import OIDCConfiguration, OIDCProxy
-from fastmcp.server.auth.providers.jwt import JWTVerifier
+from fastmcp.server.auth.providers.jwt import JWTVerifier, RSAKeyPair
+from joserfc import jwk, jwt
+from mcp.server.auth.provider import IdentityAssertionParams
+from mcp.shared.auth import OAuthClientInformationFull
 
 from canonic.config import (
     McpAuthConfig,
@@ -17,15 +25,20 @@ from canonic.config import (
     McpTokenEntry,
 )
 from canonic.contracts.models import RolePolicy, TenancyPolicy
+from canonic.contracts.principal import Caller
 from canonic.exc import CredentialError
 from canonic.mcp.auth import (
+    ASSERTED_CLAIMS_KEY,
     CLI_OVERRIDE_CLIENT_ID,
+    ID_JAG_GRANT,
     CanonicCompositeVerifier,
+    CanonicOIDCProxy,
     CanonicTokenVerifier,
     ResolvedToken,
     build_mcp_auth,
     build_oauth_verifier,
     build_token_verifier,
+    caller_from_token,
     describe_auth_mechanisms,
     principal_from_token,
     resolve_tokens,
@@ -532,3 +545,182 @@ class TestPrincipalFromToken:
         assert principal is not None
         assert principal.tenant == "4711"
         assert principal.roles == ("merchant_viewer",)
+
+
+_TENANCY = TenancyPolicy(
+    schema="tenancy/v1", claim="merchant_id", scoped_sources=[], shared_sources=[]
+)
+_ROLES = RolePolicy(schema="roles/v1", claim="roles", roles={})
+
+
+def _id_jag_token(asserted: dict[str, object] | None = None, **top_level: object) -> AccessToken:
+    """An access token shaped like one :class:`CanonicOIDCProxy` mints from an ID-JAG."""
+    claims: dict[str, object] = {"fastmcp_grant": ID_JAG_GRANT, "sub": "jsmith@acme-corp.com"}
+    if asserted is not None:
+        claims[ASSERTED_CLAIMS_KEY] = asserted
+    claims.update(top_level)
+    return AccessToken(
+        token="t",
+        client_id="agent-scheduled-reports",
+        scopes=[],
+        subject="jsmith@acme-corp.com",
+        claims=claims,
+    )
+
+
+class TestIdentityAssertedPrincipal:
+    """AMENDMENT-e12-identity-assertion-principal: an identity-asserted token is a fourth
+    Principal source, resolved from the verified assertion's claims."""
+
+    def test_grant_marker_matches_fastmcp(self) -> None:
+        """Pins FastMCP's private marker. A rename upstream would silently turn every
+        identity-asserted token into one with no tenant and no roles."""
+        assert ID_JAG_GRANT == _ID_JAG_GRANT_MARKER
+
+    def test_principal_read_from_asserted_claims(self) -> None:
+        token = _id_jag_token({"merchant_id": "4711", "roles": ["merchant_viewer"]})
+        principal = principal_from_token(token, tenancy=_TENANCY, roles=_ROLES)
+        assert principal is not None
+        assert principal.tenant == "4711"
+        assert principal.roles == ("merchant_viewer",)
+        assert principal.source == "assertion:agent-scheduled-reports"
+
+    def test_top_level_claims_ignored_for_asserted_token(self) -> None:
+        """Only the verified assertion's claims count, never a same-named top-level claim."""
+        token = _id_jag_token({}, merchant_id="9999", roles=["platform_analyst"])
+        principal = principal_from_token(token, tenancy=_TENANCY, roles=_ROLES)
+        assert principal is not None
+        assert principal.tenant is None
+        assert principal.roles == ()
+
+    def test_missing_asserted_claims_yields_unresolved_principal(self) -> None:
+        """S27 AC1 precondition: no tenancy claim means ``tenant=None``, the same shape any
+        other unresolvable token produces."""
+        principal = principal_from_token(_id_jag_token(), tenancy=_TENANCY, roles=_ROLES)
+        assert principal is not None
+        assert principal.tenant is None
+        assert principal.roles == ()
+
+    def test_claim_mapping_applies_to_asserted_claims(self) -> None:
+        token = _id_jag_token({"https://acme-corp.com/merchant_id": "4711"})
+        principal = principal_from_token(
+            token,
+            tenancy=_TENANCY,
+            roles=None,
+            claim_mapping={"merchant_id": "https://acme-corp.com/merchant_id"},
+        )
+        assert principal is not None
+        assert principal.tenant == "4711"
+
+
+class TestCallerFromToken:
+    def test_asserted_token_attributes_subject_via_agent(self) -> None:
+        assert caller_from_token(_id_jag_token()) == Caller(
+            id="jsmith@acme-corp.com", acted_via="agent-scheduled-reports"
+        )
+
+    def test_other_tokens_attribute_client_id(self) -> None:
+        token = AccessToken(token="t", client_id="alice", scopes=[], subject="alice-sub")
+        assert caller_from_token(token) == Caller(id="alice")
+
+
+_ASSERTION_ISSUER = "https://login.acme-corp.com"
+_AGENT_CLIENT_ID = "agent-scheduled-reports"
+
+
+def _identity_assertion_proxy(monkeypatch: pytest.MonkeyPatch) -> CanonicOIDCProxy:
+    monkeypatch.setenv("CANONIC_TEST_OAUTH_SECRET", "oauth-client-secret")
+    _stub_discovery(
+        monkeypatch,
+        issuer="https://idp.example.com",
+        authorization_endpoint="https://idp.example.com/authorize",
+        token_endpoint="https://idp.example.com/token",
+        jwks_uri="https://idp.example.com/jwks.json",
+    )
+    config = McpOAuthConfig(
+        mode=McpOAuthMode.PROXY,
+        issuer_url="https://idp.example.com",
+        client_id="canonic-mcp",
+        client_secret_ref="env:CANONIC_TEST_OAUTH_SECRET",
+        base_url="https://canonic.internal.example.com",
+        identity_assertion=McpIdentityAssertionConfig(trusted_issuers=[_ASSERTION_ISSUER]),
+    )
+    proxy = build_oauth_verifier(config)
+    assert isinstance(proxy, CanonicOIDCProxy)
+    proxy.set_mcp_path("/mcp")
+    return proxy
+
+
+def _sign_id_jag(key_pair: RSAKeyPair, audience: str, resource: str, **extra: object) -> str:
+    now = int(time.time())
+    claims = {
+        "iss": _ASSERTION_ISSUER,
+        "aud": audience,
+        "sub": "jsmith@acme-corp.com",
+        "client_id": _AGENT_CLIENT_ID,
+        "resource": resource,
+        "jti": uuid.uuid4().hex,
+        "iat": now,
+        "exp": now + 120,
+        **extra,
+    }
+    key = jwk.import_key(key_pair.private_key.get_secret_value(), "RSA")
+    return jwt.encode({"alg": "RS256", "typ": ID_JAG_TYP}, claims, key)
+
+
+class TestCanonicOIDCProxyExchange:
+    """The ID-JAG exchange keeps the assertion's tenancy/role claims on the minted token.
+    Stock FastMCP drops them, which would leave S25 unsatisfiable."""
+
+    async def _exchange(
+        self, monkeypatch: pytest.MonkeyPatch, **assertion_claims: object
+    ) -> AccessToken:
+        proxy = _identity_assertion_proxy(monkeypatch)
+        validator = proxy._identity_assertion_validator
+        assert validator is not None
+        key_pair = RSAKeyPair.generate()
+        audience = str(proxy.issuer_url)
+        # Seed the per-issuer verifier so validation needs no JWKS fetch.
+        validator._verifiers[_ASSERTION_ISSUER] = JWTVerifier(
+            public_key=key_pair.public_key, issuer=_ASSERTION_ISSUER, audience=validator.audience
+        )
+        resource = str(proxy._resource_url)
+        assertion = _sign_id_jag(key_pair, audience, resource, **assertion_claims)
+        client = OAuthClientInformationFull(client_id=_AGENT_CLIENT_ID, redirect_uris=None)
+        issued = await proxy.exchange_identity_assertion(
+            client, IdentityAssertionParams(assertion=assertion)
+        )
+        loaded = await proxy.load_access_token(issued.access_token)
+        assert loaded is not None
+        return loaded
+
+    async def test_asserted_claims_survive_exchange(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        token = await self._exchange(monkeypatch, merchant_id="4711", roles=["merchant_viewer"])
+        assert token.claims[ASSERTED_CLAIMS_KEY] == {
+            "merchant_id": "4711",
+            "roles": ["merchant_viewer"],
+        }
+        principal = principal_from_token(token, tenancy=_TENANCY, roles=_ROLES)
+        assert principal is not None
+        assert principal.tenant == "4711"
+        assert principal.roles == ("merchant_viewer",)
+        assert caller_from_token(token) == Caller(
+            id="jsmith@acme-corp.com", acted_via=_AGENT_CLIENT_ID
+        )
+
+    async def test_registered_claims_not_forwarded(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        token = await self._exchange(monkeypatch, merchant_id="4711")
+        asserted = token.claims[ASSERTED_CLAIMS_KEY]
+        assert set(asserted) == {"merchant_id"}
+        # FastMCP's own claims on the minted token stay FastMCP's.
+        assert token.claims["client_id"] == _AGENT_CLIENT_ID
+        assert token.claims["iss"] != _ASSERTION_ISSUER
+
+    async def test_assertion_without_policy_claims_carries_none(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        token = await self._exchange(monkeypatch)
+        assert ASSERTED_CLAIMS_KEY not in token.claims
+        principal = principal_from_token(token, tenancy=_TENANCY, roles=_ROLES)
+        assert principal is not None
+        assert principal.tenant is None

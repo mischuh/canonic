@@ -1,4 +1,25 @@
 {
+  "$defs": {
+    "AnswerEventUser": {
+      "description": "``AnswerEvent.user`` for an identity-asserted call (AMENDMENT-e12-identity-assertion-principal).\n\n``subject`` is the asserted employee whose :class:`~canonic.contracts.principal.Principal`\nscoped the query. ``acted_via`` is the calling agent's own ``client_id``. Every other\nauth path keeps ``user`` a plain string, since subject and caller are the same there.",
+      "properties": {
+        "acted_via": {
+          "title": "Acted Via",
+          "type": "string"
+        },
+        "subject": {
+          "title": "Subject",
+          "type": "string"
+        }
+      },
+      "required": [
+        "subject",
+        "acted_via"
+      ],
+      "title": "AnswerEventUser",
+      "type": "object"
+    }
+  },
   "description": "One served-answer record appended to ``.canonic/events.jsonl`` (SPEC-E16 §3).\n\n``trust_score`` carries the E14 trust tier (``caution``/``provisional``/``trusted``)\npopulated by the serving path (SPEC-E16 Part 2 §4). ``cache_hit``/``over_limit_blocked``\nremain reserved as ``null`` until E13 lands (S3-AC1).",
   "properties": {
     "bytes_scanned": {
@@ -184,6 +205,9 @@
       "anyOf": [
         {
           "type": "string"
+        },
+        {
+          "$ref": "#/$defs/AnswerEventUser"
         },
         {
           "type": "null"

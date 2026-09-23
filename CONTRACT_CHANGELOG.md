@@ -30,6 +30,17 @@ CI (`.github/workflows/contract-schema-guard.yml`,
 
 ## History
 
+## 2.10 (2026-09-23) - MINOR
+
+- ADR/PR: this PR (feat(mcp): derive the Principal from identity-asserted tokens,
+  AMENDMENT-e12-identity-assertion-principal, S25-S28)
+- Summary: `AnswerEvent.user` may now also be an object `{"subject", "acted_via"}`.
+  An identity-asserted call (SEP-990 ID-JAG) records the asserted employee, whose
+  `Principal` scoped the query, as `subject`, and the calling agent's own `client_id`
+  as `acted_via`. Static-token, `JWTVerifier` and `OIDCProxy` calls keep the existing
+  plain-string shape, and stdio/CLI calls keep `null`. Classified MINOR under §4.1:
+  the new shape only appears on a new auth path, and no existing emitter changes shape.
+
 ## 2.9 (2026-09-22) - MINOR
 
 - ADR/PR: this PR (feat(mcp): advertise contract_schema as an MCP server extension,

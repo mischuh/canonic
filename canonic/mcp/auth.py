@@ -11,33 +11,42 @@ and its caller in ``canonic.cli.commands.mcp``.
 from __future__ import annotations
 
 import hmac
+from contextvars import ContextVar
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
 from fastmcp.server.auth import IdentityAssertion
 from fastmcp.server.auth.auth import AccessToken, AuthProvider, TokenVerifier
+from fastmcp.server.auth.identity_assertion import IdentityAssertionValidator
+from fastmcp.server.auth.jwt_issuer import JWTIssuer
 from fastmcp.server.auth.oidc_proxy import OIDCConfiguration, OIDCProxy
 from fastmcp.server.auth.providers.jwt import JWTVerifier
 from pydantic import AnyHttpUrl
 
 from canonic.config import McpOAuthMode
-from canonic.contracts.principal import Principal
+from canonic.contracts.principal import Caller, Principal
 from canonic.credentials import resolve_credential
 
 if TYPE_CHECKING:
+    from mcp.server.auth.provider import IdentityAssertionParams
+    from mcp.shared.auth import OAuthClientInformationFull, OAuthToken
     from starlette.routing import Route
 
     from canonic.config import McpAuthConfig, McpOAuthConfig
     from canonic.contracts.models import RolePolicy, TenancyPolicy
 
 __all__ = [
+    "ASSERTED_CLAIMS_KEY",
     "CLI_OVERRIDE_CLIENT_ID",
+    "ID_JAG_GRANT",
     "CanonicCompositeVerifier",
+    "CanonicOIDCProxy",
     "CanonicTokenVerifier",
     "ResolvedToken",
     "build_mcp_auth",
     "build_oauth_verifier",
     "build_token_verifier",
+    "caller_from_token",
     "describe_auth_mechanisms",
     "principal_from_token",
     "resolve_tokens",
@@ -49,6 +58,28 @@ _OIDC_DISCOVERY_SUFFIX = "/.well-known/openid-configuration"
 #: client_id assigned to a token supplied via the ``--token-ref`` CLI override
 #: rather than a named entry in ``mcp.auth.tokens``.
 CLI_OVERRIDE_CLIENT_ID = "cli-override"
+
+#: ``fastmcp_grant`` marker FastMCP stamps on an access token minted from an identity
+#: assertion (SEP-990 ID-JAG). Mirrors FastMCP's private ``_ID_JAG_GRANT_MARKER``,
+#: pinned by a test so an upstream rename fails loudly instead of silently.
+ID_JAG_GRANT = "id_jag"
+
+#: Claim under which :class:`CanonicOIDCProxy` carries the verified assertion's
+#: non-registered claims (tenant, roles, ...) into the minted access token.
+ASSERTED_CLAIMS_KEY = "asserted_claims"
+
+#: JWT/SEP-990 claims that describe the assertion itself rather than the subject.
+#: Never forwarded: FastMCP sets its own values for them on the minted token.
+_REGISTERED_ASSERTION_CLAIMS = frozenset(
+    {"iss", "aud", "exp", "iat", "nbf", "jti", "sub", "client_id", "resource", "scope"}
+)
+
+#: Verified assertion claims for the identity-assertion exchange running in this task.
+#: Set by :class:`_ClaimCapturingValidator`, read by :class:`_AssertedClaimsIssuer`,
+#: scoped by :meth:`CanonicOIDCProxy.exchange_identity_assertion`.
+_asserted_claims_var: ContextVar[dict[str, Any] | None] = ContextVar(
+    "canonic_asserted_claims", default=None
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -134,7 +165,10 @@ def principal_from_token(
     Reads ``tenancy.claim`` / ``roles.claim`` — never anything client-supplied outside
     the token — applying ``claim_mapping`` (``mcp.auth.oauth.claim_mapping``) to resolve
     a namespaced IdP claim key; static tokens need no mapping since their ``claims``
-    dict is already keyed by the policy's own claim names (SPEC-E12 §7).
+    dict is already keyed by the policy's own claim names (SPEC-E12 §7). For a token
+    minted from an identity assertion, the claims are read from the verified assertion
+    carried under :data:`ASSERTED_CLAIMS_KEY`, with the same claim names and mapping
+    (AMENDMENT-e12-identity-assertion-principal).
 
     Returns ``None`` when neither policy is configured — nothing to derive, matching the
     "absence is the feature switch" rule the rest of E12 follows. With a policy
@@ -147,7 +181,7 @@ def principal_from_token(
         return None
 
     mapping = claim_mapping or {}
-    claims = token.claims
+    claims = _policy_claims(token)
 
     tenant: str | None = None
     if tenancy is not None:
@@ -162,7 +196,111 @@ def principal_from_token(
         elif isinstance(raw_roles, str):
             role_names = (raw_roles,)
 
-    return Principal(tenant=tenant, roles=role_names, source=f"token:{token.client_id}")
+    kind = "assertion" if _is_identity_asserted(token) else "token"
+    return Principal(tenant=tenant, roles=role_names, source=f"{kind}:{token.client_id}")
+
+
+def caller_from_token(token: AccessToken) -> Caller:
+    """The :class:`Caller` a verified token attributes its request to.
+
+    An identity-asserted token answers for the asserted employee (``sub``) and was
+    presented by the agent (``client_id``), so both are recorded. Every other token
+    source has one identity, its ``client_id``
+    (AMENDMENT-e12-identity-assertion-principal, ``AnswerEvent.user``).
+    """
+    if _is_identity_asserted(token) and token.subject:
+        return Caller(id=token.subject, acted_via=token.client_id)
+    return Caller(id=token.client_id)
+
+
+def _is_identity_asserted(token: AccessToken) -> bool:
+    return token.claims.get("fastmcp_grant") == ID_JAG_GRANT
+
+
+def _policy_claims(token: AccessToken) -> dict[str, Any]:
+    """The claims a tenancy/role policy is resolved against for ``token``."""
+    if _is_identity_asserted(token):
+        asserted = token.claims.get(ASSERTED_CLAIMS_KEY)
+        return asserted if isinstance(asserted, dict) else {}
+    return token.claims
+
+
+class _ClaimCapturingValidator(IdentityAssertionValidator):
+    """Records a successfully validated assertion's subject claims for this task."""
+
+    async def validate(
+        self, assertion: str, *, client_id: str, resource_url: str | None
+    ) -> dict[str, Any]:
+        claims = await super().validate(assertion, client_id=client_id, resource_url=resource_url)
+        _asserted_claims_var.set(
+            {k: v for k, v in claims.items() if k not in _REGISTERED_ASSERTION_CLAIMS}
+        )
+        return claims
+
+
+class _AssertedClaimsIssuer(JWTIssuer):
+    """Embeds the captured assertion claims into an ID-JAG access token it mints."""
+
+    def issue_access_token(
+        self,
+        client_id: str,
+        scopes: list[str],
+        jti: str,
+        expires_in: int = 3600,
+        upstream_claims: dict[str, Any] | None = None,
+        subject: str | None = None,
+        extra_claims: dict[str, Any] | None = None,
+    ) -> str:
+        asserted = _asserted_claims_var.get()
+        if asserted and extra_claims and extra_claims.get("fastmcp_grant") == ID_JAG_GRANT:
+            extra_claims = {**extra_claims, ASSERTED_CLAIMS_KEY: asserted}
+        return super().issue_access_token(
+            client_id,
+            scopes,
+            jti,
+            expires_in=expires_in,
+            upstream_claims=upstream_claims,
+            subject=subject,
+            extra_claims=extra_claims,
+        )
+
+
+class CanonicOIDCProxy(OIDCProxy):
+    """:class:`OIDCProxy` that keeps an identity assertion's claims on the minted token.
+
+    FastMCP's ID-JAG exchange mints a self-contained access token carrying only the
+    assertion's ``sub``, so the tenancy/role claims the IdP signed into the assertion
+    would never reach :func:`principal_from_token`. This subclass forwards the verified
+    assertion's non-registered claims under :data:`ASSERTED_CLAIMS_KEY`
+    (AMENDMENT-e12-identity-assertion-principal). The claims are handed from the
+    validator to the issuer through a task-local :class:`ContextVar`, so concurrent
+    exchanges cannot see each other's claims. Remove once FastMCP exposes a hook for
+    this, analogous to ``_extract_upstream_claims``.
+    """
+
+    def __init__(self, **kwargs: Any) -> None:
+        super().__init__(**kwargs)
+        if self._identity_assertion is not None:
+            self._identity_assertion_validator = _ClaimCapturingValidator(
+                config=self._identity_assertion, audience=str(self.issuer_url)
+            )
+
+    def set_mcp_path(self, mcp_path: str | None) -> None:
+        super().set_mcp_path(mcp_path)
+        self._jwt_issuer = _AssertedClaimsIssuer(
+            issuer=str(self.issuer_url),
+            audience=str(self._resource_url),
+            signing_key=self._jwt_signing_key,
+        )
+
+    async def exchange_identity_assertion(
+        self, client: OAuthClientInformationFull, params: IdentityAssertionParams
+    ) -> OAuthToken:
+        reset = _asserted_claims_var.set(None)
+        try:
+            return await super().exchange_identity_assertion(client, params)
+        finally:
+            _asserted_claims_var.reset(reset)
 
 
 def _discover_jwks_uri(issuer_url: str) -> str:
@@ -199,7 +337,8 @@ def build_oauth_verifier(oauth_config: McpOAuthConfig) -> AuthProvider:
       :attr:`McpOAuthConfig.verify_id_token` for why an IdP with opaque access tokens
       needs the latter. When ``identity_assertion`` is configured, the proxy also
       accepts an IdP-signed identity assertion (SEP-990 ID-JAG) in place of the
-      interactive flow, for headless/agentic clients.
+      interactive flow, for headless/agentic clients. :class:`CanonicOIDCProxy` keeps
+      the assertion's tenancy/role claims on the resulting token.
 
     Raises :class:`canonic.exc.CredentialError` if ``client_secret_ref`` cannot be
     resolved, or :class:`RuntimeError` if IdP discovery fails.
@@ -229,7 +368,7 @@ def build_oauth_verifier(oauth_config: McpOAuthConfig) -> AuthProvider:
         if oauth_config.identity_assertion is not None
         else None
     )
-    return OIDCProxy(
+    return CanonicOIDCProxy(
         config_url=discovery_url,
         client_id=oauth_config.client_id,
         client_secret=client_secret,

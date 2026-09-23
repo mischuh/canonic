@@ -27,7 +27,7 @@ A client that supports MCP server extensions (SEP-2133) does not need either too
 
 ```json
 {
-  "app.getcanonic/contract": {"schema": "2.9", "major": 2, "minor": 9}
+  "app.getcanonic/contract": {"schema": "2.10", "major": 2, "minor": 10}
 }
 ```
 
@@ -38,7 +38,7 @@ A client that declares its own `major`/`minor` for a request gets a MAJOR mismat
 Returns the serving contract version this daemon implements. Call at session start to confirm compatibility.
 
 ```json
-{"contract_schema": "2.9"}
+{"contract_schema": "2.10"}
 ```
 
 ### `negotiate_contract(contract_major: int)`
