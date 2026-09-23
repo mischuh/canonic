@@ -15,6 +15,13 @@ mypy canonic/
 pytest tests/ -x --tb=short
 ```
 
+## Commit messages
+- Conventional Commits, checked by commitlint (`@commitlint/config-conventional`): `type(scope): subject`
+- Subject in lowercase, imperative, no trailing period, header max 100 characters
+- Add a short body only when useful: blank line after the header, a bullet list of the main changes, lines max 100 characters
+- Do NOT append `Co-Authored-By` (or any other attribution) lines to commit messages
+- Only `feat`/`fix`/`perf` trigger a release, so use `chore`/`docs` for dev tooling under `scripts/`
+
 ## Project structure
 - `canonic/` — main package code
 - `tests/` — pytest tests (mirrors src/ structure)
