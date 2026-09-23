@@ -28,7 +28,7 @@ from canonic.contracts.principal import Principal
 from canonic.contracts.resolver import Ambiguous as ResolverAmbiguous
 from canonic.contracts.resolver import Binding as ResolverBinding
 from canonic.contracts.resolver import Unresolved as ResolverUnresolved
-from canonic.exc import Ambiguous, TenantUnresolved, Unresolved
+from canonic.exc import Ambiguous, TenantUnresolved, Unreachable, Unresolved
 from canonic.trust.models import TrustTier, tier_meets
 from canonic.trust.scorer import TrustScorer
 from canonic.trust.signals import static_signals_for
@@ -241,6 +241,19 @@ def _resolve_all_metrics(
     return resolved
 
 
+def _enforce_dimension_policy(query: SemanticQuery, effective_policy: EffectivePolicy) -> None:
+    """Stage 1b: reject a query that groups by a dimension the principal's roles forbid.
+
+    Mirrors the metric gate: fail-fast for the whole query, and the same ``UNREACHABLE``
+    shape a nonexistent dimension produces (no suggestions), so a denied name is
+    indistinguishable from an undeclared one and the error channel is not an existence
+    oracle for dimensions the caller may not know about.
+    """
+    denied = [d for d in query.dimensions if not effective_policy.dimension_allowed(d)]
+    if denied:
+        raise Unreachable(f"dimension {_names(denied)} is not declared on any reachable source")
+
+
 def _names(names: list[str]) -> str:
     return ", ".join(repr(n) for n in names)
 
@@ -301,6 +314,7 @@ def compile(  # noqa: A001 — the public verb for this capability is "compile"
     if not query.metrics:
         raise Unresolved("query requests at least one metric")
     raw_bindings = _resolve_all_metrics(query, resolver, effective_policy)
+    _enforce_dimension_policy(query, effective_policy)
 
     # Compute related metadata once here using resolved bindings (all paths get it via
     # dataclasses.replace or direct constructor argument below).
@@ -313,7 +327,9 @@ def compile(  # noqa: A001 — the public verb for this capability is "compile"
                 if component.source is not None:
                     queried_sources.add(component.source)
     queried_metric_names = {name for name, _ in raw_bindings}
-    related = _related(queried_sources, queried_metric_names, query, resolver, sources_by_name)
+    related = _related(
+        queried_sources, queried_metric_names, query, resolver, sources_by_name, effective_policy
+    )
     trust_inputs = _trust_inputs_for(raw_bindings, resolver)
     pipeline_warnings = (
         stage0_warnings
@@ -484,6 +500,7 @@ def _related(
     query: SemanticQuery,
     resolver: ContractResolver,
     sources_by_name: dict[str, SemanticSource],
+    effective_policy: EffectivePolicy,
 ) -> RelatedMetadata:
     """Compute related-query suggestions for Stage 8 metadata (SPEC-E7/E8 §2.2)."""
     used_dims: set[str] = set(query.dimensions)
@@ -507,6 +524,8 @@ def _related(
             if _query_references_dimension(entry_name, used_dims, filter_tokens):
                 continue
             if entry_name in seen_dims:
+                continue
+            if not effective_policy.dimension_allowed(entry_name):
                 continue
             if not _addable_everywhere(entry_name, queried_sources, sources_by_name):
                 continue

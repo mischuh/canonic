@@ -25,6 +25,7 @@ from canonic.trust.signals import static_signals_for
 
 if TYPE_CHECKING:
     from canonic.contracts.models import MetricBinding
+    from canonic.contracts.principal import EffectivePolicy
     from canonic.contracts.resolver import ContractResolver
     from canonic.core.context import ServiceContext
     from canonic.semantic.models import Dimension as _Dimension
@@ -158,6 +159,9 @@ class DiscoveryService:
         rather than a distinct forbidden error (SPEC-E12 §3, S15 AC3).
         """
         binding = self._ctx.resolve_or_raise(name, principal=principal)
+        effective_policy = self._ctx.resolver.authz_for(
+            principal if principal is not None else _ANONYMOUS_PRINCIPAL
+        )
         spec = spec_for(binding.kind)
         if spec.is_composite:
             assert binding.components is not None  # noqa: S101
@@ -170,13 +174,17 @@ class DiscoveryService:
             if binding.components.numerator.source is not None:
                 num_dims_by_name = {
                     d.name: d
-                    for d in self._reachable_dimensions(binding.components.numerator.source)
+                    for d in self._reachable_dimensions(
+                        binding.components.numerator.source, effective_policy
+                    )
                 }
 
             if binding.components.denominator.source is not None:
                 denom_dims_by_name = {
                     d.name: d
-                    for d in self._reachable_dimensions(binding.components.denominator.source)
+                    for d in self._reachable_dimensions(
+                        binding.components.denominator.source, effective_policy
+                    )
                 }
 
             common_dim_names = set(num_dims_by_name.keys()) & set(denom_dims_by_name.keys())
@@ -225,7 +233,7 @@ class DiscoveryService:
             source=binding.source,
             measure=binding.measure,
             grain=list(source.grain),
-            dimensions=self._reachable_dimensions(source.name),
+            dimensions=self._reachable_dimensions(source.name, effective_policy),
             measures=[m.name for m in source.measures],
             aliases=list(binding.binding.aliases),
             freshness=freshness,
@@ -264,7 +272,7 @@ class DiscoveryService:
                 continue
             name_label_pairs = sorted(source_to_metrics[src_name], key=lambda x: x[0])
             metric_refs = [MetricRef(name=n, label=lbl) for n, lbl in name_label_pairs]
-            dim_names = [d.name for d in self._reachable_dimensions(src_name)]
+            dim_names = [d.name for d in self._reachable_dimensions(src_name, effective_policy)]
             metrics_with_examples: list[tuple[str, list[Any]]] = []
             for name, label in name_label_pairs:
                 bindings = self._ctx.resolver.bindings_for(name)
@@ -284,14 +292,17 @@ class DiscoveryService:
             )
         return OverviewResult(domains=groups)
 
-    def _reachable_dimensions(self, source_name: str) -> list[DimensionInfo]:
+    def _reachable_dimensions(
+        self, source_name: str, effective_policy: EffectivePolicy
+    ) -> list[DimensionInfo]:
         """All dimensions queryable from *source_name* via its declared join graph.
 
         Traverses the join graph breadth-first using aliases. Dimensions reachable under
         only one alias are returned with an unqualified ``name``; dimensions reachable
         under multiple aliases (e.g. ``city`` via both ``pickup`` and ``dropoff``) are
         returned qualified (``pickup.city``, ``dropoff.city``) so the caller always gets
-        a usable name to pass to ``query()``.
+        a usable name to pass to ``query()``. Dimensions *effective_policy* denies are omitted,
+        the same way ``list_metrics`` omits denied metrics.
         """
         alias_to_source = build_alias_tree(source_name, self._ctx.source_by_name)
         dim_lookup: dict[tuple[str, str], _Dimension] = {
@@ -304,6 +315,8 @@ class DiscoveryService:
 
         result: list[DimensionInfo] = []
         for entry_name, alias in reachable_dimension_names(source_name, self._ctx.source_by_name):
+            if not effective_policy.dimension_allowed(entry_name):
+                continue
             src_name = alias_to_source.get(alias, alias)
             dim = dim_lookup.get((src_name, entry_name.split(".")[-1]))
             result.append(

@@ -22,7 +22,13 @@ from canonic.cli.app import app
 from canonic.compiler.query import SemanticQuery
 from canonic.contracts.principal import Principal
 from canonic.core.service import CanonicService
-from canonic.exc import TenantForbidden, TenantScopeMissing, TenantUnresolved, Unresolved
+from canonic.exc import (
+    TenantForbidden,
+    TenantScopeMissing,
+    TenantUnresolved,
+    Unreachable,
+    Unresolved,
+)
 
 _EXAMPLE = Path(__file__).parents[2] / "examples" / "marketplace"
 
@@ -162,7 +168,7 @@ async def test_platform_analyst_sees_items_sold_across_merchants(
 
 
 # ----------------------------------------------------------------------------
-# Masking vs. the unenforced dimensions.deny
+# Masking and dimensions.deny
 # ----------------------------------------------------------------------------
 
 
@@ -175,24 +181,25 @@ async def test_masking_partial_hides_email_for_admin(service: CanonicService) ->
     assert all(str(e).endswith("***") for e in emails), emails
 
 
-async def test_dimensions_deny_not_yet_enforced(service: CanonicService) -> None:
-    """Characterization test, not a spec assertion: merchant_viewer's roles.yaml
-    declares ``dimensions: { deny: [customer_email, customer_phone] }``, but nothing
-    in the compiler/discovery path consults ``EffectivePolicy.dimension_allowed()``
-    today (see canonic/contracts/principal.py — zero production call sites). So this
-    currently-cleartext result is the documented, real behavior, not a bug in this
-    test. If someone wires up enforcement, this test should start failing and must be
-    updated deliberately alongside that change and the docs' <Warning> callouts.
-    """
+async def test_dimensions_deny_blocks_email_for_viewer(service: CanonicService) -> None:
+    """merchant_viewer's ``dimensions.deny`` rejects the query with the same UNREACHABLE
+    shape an undeclared dimension produces, so a denied name is not an existence oracle."""
     query = SemanticQuery(metrics=["order_count"], dimensions=["customer_email"])
-    result = await service.query(query, principal=_VIEWER)
+    with pytest.raises(Unreachable, match="customer_email"):
+        await service.query(query, principal=_VIEWER)
 
-    assert result.result.rows
-    emails = [str(row[0]) for row in result.result.rows]
-    assert not all(e.endswith("***") for e in emails), (
-        "dimensions.deny appears to be enforced now — update this characterization "
-        "test and the docs/guides/marketplace.mdx <Warning> that describes the gap"
-    )
+
+async def test_dimensions_deny_hidden_from_viewer_discovery(service: CanonicService) -> None:
+    viewer_dims = {
+        d.name for d in service.describe_metric("order_count", principal=_VIEWER).dimensions
+    }
+    admin_dims = {
+        d.name for d in service.describe_metric("order_count", principal=_ADMIN).dimensions
+    }
+
+    assert "customer_email" not in viewer_dims
+    assert "customer_phone" not in viewer_dims
+    assert "customer_email" in admin_dims
 
 
 # ----------------------------------------------------------------------------
