@@ -189,6 +189,57 @@ async def test_dimensions_deny_blocks_email_for_viewer(service: CanonicService) 
         await service.query(query, principal=_VIEWER)
 
 
+async def test_dimensions_deny_blocks_filtering_on_denied_column(
+    service: CanonicService,
+) -> None:
+    """Filtering on a denied column would let a caller probe values it may not select,
+    whether addressed by dimension name, raw column name or table qualifier."""
+    for predicate in (
+        "customer_email = 'x'",
+        "customers.customer_email LIKE 'a%'",
+    ):
+        query = SemanticQuery(metrics=["order_count"], filters=[predicate])
+        with pytest.raises(Unreachable, match="customer_email"):
+            await service.query(query, principal=_VIEWER)
+
+
+async def test_dimensions_deny_allows_filtering_on_permitted_column(
+    service: CanonicService,
+) -> None:
+    query = SemanticQuery(metrics=["order_count"], filters=["status = 'completed'"])
+    result = await service.query(query, principal=_VIEWER)
+    assert result.result.rows
+
+
+async def test_admin_can_filter_on_column_viewer_is_denied(service: CanonicService) -> None:
+    query = SemanticQuery(metrics=["order_count"], filters=["customer_email LIKE 'a%'"])
+    result = await service.query(query, principal=_ADMIN)
+    assert result.result.rows
+
+
+async def test_related_siblings_omit_metrics_outside_policy(tmp_path: Path) -> None:
+    """A metric the role may not query must not surface as a sibling suggestion either."""
+    root = _build_project(tmp_path / "project")
+    roles_path = root / "contracts" / "policies" / "roles.yaml"
+    yaml = YAML()
+    data = yaml.load(roles_path.read_text())
+    data["roles"]["merchant_viewer"]["metrics"]["allow"] = ["revenue"]
+    with roles_path.open("w") as f:
+        yaml.dump(data, f)
+    narrowed = CanonicService.from_project(root)
+
+    query = SemanticQuery(metrics=["revenue"])
+    viewer = await narrowed.query(query, principal=_VIEWER)
+    platform = await narrowed.query(query, principal=_PLATFORM)
+
+    assert viewer.metadata.related is not None
+    assert platform.metadata.related is not None
+    viewer_siblings = {m.name for m in viewer.metadata.related.sibling_metrics}
+    platform_siblings = {m.name for m in platform.metadata.related.sibling_metrics}
+    assert "order_count" not in viewer_siblings
+    assert "order_count" in platform_siblings
+
+
 async def test_dimensions_deny_hidden_from_viewer_discovery(service: CanonicService) -> None:
     viewer_dims = {
         d.name for d in service.describe_metric("order_count", principal=_VIEWER).dimensions

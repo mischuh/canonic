@@ -437,7 +437,7 @@ def plan_leaf(
         dimensions = _resolve_dimensions(query, sources_by_name, owner, alias_to_source)
         referenced = {alias for alias, _ in dimensions}
         where_conditions, filter_sources = _bind_filters(
-            query.filters, sources_by_name, owner, alias_to_source
+            query.filters, sources_by_name, owner, alias_to_source, ctx.effective_policy
         )
     referenced |= filter_sources
     referenced |= {owner}
