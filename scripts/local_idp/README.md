@@ -49,17 +49,16 @@ Inspector](https://github.com/modelcontextprotocol/inspector)) to `http://localh
 The client performs dynamic client registration against Canonic's own OAuth endpoints;
 Canonic redirects the browser to Keycloak for the actual login (`http://localhost:8080`).
 
-1. Log in as `byte-gadgets-viewer` / `viewer`. Query the marketplace metrics — `customer_email`
-   comes back in **plain text** (`merchant_viewer`'s `dimensions.deny: [customer_email, ...]`
-   is validated but not enforced by the compiler/discovery today, see the warning at the
-   bottom of [docs/guides/marketplace.mdx](../../docs/guides/marketplace.mdx)), and `run_sql`
-   is refused (`merchant_viewer` role has `run_sql: false`).
-2. Disconnect, reconnect, log in as `byte-gadgets-admin` / `admin` instead. Same query now
-   comes back **masked** (`ab***`, `merchant_admin`'s actual `masking: partial` rule on
-   `customers.customer_email` — this is the rule that redacts, not the viewer's unenforced
-   `dimensions.deny`); `run_sql` is *accepted by the role* but still refused with
-   `TENANT_FORBIDDEN` (`marketplace_db` has `rls_enforced: false` — the second `run_sql` gate,
-   see the comment in `roles.yaml`).
+1. Log in as `byte-gadgets-viewer` / `viewer`. Query the marketplace metrics grouped by
+   `customer_email`. The query is rejected with an `unreachable` error, because
+   `merchant_viewer` has `dimensions.deny: [customer_email, customer_phone]` and a denied
+   dimension looks exactly like a nonexistent one. The dimension is also missing from
+   `describe_metric`, and `run_sql` is refused (`run_sql: false`).
+2. Disconnect, reconnect, log in as `byte-gadgets-admin` / `admin` instead. The same query now
+   works and `customer_email` comes back **masked** (`ab***`, the `masking: partial` rule of
+   `merchant_admin` on `customers.customer_email`). `run_sql` is *accepted by the role* but
+   still refused with `TENANT_FORBIDDEN` (`marketplace_db` has `rls_enforced: false`, the
+   second `run_sql` gate, see the comment in `roles.yaml`).
 3. Log in as `platform-ops` / `platform` and confirm data is visible across *both* merchants
    (`tenancy_exempt: true`, no `merchant_id` claim).
 
