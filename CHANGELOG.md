@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.26.0](https://github.com/mischuh/canonic/compare/v0.25.0...v0.26.0) (2026-09-24)
+
+
+### Features
+
+* **config:** resolve env:VAR references in non-secret config values ([#328](https://github.com/mischuh/canonic/issues/328)) ([a7b9f2e](https://github.com/mischuh/canonic/commit/a7b9f2e627fb0d80ea89484b5efb2deece41acf1))
+* **instrumentation:** bound growth of the event log and log files ([#326](https://github.com/mischuh/canonic/issues/326)) ([7107c3a](https://github.com/mischuh/canonic/commit/7107c3a6c7abaf58463464f85b03522e8f8c63db))
+
 ## [0.25.0](https://github.com/mischuh/canonic/compare/v0.24.0...v0.25.0) (2026-09-24)
 
 
