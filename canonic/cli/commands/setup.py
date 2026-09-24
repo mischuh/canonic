@@ -520,7 +520,7 @@ async def _run_demo_query(
         resolver=ContractResolver(bindings=[binding], guardrails=[]),
         sources=sources,
         project_root=root,
-        event_log=DiskAnswerEventLog(root),
+        event_log=DiskAnswerEventLog(root, config.instrumentation.events),
     )
     sq = SemanticQuery(
         metrics=[measure.name],

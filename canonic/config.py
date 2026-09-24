@@ -262,6 +262,32 @@ class LoggingConfig(BaseModel):
     # where stdout carries the JSON-RPC stream and logs must stay on stderr/file
     # but still be machine-parseable by whatever tails them.
     format: Literal["text", "json"] = "text"
+    # Size-based rotation for ``file`` and the daemon's ``.canonic/mcp.log``. ``max_bytes: 0``
+    # disables rotation. ``backup_count`` is the number of rotated files kept (``x.log.1`` ...).
+    max_bytes: int = Field(default=50 * 1024 * 1024, ge=0)
+    backup_count: int = Field(default=5, ge=1)
+
+
+class EventLogConfig(BaseModel):
+    """Size and retention policy for ``.canonic/events.jsonl`` (SPEC-E16 §12).
+
+    Once the active file reaches ``max_bytes`` its ``served_answer`` events move into an
+    immutable segment (``events-<UTC>.jsonl[.gz]``). Funnel, outcome and reconcile events
+    stay in the active file because they are small and later logic depends on them.
+    ``retention_days`` and ``max_segments`` only ever delete whole segments. ``max_bytes: 0``
+    disables rotation, ``None`` for a retention limit means unlimited.
+    """
+
+    max_bytes: int = Field(default=50 * 1024 * 1024, ge=0)
+    retention_days: int | None = Field(default=None, ge=1)
+    max_segments: int | None = Field(default=None, ge=1)
+    compress: bool = True
+
+
+class InstrumentationConfig(BaseModel):
+    """Instrumentation policy from the ``instrumentation:`` section of canonic.yaml."""
+
+    events: EventLogConfig = EventLogConfig()
 
 
 class McpTokenEntry(BaseModel):
@@ -511,6 +537,7 @@ class CanonicConfig(BaseSettings):
     feedback: FeedbackConfig = FeedbackConfig()
     runtime: RuntimeConfig = RuntimeConfig()
     logging: LoggingConfig = LoggingConfig()
+    instrumentation: InstrumentationConfig = InstrumentationConfig()
     mcp: McpConfig = McpConfig()
 
     @model_validator(mode="after")
