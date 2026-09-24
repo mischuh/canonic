@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.25.0](https://github.com/mischuh/canonic/compare/v0.24.0...v0.25.0) (2026-09-24)
+
+
+### Features
+
+* **mcp:** derive the Principal from identity-asserted tokens ([#319](https://github.com/mischuh/canonic/issues/319)) ([f5cd4d6](https://github.com/mischuh/canonic/commit/f5cd4d6a013746bb39701c6de8528ddebd18bcae))
+
+
+### Bug Fixes
+
+* **contracts:** apply dimensions.deny to filters and related metrics ([#322](https://github.com/mischuh/canonic/issues/322)) ([f0a017b](https://github.com/mischuh/canonic/commit/f0a017b33d44b6488dae7d655d8ab04c8fc7fb8a))
+* **contracts:** enforce dimensions.deny in compiler and discovery ([#321](https://github.com/mischuh/canonic/issues/321)) ([4138032](https://github.com/mischuh/canonic/commit/4138032acd2b7fbbb8d74744ec4501f783a6622d))
+
+
+### Documentation
+
+* **scripts:** update local idp walkthrough for enforced dimensions.deny ([#323](https://github.com/mischuh/canonic/issues/323)) ([5765cd2](https://github.com/mischuh/canonic/commit/5765cd286cdcc2f77b8d51167d75a3e4902a1b09))
+
 ## [0.24.0](https://github.com/mischuh/canonic/compare/v0.23.1...v0.24.0) (2026-09-22)
 
 
