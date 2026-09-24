@@ -4,10 +4,15 @@ from __future__ import annotations
 
 import json
 import logging
+from logging.handlers import RotatingFileHandler
+from typing import TYPE_CHECKING
 
 import pytest
 
-from canonic.log import _effective_log_params, configure_logging
+from canonic.log import _effective_log_params, configure_logging, rotate_file_on_start
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 
 @pytest.fixture(autouse=True)
@@ -148,3 +153,53 @@ class TestEffectiveLogParams:
         assert level == "WARNING"
         assert file is None
         assert format == "text"
+
+
+class TestRotation:
+    def test_max_bytes_uses_rotating_handler(self, tmp_path: Path):
+        configure_logging(level="INFO", file=str(tmp_path / "c.log"), max_bytes=200, backup_count=2)
+        handlers = logging.getLogger("canonic").handlers
+        assert isinstance(handlers[0], RotatingFileHandler)
+
+    def test_file_rotates_and_keeps_backup_count(self, tmp_path: Path):
+        log_file = tmp_path / "c.log"
+        configure_logging(level="INFO", file=str(log_file), max_bytes=200, backup_count=2)
+        for i in range(60):
+            logging.getLogger("canonic.rot").info("message number %d", i)
+        assert log_file.exists()
+        assert (tmp_path / "c.log.1").exists()
+        assert (tmp_path / "c.log.2").exists()
+        assert not (tmp_path / "c.log.3").exists()
+
+    def test_zero_max_bytes_keeps_plain_handler(self, tmp_path: Path):
+        configure_logging(level="INFO", file=str(tmp_path / "c.log"))
+        handler = logging.getLogger("canonic").handlers[0]
+        assert not isinstance(handler, RotatingFileHandler)
+
+
+class TestRotateFileOnStart:
+    def test_below_limit_untouched(self, tmp_path: Path):
+        path = tmp_path / "mcp.log"
+        path.write_text("x" * 10)
+        rotate_file_on_start(path, max_bytes=100, backup_count=3)
+        assert path.read_text() == "x" * 10
+        assert not (tmp_path / "mcp.log.1").exists()
+
+    def test_missing_file_is_noop(self, tmp_path: Path):
+        rotate_file_on_start(tmp_path / "mcp.log", max_bytes=100, backup_count=3)
+
+    def test_disabled_with_zero(self, tmp_path: Path):
+        path = tmp_path / "mcp.log"
+        path.write_text("x" * 500)
+        rotate_file_on_start(path, max_bytes=0, backup_count=3)
+        assert path.exists()
+
+    def test_shifts_backups_and_drops_oldest(self, tmp_path: Path):
+        path = tmp_path / "mcp.log"
+        for name, text in [("mcp.log.2", "old2"), ("mcp.log.1", "old1"), ("mcp.log", "z" * 500)]:
+            (tmp_path / name).write_text(text)
+        rotate_file_on_start(path, max_bytes=100, backup_count=2)
+        assert not path.exists()
+        assert (tmp_path / "mcp.log.1").read_text() == "z" * 500
+        assert (tmp_path / "mcp.log.2").read_text() == "old1"
+        assert not (tmp_path / "mcp.log.3").exists()

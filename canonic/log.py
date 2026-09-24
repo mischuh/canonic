@@ -8,6 +8,11 @@ import logging
 import os
 import sys
 import time
+from logging.handlers import RotatingFileHandler
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 #: Set by callers (e.g. ``CanonicService.query``) to a short per-call id so every
 #: log record emitted while it's in flight — across service/resolver/pipeline
@@ -52,8 +57,33 @@ class _QueryIdFilter(logging.Filter):
         return True
 
 
+def rotate_file_on_start(path: Path, max_bytes: int, backup_count: int) -> None:
+    """Shift ``path`` to ``path.1`` (and ``.1`` to ``.2`` ...) when it has reached ``max_bytes``.
+
+    For files whose writer is an inherited file descriptor (the daemon's ``mcp.log``) and so
+    cannot rotate itself while running. The oldest backup beyond ``backup_count`` is dropped.
+    """
+    if max_bytes <= 0:
+        return
+    try:
+        if path.stat().st_size < max_bytes:
+            return
+    except FileNotFoundError:
+        return
+    path.with_name(f"{path.name}.{backup_count}").unlink(missing_ok=True)
+    for index in range(backup_count - 1, 0, -1):
+        older = path.with_name(f"{path.name}.{index}")
+        if older.exists():
+            older.replace(path.with_name(f"{path.name}.{index + 1}"))
+    path.replace(path.with_name(f"{path.name}.1"))
+
+
 def configure_logging(
-    level: str = "WARNING", file: str | None = None, format: str = "text"
+    level: str = "WARNING",
+    file: str | None = None,
+    format: str = "text",
+    max_bytes: int = 0,
+    backup_count: int = 5,
 ) -> None:
     """Configure the canonic logger hierarchy.
 
@@ -67,6 +97,9 @@ def configure_logging(
             Never stdout: on stdio MCP transport, stdout carries the JSON-RPC
             stream, so logs must stay on stderr or a file.
         format: ``"text"`` (default) or ``"json"`` for one JSON object per line.
+        max_bytes: Rotate ``file`` at this size, keeping ``backup_count`` old files.
+            ``0`` (default) never rotates.
+        backup_count: Number of rotated files to keep.
     """
     numeric = logging.getLevelName(level.upper())
     if not isinstance(numeric, int):
@@ -78,7 +111,12 @@ def configure_logging(
 
     handler: logging.Handler
     if file is not None:
-        handler = logging.FileHandler(file, encoding="utf-8")
+        if max_bytes > 0:
+            handler = RotatingFileHandler(
+                file, maxBytes=max_bytes, backupCount=backup_count, encoding="utf-8"
+            )
+        else:
+            handler = logging.FileHandler(file, encoding="utf-8")
     else:
         handler = logging.StreamHandler(sys.stderr)
 

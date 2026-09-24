@@ -51,6 +51,18 @@ marked_by: analyst                  # analyst | agent | ci
 
 The `reason_code` is an attribution safeguard: acting on the wrong cause corrupts good context. `wrong_definition` is the only code that implicates the binding used: it's the one eligible to become contradiction evidence downstream. `wrong_data` (the warehouse data is wrong) and `wrong_interpretation` (the wrong metric was picked) are recorded but never flag the binding. `unspecified`, the default when a verdict is marked incorrect without an explicit reason, carries the lowest weight. canonic records the code faithfully. It does not act on it.
 
+### Growth and retention
+
+The log is local by design, so in a large deployment it needs a bound. By default the active `.canonic/events.jsonl` rotates once it reaches 50 MB:
+
+- `served_answer` events, the only high-volume kind, move into an immutable segment `events-<UTC>.jsonl.gz` next to it.
+- Funnel, outcome, and reconcile events stay in the active file. They are small, and the onboarding funnel, [feedback loop](/concepts/ingestion-and-reconciliation#feedback-loop-e11), and audit depend on them.
+- `canonic status` and `canonic audit` read segments and the active file transparently. Nothing needs to be merged by hand.
+- Optional `retention_days` and `max_segments` delete whole segments, oldest first. Nothing is summarized, an expired segment is simply gone. Both default to unlimited.
+- Concurrent writers, for example the MCP daemon and a CLI command, are serialized with a file lock.
+
+Limits are set under `instrumentation.events` in `canonic.yaml`, see the [config reference](/reference/config-schema#instrumentation). This works the same in [air-gapped](/concepts/llm-runtime#air-gapped-mode--enforced-not-advisory) mode, where the log is written locally and never sent anywhere.
+
 ## Local inspection, no telemetry required
 
 `canonic status` and `canonic audit` read the log directly: counts, error-code distribution, latency percentiles, bytes scanned, freshness and guardrail-hit coverage, the onboarding funnel (setup started → connection added → bootstrap completed → first answer served → first curated review completed), trust-tier calibration, and correction recurrence. None of this requires telemetry to be enabled. The log is not a black box on day one.

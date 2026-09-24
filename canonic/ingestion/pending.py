@@ -27,6 +27,7 @@ from typing import TYPE_CHECKING
 
 from pydantic import BaseModel, ConfigDict
 from ruamel.yaml import YAML
+from ruamel.yaml.error import YAMLError
 
 from canonic.config import LOCAL_STATE_DIR
 
@@ -40,6 +41,7 @@ __all__ = [
     "PendingStatus",
     "ProposalStatus",
     "apply_entry",
+    "expired_pending_runs",
     "generate_run_id",
     "latest_run_id",
     "update_status",
@@ -169,6 +171,33 @@ def latest_run_id(project_root: Path) -> str | None:
         return None
     dirs = sorted(d.name for d in pending_root.iterdir() if d.is_dir())
     return dirs[-1] if dirs else None
+
+
+def expired_pending_runs(
+    project_root: Path, older_than_days: int, now: datetime | None = None
+) -> list[Path]:
+    """Run directories whose ``status.yaml`` is older than ``older_than_days`` and fully reviewed.
+
+    A run with any proposal still ``pending`` is never returned, and neither is a run whose
+    ``status.yaml`` is missing or unreadable, so unreviewed or unknown work is never removed.
+    """
+    pending_root = project_root / LOCAL_STATE_DIR / _PENDING_DIFFS_DIR
+    if not pending_root.is_dir():
+        return []
+    cutoff = (now or datetime.now(UTC)).timestamp() - older_than_days * 86400
+    expired: list[Path] = []
+    for run_dir in sorted(d for d in pending_root.iterdir() if d.is_dir()):
+        status_path = run_dir / "status.yaml"
+        try:
+            if status_path.stat().st_mtime >= cutoff:
+                continue
+            status = PendingStatus.model_validate(_load_yaml(status_path))
+        except (OSError, ValueError, YAMLError):
+            continue
+        if any(p.status == ProposalStatus.PENDING for p in status.proposals):
+            continue
+        expired.append(run_dir)
+    return expired
 
 
 def _load_yaml(path: Path) -> object:

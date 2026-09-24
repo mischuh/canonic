@@ -271,7 +271,7 @@ def start_stdio(
     whole session — threaded into ``build_server`` as ``session_principal`` so every tool
     call in this session scopes to it.
     """
-    from canonic.config import load_config
+    from canonic.config import LoggingConfig, load_config
     from canonic.log import _effective_log_params, configure_logging
     from canonic.mcp.server import build_server
 
@@ -283,7 +283,14 @@ def start_stdio(
         )
     except Exception:
         level, file, format = _effective_log_params("WARNING", None)
-    configure_logging(level=level, file=file, format=format)
+    log_cfg = cfg.logging if cfg is not None else LoggingConfig()
+    configure_logging(
+        level=level,
+        file=file,
+        format=format,
+        max_bytes=log_cfg.max_bytes,
+        backup_count=log_cfg.backup_count,
+    )
 
     _check_version_on_start(project_root)
     if service.resolver.tenancy_enabled and principal is None:  # type: ignore[attr-defined]
@@ -299,6 +306,22 @@ def start_stdio(
         cache_ttl_seconds=cfg.mcp.cache_ttl_seconds if cfg is not None else 300,
     )
     mcp.run(transport="stdio", show_banner=False)
+
+
+def _rotate_daemon_log(project_root: Path, log_path: Path) -> None:
+    """Rotate ``mcp.log`` before a new daemon inherits it, using ``logging.max_bytes``.
+
+    The child writes through an inherited file descriptor, so the file cannot rotate while
+    the daemon runs. Rotating on start bounds growth across restarts.
+    """
+    from canonic.config import LoggingConfig, load_config
+    from canonic.log import rotate_file_on_start
+
+    try:
+        log_cfg = load_config(project_root / "canonic.yaml").logging
+    except Exception:
+        log_cfg = LoggingConfig()
+    rotate_file_on_start(log_path, log_cfg.max_bytes, log_cfg.backup_count)
 
 
 def start_http(
@@ -348,6 +371,7 @@ def start_http(
 
     log_path = project_root / ".canonic" / "mcp.log"
     log_path.parent.mkdir(parents=True, exist_ok=True)
+    _rotate_daemon_log(project_root, log_path)
 
     cmd = [
         sys.executable,
@@ -428,7 +452,7 @@ def serve_http_foreground(
     it needs no CLI-level fail-closed check the way ``tasks`` does, so there is nothing
     for the caller to decide ahead of time.
     """
-    from canonic.config import load_config
+    from canonic.config import LoggingConfig, load_config
     from canonic.log import _effective_log_params, configure_logging
     from canonic.mcp.server import build_server
 
@@ -440,7 +464,14 @@ def serve_http_foreground(
         )
     except Exception:
         level, file, format = _effective_log_params("WARNING", None)
-    configure_logging(level=level, file=file, format=format)
+    log_cfg = cfg.logging if cfg is not None else LoggingConfig()
+    configure_logging(
+        level=level,
+        file=file,
+        format=format,
+        max_bytes=log_cfg.max_bytes,
+        backup_count=log_cfg.backup_count,
+    )
 
     mcp = build_server(
         service,  # type: ignore[arg-type]

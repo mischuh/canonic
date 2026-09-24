@@ -165,7 +165,7 @@ class CanonicService:
             resolver=resolver,
             sources=sources,
             project_root=root,
-            event_log=DiskAnswerEventLog(root),
+            event_log=DiskAnswerEventLog(root, config.instrumentation.events),
         )
 
     # ------------------------------------------------------------------

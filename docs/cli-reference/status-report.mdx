@@ -76,3 +76,20 @@ canonic outcome mark --ref sha256:… --verdict incorrect --reason wrong_definit
 | `--correction` | A corrected SQL hash or definition reference. |
 
 The reason-code is an attribution safeguard, not a formality: only `wrong_definition` implicates the canonical binding used and is eligible to become contradiction evidence downstream. `wrong_data` and `wrong_interpretation` are recorded but never flag the binding. `unspecified` carries the lowest weight. Passing `--reason` together with `--verdict correct` fails with `VALIDATION_FAILED` (exit `9`): a reason only makes sense for an incorrect verdict.
+
+## `canonic gc`
+
+Prune local state under `.canonic/` that has outlived its retention. Dry-run by default.
+
+```bash
+canonic gc                                        # list what would be removed
+canonic gc --apply                                # delete it
+canonic gc --pending-diffs-older-than 90 --apply  # also prune old reviewed pending-diffs runs
+```
+
+| Flag | Description |
+| --- | --- |
+| `--apply` | Delete the listed files. Without it, `gc` only lists them and their sizes. |
+| `--pending-diffs-older-than` | Also prune `.canonic/pending-diffs/<run-id>/` runs whose `status.yaml` is older than N days. |
+
+Event-log segments follow `retention_days` and `max_segments` under [`instrumentation.events`](/reference/config-schema#instrumentation). With neither set, nothing is removed. Rotation already applies the same limits automatically, so `gc` is for applying a tightened policy right away. Pending-diffs runs are audit artifacts, so they are never touched unless you pass the flag, and a run with any proposal still `pending` or an unreadable `status.yaml` is always kept. `--json` prints the `applied` flag plus the `event_segments` and `pending_diffs` lists with sizes.

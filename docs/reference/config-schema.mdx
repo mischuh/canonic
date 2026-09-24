@@ -18,7 +18,8 @@ description: "Every top-level field in the project config file, and what it gove
 | `reconcile` | `ReconcileConfig` | propose-only | Auto-apply policy for ingestion, see [Ingestion & reconciliation](/concepts/ingestion-and-reconciliation#propose-only-by-default). |
 | `feedback` | `FeedbackConfig` | see [below](#feedback) | Pattern-gate and trust-cap thresholds for the E11 feedback loop, see [Feedback loop (E11)](/concepts/ingestion-and-reconciliation#feedback-loop-e11). |
 | `runtime` | `RuntimeConfig` | `air_gapped: false` | Air-gapped enforcement, see [LLM & embeddings runtime](/concepts/llm-runtime#air-gapped-mode--enforced-not-advisory). |
-| `logging` | `LoggingConfig` | `level: WARNING`, `format: text` | Log level, optional file, and text/json format. |
+| `logging` | `LoggingConfig` | `level: WARNING`, `format: text` | Log level, optional file, text/json format, and size-based rotation, see [below](#logging). |
+| `instrumentation` | `InstrumentationConfig` | see [below](#instrumentation) | Size and retention limits for the local event log `.canonic/events.jsonl`. |
 | `mcp` | `McpConfig` | `auth: { tokens: [] }` | Bearer-token auth for the MCP daemon's `http` transport, see [below](#mcp). |
 
 `version` and `project` are the only fields canonic actually needs to boot. Everything else configures a specific subsystem and can be left out entirely for a local, single-user setup: `connections` is empty until you add a data source, `llm` is `null` until you configure a provider, and the rest fall back to safe local defaults. `embeddings` and `telemetry` rarely need touching, they exist mostly for opt-in tuning and privacy control rather than day-to-day project setup.
@@ -183,6 +184,49 @@ runtime:
 | `allow_cidrs` | `list[str]` | `[]` | Additional private/LAN CIDR ranges to trust under `air_gapped`, for a setup where inference runs on a separate on-prem host rather than the local machine. Only consulted when `air_gapped` is `true`. By default, air-gapped mode trusts localhost only. |
 
 When `air_gapped: true`, load-time validation additionally rejects a public `llm.base_url`, `telemetry.enabled: true`, and any `credentials_ref`/`api_key_ref` using a non-local scheme. The check runs once, at config load, so there's no window where a project starts up in a state that could leak context off the machine. Telemetry has no allowlist path the way `llm.base_url` does via `allow_cidrs`. Under `air_gapped`, it is hard off regardless of `telemetry.endpoint`/`transport_acknowledged`.
+
+## `logging`
+
+```yaml
+logging:
+  level: WARNING
+  file: null                # null logs to stderr
+  format: text              # text | json
+  max_bytes: 52428800       # 50 MB, 0 disables rotation
+  backup_count: 5
+```
+
+| Field | Type | Default | Governs |
+| --- | --- | --- | --- |
+| `level` | `str` | `WARNING` | Log level of the `canonic` logger. Override with `CANONIC_LOG_LEVEL`. |
+| `file` | `str \| null` | `null` | Log file path. Without it, records go to stderr, never stdout, because stdio MCP carries JSON-RPC there. Override with `CANONIC_LOG_FILE`. |
+| `format` | `text \| json` | `text` | One text line or one JSON object per record. Override with `CANONIC_LOG_FORMAT`. |
+| `max_bytes` | `int` | `52428800` | Rotates `file` at this size. Also rotates the MCP daemon's `.canonic/mcp.log` each time the daemon starts. `0` disables rotation. |
+| `backup_count` | `int` | `5` | Number of rotated files kept (`canonic.log.1`, `canonic.log.2`, and so on). The oldest one is deleted. |
+
+The daemon writes `.canonic/mcp.log` through an inherited file descriptor, so it can only rotate on daemon start, not while the daemon runs. Set `logging.file` if you need rotation during a long-running daemon.
+
+## `instrumentation`
+
+```yaml
+instrumentation:
+  events:
+    max_bytes: 52428800     # 50 MB, 0 disables rotation
+    retention_days: null    # null keeps segments forever
+    max_segments: null      # null keeps all segments
+    compress: true
+```
+
+| Field | Type | Default | Governs |
+| --- | --- | --- | --- |
+| `events.max_bytes` | `int` | `52428800` | Size at which the active `.canonic/events.jsonl` rotates. `0` disables rotation. |
+| `events.retention_days` | `int \| null` | `null` | Deletes segments whose rotation time is older than this many days. |
+| `events.max_segments` | `int \| null` | `null` | Keeps only this many of the newest segments. |
+| `events.compress` | `bool` | `true` | Gzips segments (`events-<UTC>.jsonl.gz`). |
+
+Rotation moves `served_answer` events into a segment. Funnel, outcome, and reconcile events stay in the active file, so limits never affect onboarding state or feedback history. Retention only deletes whole segments and is evaluated when a rotation happens. See [The event log](/concepts/instrumentation-and-eval#growth-and-retention).
+
+This applies equally under `runtime.air_gapped: true`. The log is always local, so nothing else bounds its size.
 
 ## `mcp`
 

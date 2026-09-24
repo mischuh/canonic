@@ -4,14 +4,14 @@ from __future__ import annotations
 
 import json
 import math
+from collections import deque
 from datetime import UTC, datetime
 from json import JSONDecodeError
 from typing import TYPE_CHECKING, Literal, overload
 
 from pydantic import BaseModel, ConfigDict, ValidationError
 
-from canonic.config import LOCAL_STATE_DIR
-from canonic.instrumentation.events import _EVENTS_FILE, CanonicEvent
+from canonic.instrumentation.events import CanonicEvent, event_log_paths, open_event_file
 from canonic.instrumentation.models import (
     AnswerEvent,
     AnswerOutcomeEvent,
@@ -23,6 +23,7 @@ from canonic.instrumentation.models import (
 from canonic.trust.models import TrustTier
 
 if TYPE_CHECKING:
+    from collections.abc import Iterable
     from pathlib import Path
 
 __all__ = [
@@ -249,16 +250,10 @@ def read_events(
     Returns an empty list if the log file is missing. Malformed or unknown lines
     are skipped. Pass ``kind`` to filter to one event type.
     """
-    log_path = project_root / LOCAL_STATE_DIR / _EVENTS_FILE
-    if not log_path.exists():
-        return []
-
-    lines = log_path.read_text().splitlines()
-    if last is not None:
-        lines = lines[-last:]
-
+    # Rotated segments hold served_answer events only, so other kinds read the active file.
+    paths = event_log_paths(project_root, include_segments=kind in (None, "served_answer"))
     events: list[CanonicEvent] = []
-    for line in lines:
+    for line in _raw_lines(paths, last):
         line = line.strip()
         if not line:
             continue
@@ -269,6 +264,24 @@ def read_events(
             continue
         events.append(event)
     return events
+
+
+def _raw_lines(paths: list[Path], last: int | None) -> Iterable[str]:
+    """Stream lines of ``paths`` in order, or only the final ``last`` lines across them.
+
+    Reads newest file first for ``last`` so old segments are never opened once enough
+    lines are collected.
+    """
+    if last is None:
+        return (line for path in paths for line in open_event_file(path))
+    tail: deque[str] = deque()
+    for path in reversed(paths):
+        remaining = last - len(tail)
+        if remaining <= 0:
+            break
+        chunk = deque(open_event_file(path), maxlen=remaining)
+        tail.extendleft(reversed(chunk))
+    return tail
 
 
 def build_funnel(events: list[FunnelEvent]) -> FunnelReport:
