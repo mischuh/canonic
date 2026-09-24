@@ -274,6 +274,23 @@ def test_tenant_passed_through_on_stdio(runner: CliRunner, project_dir: Path) ->
     assert mock_start_stdio.call_args.kwargs["principal"].tenant == "4711"
 
 
+def test_tasks_enabled_warns_and_is_ignored_on_stdio(runner: CliRunner, project_dir: Path) -> None:
+    """mcp.tasks.enabled on stdio is a warned no-op: start_stdio takes no tasks argument (S22 AC4)."""
+    (project_dir / "canonic.yaml").write_text(_VALID_CONFIG + "mcp:\n  tasks:\n    enabled: true\n")
+    with (
+        patch(_PATCH_SERVICE) as mock_cls,
+        patch(_PATCH_START_STDIO) as mock_start_stdio,
+        patch("canonic.cli.commands.mcp._save_last_project"),
+    ):
+        mock_cls.from_project.return_value = _mock_service()
+        result = runner.invoke(app, ["mcp", "start"])
+
+    assert result.exit_code == 0, result.output
+    assert "mcp.tasks.enabled is ignored" in result.output
+    mock_start_stdio.assert_called_once()
+    assert "tasks" not in mock_start_stdio.call_args.kwargs
+
+
 def test_no_tenant_stdio_unaffected(runner: CliRunner, project_dir: Path) -> None:
     """Without --tenant, stdio start is unchanged (no warning, principal=None passed through)."""
     with (

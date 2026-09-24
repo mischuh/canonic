@@ -250,6 +250,11 @@ def start(
             else:
                 _console.print(f"MCP daemon started (http {host}:{port})")
         else:
+            if cfg.mcp.tasks.enabled and not json_output:
+                _console.print(
+                    "[yellow]warning:[/yellow] mcp.tasks.enabled is ignored on --transport stdio, "
+                    "background tasks are http-only"
+                )
             start_stdio(service, root, suggestions=suggestions, principal=principal)
     except RuntimeError as exc:
         msg = str(exc)

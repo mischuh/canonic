@@ -13,7 +13,9 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
+import pytest
 from fastmcp import Client
+from fastmcp.server.auth.providers.jwt import JWTVerifier, RSAKeyPair
 
 from canonic.mcp.server import build_server
 
@@ -89,3 +91,21 @@ class TestCacheHints:
 
         assert result.ttl_ms == 60_000
         assert result.cache_scope == "private"
+
+
+class TestCacheScopeWithAuth:
+    """S24 AC1: whenever ``mcp.auth`` is configured the listing is never publicly cacheable."""
+
+    @pytest.mark.parametrize("ttl_seconds", [1, 60, 300, 86_400])
+    async def test_tools_list_never_carries_public_scope(
+        self, canonic_service: CanonicService, ttl_seconds: int
+    ) -> None:
+        pair = RSAKeyPair.generate()
+        auth = JWTVerifier(
+            public_key=pair.public_key, issuer="https://idp.example", audience="canonic"
+        )
+        mcp = build_server(canonic_service, auth=auth, cache_ttl_seconds=ttl_seconds)
+        async with Client(mcp) as client:
+            result = await client.list_tools_mcp()
+
+        assert result.cache_scope != "public"
