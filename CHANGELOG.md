@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.27.0](https://github.com/mischuh/canonic/compare/v0.26.0...v0.27.0) (2026-09-24)
+
+
+### Features
+
+* **mcp:** add unauthenticated /livez and /readyz probes and --foreground ([#329](https://github.com/mischuh/canonic/issues/329)) ([d8fa2de](https://github.com/mischuh/canonic/commit/d8fa2de95011dcb17c94106adaa5f7e8d9fad3ba))
+
 ## [0.26.0](https://github.com/mischuh/canonic/compare/v0.25.0...v0.26.0) (2026-09-24)
 
 
