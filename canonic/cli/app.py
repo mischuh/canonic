@@ -18,6 +18,7 @@ from canonic.cli.commands import (
     completion,
     connection,
     evaluate,
+    gc,
     ingest,
     knowledge,
     mcp,
@@ -103,5 +104,6 @@ app.command("assert")(assertions.assert_)
 app.command("sql")(sql.sql)
 app.command("status")(status.status)
 app.command("audit")(audit.audit)
+app.command("gc")(gc.gc)
 app.command("validate")(validate.validate)
 app.command("completion")(completion.completion)
