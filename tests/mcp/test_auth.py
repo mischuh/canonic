@@ -14,7 +14,7 @@ from fastmcp.server.auth.oauth_proxy.proxy import _ID_JAG_GRANT_MARKER
 from fastmcp.server.auth.oidc_proxy import OIDCConfiguration, OIDCProxy
 from fastmcp.server.auth.providers.jwt import JWTVerifier, RSAKeyPair
 from joserfc import jwk, jwt
-from mcp.server.auth.provider import IdentityAssertionParams
+from mcp.server.auth.provider import IdentityAssertionParams, TokenError
 from mcp.shared.auth import OAuthClientInformationFull
 
 from canonic.config import (
@@ -724,3 +724,65 @@ class TestCanonicOIDCProxyExchange:
         principal = principal_from_token(token, tenancy=_TENANCY, roles=_ROLES)
         assert principal is not None
         assert principal.tenant is None
+
+
+class TestIdentityAssertionRejection:
+    """S20 AC2. Verification is FastMCP's; these pin that canonic's wiring keeps it in
+    force, so an unusable assertion never yields a token."""
+
+    async def _present(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        *,
+        signing_key: RSAKeyPair | None = None,
+        repeat: int = 1,
+        **assertion_claims: object,
+    ) -> None:
+        proxy = _identity_assertion_proxy(monkeypatch)
+        validator = proxy._identity_assertion_validator
+        assert validator is not None
+        trusted_key = RSAKeyPair.generate()
+        validator._verifiers[_ASSERTION_ISSUER] = JWTVerifier(
+            public_key=trusted_key.public_key, issuer=_ASSERTION_ISSUER, audience=validator.audience
+        )
+        assertion = _sign_id_jag(
+            signing_key or trusted_key,
+            str(proxy.issuer_url),
+            str(proxy._resource_url),
+            **assertion_claims,
+        )
+        client = OAuthClientInformationFull(client_id=_AGENT_CLIENT_ID, redirect_uris=None)
+        for _ in range(repeat):
+            await proxy.exchange_identity_assertion(
+                client, IdentityAssertionParams(assertion=assertion)
+            )
+
+    async def test_untrusted_issuer_rejected(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        with pytest.raises(TokenError) as exc_info:
+            await self._present(monkeypatch, iss="https://evil.example.com")
+        assert exc_info.value.error == "invalid_grant"
+
+    async def test_bad_signature_rejected(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        with pytest.raises(TokenError) as exc_info:
+            await self._present(monkeypatch, signing_key=RSAKeyPair.generate())
+        assert exc_info.value.error == "invalid_grant"
+
+    async def test_replayed_assertion_rejected(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        with pytest.raises(TokenError) as exc_info:
+            await self._present(monkeypatch, repeat=2)
+        assert exc_info.value.error == "invalid_grant"
+
+
+class TestStaticTokensWithIdentityAssertion:
+    """S17 stays unchanged once ``identity_assertion`` is configured alongside tokens."""
+
+    async def test_static_token_still_accepted(
+        self, auth_config: McpAuthConfig, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        oauth = _identity_assertion_proxy(monkeypatch)
+        composite = CanonicCompositeVerifier(
+            CanonicTokenVerifier(resolve_tokens(auth_config)), oauth
+        )
+        token = await composite.verify_token("alice-secret")
+        assert token is not None
+        assert token.client_id == "alice"

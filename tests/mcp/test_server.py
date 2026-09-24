@@ -463,3 +463,48 @@ class TestClaimMappingWiring:
             "list_reports",
             "run_report",
         }
+
+
+class TestAdapterDoesNotGateOnRoles:
+    """S21 AC2. Role authorization belongs to the core, so nothing under ``canonic/mcp/``
+    may hide or reject a tool based on role membership. Absence of a behavior is hard to
+    prove at runtime alone, hence a runtime check plus a static one."""
+
+    @pytest.mark.asyncio
+    async def test_listing_and_calls_identical_for_any_role(
+        self, orders_source: SemanticSource, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        service = _tenancy_service(orders_source, monkeypatch)
+        mcp = build_server(service)
+        seen: dict[str, tuple[set[str], object]] = {}
+        for label, roles in {"none": [], "unknown": ["no_such_role"], "other": ["intern"]}.items():
+            token = AccessToken(
+                token="t",
+                client_id="agent",
+                scopes=[],
+                claims={"merchant_id": "4711", "roles": roles},
+            )
+            monkeypatch.setattr("canonic.mcp.server.get_access_token", lambda t=token: t)
+            async with Client(mcp) as client:
+                names = {t.name for t in await client.list_tools()}
+                result = await client.call_tool("list_metrics", {})
+            seen[label] = (names, result.data)
+        assert len({frozenset(names) for names, _ in seen.values()}) == 1
+        assert len({repr(data) for _, data in seen.values()}) == 1
+
+    def test_no_role_gating_in_adapter_source(self) -> None:
+        import re
+        from pathlib import Path
+
+        import canonic.mcp
+
+        forbidden = re.compile(
+            r"require_roles|not in .*allowed_roles|role[s]? not in|if .*\.roles\b.*:\s*raise"
+        )
+        offenders = [
+            f"{path.name}:{lineno}: {line.strip()}"
+            for path in Path(canonic.mcp.__file__).parent.glob("*.py")
+            for lineno, line in enumerate(path.read_text().splitlines(), 1)
+            if forbidden.search(line) and not line.lstrip().startswith("#")
+        ]
+        assert offenders == []
