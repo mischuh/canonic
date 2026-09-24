@@ -92,6 +92,17 @@ def start(
         bool,
         typer.Option("--suggestions", help="Enable follow-up suggestions in query responses."),
     ] = False,
+    foreground: Annotated[
+        bool,
+        typer.Option(
+            "--foreground",
+            help=(
+                "Run the http daemon in the foreground instead of detaching, so the process "
+                "stays PID 1 in a container and receives SIGTERM directly. Writes no "
+                "mcp.json state, so `canonic mcp status`/`stop` do not apply."
+            ),
+        ),
+    ] = False,
     child: Annotated[
         bool,
         typer.Option(
@@ -107,7 +118,8 @@ def start(
 
     With ``--transport stdio`` (default): runs in the foreground (the MCP client
     manages the process lifetime). With ``--transport http``: spawns a detached
-    background uvicorn daemon bound to the given host/port; requires at least one
+    background uvicorn daemon bound to the given host/port (or, with ``--foreground``,
+    runs it in the current process, for containers); requires at least one
     auth mechanism (``mcp.auth.tokens`` and/or ``mcp.auth.oauth`` in canonic.yaml, or
     ``--token-ref``) since the daemon becomes network-reachable
     (AMENDMENT-remote-mcp-transport.md, AMENDMENT-oauth-mcp-auth.md).
@@ -118,6 +130,13 @@ def start(
     principal from its verified token, so a single daemon-wide tenant would silently
     apply to every caller regardless of who they are.
     """
+    if foreground and transport != "http":
+        msg = "--foreground applies to --transport http only, stdio already runs in the foreground"
+        if get_cli_context(ctx).json_output:
+            typer.echo(json.dumps({"error": msg}))
+        else:
+            _console.print(f"[red]error:[/red] {msg}")
+        raise typer.Exit(1)
     if tenant is not None and transport == "http":
         msg = (
             "--tenant is refused on --transport http: each request already derives its "
@@ -212,9 +231,10 @@ def start(
                         _console.print(msg, markup=False)
                     raise typer.Exit(1)
 
-            if child:
-                # Already the detached process spawned by start_http (via `--_child`):
-                # run in the foreground, don't spawn yet another child.
+            if child or foreground:
+                # Either the detached process spawned by start_http (`--_child`) or an
+                # explicit `--foreground` (containers): run in the foreground, don't
+                # spawn yet another child.
                 from canonic.mcp.daemon import serve_http_foreground
 
                 claim_mapping = cfg.mcp.auth.oauth.claim_mapping if cfg.mcp.auth.oauth else None

@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING, Any
 
 from fastmcp import FastMCP
 from fastmcp.server.dependencies import get_access_token
+from starlette.responses import JSONResponse
 
 from canonic import __version__ as CANONIC_VERSION
 from canonic.compiler.query import SemanticQuery
@@ -26,6 +27,7 @@ from canonic.mcp.extensions import ContractExtension
 
 if TYPE_CHECKING:
     from fastmcp.server.auth.auth import AuthProvider
+    from starlette.requests import Request
 
     from canonic.contracts.principal import Caller, Principal
     from canonic.contracts.resolver import ContractResolver
@@ -242,6 +244,20 @@ def build_server(
     if tasks:
         TasksExtension = _require_tasks_extension()
         mcp.add_extension(TasksExtension(url=tasks_url))
+
+    @mcp.custom_route("/livez", methods=["GET"], include_in_schema=False)
+    async def livez(request: Request) -> JSONResponse:
+        """Liveness probe: the process is up and serving HTTP. Unauthenticated by design."""
+        return JSONResponse({"status": "ok"})
+
+    @mcp.custom_route("/readyz", methods=["GET"], include_in_schema=False)
+    async def readyz(request: Request) -> JSONResponse:
+        """Readiness probe: ``service`` is built, so tools can be served.
+
+        Unauthenticated by design and deliberately shallow: no connector or warehouse call,
+        so a probe never generates warehouse traffic. Exposes only the version.
+        """
+        return JSONResponse({"status": "ready", "version": CANONIC_VERSION})
 
     # ------------------------------------------------------------------
     # Tool: list_metrics

@@ -84,6 +84,8 @@ mcp:
 
 Each client authenticates with its own token (`Authorization: Bearer <token>`), and the resolved `client_id` is attributed on every `query`/`run_sql` answer event in `.canonic/events.jsonl`, so usage is traceable per user, not just per daemon instance.
 
+The HTTP daemon also serves unauthenticated `/livez` and `/readyz` probe endpoints for load balancers and Kubernetes. See [Health endpoints](/cli-reference/mcp#health-endpoints).
+
 ### Binding tenant/role claims to a token
 
 When the project has a [tenancy and/or role policy](/concepts/tenancy-and-access-control) configured (`contracts/policies/tenancy.yaml` / `roles.yaml`), a token also needs to carry the claims those policies name (`claim: merchant_id`, `claim: roles`, or whatever the policy declares). A static bearer token has no IdP to fetch claims from at request time, so it carries them inline via `claims`:

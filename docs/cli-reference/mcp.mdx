@@ -20,6 +20,7 @@ canonic mcp start --transport http --port 7474
 | `--transport` | `stdio` (default, local) or `http` (remote, network-reachable). |
 | `--port` | Port for the HTTP daemon (default `7474`). |
 | `--host` | Host for the HTTP daemon (default `127.0.0.1`). |
+| `--foreground` | With `--transport http`, run the daemon in the current process instead of detaching. Use this as a container's start command so the daemon is PID 1 and receives `SIGTERM` directly. Writes no state file, so `mcp status` and `mcp stop` do not apply. |
 | `--token-ref` | Bearer token reference (`env:VAR`) for `--transport http`, overriding/supplementing `mcp.auth.tokens` in `canonic.yaml`. |
 | `--suggestions` | Enable follow-up suggestions in query responses. |
 | `--tenant` | Bind a fixed, roleless principal for a `stdio` session, local-development/platform-operator use only. Always logs a warning. Refused (exit `1`) on `--transport http`. See [Tenancy & access control](/concepts/tenancy-and-access-control#--tenant-cli-override). |
@@ -45,6 +46,36 @@ mcp:
 or pass `--token-ref env:SOME_VAR` for a quick one-off token. Starting `--transport http` with neither configured is a hard error. Token clients authenticate with `Authorization: Bearer <token>`. OAuth clients complete the IdP's login flow (`proxy` mode) or present an IdP-issued JWT directly (`jwt` mode). Either way the resolved `client_id` (a token's configured name, or the OAuth subject/email) is recorded on every `query`/`run_sql` answer event for per-user attribution. See the [config schema reference](/reference/config-schema#mcp) for the full `oauth` field list, and [Connecting your agent](/mcp-integration/connecting-your-agent#remote-enterprise-deployment) for the deployment walkthrough.
 
 On first start in a project with no active metric contracts, canonic auto-generates inferred metric contracts from the loaded semantic sources before serving.
+
+## Health endpoints
+
+The `http` daemon serves two unauthenticated probe endpoints next to `/mcp`, for orchestrators such as Kubernetes.
+
+| Endpoint | Meaning | Response |
+| --- | --- | --- |
+| `GET /livez` | The process is up and serving HTTP. | `200 {"status": "ok"}` |
+| `GET /readyz` | The service is built and tools can be served. | `200 {"status": "ready", "version": "<canonic version>"}` |
+
+Both endpoints skip the auth layer on purpose, so a probe needs no token. They expose only the status and the canonic version. `/readyz` is deliberately shallow: it makes no connector or warehouse call, so probes never generate warehouse traffic. The `stdio` transport has no HTTP surface and no probes.
+
+Example Kubernetes probes for a daemon listening on port `7474`:
+
+```yaml
+startupProbe:
+  httpGet: { path: /readyz, port: 7474 }
+  periodSeconds: 2
+  failureThreshold: 30
+livenessProbe:
+  httpGet: { path: /livez, port: 7474 }
+  periodSeconds: 10
+readinessProbe:
+  httpGet: { path: /readyz, port: 7474 }
+  periodSeconds: 5
+```
+
+In a container, start the daemon with `canonic mcp start --transport http --host 0.0.0.0 --foreground`. Without `--foreground` the command detaches and returns, so the container would exit right after starting. `--host 0.0.0.0` lets the probes reach the pod IP.
+
+The official image ships a Docker `HEALTHCHECK` that calls `/livez` on port `7474`.
 
 ## `mcp stop`
 
