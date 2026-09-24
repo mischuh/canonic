@@ -607,3 +607,26 @@ def test_json_mode_rejected(runner: CliRunner, tmp_path: Path, monkeypatch) -> N
     assert result.exit_code == 1
     assert "interactive" in result.output
     assert not (tmp_path / "canonic.yaml").exists()
+
+
+def test_add_connection_keeps_env_references_in_existing_yaml(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from canonic.cli.commands import setup as setup_mod
+    from canonic.config import Connection
+
+    monkeypatch.setenv("DB_HOST", "db.prod.internal")
+    (tmp_path / "canonic.yaml").write_text(
+        "version: 1\nproject:\n  name: t\nconnections:\n"
+        "  - id: wh\n    type: postgres\n    params:\n      host: env:DB_HOST\n"
+    )
+    monkeypatch.setattr(
+        setup_mod,
+        "_prompt_connection",
+        lambda _root: Connection(id="other", type="sqlite", params={"path": "x.db"}),
+    )
+    setup_mod._add_connection_to_existing(tmp_path)
+    text = (tmp_path / "canonic.yaml").read_text()
+    assert "env:DB_HOST" in text
+    assert "db.prod.internal" not in text
+    assert "id: other" in text
