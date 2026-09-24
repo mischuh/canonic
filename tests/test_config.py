@@ -964,3 +964,63 @@ class TestNoModelsOperatingPoint:
     def test_no_llm_embeddings_defaults_apply(self, tmp_path: Path) -> None:
         cfg = load_config(_canonic_yaml(tmp_path, _NO_LLM))
         assert cfg.embeddings.model == "all-MiniLM-L6-v2"
+
+
+_ENV_YAML = """\
+version: 1
+project:
+  name: test-project
+connections:
+  - id: warehouse_pg
+    type: postgres
+    params:
+      host: env:DB_HOST
+      port: env:DB_PORT
+      user: env:DB_USER
+    credentials_ref: env:CANONIC_PG_DSN
+llm:
+  provider: openai_compatible
+  base_url: env:LLM_URL
+  model: llama3
+"""
+
+
+def test_env_values_are_expanded_in_params_and_other_sections(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("DB_HOST", "db.prod.internal")
+    monkeypatch.setenv("DB_PORT", "6432")
+    monkeypatch.setenv("DB_USER", "svc_canonic")
+    monkeypatch.setenv("LLM_URL", "http://llm.internal/v1")
+    cfg = load_config(_canonic_yaml(tmp_path, _ENV_YAML))
+    params = cfg.connections[0].params
+    assert params == {"host": "db.prod.internal", "port": "6432", "user": "svc_canonic"}
+    assert cfg.llm is not None
+    assert cfg.llm.base_url == "http://llm.internal/v1"
+
+
+def test_ref_fields_stay_unexpanded(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    for name, value in {
+        "DB_HOST": "h",
+        "DB_PORT": "1",
+        "DB_USER": "u",
+        "LLM_URL": "http://x/v1",
+        "CANONIC_PG_DSN": "postgresql://secret",
+    }.items():
+        monkeypatch.setenv(name, value)
+    cfg = load_config(_canonic_yaml(tmp_path, _ENV_YAML))
+    assert cfg.connections[0].credentials_ref == "env:CANONIC_PG_DSN"
+
+
+def test_unset_env_value_names_the_location(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.delenv("DB_HOST", raising=False)
+    with pytest.raises(ConfigError, match=r"connections\[0\]\.params\.host.*'DB_HOST' is not set"):
+        load_config(_canonic_yaml(tmp_path, _ENV_YAML))
+
+
+def test_empty_env_value_is_rejected(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("DB_HOST", "  ")
+    with pytest.raises(ConfigError, match="set but empty"):
+        load_config(_canonic_yaml(tmp_path, _ENV_YAML))

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import re
 from enum import StrEnum
 from pathlib import Path
@@ -28,6 +29,9 @@ _REF_PATTERN = re.compile(r"^(env:|keyring:|file:)")
 #: held for the life of the process, so a self-expiring provider credential there would
 #: silently go stale rather than refresh.
 _CONNECTION_REF_PATTERN = re.compile(r"^(env:|keyring:|file:|provider:)")
+
+#: Prefix marking a whole config value as an environment variable to substitute at load time.
+_ENV_PREFIX = "env:"
 
 #: Committed context directories scaffolded for every project (SPEC E1 §2).
 CONTEXT_DIRS: tuple[str, ...] = ("semantics", "knowledge", "contracts", "reports", "raw-sources")
@@ -669,6 +673,42 @@ def scaffold_project(root: Path) -> list[Path]:
     return created
 
 
+def _is_ref_key(key: object) -> bool:
+    """True for ``*_ref`` keys, whose ``env:`` values are resolved lazily as secrets."""
+    return isinstance(key, str) and key.endswith("_ref")
+
+
+def expand_env_refs(raw: Any, _path: str = "") -> Any:
+    """Return ``raw`` with every ``env:VAR`` string value replaced by the variable's value.
+
+    Only whole values are substituted. Values under a ``*_ref`` key are left alone: those
+    are secret references that connectors and the auth layer resolve lazily, and they must
+    keep passing their literal-secret validators. Runs before model validation, so typed
+    fields coerce the resulting string and validators see the real value.
+
+    Raises:
+        ConfigError: If a referenced variable is unset or empty, naming the config location.
+    """
+    if isinstance(raw, dict):
+        return {
+            k: v if _is_ref_key(k) else expand_env_refs(v, f"{_path}.{k}" if _path else str(k))
+            for k, v in raw.items()
+        }
+    if isinstance(raw, list):
+        return [expand_env_refs(v, f"{_path}[{i}]") for i, v in enumerate(raw)]
+    if isinstance(raw, str) and raw.startswith(_ENV_PREFIX):
+        name = raw[len(_ENV_PREFIX) :].strip()
+        if not name:
+            raise ConfigError(f"{_path}: env: value is missing a variable name")
+        value = os.environ.get(name)
+        if value is None:
+            raise ConfigError(f"{_path}: environment variable {name!r} is not set")
+        if not value.strip():
+            raise ConfigError(f"{_path}: environment variable {name!r} is set but empty")
+        return value
+    return raw
+
+
 def load_config(path: Path) -> CanonicConfig:
     """Load and validate canonic.yaml at path, raising ConfigError on any problem."""
     if not path.exists():
@@ -685,6 +725,7 @@ def load_config(path: Path) -> CanonicConfig:
     if version not in KNOWN_VERSIONS:
         raise ConfigError(f"unknown config version {version}, upgrade canonic")
 
+    raw = expand_env_refs(raw)
     try:
         return CanonicConfig.model_validate(raw)
     except ValidationError as exc:

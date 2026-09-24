@@ -29,7 +29,7 @@ from rich.panel import Panel
 from rich.table import Table
 
 from canonic.cli._errors import get_cli_context, handle_errors
-from canonic.cli.commands import _console
+from canonic.cli.commands import _console, load_raw_config, write_raw_config
 from canonic.cli.commands._schema_selection import (
     discover_relations,
     introspect_connection,
@@ -735,15 +735,21 @@ def _print_status(root: Path) -> None:
 
 def _add_connection_to_existing(root: Path) -> None:
     conn = _prompt_connection(root)
-    config = load_config(root / "canonic.yaml")
-    existing = next((c for c in config.connections if c.id == conn.id), None)
+    path = root / "canonic.yaml"
+    load_config(path)  # fail early on an invalid file
+    # Edit the raw document, not the loaded config: loading resolves ``env:VAR`` values and
+    # writing those back would bake host/user into the file.
+    raw = load_raw_config(path)
+    connections = raw.get("connections") or []
+    existing = next((c for c in connections if c.get("id") == conn.id), None)
     if existing is not None and not typer.confirm(
         f"connection {conn.id!r} already exists — replace it?", default=False
     ):
         _console.print("[dim]kept existing connection; nothing written.[/dim]")
         return
-    config.connections = [c for c in config.connections if c.id != conn.id] + [conn]
-    dump_config(config, root / "canonic.yaml")
+    kept = [c for c in connections if c.get("id") != conn.id]
+    raw["connections"] = [*kept, conn.model_dump(mode="json", exclude_none=True)]
+    write_raw_config(path, raw)
     logger.info("setup: connection %s (%s) added to canonic.yaml", conn.id, conn.type)
     _console.print(f"[green]✓[/green] connection [bold]{conn.id}[/bold] added to canonic.yaml")
 
@@ -751,14 +757,18 @@ def _add_connection_to_existing(root: Path) -> None:
 def _add_llm_to_existing(root: Path) -> None:
     """Configure or replace the LLM block on an existing project (mirrors _add_connection_to_existing)."""
     llm = _prompt_llm()
-    config = load_config(root / "canonic.yaml")
-    if config.llm is not None and not typer.confirm(
+    path = root / "canonic.yaml"
+    load_config(path)  # fail early on an invalid file
+    raw = load_raw_config(path)
+    if raw.get("llm") is not None and not typer.confirm(
         "an LLM is already configured — replace it?", default=False
     ):
         _console.print("[dim]kept existing LLM config; nothing written.[/dim]")
         return
-    config.llm = llm
-    dump_config(config, root / "canonic.yaml")
+    raw["llm"] = llm.model_dump(mode="json", exclude_none=True, exclude_defaults=False)
+    if not raw["llm"].get("tasks"):
+        raw["llm"].pop("tasks", None)
+    write_raw_config(path, raw)
     logger.info("setup: llm provider=%s model=%s added to canonic.yaml", llm.provider, llm.model)
     _console.print(
         f"[green]✓[/green] LLM [bold]{llm.provider}/{llm.model}[/bold] added to canonic.yaml"

@@ -24,6 +24,12 @@ description: "Every top-level field in the project config file, and what it gove
 
 `version` and `project` are the only fields canonic actually needs to boot. Everything else configures a specific subsystem and can be left out entirely for a local, single-user setup: `connections` is empty until you add a data source, `llm` is `null` until you configure a provider, and the rest fall back to safe local defaults. `embeddings` and `telemetry` rarely need touching, they exist mostly for opt-in tuning and privacy control rather than day-to-day project setup.
 
+## Environment variables in values
+
+Any value in `canonic.yaml` can be written as `env:VAR`, for example `host: env:DB_HOST` or `port: env:DB_PORT`. canonic replaces the whole value with the variable's content when it loads the file, so one committed config can serve dev, staging and production. Only whole values are substituted, there is no `${VAR}` syntax and no default value. An unset or empty variable stops the load with an error that names the exact location, such as `connections[0].params.host`.
+
+Keys ending in `_ref` (`credentials_ref`, `api_key_ref`, `token_ref` and so on) are not substituted at load time. They stay secret references and are resolved only when the secret is actually needed. `canonic setup` keeps the `env:VAR` spelling when it edits an existing file, so resolved values are never written back. The diagnostic bundle from `canonic audit --bundle` shows the resolved values, so a bug report says which environment it came from.
+
 ## `connections[]`
 
 ```yaml
