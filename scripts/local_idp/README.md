@@ -19,7 +19,7 @@ docker compose -f scripts/local_idp/docker-compose.yml up --build
 
 Wait for:
 - Keycloak: log line confirming realm `canonic` was imported.
-- `canonic`: log line `MCP daemon started (http 0.0.0.0:7474)`.
+- `canonic`: Uvicorn's `Uvicorn running on http://0.0.0.0:7474` log line.
 
 Keycloak admin console: http://localhost:8080 (`admin` / `admin`) — useful for inspecting or
 editing the imported realm/users. Canonic MCP endpoint: http://localhost:7474.

@@ -74,4 +74,3 @@ runtime:
 logging:
   level: INFO
   format: json
-  file: .canonic/canonic.log

@@ -204,6 +204,51 @@ def test_start_http_with_token_ref_succeeds(
     assert mock_start_http.call_args.kwargs["auth"] is not None
 
 
+def test_start_http_foreground_serves_in_process(
+    runner: CliRunner, project_dir: Path, monkeypatch
+) -> None:
+    """--foreground runs the daemon in this process instead of spawning a detached child."""
+    monkeypatch.setenv("CANONIC_TEST_MCP_TOKEN", "s3cr3t")
+
+    with (
+        patch(_PATCH_SERVICE) as mock_cls,
+        patch(_PATCH_START_HTTP) as mock_start_http,
+        patch("canonic.mcp.daemon.serve_http_foreground") as mock_serve,
+        patch("canonic.cli.commands.mcp._save_last_project"),
+    ):
+        mock_cls.from_project.return_value = _mock_service()
+        result = runner.invoke(
+            app,
+            [
+                "mcp",
+                "start",
+                "--transport",
+                "http",
+                "--foreground",
+                "--host",
+                "0.0.0.0",  # noqa: S104
+                "--token-ref",
+                "env:CANONIC_TEST_MCP_TOKEN",
+            ],
+        )
+
+    assert result.exit_code == 0, result.output
+    mock_serve.assert_called_once()
+    assert mock_serve.call_args.args[2] == "0.0.0.0"  # noqa: S104
+    mock_start_http.assert_not_called()
+
+
+def test_foreground_refused_on_stdio(runner: CliRunner, project_dir: Path) -> None:
+    """--foreground is http-only: stdio already runs in the foreground."""
+    with patch(_PATCH_SERVICE) as mock_cls, patch(_PATCH_START_STDIO) as mock_start_stdio:
+        result = runner.invoke(app, ["mcp", "start", "--foreground"])
+
+    assert result.exit_code == 1
+    assert "--foreground" in result.output
+    mock_start_stdio.assert_not_called()
+    mock_cls.from_project.assert_not_called()
+
+
 # ---------------------------------------------------------------------------
 # --transport http mcp.tasks fail-closed (AMENDMENT-fastmcp4-adoption §4, S22)
 # ---------------------------------------------------------------------------
