@@ -141,6 +141,8 @@ mcp:
 
 `canonic mcp status` reports which mechanism(s) are active on a running daemon (e.g. `token, oauth-proxy`), useful for confirming a deployment matches its intended config. TLS termination is expected to happen at a reverse proxy/ingress in front of the daemon, not in the daemon itself.
 
+For a runnable end-to-end example with a real IdP, see [Marketplace with Keycloak](/guides/marketplace-keycloak): a local Keycloak plus a dockerized daemon, with role and tenant claims flowing from the login into the query.
+
 **Headless/agentic clients**: `mode: proxy` also accepts an IdP-signed identity assertion (SEP-990 ID-JAG) in place of the interactive Authorization Code + PKCE flow, for a client that already holds an established identity from the IdP and cannot open a browser to log in:
 
 ```yaml

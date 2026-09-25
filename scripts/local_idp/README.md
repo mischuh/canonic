@@ -7,6 +7,11 @@ Authorization Code + PKCE browser login and see the resulting role/tenant enforc
 (masking, `run_sql` gating, tenancy scoping — SPEC-E12) live, instead of only exercising it
 through mocked unit tests.
 
+The full guide, including how to adapt this to a real Keycloak realm, lives in the docs:
+[Marketplace with Keycloak](../../docs/guides/marketplace-keycloak.mdx)
+([online](https://docs.getcanonic.app/guides/marketplace-keycloak)). This README is the short
+runnable reference.
+
 `examples/marketplace/canonic.yaml` itself is never modified — this setup mounts
 [`canonic.docker.yaml`](canonic.docker.yaml) over it inside the container, so the shipped,
 golden-tested example stays untouched.

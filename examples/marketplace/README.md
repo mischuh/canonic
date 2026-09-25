@@ -2,7 +2,9 @@
 
 An end-to-end canonic project on a multi-merchant marketplace: one shared SQLite warehouse, 5 merchants, ~24 months of order history, 4 metric contracts, one enforced guardrail, and a full tenant-scoping / role-based-authorization (RBAC) setup demonstrating SPEC-E12.
 
-Full walkthrough, tenant/role table, and the policy-hole/masking/run_sql demos: **[`docs/guides/marketplace.mdx`](../../docs/guides/marketplace.mdx)**.
+Full walkthrough, tenant/role table, and the policy-hole/masking/run_sql demos: **[`docs/guides/marketplace.mdx`](../../docs/guides/marketplace.mdx)** ([online](https://docs.getcanonic.app/guides/marketplace)).
+
+The same project behind a real identity provider (Keycloak, OAuth 2.1 browser login): **[`docs/guides/marketplace-keycloak.mdx`](../../docs/guides/marketplace-keycloak.mdx)** ([online](https://docs.getcanonic.app/guides/marketplace-keycloak)), runnable via [`scripts/local_idp`](../../scripts/local_idp).
 
 ## Prerequisites
 
@@ -20,6 +22,8 @@ canonic ingest --bootstrap --headless
 canonic query --metrics revenue --dimensions status --tenant byte-gadgets
 canonic mcp start
 ```
+
+`canonic.yaml` resolves its five MCP tokens from `CANONIC_MCP_TOKEN_*` environment variables (`BYTE_GADGETS_VIEWER`, `BYTE_GADGETS_ADMIN`, `URBAN_THREADS_VIEWER`, `URBAN_THREADS_ADMIN`, `PLATFORM_OPS`). Set them to any value before `canonic mcp start --transport http`.
 
 `--tenant` is a local-development / platform-operator override (SPEC-E12 §7): it always
 warns, and it binds no role claim, so a CLI-direct query runs as `roles.yaml`'s
