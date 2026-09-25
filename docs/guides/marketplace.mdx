@@ -5,7 +5,7 @@ description: "A multi-merchant marketplace on SQLite demonstrating tenant isolat
 
 An end-to-end canonic project on a multi-merchant marketplace: one shared SQLite warehouse hosting 5 independent merchants, ~24 months of order history with real growth/decline trends, 4 metric contracts, one enforced guardrail, and a full tenant-scoping / role-based-authorization (RBAC) setup. Unlike the other example projects, this one ships thousands of rows so there is real seasonality, trend, and promotion activity to query.
 
-<Info>Full source: [`examples/marketplace/`](https://github.com/mischuh/canonic/tree/main/examples/marketplace)</Info>
+<Info>Full source: [`examples/marketplace/`](https://github.com/mischuh/canonic/tree/main/examples/marketplace). To run it behind a real identity provider, see [Marketplace with Keycloak](/guides/marketplace-keycloak).</Info>
 
 ## Schema
 
@@ -52,6 +52,16 @@ canonic query --metrics revenue --dimensions status --tenant byte-gadgets
 canonic mcp start
 ```
 
+`canonic.yaml` resolves its five MCP tokens from environment variables (`token_ref: env:...`), so `canonic mcp start --transport http` needs them set first. Any value works for local development:
+
+```bash
+export CANONIC_MCP_TOKEN_BYTE_GADGETS_VIEWER=byte-gadgets-viewer-local-dev
+export CANONIC_MCP_TOKEN_BYTE_GADGETS_ADMIN=byte-gadgets-admin-local-dev
+export CANONIC_MCP_TOKEN_URBAN_THREADS_VIEWER=urban-threads-viewer-local-dev
+export CANONIC_MCP_TOKEN_URBAN_THREADS_ADMIN=urban-threads-admin-local-dev
+export CANONIC_MCP_TOKEN_PLATFORM_OPS=platform-ops-local-dev
+```
+
 <Warning>
   `canonic.yaml` declares an `llm:` block (matching every other example's shape), but this project's semantics are already fully hand-curated. There is nothing left to draft. Without `--headless`, `canonic ingest --bootstrap` still constructs a real LLM drafter and tries to reach it (here, a local Ollama endpoint) even though grain is deterministic from the declared primary keys, and fails if that endpoint isn't running. `--headless` (or `CI=true`) forces the deterministic `NullLLMDrafter`, zero model calls, which is what this guide's Quickstart uses and what CI itself runs.
 </Warning>
@@ -64,7 +74,7 @@ error tenant_unresolved: tenancy policy is active but the request carries no res
 # exit 22
 ```
 
-This happens because `contracts/policies/tenancy.yaml` sets `on_missing_principal: deny`.
+This happens because `contracts/policies/tenancy.yaml` sets `on_missing_principal: deny`. A CLI-direct query with `--tenant` binds no role claim, so it runs as the `default_role` of `roles.yaml` (`merchant_viewer`).
 
 ## Metrics
 
@@ -94,6 +104,8 @@ This happens because `contracts/policies/tenancy.yaml` sets `on_missing_principa
 | `platform-ops` | `roles: [platform_analyst]` (no `merchant_id`) | `tenancy_exempt: true`, every metric (`allow: ["*"]`), every knowledge tag, `run_sql: true` and actually allowed |
 
 `merchant_admin` `inherits: merchant_viewer` (field-level override, not a list-merge): it re-opens `dimensions.deny` to `[]` and adds a `masking` rule instead.
+
+The five identities above are static bearer tokens, the simplest setup. The same identities can also come from a real identity provider through `mcp.auth.oauth`. The [Keycloak guide](/guides/marketplace-keycloak) runs this exact project behind a local Keycloak with a browser login, and both mechanisms can be active on one daemon.
 
 ## Querying as merchant A vs merchant B
 
@@ -214,3 +226,5 @@ contracts/policies/             ← tenancy.yaml + roles.yaml
 knowledge/global/               ← revenue/aov definitions (public/merchant tags) +
                                    platform-margin-notes.md (platform tag, platform_analyst only)
 ```
+
+The Keycloak variant lives outside the example in [`scripts/local_idp/`](https://github.com/mischuh/canonic/tree/main/scripts/local_idp) (compose file, realm export, and a `canonic.docker.yaml` overlay), so the example itself stays unchanged.

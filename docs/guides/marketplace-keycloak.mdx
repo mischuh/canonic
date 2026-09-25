@@ -1,0 +1,140 @@
+---
+title: "Guide: Marketplace with Keycloak (OAuth 2.1)"
+description: "Run the marketplace example behind a real identity provider. Log in through Keycloak and see role and tenant enforcement applied live."
+---
+
+The [marketplace guide](/guides/marketplace) demonstrates tenant scoping and role-based access control with five static bearer tokens. This guide serves the same project behind a real OIDC identity provider (Keycloak) using `mcp.auth.oauth` in `proxy` mode. You log in through the browser (Authorization Code + PKCE) and see masking, `run_sql` gating, and tenancy scoping applied to the identity the IdP issued, instead of a fixed token.
+
+<Info>Full source: [`scripts/local_idp/`](https://github.com/mischuh/canonic/tree/main/scripts/local_idp)</Info>
+
+The setup never modifies `examples/marketplace/canonic.yaml`. The compose file mounts `canonic.docker.yaml` over it inside the container, so the shipped and golden-tested example stays untouched.
+
+## Prerequisites
+
+- Docker with Compose
+- A checkout of the canonic repository (the compose file builds the daemon from the repo's own `Dockerfile`)
+- An MCP client that speaks OAuth 2.1, for example the [MCP Inspector](https://github.com/modelcontextprotocol/inspector)
+
+## Start
+
+From the repository root:
+
+```bash
+docker compose -f scripts/local_idp/docker-compose.yml up --build
+```
+
+Wait for the Keycloak log line confirming that realm `canonic` was imported, and for Uvicorn's `Uvicorn running on http://0.0.0.0:7474` line from the `canonic` container.
+
+| Service | URL | Notes |
+| --- | --- | --- |
+| Keycloak admin console | `http://localhost:8080` | `admin` / `admin`, useful to inspect the imported realm and users |
+| Canonic MCP endpoint | `http://localhost:7474` | Serves `examples/marketplace` |
+
+## Test users
+
+The realm `canonic` ships five users that mirror the five static tokens of the marketplace example:
+
+| Username | Password | Realm role | `merchant_id` |
+| --- | --- | --- | --- |
+| `byte-gadgets-viewer` | `viewer` | `merchant_viewer` | `byte-gadgets` |
+| `byte-gadgets-admin` | `admin` | `merchant_admin` | `byte-gadgets` |
+| `urban-threads-viewer` | `viewer` | `merchant_viewer` | `urban-threads` |
+| `urban-threads-admin` | `admin` | `merchant_admin` | `urban-threads` |
+| `platform-ops` | `platform` | `platform_analyst` | none (tenancy-exempt) |
+
+The role and tenant reach canonic as token claims. Two protocol mappers on the `canonic-mcp` client put them there: `roles` (all realm roles of the user) and `merchant_id` (a user attribute). They match `claim: roles` in `roles.yaml` and `claim: merchant_id` in `tenancy.yaml`, so no `claim_mapping` is needed.
+
+## Configuration
+
+The only difference to the static-token setup is the `mcp.auth.oauth` block:
+
+```yaml
+# scripts/local_idp/canonic.docker.yaml (excerpt)
+mcp:
+  auth:
+    tokens:            # unchanged, still works side by side with OAuth
+      - client_id: byte-gadgets-viewer
+        token_ref: env:CANONIC_MCP_TOKEN_BYTE_GADGETS_VIEWER
+        claims: { merchant_id: 'byte-gadgets', roles: [merchant_viewer] }
+      # ... the other four tokens
+    oauth:
+      mode: proxy
+      issuer_url: http://localhost:8080/realms/canonic
+      client_id: canonic-mcp
+      client_secret_ref: env:CANONIC_OAUTH_CLIENT_SECRET
+      base_url: http://localhost:7474
+```
+
+`CANONIC_OAUTH_CLIENT_SECRET` is `local-dev-secret` in the compose file and matches the `secret` of the `canonic-mcp` client in the realm export. The daemon checks the static token map first and falls through to OAuth verification, so both mechanisms are active at once. `canonic mcp status` reports `token, oauth-proxy`.
+
+<Note>
+`issuer_url` uses `localhost:8080` on purpose, not the compose service name `keycloak`. Keycloak's discovery document echoes back whatever host it was queried with, and that same document is what the browser gets redirected to for login, so the host has to resolve on the browser's side. To make `localhost:8080` reach Keycloak from inside the `canonic` container as well, the compose file puts it into Keycloak's network namespace (`network_mode: "service:keycloak"`). This is also why port 7474 is published from the `keycloak` service block. `base_url` is unrelated to this and is the host-published address the client is redirected to for the canonic side of the OAuth flow.
+</Note>
+
+## Try the login flow
+
+Point the MCP client at `http://localhost:7474`. The client registers itself against canonic's own OAuth endpoints (Dynamic Client Registration), and canonic redirects the browser to Keycloak for the actual login.
+
+1. Log in as `byte-gadgets-viewer` / `viewer` and query the marketplace metrics grouped by `customer_email`. The query is rejected with an `unreachable` error, because `merchant_viewer` denies `customer_email` and `customer_phone` as dimensions, and a denied dimension looks exactly like a nonexistent one. `run_sql` is refused as well (`run_sql: false`).
+2. Disconnect and log in as `byte-gadgets-admin` / `admin`. The same query now works and `customer_email` comes back **masked** (`ab***`). `run_sql` is accepted by the role but still refused with `TENANT_FORBIDDEN`, because `marketplace_db` has `rls_enforced: false` (see [run_sql's two gates](/guides/marketplace#run_sqls-two-gates)).
+3. Log in as `platform-ops` / `platform`. Data is visible across both merchants, because the role is `tenancy_exempt: true` and the token carries no `merchant_id`.
+
+These are the same results as in the [marketplace guide](/guides/marketplace#masking-in-action), now driven by the IdP login.
+
+## Sanity check without a browser
+
+The static tokens from the compose file still work, which allows a quick check with `curl`:
+
+```bash
+curl -s http://localhost:7474/mcp \
+  -H "Authorization: Bearer byte-gadgets-admin-local-dev" \
+  -H "Content-Type: application/json" \
+  -H "Accept: application/json, text/event-stream" \
+  -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}'
+```
+
+## Stop
+
+```bash
+docker compose -f scripts/local_idp/docker-compose.yml down
+```
+
+## Adapting this to a real Keycloak
+
+The realm export is a local-development artifact. Passwords, the client secret and `sslRequired: none` are baked in, so never use it as a starting point for anything reachable from the internet. For a real deployment, recreate these pieces in your own realm.
+
+<Steps>
+  <Step title="Create a confidential client">
+    Register a client (`canonic-mcp` in this example) with client authentication on, the standard flow enabled, and direct access grants, implicit flow and service accounts off. Store its secret outside of `canonic.yaml` and reference it through `client_secret_ref`.
+  </Step>
+  <Step title="Set the redirect URI">
+    Allow the daemon's public callback, `<base_url>/*`, as a valid redirect URI. `base_url` must be the URL clients reach the daemon under, for example `https://canonic.internal.example.com`, and TLS terminates at your reverse proxy.
+  </Step>
+  <Step title="Add the claims your policies name">
+    Add a `roles` mapper (type "User Realm Role") and one mapper per tenant claim (type "User Attribute", for example `merchant_id`) to the client, with "Add to access token" on. Set the `claim.name` of each mapper to the `claim` used in `roles.yaml` and `tenancy.yaml`. If your IdP team requires namespaced claim names, name the mapper claim `https://example.com/merchant_id` and map it with `claim_mapping` instead.
+  </Step>
+  <Step title="Point canonic at the realm">
+    Set `issuer_url` to `https://<keycloak-host>/realms/<realm>`. In `proxy` mode canonic discovers the endpoints from `issuer_url + /.well-known/openid-configuration`. Keycloak issues JWT access tokens, so the default `verify_id_token: false` works.
+  </Step>
+</Steps>
+
+If the client that talks to canonic already holds a Keycloak token and canonic should only verify it, use `jwt` mode instead. It needs no client secret and no `base_url`:
+
+```yaml
+mcp:
+  auth:
+    oauth:
+      mode: jwt
+      issuer_url: https://keycloak.example.com/realms/canonic
+      audience: canonic-mcp
+```
+
+Keycloak does not add an `aud` claim for a custom audience on its own, so add an "Audience" mapper for `canonic-mcp` to the token. Without `audience`, any token the realm issued for any resource is accepted. If your Keycloak does not publish OIDC discovery, set `jwks_uri` to `https://keycloak.example.com/realms/canonic/protocol/openid-connect/certs`.
+
+Under a tenancy or role policy, the IdP must sign the tenancy and role claims into the token, since canonic reads the principal from the verified claims and from nothing else. A user without a `merchant_id` claim resolves as a caller without a tenant and fails closed (`TENANT_UNRESOLVED`) unless their role is `tenancy_exempt`.
+
+## Where to go next
+
+- [Connecting your agent](/mcp-integration/connecting-your-agent#remote-enterprise-deployment) for bearer tokens, OAuth modes, headless clients and CI pipelines
+- [Config schema](/reference/config-schema#mcp) for every `mcp.auth.oauth` field
+- [Tenancy & access control](/concepts/tenancy-and-access-control) for how the verified claims become a `Principal`

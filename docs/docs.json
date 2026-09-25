@@ -68,6 +68,7 @@
           "guides/ecommerce",
           "guides/jaffle-shop",
           "guides/marketplace",
+          "guides/marketplace-keycloak",
           "guides/rental",
           "guides/saas-analytics"
         ]
