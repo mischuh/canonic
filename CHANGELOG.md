@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.27.1](https://github.com/mischuh/canonic/compare/v0.27.0...v0.27.1) (2026-09-25)
+
+
+### Documentation
+
+* **examples:** add marketplace keycloak guide and cross-link examples ([#331](https://github.com/mischuh/canonic/issues/331)) ([232a063](https://github.com/mischuh/canonic/commit/232a0632fc2943d991c923ec14d5ea8aa05f8e54))
+
 ## [0.27.0](https://github.com/mischuh/canonic/compare/v0.26.0...v0.27.0) (2026-09-24)
 
 
