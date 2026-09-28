@@ -1,5 +1,7 @@
 # canonic
 
+<!-- mcp-name: io.github.mischuh/canonic -->
+
 [![CI](https://github.com/mischuh/canonic/actions/workflows/ci.yml/badge.svg)](https://github.com/mischuh/canonic/actions/workflows/ci.yml)
 [![PyPI](https://img.shields.io/pypi/v/canonic)](https://pypi.org/project/canonic/)
 [![License](https://img.shields.io/badge/license-BUSL--1.1-blue)](LICENSE.md)
