@@ -1,0 +1,39 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.mischuh/canonic",
+  "description": "The Open Context Layer for Data Agents",
+  "repository": {
+    "url": "https://github.com/mischuh/canonic",
+    "source": "github"
+  },
+  "version": "0.27.0",
+  "packages": [
+    {
+      "registryType": "pypi",
+      "registryBaseUrl": "https://pypi.org",
+      "identifier": "canonic",
+      "version": "0.27.0",
+      "runtimeHint": "uvx",
+      "transport": {
+        "type": "stdio"
+      },
+      "packageArguments": [
+        {
+          "type": "positional",
+          "value": "mcp"
+        },
+        {
+          "type": "positional",
+          "value": "start"
+        },
+        {
+          "type": "named",
+          "name": "--project",
+          "description": "Path to the canonic project root (defaults to the current directory's project).",
+          "format": "filepath",
+          "isRequired": false
+        }
+      ]
+    }
+  ]
+}
