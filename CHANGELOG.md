@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.28.0](https://github.com/mischuh/canonic/compare/v0.27.1...v0.28.0) (2026-09-28)
+
+
+### Features
+
+* **mcp:** register canonic with the MCP registry ([#333](https://github.com/mischuh/canonic/issues/333)) ([cb89e84](https://github.com/mischuh/canonic/commit/cb89e84d219e6e9b45c6c220b0433b3b96850c96))
+
 ## [0.27.1](https://github.com/mischuh/canonic/compare/v0.27.0...v0.27.1) (2026-09-25)
 
 
