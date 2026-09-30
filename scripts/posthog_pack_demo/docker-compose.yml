@@ -1,0 +1,56 @@
+# Dockerized PostHog context-pack demo. See README.md for the full walkthrough.
+#
+# Brings up:
+#   - postgres: a real Postgres database, seeded (postgres/init/*.sql) with tables
+#     shaped exactly like PostHog's documented Postgres batch-export format.
+#   - canonic:  the MCP http daemon, built from the repo's own Dockerfile. On start,
+#     entrypoint.sh installs the "posthog" context pack (canonic-packs) against the
+#     seeded database, then serves the resulting project over MCP.
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: posthog
+      POSTGRES_USER: posthog
+      # Local-demo-only value, never a real secret. Matches CANONIC_POSTGRES_PASSWORD
+      # below, which canonic.docker.yaml's connections[].credentials_ref points at.
+      POSTGRES_PASSWORD: posthog-local-dev
+    volumes:
+      - ./postgres/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U posthog -d posthog"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  canonic:
+    build:
+      context: ../..
+      dockerfile: Dockerfile
+    depends_on:
+      postgres:
+        # Unlike scripts/local_idp's Keycloak (whose depends_on only waits for the
+        # container to *start*), Postgres's own healthcheck reflects true readiness, so
+        # no extra wait-loop is needed in entrypoint.sh here.
+        condition: service_healthy
+    entrypoint: ["/bin/sh", "/entrypoint.sh"]
+    environment:
+      CANONIC_POSTGRES_PASSWORD: posthog-local-dev
+      # Local-demo-only bearer token. --transport http refuses to start with no auth
+      # mechanism configured at all (canonic.docker.yaml's mcp.auth.tokens).
+      CANONIC_MCP_TOKEN: posthog-demo-local-dev
+    ports:
+      - "7474:7474"
+    volumes:
+      - ./canonic.docker.yaml:/data/posthog-demo/canonic.yaml:ro
+      - ./pack-params.json:/data/posthog-demo/pack-params.json:ro
+      - ./entrypoint.sh:/entrypoint.sh:ro
+      # The "posthog" pack's content lives on canonic-packs' feat/posthog-postgres-pack
+      # branch, not yet merged to main, and the base Dockerfile has no `git` binary (so
+      # `canonic pack add --repo <github-url>` can't clone from inside the container
+      # yet). Point this at a local canonic-packs checkout instead — override
+      # CANONIC_PACKS_DIR if it isn't a sibling of this repo. Once that branch merges to
+      # main, drop this mount and pass
+      # --repo https://github.com/mischuh/canonic-packs.git in entrypoint.sh instead
+      # (the same default canonic/cli/commands/pack.py already falls back to).
+      - ${CANONIC_PACKS_DIR:-../../../canonic-packs}:/packs/canonic-packs:ro

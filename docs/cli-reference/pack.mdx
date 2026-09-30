@@ -1,0 +1,64 @@
+---
+title: "canonic pack"
+description: "Install a curated context pack: templated semantics/contracts/knowledge for a known system."
+---
+
+`canonic pack` installs a **context pack** (AMENDMENT-context-packs): a versioned, git-distributed bundle of pre-curated `semantics/`/`contracts/`/`knowledge/` content for a known system, such as PostHog on Postgres. A pack writes ordinary, already-schema-valid E5/E15/E6 files — nothing it installs is a new file format or a new query/validation path, and installed files are reviewed and edited exactly like hand-written ones after the fact.
+
+Packs live in a **pack repo**: a git repository (or local directory) of `packs/<name>/pack.yaml` manifests. `--repo` accepts either a git URL or a local path; when omitted it falls back to `$CANONIC_PACKS_REPO`, then a built-in default.
+
+## `pack list`
+
+List packs available from the configured pack repo.
+
+```bash
+canonic pack list
+canonic pack list --repo /path/to/local/packs-checkout
+```
+
+Shows each pack's name, version, available variants, and description. With `--json`, returns `{"packs": [...]}`.
+
+## `pack add`
+
+Install a context pack into the current project.
+
+```bash
+canonic pack add posthog
+canonic pack add posthog --variant postgres --connection posthog_db \
+  --param signup_event=user_signed_up --yes
+```
+
+| Flag | Description |
+| --- | --- |
+| `--repo` | Pack repo: a git URL or a local path (default: `$CANONIC_PACKS_REPO`, then the built-in default). |
+| `--variant` | Variant id, e.g. `postgres` (default: the pack's only variant, or prompted). |
+| `--connection` | Existing `canonic.yaml` connection id to bind (default: auto-picked if exactly one matches the variant's connector, else prompted). |
+| `--param`, `-p` | Param as `KEY=VALUE` (repeatable). |
+| `--params-file` | JSON/YAML file of param values. Presence of this flag makes the whole command **non-interactive**: every required param not covered by it (or by `--param`/`--connection`) fails fast, listing every missing name at once, rather than prompting. |
+| `--yes` | Skip the write-preview confirmation. |
+
+Before writing anything, every table in the pack's `required_tables` is checked to exist on the bound connection (`check_required_tables`) — a live, read-only introspection call. `add` then templates every file the pack `provides`, stamps it `provenance: human_curated` plus a `pack_source: {pack, version, variant}` tag, writes it, and runs the project's ordinary semantic/contract/knowledge validation over the whole project. `pack_source` is how installed content stays traceable to the pack that produced it — a review starts from "does this match my instance," not "is this a sane measure at all," same as any other `human_curated` content. A validation failure is reported but nothing already written is deleted — a pack-installed file is indistinguishable from a hand-written one the moment it lands, so a broken one is fixed the same way any other broken committed file is. If the pack declares a `first_answer`, a demo query runs immediately after install and its result (or failure) is shown.
+
+Run without `--params-file`, `add` prompts for each param in turn — including a live top-N picklist for any param with `choose_from`, and building a derived param (e.g. an exclusion filter) from a plain answer for any param with `derive`.
+
+This is also the command behind the `canonic setup` wizard's pack branch (offered before the generic connection/bootstrap path on a fresh project, and from the existing-project menu) — same install routine, same prompt flow, a second entry point rather than a separate implementation.
+
+## `pack validate`
+
+Validate pack content with no project and no live connection — the CI-friendly path.
+
+```bash
+canonic pack validate                        # every pack under packs/*/pack.yaml, cwd as repo root
+canonic pack validate packs/posthog           # one pack directory
+canonic pack validate --variant postgres
+```
+
+| Argument / Flag | Description |
+| --- | --- |
+| `PATH` | A pack directory (has `pack.yaml`) or a repo root (has `packs/*/pack.yaml`). Default `.`. |
+| `--repo` | Resolve a git URL or local path first, same as `add`/`list`, instead of using `PATH` directly. |
+| `--variant` | Validate only this variant id (default: every variant the manifest declares). |
+
+Unlike `add`, `validate` never calls `find_project_root()` and never needs a `canonic.yaml` — it's the one `pack` subcommand designed to run from inside a bare pack-repo checkout, e.g. in that repo's own CI. It synthesizes a placeholder value for every declared param (a derive's source param gets a non-empty placeholder so the derive's template is actually exercised, without ever violating the param's own `validate.pattern`), installs into a discarded temporary directory, and runs the same E5/E15/E6 validation `add` does — everything except the connection-dependent `required_tables` existence check, which needs a live database and is out of scope here on purpose. `choose_from`/`required_tables` templates are still checked for unresolved `{{param}}` tokens, since that much needs no execution.
+
+Exits non-zero if any pack/variant fails. With `--json`, returns `{"results": [{"pack", "variant", "ok", "files", "errors"}, ...]}` for one pack/variant per entry.

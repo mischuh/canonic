@@ -1,0 +1,8 @@
+{
+  "schema": "posthog_exports",
+  "events_table": "events",
+  "persons_table": "persons",
+  "signup_event": "user_signed_up",
+  "activation_event": "report_created",
+  "internal_email_domains": "yourcompany.com"
+}
