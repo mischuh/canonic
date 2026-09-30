@@ -10,8 +10,8 @@ The [context-packs mechanism](/cli-reference/pack) installs versioned, pre-curat
 ## Prerequisites
 
 - Docker with Compose
-- A checkout of the canonic repository (the compose file builds the daemon from the repo's own `Dockerfile`)
-- A checkout of [`canonic-packs`](https://github.com/mischuh/canonic-packs) on the `feat/posthog-postgres-pack` branch, as a sibling directory of `canonic/` (see "Why a local checkout" below)
+- A checkout of the canonic repository (the compose file builds the daemon from `scripts/posthog_pack_demo/Dockerfile`)
+- Network access from inside the container to clone [`canonic-packs`](https://github.com/mischuh/canonic-packs) from GitHub at startup — no local checkout needed, see "Where the pack content comes from" below
 - An MCP client, for example the [MCP Inspector](https://github.com/modelcontextprotocol/inspector), or plain `curl`
 
 ## Start
@@ -35,7 +35,7 @@ Wait for `installing the posthog context pack...`, a line listing the installed 
 
 ```bash
 canonic pack add posthog \
-  --repo /packs/canonic-packs --variant postgres --connection posthog_db \
+  --variant postgres --connection posthog_db \
   --params-file pack-params.json --yes
 ```
 
@@ -91,9 +91,9 @@ docker compose -f scripts/posthog_pack_demo/docker-compose.yml down
 
 Add `-v` to also drop the seeded Postgres volume; without it, a later `up` reuses the same data (Postgres only runs its init scripts against a fresh volume) and reinstalls the pack fresh each time (`install_pack` overwrites unconditionally, so this is always safe).
 
-## Why a local checkout, not `--repo <url>`
+## Where the pack content comes from
 
-The posthog pack's content lives on `canonic-packs`' `feat/posthog-postgres-pack` branch, not yet merged to `main`, and the base `Dockerfile` has no `git` binary, so `canonic pack add --repo https://github.com/mischuh/canonic-packs.git` can't clone from inside the container yet. `docker-compose.yml` bind-mounts a local `canonic-packs` checkout read-only instead (`CANONIC_PACKS_DIR`, default `../canonic-packs` relative to this repo). Once the branch merges to `main`, this drops to the same `--repo` default `canonic pack add` already falls back to.
+No `--repo` is passed, so `canonic pack add` falls back to its own built-in default — the `canonic-packs` GitHub repo (`canonic/cli/commands/pack.py::_DEFAULT_REPO`) — shallow-cloned fresh into `.canonic/packs-cache/` on every container start. That clone needs `git` on `PATH`, which the shared root `Dockerfile` doesn't have (adding it there would grow every image built from it, not just this demo), so this demo builds from its own `Dockerfile` instead — an exact copy of the root one plus `git`.
 
 ## Point this at a real PostHog instance
 

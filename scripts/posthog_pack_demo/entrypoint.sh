@@ -10,15 +10,18 @@ set -e
 # cosmetic.
 cd /data/posthog-demo
 
-# --repo is a local path (the canonic-packs checkout bind-mounted at /packs/canonic-packs,
-# see docker-compose.yml for why this isn't a --repo <github-url> clone yet). --connection
-# binds the one Postgres connection already in canonic.yaml; --params-file supplies every
-# other required param non-interactively; --yes skips the write-preview confirmation.
-# install_pack (canonic/packs/install.py) writes every target file unconditionally, so
-# rerunning this on a container restart is safe — no idempotency guard needed here.
+# No --repo: falls back to canonic pack add's own built-in default
+# (canonic/cli/commands/pack.py::_DEFAULT_REPO, the canonic-packs GitHub repo), shallow-
+# cloned fresh into .canonic/packs-cache/ on every container start — this demo's
+# Dockerfile adds `git` on top of the shared root Dockerfile specifically so this clone
+# can happen from inside the container, no local canonic-packs checkout needed.
+# --connection binds the one Postgres connection already in canonic.yaml; --params-file
+# supplies every other required param non-interactively; --yes skips the write-preview
+# confirmation. install_pack (canonic/packs/install.py) writes every target file
+# unconditionally, so rerunning this on a container restart is safe — no idempotency
+# guard needed here.
 echo "installing the posthog context pack..."
 uv run --project /app --no-sync canonic pack add posthog \
-  --repo /packs/canonic-packs \
   --variant postgres \
   --connection posthog_db \
   --params-file pack-params.json \

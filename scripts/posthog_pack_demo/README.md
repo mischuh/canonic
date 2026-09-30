@@ -18,12 +18,11 @@ short runnable reference.
 ## Prerequisites
 
 - Docker with Compose
-- A checkout of the `canonic` repository (the compose file builds the daemon from the
-  repo's own `Dockerfile`)
-- A checkout of [`canonic-packs`](https://github.com/mischuh/canonic-packs) on the
-  `feat/posthog-postgres-pack` branch, as a sibling directory of this repo
-  (`../canonic-packs` relative to `canonic/`) — or set `CANONIC_PACKS_DIR` to point
-  elsewhere. See "Why a local checkout, not `--repo <url>`" below.
+- A checkout of the `canonic` repository (the compose file builds the daemon from
+  `Dockerfile` in this directory)
+- Network access from inside the `canonic` container to clone
+  [`canonic-packs`](https://github.com/mischuh/canonic-packs) from GitHub at startup —
+  no local checkout needed, see "Where the pack content comes from" below
 
 ## Start
 
@@ -88,16 +87,15 @@ docker compose -f scripts/posthog_pack_demo/docker-compose.yml down
 Add `-v` to also drop the seeded Postgres volume (a plain `down`/`up` reuses it and skips
 re-seeding, since Postgres only runs `postgres/init/*.sql` against a fresh volume).
 
-## Why a local checkout, not `--repo <url>`
+## Where the pack content comes from
 
-The posthog pack's content lives on `canonic-packs`' `feat/posthog-postgres-pack` branch,
-not yet merged to `main`, and the base `Dockerfile` has no `git` binary installed, so
-`canonic pack add --repo https://github.com/mischuh/canonic-packs.git` can't clone from
-inside the container today. `docker-compose.yml` instead bind-mounts a local
-`canonic-packs` checkout read-only at `/packs/canonic-packs` and passes that as `--repo`.
-Once the branch merges to `main`, this mount can be dropped in favor of the `--repo`
-default `canonic pack add` already falls back to
-(`canonic/cli/commands/pack.py::_DEFAULT_REPO`) — a one-line change in `entrypoint.sh`.
+`entrypoint.sh` runs `canonic pack add posthog` with no `--repo`, so it falls back to the
+command's own built-in default: the `canonic-packs` GitHub repo
+(`canonic/cli/commands/pack.py::_DEFAULT_REPO`), shallow-cloned fresh into
+`.canonic/packs-cache/` on every container start. The repo's own root `Dockerfile` has no
+`git` binary (adding one would grow every image built from it, not just this demo), so
+this directory has its own `Dockerfile` — an exact copy of the root one plus `git` —
+built instead. Keep the two in sync if the root `Dockerfile` changes.
 
 ## Point this at a real PostHog instance
 
