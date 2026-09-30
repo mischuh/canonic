@@ -62,7 +62,7 @@ from canonic.contracts.bootstrap import write_inferred_contracts as _write_boots
 from canonic.contracts.models import CanonicalRef, MetricBinding, Status
 from canonic.contracts.resolver import ContractResolver
 from canonic.core.service import CanonicService
-from canonic.exc import CanonicError, ConnectionError, CredentialError
+from canonic.exc import CanonicError, ConnectionError, CredentialError, PackError
 from canonic.ingestion.models import DraftedBy
 from canonic.instrumentation.events import DiskAnswerEventLog, emit_milestone
 from canonic.instrumentation.models import FunnelMilestone
@@ -71,11 +71,14 @@ from canonic.semantic.loader import list_semantic_sources
 from canonic.semantic.models import NormalizedType
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from canonic.compiler.query import SemanticQuery
     from canonic.connectors.base import Health
     from canonic.core.models import QueryResult
     from canonic.ingestion.emitter import EmittedDiff
     from canonic.ingestion.pipeline import PipelineResult
+    from canonic.packs.manifest import PackManifest, Variant
     from canonic.semantic.models import Dimension, Measure, SemanticSource
 
 logger = logging.getLogger(__name__)
@@ -216,6 +219,7 @@ def run_interactive() -> None:
 
 def _run_wizard(root: Path) -> None:
     state = load_state(root) or SetupState()
+    fresh_run = not state.completed_steps
     if state.completed_steps:
         _console.print("[dim]resuming interrupted setup…[/dim]")
         logger.info("setup: resuming interrupted run, completed_steps=%s", state.completed_steps)
@@ -228,6 +232,14 @@ def _run_wizard(root: Path) -> None:
         state.mark(STEP_NAME)
         save_state(root, state)
         logger.debug("setup: step name complete: %s", state.project_name)
+
+    # §5.1: offer known-system packs before the generic connection/bootstrap path. Only on
+    # a genuinely fresh run — pack-branch resumability is out of scope for v1 (a pack
+    # install is idempotent by design, §2.3, so re-running `canonic setup` from scratch is
+    # the supported recovery path for an interrupted pack install).
+    assert state.project_name  # guarded by STEP_NAME above
+    if fresh_run and _run_pack_branch(root, state.project_name):
+        return
 
     if not state.done(STEP_CONNECTION):
         state.connection = _prompt_connection_or_skip(root)
@@ -680,8 +692,8 @@ def _existing_project_menu(root: Path) -> None:
     while True:
         choice = typer.prompt(
             "Select  [1] status  [2] add connection  [3] generate contracts  "
-            "[4] configure LLM  [5] exit",
-            default="5",
+            "[4] configure LLM  [5] add a context pack  [6] exit",
+            default="6",
         )
         if choice == "1":
             _print_status(root)
@@ -692,9 +704,11 @@ def _existing_project_menu(root: Path) -> None:
         elif choice == "4":
             _add_llm_to_existing(root)
         elif choice == "5":
+            _add_pack_to_existing(root)
+        elif choice == "6":
             return
         else:
-            _console.print("[red]invalid choice[/red]; enter 1, 2, 3, 4 or 5")
+            _console.print("[red]invalid choice[/red]; enter 1, 2, 3, 4, 5 or 6")
 
 
 def _generate_contracts_for_existing(root: Path) -> None:
@@ -773,6 +787,322 @@ def _add_llm_to_existing(root: Path) -> None:
     _console.print(
         f"[green]✓[/green] LLM [bold]{llm.provider}/{llm.model}[/bold] added to canonic.yaml"
     )
+
+
+# --- context packs (AMENDMENT-context-packs §5) -----------------------------
+#
+# §5.5's flow order: pick pack+variant → connection (§5.2) → location check (§5.3) →
+# params (§5.4) → preview+confirm (§5.5) → write (§2.3) → first answer (§5.6). This is a
+# second entry point into the same ``canonic.packs.install``/``_pack_prompts`` machinery
+# ``canonic pack add`` uses (canonic/cli/commands/pack.py) — no separate implementation.
+
+_DEFAULT_PACKS_REPO_ENV = "CANONIC_PACKS_REPO"
+_DEFAULT_PACKS_REPO = "https://github.com/mischuh/canonic-packs.git"
+
+
+def _offer_context_packs(root: Path) -> tuple[Path, PackManifest] | None:
+    """§5.1: list packs from the configured repo, or None on unreachable/none/declined.
+
+    A network failure never blocks setup: printed once, then the caller falls through to
+    the unchanged generic path.
+    """
+    from canonic.packs.loader import list_packs
+    from canonic.packs.repo import resolve_repo
+
+    repo_value = os.environ.get(_DEFAULT_PACKS_REPO_ENV) or _DEFAULT_PACKS_REPO
+    try:
+        repo_dir = resolve_repo(repo_value, project_root=root)
+        manifests = list_packs(repo_dir)
+    except CanonicError as exc:
+        _console.print(f"[yellow]pack repo unreachable, continuing without packs:[/yellow] {exc}")
+        logger.info("setup: pack repo unreachable: %s", exc)
+        return None
+    if not manifests:
+        return None
+
+    _console.print(
+        Panel.fit("Set up a known system, or infer from your database.", title="context packs")
+    )
+    for i, m in enumerate(manifests, 1):
+        _console.print(f"  [{i}] {m.pack} — {m.description}")
+    other_idx = len(manifests) + 1
+    _console.print(f"  [{other_idx}] Something else (infer from my database)")
+    choice = typer.prompt("Select", default=str(other_idx))
+    try:
+        idx = int(choice)
+    except ValueError:
+        idx = other_idx
+    if not (1 <= idx <= len(manifests)):
+        return None
+    return repo_dir, manifests[idx - 1]
+
+
+def _run_pack_branch(root: Path, project_name: str) -> bool:
+    """§5.1 entry point for the fresh-project wizard.
+
+    Returns True once canonic.yaml has been written for a chosen pack's connection — the
+    caller returns immediately, even if the user then declines the pack's own file write
+    (canonic.yaml already exists at that point, so falling through to the generic path
+    would re-prompt for a connection and overwrite it). False means "continue the generic
+    wizard path unchanged": no packs available/reachable, or the user picked "something
+    else" — nothing has been written yet in either case.
+    """
+    offer = _offer_context_packs(root)
+    if offer is None:
+        return False
+    repo_dir, manifest = offer
+    return _run_pack_setup(root, project_name, repo_dir, manifest)
+
+
+def _prompt_pack_variant(manifest: PackManifest) -> Variant:
+    _console.print("multiple variants available:")
+    for i, v in enumerate(manifest.variants, 1):
+        _console.print(f"  [{i}] {v.id} — {v.label}")
+    choice = typer.prompt("Select variant", default="1")
+    try:
+        return manifest.variants[int(choice) - 1]
+    except (ValueError, IndexError):
+        return manifest.variants[0]
+
+
+def _prompt_pack_connection(root: Path, variant: Variant) -> Connection:
+    """§5.2: run the connection flow inline, pinned to the variant's connector type.
+
+    Each variant declares the connector type it needs, so the chosen id is bound to
+    ``connection_id`` — it is never asked as an ordinary param. Falls back to the
+    generic type-picker menu (:func:`_prompt_connection`) when a variant declares no
+    connector (not used by the shipped PostHog pack, but the manifest allows it).
+    """
+    prompt_fn = _CONNECTOR_PROMPTS.get(variant.connector) if variant.connector else None
+    if prompt_fn is None:
+        return _prompt_connection(root)
+    _console.print(
+        Panel.fit(
+            f"Configure the {variant.connector} connection this pack needs.", title="connection"
+        )
+    )
+    while True:
+        conn = prompt_fn()
+        health = _test_connection(conn)
+        if health is not None and health.status == "ok":
+            _console.print("[green]✓[/green] connection test passed")
+            return conn
+        if health is not None:
+            _console.print(f"[red]connection test failed:[/red] {health.message}")
+        if not typer.confirm("Try again?", default=True):
+            raise typer.Exit(1)
+
+
+def _location_check_with_fallback(
+    manifest: PackManifest, seeded: dict[str, str], connection: Connection
+) -> dict[str, str]:
+    """§5.3: on a required_tables miss, offer schemas that contain a same-named table.
+
+    Only offered when the manifest declares a ``schema`` param (the amendment's own
+    worked example names it exactly that, §2.2) — nothing to rebind otherwise, so the
+    precise §2.4 error is raised as-is.
+    """
+    from canonic.packs.install import check_required_tables
+    from canonic.packs.templating import substitute
+
+    try:
+        check_required_tables(manifest, seeded, connection)
+        return seeded
+    except PackError as exc:
+        original = exc
+
+    if manifest.param("schema") is None:
+        raise original
+
+    relations = discover_relations(connection) or []
+    expected = {
+        substitute(t, seeded, source="pack.yaml#required_tables").rsplit(".", 1)[-1]
+        for t in manifest.required_tables
+    }
+    candidates = sorted(
+        {
+            r.relation.rsplit(".", 1)[0]
+            for r in relations
+            if "." in r.relation and r.relation.rsplit(".", 1)[-1] in expected
+        }
+    )
+    if not candidates:
+        raise original
+
+    _console.print(f"[yellow]{original}[/yellow]")
+    _console.print("found matching table name(s) in these schemas:")
+    for i, s in enumerate(candidates, 1):
+        _console.print(f"  [{i}] {s}")
+    choice = typer.prompt("Select schema", default="1")
+    try:
+        picked = candidates[int(choice) - 1]
+    except (ValueError, IndexError):
+        raise original from None
+
+    seeded = {**seeded, "schema": picked}
+    check_required_tables(manifest, seeded, connection)  # raises the precise error if still broken
+    return seeded
+
+
+def _resolve_pack_install_params(
+    root: Path, manifest: PackManifest, connection: Connection
+) -> dict[str, str]:
+    """§5.4/§5.5 step 4: plain questions → location check (§5.3) → choose_from → derive."""
+    from canonic.cli.commands._pack_prompts import prompt_choose_from, prompt_plain, seed_defaults
+    from canonic.packs.install import resolve_params
+
+    explicit: dict[str, str] = {"connection_id": connection.id}
+    for p in manifest.params:
+        if p.name in explicit or p.derive is not None or p.choose_from is not None:
+            continue
+        explicit[p.name] = prompt_plain(p)
+
+    seeded = seed_defaults(manifest, explicit)
+    seeded = _location_check_with_fallback(manifest, seeded, connection)
+    if "schema" in seeded:
+        explicit["schema"] = seeded["schema"]
+
+    cache: dict[str, list[tuple[str, int]]] = {}
+    for p in manifest.params:
+        if p.name in explicit or p.choose_from is None:
+            continue
+        explicit[p.name] = prompt_choose_from(root, p, manifest, seeded, connection.id, cache)
+
+    return resolve_params(manifest, explicit)
+
+
+def _render_pack_file_preview(manifest: PackManifest, variant: Variant) -> None:
+    """§5.5 step 5: the list of files to be written. Nothing is written before this."""
+    _console.print(f"\n[bold]{manifest.pack} / {variant.id}[/bold] — files to be written:")
+    for rel in (
+        *manifest.provides.semantics,
+        *manifest.provides.contracts.metrics,
+        *manifest.provides.contracts.guardrails,
+        *manifest.provides.knowledge,
+    ):
+        _console.print(f"  {rel}")
+
+
+def _run_pack_setup(root: Path, project_name: str, repo_dir: Path, manifest: PackManifest) -> bool:
+    """§5.2-§5.7 for a fresh project: connection → params → preview/confirm → write."""
+    from canonic.cli.commands._pack_prompts import (
+        render_install_result,
+        run_and_render_first_answer,
+    )
+    from canonic.packs.install import install_pack
+    from canonic.packs.loader import find_pack_dir
+
+    variant = (
+        manifest.variants[0] if len(manifest.variants) == 1 else _prompt_pack_variant(manifest)
+    )
+    pack_dir = find_pack_dir(repo_dir, manifest.pack)
+    connection = _prompt_pack_connection(root, variant)
+
+    # canonic.yaml is written now, right after the connection is bound — mirrors the
+    # generic wizard (STEP_CONNECTION's choice is committed before anything downstream
+    # runs) and is required here: choose_from (§5.4.1) runs a real query through
+    # CanonicService.from_project(root), which needs a real canonic.yaml to load.
+    config = CanonicConfig(
+        version=1,
+        project=ProjectConfig(name=project_name, default_connection=connection.id),
+        connections=[connection],
+        telemetry=TelemetryConfig(),
+    )
+    created = scaffold_project(root)
+    dump_config(config, root / "canonic.yaml")
+    load_config(root / "canonic.yaml")  # assert the written file round-trips
+    clear_state(root)
+
+    params = _resolve_pack_install_params(root, manifest, connection)
+
+    _render_pack_file_preview(manifest, variant)
+    if not typer.confirm("Write these files?", default=True):
+        # canonic.yaml already exists at this point — falling through to the generic
+        # wizard path would re-prompt for a connection and overwrite it, so this always
+        # ends the wizard here, just without the pack's own files.
+        _console.print(
+            "[yellow]aborted:[/yellow] pack files not written; the connection is kept. "
+            "Run `canonic setup` again to install a pack, or edit "
+            "semantics/contracts/knowledge by hand."
+        )
+        _render_setup_complete(config, created, demo_ok=False, withheld_count=0)
+        return True
+
+    result = install_pack(root, pack_dir, manifest, variant, params)
+    render_install_result(result)
+
+    demo_ok = False
+    if manifest.first_answer is not None:
+        demo_ok = run_and_render_first_answer(root, manifest.first_answer)
+
+    logger.info("setup: pack %s installed, first_answer_ok=%s", manifest.pack, demo_ok)
+    _render_setup_complete(config, created, demo_ok=demo_ok, withheld_count=0)
+    return True
+
+
+def _add_pack_to_existing(root: Path) -> None:
+    """Install a context pack into an already-configured project (existing-project menu)."""
+    from canonic.cli.commands._pack_prompts import (
+        render_install_result,
+        run_and_render_first_answer,
+    )
+    from canonic.packs.install import install_pack
+    from canonic.packs.loader import find_pack_dir
+
+    offer = _offer_context_packs(root)
+    if offer is None:
+        _console.print("[dim]no packs available.[/dim]")
+        return
+    repo_dir, manifest = offer
+
+    config = load_config(root / "canonic.yaml")
+    variant = (
+        manifest.variants[0] if len(manifest.variants) == 1 else _prompt_pack_variant(manifest)
+    )
+    pack_dir = find_pack_dir(repo_dir, manifest.pack)
+
+    candidates = [
+        c for c in config.connections if variant.connector is None or c.type == variant.connector
+    ]
+    if not candidates:
+        connection = _prompt_pack_connection(root, variant)
+        # Persisted immediately (not deferred to the write-preview confirm below):
+        # choose_from (§5.4.1) needs this connection loadable from canonic.yaml before
+        # its query can run through CanonicService.from_project(root).
+        path = root / "canonic.yaml"
+        raw = load_raw_config(path)
+        raw.setdefault("connections", [])
+        raw["connections"].append(connection.model_dump(mode="json", exclude_none=True))
+        write_raw_config(path, raw)
+        logger.info(
+            "setup: connection %s (%s) added for pack %s",
+            connection.id,
+            connection.type,
+            manifest.pack,
+        )
+    elif len(candidates) == 1:
+        connection = candidates[0]
+    else:
+        _console.print(f"multiple {variant.connector} connections found:")
+        for i, c in enumerate(candidates, 1):
+            _console.print(f"  [{i}] {c.id}")
+        choice = typer.prompt("Select connection", default="1")
+        try:
+            connection = candidates[int(choice) - 1]
+        except (ValueError, IndexError):
+            connection = candidates[0]
+
+    params = _resolve_pack_install_params(root, manifest, connection)
+
+    _render_pack_file_preview(manifest, variant)
+    if not typer.confirm("Write these files?", default=True):
+        _console.print("[yellow]aborted:[/yellow] nothing written")
+        return
+
+    result = install_pack(root, pack_dir, manifest, variant, params)
+    render_install_result(result)
+    if manifest.first_answer is not None:
+        run_and_render_first_answer(root, manifest.first_answer)
 
 
 # --- shared prompts --------------------------------------------------------
@@ -901,6 +1231,16 @@ def _prompt_redshift_params() -> Connection:
         params=params,
         credentials_ref=f"env:{env_var}",
     )
+
+
+#: connector type → the prompt function collecting its params, for a pack variant's
+#: pinned ``connector`` (§5.2, `_prompt_pack_connection` above).
+_CONNECTOR_PROMPTS: dict[str, Callable[[], Connection]] = {
+    "postgres": _prompt_postgres_params,
+    "redshift": _prompt_redshift_params,
+    "sqlite": _prompt_sqlite_params,
+    "duckdb": _prompt_duckdb_params,
+}
 
 
 def _test_connection(conn: Connection) -> Health | None:

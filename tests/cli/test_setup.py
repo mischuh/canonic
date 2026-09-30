@@ -374,7 +374,7 @@ def test_existing_project_menu_exit_does_not_overwrite(
     runner: CliRunner, project_dir: Path
 ) -> None:
     before = (project_dir / "canonic.yaml").read_bytes()
-    result = runner.invoke(app, ["setup"], input="5\n")  # exit immediately
+    result = runner.invoke(app, ["setup"], input="6\n")  # exit immediately
     assert result.exit_code == 0, result.output
     assert "project menu" in result.output
     assert (project_dir / "canonic.yaml").read_bytes() == before
@@ -395,7 +395,7 @@ def test_existing_project_menu_adds_connection(
             "db",  # database
             "",  # env var
             "n",  # narrow schemas/tables? → No
-            "5",  # exit
+            "6",  # exit
         ]
     )
     result = runner.invoke(app, ["setup"], input=menu_input + "\n")
@@ -452,7 +452,7 @@ def test_existing_project_menu_generates_contracts(runner: CliRunner, project_di
         "dimensions: []\n"
     )
 
-    result = runner.invoke(app, ["setup"], input="3\n5\n")
+    result = runner.invoke(app, ["setup"], input="3\n6\n")
     assert result.exit_code == 0, result.output
     assert "wrote" in result.output
     assert (project_dir / "contracts" / "metrics" / "row-count.yaml").exists()
@@ -590,7 +590,7 @@ def test_existing_project_menu_configures_llm(
             "",  # base url
             "gpt-x",  # model
             "",  # api key env
-            "5",  # exit
+            "6",  # exit
         ]
     )
     result = runner.invoke(app, ["setup"], input=menu_input + "\n")

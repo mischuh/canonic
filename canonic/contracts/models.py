@@ -7,7 +7,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from canonic.semantic.models import Provenance
+from canonic.semantic.models import PackSourceMeta, Provenance
 from canonic.trust.models import TrustTier
 
 __all__ = [
@@ -295,6 +295,9 @@ class MetricBinding(BaseModel):
     deprecated_alternatives: list[DeprecatedAlternative] = []
     examples: list[Example] = []
     status: Status = Status.ACTIVE
+    #: Which context pack installed this binding (AMENDMENT-context-packs §2.3); None
+    #: for a hand-written binding.
+    pack_source: PackSourceMeta | None = None
 
     @model_validator(mode="after")
     def _validate_aliases(self) -> MetricBinding:
@@ -361,6 +364,10 @@ class Guardrail(BaseModel):
     severity: Severity = Severity.ERROR
     rationale: str
     phase: str | None = None
+    provenance: Provenance = Provenance.HUMAN_CURATED
+    #: Which context pack installed this guardrail (AMENDMENT-context-packs §2.3); None
+    #: for a hand-written guardrail.
+    pack_source: PackSourceMeta | None = None
 
     @model_validator(mode="after")
     def _validate_kind_fields(self) -> Guardrail:

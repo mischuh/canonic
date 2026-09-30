@@ -24,6 +24,7 @@ from canonic.cli.commands import (
     mcp,
     outcome,
     overview,
+    pack,
     query,
     report,
     review,
@@ -93,6 +94,7 @@ app.add_typer(evaluate.app, name="eval")
 app.add_typer(outcome.app, name="outcome")
 app.add_typer(ingest.app, name="ingest")
 app.add_typer(report.app, name="report")
+app.add_typer(pack.app, name="pack")
 
 # Top-level single commands.
 app.command("overview")(overview.overview)

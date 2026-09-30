@@ -444,6 +444,18 @@ class ReportError(CanonicError):
     """Raised when a reports/*.yaml file is invalid; message carries file+line."""
 
 
+class PackError(CanonicError):
+    """Raised on a context-pack mechanism failure (AMENDMENT-context-packs).
+
+    Covers manifest problems (unknown pack/variant, malformed ``pack.yaml``), a missing
+    required param, a required table absent from the target connection (§2.4, checked
+    before anything is written), and pack-repo resolution failures. Carries no wire
+    ``ErrorCode`` (default exit 1) — the amendment adds no new error codes; a pack-emitted
+    file that fails the *existing* E5/E15/E6 validators raises that validator's own typed
+    error (``SemanticSourceError``/``ContractError``/``KnowledgePageError``) instead.
+    """
+
+
 class ReportNotFound(Unresolved):
     """Raised when a ``report_id`` matches no committed report (AMENDMENT-curated-reports).
 
