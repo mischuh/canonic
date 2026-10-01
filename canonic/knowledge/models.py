@@ -12,7 +12,7 @@ from pathlib import Path  # noqa: TC003 — Pydantic resolves annotations at run
 
 from pydantic import BaseModel, ConfigDict
 
-from canonic.semantic.models import Provenance
+from canonic.semantic.models import PackSourceMeta, Provenance
 
 __all__ = [
     "KnowledgePage",
@@ -65,6 +65,9 @@ class KnowledgePageMeta(BaseModel):
     bound_fingerprints: dict[str, str] = {}
     # Human-owned freeze marker E4 reads: reconciliation flags but never edits (E4 §5.3).
     frozen: bool = False
+    #: Which context pack installed this page (AMENDMENT-context-packs §2.3); None for a
+    #: hand-written page.
+    pack_source: PackSourceMeta | None = None
 
 
 class KnowledgePage(BaseModel):

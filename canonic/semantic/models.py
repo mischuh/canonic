@@ -21,6 +21,7 @@ __all__ = [
     "Join",
     "Measure",
     "NormalizedType",
+    "PackSourceMeta",
     "Provenance",
     "Relationship",
     "SemanticSource",
@@ -85,6 +86,23 @@ class Provenance(StrEnum):
     BOARD_APPROVED = "board_approved"
     HUMAN_CURATED = "human_curated"
     INFERRED = "inferred"
+
+
+class PackSourceMeta(BaseModel):
+    """Which context pack installed this file (AMENDMENT-context-packs §2.3).
+
+    Stamped once at ``canonic pack add`` time on every emitted semantic source, metric
+    binding, guardrail, and knowledge page; ``None`` for anything not pack-installed.
+    System-written, human-editable afterward — same status as ``frozen``, not itself
+    validated by the compiler. There is no "pack update" that rewrites this later: a
+    version bump re-runs install and produces a new reviewable diff like any other change.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    pack: str
+    version: str
+    variant: str
 
 
 class Column(BaseModel):
@@ -201,6 +219,7 @@ class SourceMeta(BaseModel):
     source_fingerprint: str | None = None  # sha256 of the introspected/declared schema
     last_validated_at: datetime | None = None
     frozen: bool = False
+    pack_source: PackSourceMeta | None = None
 
 
 def _columns_in_expr(expr: str) -> set[str]:
