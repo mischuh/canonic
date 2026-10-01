@@ -68,15 +68,9 @@ curl -s http://localhost:7474/mcp \
 Or point an MCP client (e.g. the [MCP
 Inspector](https://github.com/modelcontextprotocol/inspector)) at
 `http://localhost:7474` with that same bearer token and query `active_users`,
-`new_users`, or `activated_users`. `posthog-demo-local-dev` is `canonic.docker.yaml`'s
-single static demo token (`mcp.auth.tokens`) — `--transport http` refuses to start with
-no auth mechanism configured at all.
-
-> `activation_rate` (a ratio of two `distinct_count` metrics) currently fails with
-> `unsupported_measure: nested composite metrics are not yet supported` — a pre-existing
-> canonic query-engine limitation, not a pack or demo defect. Query `activated_users` and
-> `new_users` separately and divide for the same number in the meantime. See the full
-> guide for details.
+`new_users`, `activated_users`, or `activation_rate`. `posthog-demo-local-dev` is
+`canonic.docker.yaml`'s single static demo token (`mcp.auth.tokens`) — `--transport http`
+refuses to start with no auth mechanism configured at all.
 
 ## Stop
 

@@ -222,6 +222,19 @@ def _population_filter_conditions(
     return [bound]
 
 
+def _combine_population_filters(*filters: str | None) -> str | None:
+    """AND together a composite-level and a component-level population_filter (§4.5).
+
+    Both the ratio metric itself and each of its numerator/denominator building blocks
+    may declare a population_filter; a leaf must honor whichever of its own owner's
+    filter and the composite's filter are present, not just one of the two.
+    """
+    present = [f for f in filters if f]
+    if not present:
+        return None
+    return " AND ".join(f"({f})" for f in present)
+
+
 @dataclass(frozen=True, slots=True)
 class TenantScoping:
     """Per-leaf tenant predicates plus which sources they touched (SPEC-E12 §3 stage 2b)."""

@@ -431,6 +431,7 @@ def _plan_metric(
             binding,
             resolver,
             sources_by_name,
+            dialect=dialect,
             principal=principal,
             effective_policy=effective_policy,
         )

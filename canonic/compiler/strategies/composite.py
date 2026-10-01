@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING
 from canonic.compiler.compose import Combine, LeafRef, MetricLeaves, MetricPlan
 from canonic.compiler.leaf import LeafContext, LeafMetric, LeafPlan, plan_leaf
 from canonic.compiler.result import CompositionMetadata
+from canonic.compiler.strategies.recompute import plan_metric as plan_recompute_at_grain
 from canonic.contracts.models import BindingKind, OnZeroDenominator
 from canonic.exc import Unresolved, UnsupportedMeasure
 
@@ -17,7 +18,10 @@ if TYPE_CHECKING:
     from canonic.contracts.resolver import ComponentBindings, ContractResolver
     from canonic.semantic.models import SemanticSource
 
-from canonic.compiler._helpers import _find_measure, _ResolvedMetric
+from canonic.compiler._helpers import _combine_population_filters, _find_measure, _ResolvedMetric
+
+#: Composite kinds, the only components that are genuinely nested rather than unsupported leaves.
+_COMPOSITE_KINDS = frozenset({BindingKind.RATIO, BindingKind.WEIGHTED_AVG})
 
 
 def _plan_leaf(
@@ -27,19 +31,40 @@ def _plan_leaf(
     sources_by_name: dict[str, SemanticSource],
     principal: Principal,
     effective_policy: EffectivePolicy,
-    population_filter: str | None = None,
+    dialect: str,
+    composite_population_filter: str | None = None,
 ) -> LeafPlan:
-    """Bind one single-kind component to its measure, then plan it as a leaf.
+    """Plan one component of a composite as a leaf, by the strategy for its own kind.
 
     Stages 2-6 live in :func:`canonic.compiler.leaf.plan_leaf`, shared with every other
-    compile path. What stays here is what is specific to being a *component*: rejecting a
-    nested composite, and resolving the component's source and measure so the error names
-    the component rather than a metric the caller never asked for.
+    compile path. What stays here is what is specific to being a *component*: which kinds
+    may serve as one (``single`` and ``distinct_count``), and resolving the component's
+    source and measure so an error names the component rather than a metric the caller
+    never asked for.
     """
+    if component.kind is BindingKind.DISTINCT_COUNT:
+        # A distinct count must go through its own planner. The additive default would
+        # compile it as a sum, which is a plausible and wrong number.
+        return plan_recompute_at_grain(
+            query,
+            component.metric,
+            component,
+            resolver,
+            sources_by_name,
+            dialect=dialect,
+            principal=principal,
+            effective_policy=effective_policy,
+            parent_population_filter=composite_population_filter,
+        ).leaves[0]
     if component.kind is not BindingKind.SINGLE:
+        nested = (
+            "nested composite metrics are not yet supported; "
+            if (component.kind in _COMPOSITE_KINDS)
+            else ""
+        )
         raise UnsupportedMeasure(
-            f"nested composite metrics are not yet supported; "
-            f"component {component.metric!r} has kind {component.kind!r}"
+            f"{nested}component {component.metric!r} has kind {str(component.kind)!r}, "
+            f"but only single and distinct_count metrics can be ratio components"
         )
     assert component.source is not None and component.measure is not None  # noqa: S101
 
@@ -68,7 +93,9 @@ def _plan_leaf(
                 resolved=_ResolvedMetric(
                     name=component.metric, source=source_name, measure=measure_obj
                 ),
-                population_filter=population_filter,
+                population_filter=_combine_population_filters(
+                    composite_population_filter, component.binding.canonical.population_filter
+                ),
             )
         ],
         finality_metric=component.metric,
@@ -85,19 +112,6 @@ _ZERO_POLICY: dict[OnZeroDenominator, Combine] = {
 }
 
 
-def _combine_population_filters(*filters: str | None) -> str | None:
-    """AND together a composite-level and a component-level population_filter (§4.5).
-
-    Both the ratio metric itself and each of its numerator/denominator building blocks
-    may declare a population_filter; a leaf must honor whichever of its own owner's
-    filter and the composite's filter are present, not just one of the two.
-    """
-    present = [f for f in filters if f]
-    if not present:
-        return None
-    return " AND ".join(f"({f})" for f in present)
-
-
 def plan_metric(
     query: SemanticQuery,
     queried_name: str,
@@ -105,6 +119,7 @@ def plan_metric(
     resolver: ContractResolver,
     sources_by_name: dict[str, SemanticSource],
     *,
+    dialect: str = "postgres",
     principal: Principal,
     effective_policy: EffectivePolicy,
 ) -> MetricLeaves:
@@ -134,9 +149,8 @@ def plan_metric(
             sources_by_name,
             principal,
             effective_policy,
-            _combine_population_filters(
-                composite_pop_filter, component.binding.canonical.population_filter
-            ),
+            dialect,
+            composite_pop_filter,
         )
         for component in (components.numerator, components.denominator)
     ]
