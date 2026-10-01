@@ -197,4 +197,7 @@ def test_pack_validate_unknown_path_errors(runner, tmp_path, monkeypatch):
 
     result = runner.invoke(app, ["pack", "validate", str(empty_dir)])
     assert result.exit_code != 0
-    assert "not a pack directory" in result.output
+    # Rich wraps the error at the terminal width, which varies by environment (narrower
+    # in CI than a local dev terminal) — collapse whitespace so wrapping can't split the
+    # phrase being asserted on across lines.
+    assert "not a pack directory" in " ".join(result.output.split())
