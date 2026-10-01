@@ -1,0 +1,196 @@
+---
+title: "Guide: Snowflake"
+description: "Connect canonic to Snowflake with key-pair auth and a read-only role, bootstrap a semantic layer, and run your first query."
+---
+
+This guide connects canonic to a Snowflake account from scratch: a key pair for headless authentication, a role that can only read, a connection, and a first bootstrapped semantic layer with a query. It uses a small throwaway database, so you can follow it on a trial account without touching real data.
+
+<Info>The Snowflake connector needs the `snowflake` extra: `pip install 'canonic[snowflake]'`. Without it, a Snowflake connection fails with an install hint instead of a stack trace.</Info>
+
+## What you need
+
+- A Snowflake account and a user that can create roles and grant privileges, typically `ACCOUNTADMIN` on a trial account.
+- Your **account identifier**, in the form `orgname-accountname` (or an account locator with a region such as `xy12345.eu-central-1`). In Snowsight, click your name at the bottom left, then **Account** and **View account details**.
+- A **warehouse**. A trial account has `COMPUTE_WH`.
+- `openssl` on your machine.
+
+All SQL below runs in a Snowsight SQL worksheet. Open one under **Projects** and **Worksheets** (newer interfaces call this **Workspaces**), pick the role in the role menu at the top right, and run the whole script with **Run All**, because a single run only executes the current statement.
+
+## Why key-pair auth
+
+canonic connects without a human in the loop, so it cannot answer an interactive prompt. Snowflake can require multi-factor authentication for password sign-ins of regular users, which a headless client cannot complete. Key-pair authentication has no such prompt, and the private key never leaves your machine. The setup wizard only covers password auth, so for key-pair you write the connection yourself, as shown below.
+
+For automation, prefer a dedicated service user with its own key over your personal login, see the Snowflake documentation on service users.
+
+<Steps>
+  <Step title="Create the key pair">
+    In a terminal, generate an unencrypted PKCS8 private key and its public key:
+
+    ```bash
+    mkdir -p ~/.snowflake && cd ~/.snowflake
+    openssl genrsa 2048 | openssl pkcs8 -topk8 -inform PEM -out rsa_key.p8 -nocrypt
+    openssl rsa -in rsa_key.p8 -pubout -out rsa_key.pub
+    chmod 600 rsa_key.p8
+    ```
+
+    `rsa_key.p8` is your private key. Keep it outside any repository and never share it. If you prefer an encrypted key, generate it with a passphrase instead of `-nocrypt` and point `credentials_ref` at the passphrase later.
+  </Step>
+  <Step title="Register the public key with your user">
+    Copy the public key without its header and footer lines and without line breaks:
+
+    ```bash
+    grep -v '^-----' ~/.snowflake/rsa_key.pub | tr -d '\n' | pbcopy
+    ```
+
+    `pbcopy` is macOS. On Linux, print the value and copy it by hand. Then run this in a worksheet with your login name and the copied key:
+
+    ```sql
+    ALTER USER <YOUR_USER> SET RSA_PUBLIC_KEY='<paste the key here>';
+    DESC USER <YOUR_USER>;
+    ```
+
+    `RSA_PUBLIC_KEY_FP` in the output must now hold a value. Your login name is what `SELECT CURRENT_USER();` returns.
+  </Step>
+  <Step title="Create a read-only role">
+    Snowflake has no read-only session flag, so the safety of a connection is the role it runs as. canonic also parses every statement and refuses anything that is not a single `SELECT`, but the role is the part Snowflake itself enforces. Create one that can only read what canonic should see:
+
+    ```sql
+    USE ROLE ACCOUNTADMIN;
+
+    CREATE ROLE IF NOT EXISTS CANONIC_RO;
+    GRANT USAGE ON WAREHOUSE COMPUTE_WH TO ROLE CANONIC_RO;
+    GRANT USAGE ON DATABASE ANALYTICS TO ROLE CANONIC_RO;
+    GRANT USAGE ON SCHEMA ANALYTICS.SHOP TO ROLE CANONIC_RO;
+    GRANT SELECT ON ALL TABLES IN SCHEMA ANALYTICS.SHOP TO ROLE CANONIC_RO;
+    GRANT SELECT ON ALL VIEWS IN SCHEMA ANALYTICS.SHOP TO ROLE CANONIC_RO;
+    GRANT ROLE CANONIC_RO TO USER <YOUR_USER>;
+    ```
+
+    Replace the warehouse, database and schema with your own. To cover tables created later, also grant `SELECT ON FUTURE TABLES IN SCHEMA ...` and the same for views.
+  </Step>
+  <Step title="Add the connection">
+    Add the connection to `canonic.yaml`. `database` and `schema` set the session defaults, `schemas` limits what introspection returns, and `read_only_role` is the role the session uses:
+
+    ```yaml
+    connections:
+      - id: snowflake_wh
+        type: snowflake
+        params:
+          account: xy12345.eu-central-1
+          user: CANONIC
+          warehouse: COMPUTE_WH
+          database: ANALYTICS
+          schema: SHOP
+          schemas: [SHOP]
+          private_key_path: ~/.snowflake/rsa_key.p8
+        read_only_role: CANONIC_RO
+    ```
+
+    With key-pair auth there is no `credentials_ref`, unless the private key is encrypted. Then it points at the passphrase, for example `credentials_ref: env:SNOWFLAKE_KEY_PASSPHRASE`. You can also create the connection from the command line, see [`canonic connection add`](/cli-reference/connection#connection-add).
+  </Step>
+  <Step title="Test the connection">
+    ```bash
+    canonic connection test --connection snowflake_wh
+    ```
+
+    A successful test confirms the account, the key and the warehouse. A failure prints Snowflake's own message, see [Troubleshooting](#troubleshooting).
+  </Step>
+</Steps>
+
+## Bootstrap the semantic layer
+
+With the connection in place, let canonic draft semantic sources from the live schema:
+
+```bash
+canonic ingest --bootstrap
+```
+
+Introspection reads `INFORMATION_SCHEMA` for tables, views, column types and row estimates, and `SHOW PRIMARY KEYS` and `SHOW IMPORTED KEYS` for declared keys. What you get depends on those keys:
+
+- A table with a primary key becomes a source with `grain` taken from the key, and a foreign key becomes a `many_to_one` join. These are accepted automatically on the first run.
+- A table or view **without** a primary key becomes a proposal with an empty `grain` and `grain_draft: true`. canonic does not guess a grain. Review it with [`canonic review`](/cli-reference/review-apply) and fill in the grain yourself.
+- A `VARIANT`, `OBJECT` or `ARRAY` column is recorded with type `json` and is not turned into a dimension.
+
+Snowflake never enforces primary and foreign keys, so they only help canonic when someone declared them. A role only sees keys on objects it can access. If the key queries themselves fail, introspection logs a warning and continues without keys. Either way, every grain without a key then needs a manual review.
+
+The generated sources are named after the table in the case Snowflake stores it, for example `ORDERS` with `table: SHOP.ORDERS`, and carry the measure `row_count` plus `total_<COLUMN>` sums for numeric columns that are not keys. Measures are not metrics yet. To query one, give it a metric contract:
+
+```yaml
+# contracts/metrics/revenue.yaml
+metric: revenue
+canonical:
+  source: ORDERS
+  measure: total_AMOUNT
+provenance: human_curated
+label: "Revenue"
+aliases: ["total revenue"]
+status: active
+```
+
+```bash
+canonic sl compile --metrics revenue --dimensions NAME
+canonic query --metrics revenue --dimensions NAME
+```
+
+`sl compile` shows the SQL canonic generates for the Snowflake dialect, including quoted identifiers and, when a dimension lives on a joined source, the join. For a question no metric covers, `canonic sql` runs a read-only statement directly:
+
+```bash
+canonic sql 'SELECT COUNT(*) AS n FROM "SHOP"."ORDERS"' --connection snowflake_wh
+```
+
+## Identifier case
+
+canonic quotes every identifier it emits. Snowflake stores an unquoted name in upper case, so `CREATE TABLE orders (...)` creates a table called `ORDERS`, and `"orders"` in quotes then refers to a different, non-existent object.
+
+- Introspection returns names exactly as Snowflake stores them, so a source generated by `canonic ingest` already matches.
+- When you write a semantic source by hand, use the stored case: `table: ORDERS`, `name: ID`, and `expr: sum(AMOUNT)`.
+- An object created with a quoted lower-case name, such as `CREATE TABLE "orders"`, keeps that case, and you must write it that way.
+
+If a query fails with `Object ... does not exist or not authorized` although the table is there, a case mismatch is the most likely cause, after missing privileges.
+
+## Session settings and limits
+
+| Setting | Where | Default | Effect |
+| --- | --- | --- | --- |
+| `read_only_role` | Connection | none | Role for the session. Takes precedence over `params.role`. |
+| `statement_timeout_ms` | `params` | `30000` | Sent as `STATEMENT_TIMEOUT_IN_SECONDS`, so Snowflake cancels slow statements. |
+| `row_limit` | `params` | `10000` | Results are cut at this size and marked `truncated`. |
+| `schemas`, `tables` | `params` | all | Narrow introspection to schemas and glob patterns. |
+
+Every session sets `QUERY_TAG` to `canonic`, which makes canonic's statements easy to find in Snowflake's query history.
+
+## Troubleshooting
+
+| Symptom | Likely cause and fix |
+| --- | --- |
+| The error mentions a JWT or authentication failure | The public key is not registered for that user, the account identifier is wrong, or `user` is not the login name. Check `DESC USER` for `RSA_PUBLIC_KEY_FP` and the value of `SELECT CURRENT_USER()`. |
+| A password login fails asking for MFA | Snowflake requires multi-factor authentication for that user. Switch to key-pair auth. |
+| `Object ... does not exist or not authorized` | The role lacks `USAGE` on the database, schema or warehouse, or lacks `SELECT` on the object. It can also be an identifier case mismatch, see above. |
+| The error says the connector requires `snowflake-connector-python` | Install the extra: `pip install 'canonic[snowflake]'`. |
+| A warning says `Bad owner or permissions` for `~/.snowflake/config.toml` | The driver warns about a config file with open permissions. Run `chmod 0600 ~/.snowflake/config.toml`. |
+| Introspection finds no tables | `schemas` or `tables` filter out everything, or the role cannot see the schema. Names are case sensitive, so write `SHOP` and not `shop`. |
+
+## Clean up
+
+If you created throwaway objects for this guide, remove them in a worksheet:
+
+```sql
+DROP DATABASE IF EXISTS ANALYTICS;
+DROP ROLE IF EXISTS CANONIC_RO;
+```
+
+## Running the connector tests
+
+Contributors can run the Snowflake tests without an account, since the unit tests use a fake driver and an optional smoke test uses the in-process emulator [fakesnow](https://github.com/tekumara/fakesnow).
+
+The live tests in `tests/connectors/test_snowflake_live.py` need a real account. Run `tests/connectors/fixtures/snowflake_live_setup.sql` once in a worksheet. It creates the `CANONIC_TEST` database with sample tables, a view, declared keys and a `CANONIC_RO` role. Then export the variables the tests read and run them. They are skipped when `CANONIC_TEST_SNOWFLAKE_ACCOUNT` is unset:
+
+```bash
+export CANONIC_TEST_SNOWFLAKE_ACCOUNT=...
+export CANONIC_TEST_SNOWFLAKE_USER=...
+export CANONIC_TEST_SNOWFLAKE_WAREHOUSE=...
+export CANONIC_TEST_SNOWFLAKE_PRIVATE_KEY_PATH=~/.snowflake/rsa_key.p8
+pytest tests/connectors/test_snowflake_live.py -v
+```
+
+Use `CANONIC_TEST_SNOWFLAKE_PASSWORD` instead of the key path for password auth, and `CANONIC_TEST_SNOWFLAKE_PRIVATE_KEY_PASSPHRASE` for an encrypted key.

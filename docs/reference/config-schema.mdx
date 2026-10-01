@@ -90,7 +90,7 @@ No secret value appears in `canonic.yaml`. `cluster_id`, `db_user` and `region` 
 
 Things worth knowing before you reach for it:
 
-- **Redshift only, today.** `provider:` refs are resolved on every connect, and Redshift is the only connector that does that so far. Pointing another connector at one fails with a clear error rather than silently freezing the first credential it ever saw.
+- **Redshift and Snowflake only, today.** `provider:` refs are resolved on every connect, and Redshift and Snowflake are the only connectors that do that so far. The only provider that ships, `aws-iam-redshift`, issues Redshift credentials, so a Snowflake connection has no provider to point at yet. Pointing any other connector at a `provider:` ref fails with a clear error rather than silently freezing the first credential it ever saw.
 - **Not for inbound auth.** `llm.api_key_ref`, `mcp.auth.tokens[].token_ref` and `mcp.auth.oauth.client_secret_ref` are resolved once at startup and held. A provider credential there would go stale rather than refresh, so config validation rejects it.
 - **`aws-iam-redshift` needs boto3**, which canonic does not install. `pip install boto3`. Credentials for the AWS call itself come from the standard boto3 chain (instance role, `AWS_PROFILE`, environment).
 - **Rejected under `air_gapped: true`.** Fetching from AWS is network egress, which is what that mode exists to prevent.
