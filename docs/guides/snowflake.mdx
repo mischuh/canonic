@@ -18,7 +18,7 @@ All SQL below runs in a Snowsight SQL worksheet. Open one under **Projects** and
 
 ## Why key-pair auth
 
-canonic connects without a human in the loop, so it cannot answer an interactive prompt. Snowflake can require multi-factor authentication for password sign-ins of regular users, which a headless client cannot complete. Key-pair authentication has no such prompt, and the private key never leaves your machine. The setup wizard only covers password auth, so for key-pair you write the connection yourself, as shown below.
+canonic connects without a human in the loop, so it cannot answer an interactive prompt. Snowflake can require multi-factor authentication for password sign-ins of regular users, which a headless client cannot complete. Key-pair authentication has no such prompt, and the private key never leaves your machine. The setup wizard offers key-pair auth too, or you can write the connection yourself as shown below.
 
 For automation, prefer a dedicated service user with its own key over your personal login, see the Snowflake documentation on service users.
 
