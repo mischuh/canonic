@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.29.0](https://github.com/mischuh/canonic/compare/v0.28.0...v0.29.0) (2026-10-01)
+
+
+### Features
+
+* **compiler:** allow distinct_count components in ratio metrics ([#342](https://github.com/mischuh/canonic/issues/342)) ([6a86ebb](https://github.com/mischuh/canonic/commit/6a86ebb51725f489187f1017b2fbc157f1db9e34))
+* **examples:** add a dockerized PostHog context-pack demo ([#336](https://github.com/mischuh/canonic/issues/336)) ([a2289b8](https://github.com/mischuh/canonic/commit/a2289b8bee47f991973af763a4956b54e9f7b5d3))
+* **packs:** add context pack install mechanism, setup wizard integration, and validate ([#335](https://github.com/mischuh/canonic/issues/335)) ([ffbf506](https://github.com/mischuh/canonic/commit/ffbf50633e259538b8a6847d368275fefb5e57e4))
+
 ## [0.28.0](https://github.com/mischuh/canonic/compare/v0.27.1...v0.28.0) (2026-09-28)
 
 
