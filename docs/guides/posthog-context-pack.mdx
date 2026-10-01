@@ -64,12 +64,9 @@ With the guardrail applied, that gives:
 | `active_users` (30d) | 27 |
 | `new_users` | 27 |
 | `activated_users` | 9 |
+| `activation_rate` | 9 / 27 ≈ 33% |
 
 The pack's `first_answer` (`active_users`, 30d window) runs automatically right after install — its result is the first thing `canonic pack add` prints.
-
-<Warning>
-`activation_rate` (`kind: ratio` of `activated_users` over `new_users`, both themselves `distinct_count` metrics) currently fails with `unsupported_measure: nested composite metrics are not yet supported` — a pre-existing canonic query-engine limitation this demo surfaced, not a pack or demo defect. Until that's supported, get the same number by querying `activated_users` and `new_users` separately and dividing (9 / 27 ≈ 33% with the seed data above).
-</Warning>
 
 ## Query it
 
@@ -81,7 +78,7 @@ curl -s http://localhost:7474/mcp \
   -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}'
 ```
 
-Or connect an MCP client to `http://localhost:7474` with that same bearer token and query `active_users`, `new_users`, or `activated_users` via the `query` tool. `posthog-demo-local-dev` is `canonic.docker.yaml`'s single static demo token (`mcp.auth.tokens`) — `--transport http` refuses to start with no auth mechanism configured at all.
+Or connect an MCP client to `http://localhost:7474` with that same bearer token and query `active_users`, `new_users`, `activated_users`, or `activation_rate` via the `query` tool. `posthog-demo-local-dev` is `canonic.docker.yaml`'s single static demo token (`mcp.auth.tokens`) — `--transport http` refuses to start with no auth mechanism configured at all.
 
 ## Stop
 
