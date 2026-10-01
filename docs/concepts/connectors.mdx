@@ -42,6 +42,11 @@ Implement `introspect_schema` + `run_read_only_sql`: these feed the [semantic la
 | `sqlite` | Local `.db` file, no server, no network. |
 | `duckdb` | Local `.duckdb` file, or reads CSV/Parquet/JSON directly. |
 | `redshift` | Postgres-compatible catalog surface. |
+| `snowflake` | `INFORMATION_SCHEMA` introspection, password or key-pair auth. Needs the `snowflake` extra: `pip install 'canonic[snowflake]'`. See the [Snowflake guide](/guides/snowflake). |
+
+<Note>
+  Snowflake stores unquoted identifiers in upper case, and canonic quotes every identifier it emits. Relation and column names in a semantic source must therefore match the stored case, for example `PUBLIC.ORDERS`. Introspection returns names exactly as Snowflake stores them, so sources generated from it work as is. Snowflake has no read-only session flag, so point `read_only_role` at a role that only holds `SELECT` grants.
+</Note>
 
 ### Definition
 

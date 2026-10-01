@@ -1136,8 +1136,11 @@ def _prompt_connection(root: Path) -> Connection:
     )
     _console.print("  [bold][3][/bold] Postgres — server-based, requires host/port/credentials")
     _console.print("  [bold][4][/bold] Redshift — Amazon Redshift, requires host/port/credentials")
+    _console.print("  [bold][5][/bold] Snowflake — requires account/user/warehouse/credentials")
     while True:
-        choice = typer.prompt("Type [1=sqlite / 2=duckdb / 3=postgres / 4=redshift]", default="1")
+        choice = typer.prompt(
+            "Type [1=sqlite / 2=duckdb / 3=postgres / 4=redshift / 5=snowflake]", default="1"
+        )
         if choice == "1":
             conn = _prompt_sqlite_params()
         elif choice == "2":
@@ -1146,14 +1149,16 @@ def _prompt_connection(root: Path) -> Connection:
             conn = _prompt_postgres_params()
         elif choice == "4":
             conn = _prompt_redshift_params()
+        elif choice == "5":
+            conn = _prompt_snowflake_params()
         else:
-            _console.print("[red]enter 1, 2, 3 or 4[/red]")
+            _console.print("[red]enter 1, 2, 3, 4 or 5[/red]")
             continue
 
         health = _test_connection(conn)
         if health is not None and health.status == "ok":
             _console.print("[green]✓[/green] connection test passed")
-            if conn.type in ("postgres", "redshift"):
+            if conn.type in ("postgres", "redshift", "snowflake"):
                 conn = _maybe_narrow_schema(conn)
             return conn
 
@@ -1233,11 +1238,46 @@ def _prompt_redshift_params() -> Connection:
     )
 
 
+def _prompt_snowflake_params() -> Connection:
+    """Collect params for a Snowflake connection (account + password env var).
+
+    Key-pair auth (``private_key_path``) and a dedicated read-only role are set by editing
+    canonic.yaml, the wizard covers the password path only.
+    """
+    conn_id = typer.prompt("Connection id", default="warehouse_sf")
+    params: dict[str, object] = {
+        "account": typer.prompt("Account identifier (e.g. xy12345.eu-central-1)"),
+        "user": typer.prompt("User"),
+        "warehouse": typer.prompt("Warehouse"),
+        "database": typer.prompt("Database"),
+    }
+    role = typer.prompt("Role (leave empty for the user's default)", default="")
+    env_var = typer.prompt(
+        "Env var holding the password",
+        default=f"CANONIC_{conn_id.upper()}_PASSWORD",
+    )
+    if not os.environ.get(env_var):
+        _console.print(
+            f"\n[yellow]note:[/yellow] [bold]{env_var}[/bold] is not set in your current shell.\n"
+            f"  Before the connection test runs, open a new terminal tab and export it:\n"
+            f"  [bold]export {env_var}=<your-password>[/bold]\n"
+            "  Setup progress is saved. If you need to exit now, re-run [bold]canonic setup[/bold] and it will resume here.\n"
+        )
+    return Connection(
+        id=conn_id,
+        type="snowflake",
+        params=params,
+        credentials_ref=f"env:{env_var}",
+        read_only_role=role or None,
+    )
+
+
 #: connector type → the prompt function collecting its params, for a pack variant's
 #: pinned ``connector`` (§5.2, `_prompt_pack_connection` above).
 _CONNECTOR_PROMPTS: dict[str, Callable[[], Connection]] = {
     "postgres": _prompt_postgres_params,
     "redshift": _prompt_redshift_params,
+    "snowflake": _prompt_snowflake_params,
     "sqlite": _prompt_sqlite_params,
     "duckdb": _prompt_duckdb_params,
 }

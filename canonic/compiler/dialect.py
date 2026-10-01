@@ -21,6 +21,7 @@ __all__ = [
     "DialectAdapter",
     "PostgresDialectAdapter",
     "SQLiteDialectAdapter",
+    "TYPE_TO_DIALECT",
     "adapter_for",
 ]
 
@@ -58,6 +59,17 @@ _DUCKDB_TYPE_MAP: dict[NormalizedType, str] = {
     NormalizedType.DATE: "DATE",
     NormalizedType.TIMESTAMP: "TIMESTAMPTZ",
     NormalizedType.JSON: "JSON",
+}
+
+_SNOWFLAKE_TYPE_MAP: dict[NormalizedType, str] = {
+    NormalizedType.STRING: "VARCHAR",
+    NormalizedType.INT: "BIGINT",
+    NormalizedType.DECIMAL: "NUMBER",
+    NormalizedType.FLOAT: "DOUBLE",
+    NormalizedType.BOOL: "BOOLEAN",
+    NormalizedType.DATE: "DATE",
+    NormalizedType.TIMESTAMP: "TIMESTAMP_TZ",
+    NormalizedType.JSON: "VARIANT",
 }
 
 _SQLITE_TYPE_MAP: dict[NormalizedType, str] = {
@@ -212,7 +224,7 @@ class SQLiteDialectAdapter(_GenericDialectAdapter):
         return False
 
 
-# Pre-built adapters for the four supported query connectors. Redshift is Postgres
+# Pre-built adapters for the supported query connectors. Redshift is Postgres
 # wire-compatible, so it reuses the Postgres type map (spec-drift A1) rather than getting
 # its own — but it's a first-class registry entry, not the "any sqlglot dialect works"
 # fallback that used to construct it on the fly.
@@ -220,11 +232,12 @@ DIALECT_ADAPTERS: dict[str, DialectAdapter] = {
     "postgres": PostgresDialectAdapter(),
     "redshift": _GenericDialectAdapter("redshift", _POSTGRES_TYPE_MAP),
     "duckdb": _GenericDialectAdapter("duckdb", _DUCKDB_TYPE_MAP),
+    "snowflake": _GenericDialectAdapter("snowflake", _SNOWFLAKE_TYPE_MAP),
     "sqlite": SQLiteDialectAdapter(),
 }
 
 # Connection type → sqlglot dialect name when they differ.
-_TYPE_TO_DIALECT: dict[str, str] = {
+TYPE_TO_DIALECT: dict[str, str] = {
     "postgresql": "postgres",
     "pg": "postgres",
 }
@@ -243,7 +256,7 @@ def adapter_for(dialect: str) -> DialectAdapter:
     metabase/notion/url in the first place), so this never fires for a normally
     configured project.
     """
-    normalised = _TYPE_TO_DIALECT.get(dialect, dialect)
+    normalised = TYPE_TO_DIALECT.get(dialect, dialect)
     adapter = DIALECT_ADAPTERS.get(normalised)
     if adapter is None:
         raise UnsupportedDialectError(dialect, supported=sorted(DIALECT_ADAPTERS))

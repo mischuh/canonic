@@ -18,6 +18,7 @@ from canonic.connectors.notion import DEFAULT_API_VERSION as _NOTION_DEFAULT_API
 from canonic.connectors.notion import make_notion_connector
 from canonic.connectors.postgres import PostgresConnector
 from canonic.connectors.redshift import RedshiftConnector
+from canonic.connectors.snowflake import SnowflakeConnector
 from canonic.connectors.sqlite import SQLiteConnector
 from canonic.exc import ConnectionError, UnknownConnectorType
 
@@ -135,6 +136,7 @@ def _build_default_factory() -> ConnectorFactory:
     factory.register("notion", _make_notion)
     factory.register("postgres", PostgresConnector)
     factory.register("redshift", RedshiftConnector)
+    factory.register("snowflake", SnowflakeConnector)
     factory.register("sqlite", SQLiteConnector)
     factory.register("url", _make_url)
     return factory

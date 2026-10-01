@@ -88,6 +88,7 @@ def test_adapter_for_registered_dialects() -> None:
     assert adapter_for("postgres").dialect == "postgres"
     assert adapter_for("redshift").dialect == "redshift"
     assert adapter_for("duckdb").dialect == "duckdb"
+    assert adapter_for("snowflake").dialect == "snowflake"
     assert adapter_for("sqlite").dialect == "sqlite"
 
 
@@ -147,3 +148,31 @@ def test_sqlite_type_map() -> None:
     a = adapter_for("sqlite")
     assert a.map_type(NormalizedType.INT) == "INTEGER"
     assert a.map_type(NormalizedType.BOOL) == "INTEGER"
+
+
+def test_snowflake_type_map() -> None:
+    a = adapter_for("snowflake")
+    assert a.map_type(NormalizedType.STRING) == "VARCHAR"
+    assert a.map_type(NormalizedType.DECIMAL) == "NUMBER"
+    assert a.map_type(NormalizedType.TIMESTAMP) == "TIMESTAMP_TZ"
+    assert a.map_type(NormalizedType.JSON) == "VARIANT"
+
+
+def test_snowflake_adapter_emits_native_sql() -> None:
+    """Date truncation, interval arithmetic, TIMESTAMPTZ casts and ordered-set percentiles all
+    transpile to valid Snowflake SQL, and identifiers keep the case they were written in."""
+    import sqlglot
+
+    neutral = sqlglot.parse_one(
+        "SELECT DATE_TRUNC('month', o.created_at) AS m, CAST(o.ts AS TIMESTAMPTZ) AS t, "
+        "PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY o.amount) AS p50 "
+        "FROM orders AS o WHERE o.created_at >= CURRENT_DATE - INTERVAL '3' MONTH",
+        dialect="postgres",
+    )
+    sql = adapter_for("snowflake").emit(neutral, limit=10)
+    assert 'DATE_TRUNC(\'MONTH\', "o"."created_at")' in sql
+    assert 'CAST("o"."ts" AS TIMESTAMPTZ)' in sql
+    assert "INTERVAL '3 MONTH'" in sql
+    assert 'PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY "o"."amount")' in sql
+    assert sql.endswith("LIMIT 10")
+    assert adapter_for("snowflake").supports_percentile_cont()

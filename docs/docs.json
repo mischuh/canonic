@@ -72,7 +72,8 @@
           "guides/marketplace-keycloak",
           "guides/posthog-context-pack",
           "guides/rental",
-          "guides/saas-analytics"
+          "guides/saas-analytics",
+          "guides/snowflake"
         ]
       },
       {

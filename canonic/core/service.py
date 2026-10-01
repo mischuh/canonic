@@ -16,7 +16,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from canonic.compiler.dialect import DIALECT_ADAPTERS, adapter_for
+from canonic.compiler.dialect import DIALECT_ADAPTERS, TYPE_TO_DIALECT, adapter_for
 from canonic.config import CanonicConfig, Connection, load_config
 from canonic.contracts import ContractResolver
 from canonic.core.assertions import AssertionService
@@ -54,12 +54,6 @@ if TYPE_CHECKING:
 __all__ = ["CanonicService"]
 
 
-_TYPE_ALIASES: dict[str, str] = {
-    "postgresql": "postgres",
-    "pg": "postgres",
-}
-
-
 def _dialect_for_type(connector_type: str) -> str | None:
     """Map a query connector's type string to a sqlglot dialect name.
 
@@ -70,7 +64,7 @@ def _dialect_for_type(connector_type: str) -> str | None:
     examples/dutch-railway, jaffle-shop, ecommerce) is the normal case this must not
     break: only the query connector's type reaches :func:`adapter_for`.
     """
-    dialect = _TYPE_ALIASES.get(connector_type, connector_type)
+    dialect = TYPE_TO_DIALECT.get(connector_type, connector_type)
     if dialect not in DIALECT_ADAPTERS:
         return None
     return adapter_for(dialect).dialect
