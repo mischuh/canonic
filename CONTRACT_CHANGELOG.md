@@ -30,6 +30,18 @@ CI (`.github/workflows/contract-schema-guard.yml`,
 
 ## History
 
+## 2.11 (2026-10-01) - MINOR
+
+- ADR/PR: this PR (feat(compiler): allow distinct_count components in ratio metrics,
+  AMENDMENT-ratio-recompute-components, S1-S5)
+- Summary: No change to any frozen field set. A `ratio` or `weighted_avg` whose numerator
+  or denominator is a `distinct_count` metric now compiles, where it previously failed with
+  `unsupported_measure`. Each component is planned by the strategy for its own kind and
+  aggregates to the requested grain before the division. `percentile`, `semi_additive` and
+  composite components are still rejected, now with a message naming the component and its
+  kind. Classified MINOR under §4.1: a request that used to fail now succeeds, and no
+  request or response shape changes.
+
 ## 2.10 (2026-09-23) - MINOR
 
 - ADR/PR: this PR (feat(mcp): derive the Principal from identity-asserted tokens,

@@ -29,6 +29,7 @@ if TYPE_CHECKING:
 from canonic.compiler._helpers import (
     _alias,
     _bind_name,
+    _combine_population_filters,
     _dimension_expr,
     _dimension_output_names,
     _from_and_joins,
@@ -49,11 +50,15 @@ def plan_metric(
     dialect: str = "postgres",
     principal: Principal,
     effective_policy: EffectivePolicy,
+    parent_population_filter: str | None = None,
 ) -> MetricLeaves:
     """Plan a recompute_at_grain metric (distinct_count / percentile) as one leaf (§4.3).
 
     Never derives from a pre-aggregate: the leaf always groups the base table by the
     requested dimensions and computes the aggregate directly.
+
+    ``parent_population_filter`` is set when this metric is a component of a ratio: the
+    leaf then honors the ratio's population as well as its own (§4.5).
 
     Fanout policy is kind-specific, which is why this leaf brings its own builder rather
     than the additive floor: a distinct count tolerates row duplication because DISTINCT
@@ -125,7 +130,9 @@ def plan_metric(
                     source=source_name,
                     measure=_make_synthetic_measure(col_phys),
                 ),
-                population_filter=binding.binding.canonical.population_filter,
+                population_filter=_combine_population_filters(
+                    parent_population_filter, binding.binding.canonical.population_filter
+                ),
                 alias=queried_name,
             )
         ],
