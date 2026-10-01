@@ -83,12 +83,12 @@ def test_create_url_missing_urls_param_raises() -> None:
 
 def test_instantiate_unknown_type_raises(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("PG_PASSWORD", "pw")
-    conn = Connection(id="x", type="snowflake", params={}, credentials_ref="env:PG_PASSWORD")
+    conn = Connection(id="x", type="bigquery", params={}, credentials_ref="env:PG_PASSWORD")
     with pytest.raises(UnknownConnectorType) as exc_info:
         default_factory.create(conn)
     err = exc_info.value
-    assert err.type_name == "snowflake"
-    assert "snowflake" in str(err)
+    assert err.type_name == "bigquery"
+    assert "bigquery" in str(err)
     assert "postgres" in str(err)
     assert isinstance(err, ConnectionError)
     assert err.exit_code == 13

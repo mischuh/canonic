@@ -14,14 +14,18 @@ from sqlglot.errors import ParseError
 from canonic.exc import ReadOnlyViolation
 
 
-def assert_read_only(sql: str) -> None:
+def assert_read_only(sql: str, dialect: str = "postgres") -> None:
     """Raise ReadOnlyViolation unless sql is exactly one read-only SELECT/UNION.
 
     Rejects: unparseable SQL, multiple statements (';' split → len != 1),
     and any root node that is not Select/Union. Never opens a connection.
+
+    ``dialect`` is the sqlglot dialect used to parse ``sql``. It defaults to Postgres, which
+    covers every connector except those whose native syntax Postgres cannot parse
+    (e.g. Snowflake's ``col:path::type`` variant access).
     """
     try:
-        statements = [s for s in sqlglot.parse(sql, read="postgres") if s is not None]
+        statements = [s for s in sqlglot.parse(sql, read=dialect) if s is not None]
     except ParseError as exc:
         raise ReadOnlyViolation(f"could not parse SQL as read-only: {exc}") from exc
     if len(statements) != 1:

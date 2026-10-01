@@ -44,16 +44,17 @@ connections:
 | Field | Type | Default | Governs |
 | --- | --- | --- | --- |
 | `id` | `str` | n/a (required) | Unique identifier for this connection. Referenced from `semantics/<connection-id>/`, `project.default_connection`, and a dbt connection's `target_connection`. |
-| `type` | `str` | n/a (required) | Connector type, e.g. `postgres`, `snowflake`, `bigquery`, `sqlite`, `duckdb`, `dbt`. Must match a registered connector or the connection fails to load with `connection_error`. |
+| `type` | `str` | n/a (required) | Connector type, e.g. `postgres`, `redshift`, `snowflake`, `sqlite`, `duckdb`, `dbt`. Must match a registered connector or the connection fails to load with `connection_error`. |
 | `params` | `dict[str, Any]` | `{}` | Connector-specific settings such as `host`, `port`, `database`, or `schema`. What's valid here depends entirely on `type`. |
 | `credentials_ref` | `str \| null` | `null` | Where to resolve this connection's secret from, never the secret itself. See below. |
-| `read_only_role` | `str \| null` | `null` | Reserved for a future read-only enforcement mode. Accepted and stored today but not yet consulted by any connector. |
+| `read_only_role` | `str \| null` | `null` | The session role a `snowflake` connection connects with, which should only hold `SELECT` grants. Accepted and stored for other connectors but not yet consulted by them. |
 | `rls_enforced` | `bool` | `false` | Operator attestation that this connection's warehouse enforces row-level security independent of canonic (per-tenant credentials, or warehouse-native RLS). canonic cannot verify this claim, only trust it. Must be `true` for `run_sql` to be served on this connection once a [tenancy policy](/concepts/tenancy-and-access-control) is active, see [the `run_sql` gate](/concepts/tenancy-and-access-control#the-run_sql-gate). |
 
 A connection is how canonic reaches an actual data source. `id` is the name every other file uses to point back at it, `type` picks which connector implementation handles it, and `params` carries whatever that connector needs to connect, host and port for a warehouse, a manifest path for dbt. `credentials_ref` keeps the secret itself out of `canonic.yaml` entirely, instead of a password you write a pointer to where the password actually lives.
 
 - `credentials_ref` must be a reference, one of `env:`, `keyring:`, `file:`, or `provider:`, never a literal secret. Config validation rejects a literal outright. `llm.api_key_ref` and the MCP auth refs accept the same schemes minus `provider:`, see [Dynamic credentials](#dynamic-credentials) below.
 - Postgres/Redshift connections additionally recognize `schema`/`schemas` (search path) and `tables` (glob patterns narrowing introspection), plus `fetch_column_stats: true` to merge zero-scan cardinality/null-ratio stats into the returned schema (a no-op on SQLite/DuckDB).
+- `snowflake` connections require `account` and `user`, and `database` for introspection. Optional: `warehouse`, `schema`, `role` (overridden by `read_only_role`), `schemas`/`tables` (narrowing introspection, as above), `row_limit` and `statement_timeout_ms`. `credentials_ref` resolves to the password. For key-pair auth set `private_key_path` to a PEM file, and `credentials_ref` then only holds the optional key passphrase. The driver is not installed with canonic, install it with `pip install 'canonic[snowflake]'`.
 - `dbt` connections recognize `manifest_path` (path to the compiled `manifest.json`, default `manifest.json`) and `target_connection` (the id of the physical, queryable connection whose tables this manifest describes, see [Connectors](/concepts/connectors#definition)). `target_connection` must name a connection actually declared in `connections[]`. An unknown id fails config validation at load time. Omitting it falls back to the dbt connection's own id.
 
 ```yaml

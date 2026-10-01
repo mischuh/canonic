@@ -31,6 +31,9 @@ embeddings = [
 tasks = [
     "fastmcp[tasks]",
 ]
+snowflake = [
+    "snowflake-connector-python>=3.12",
+]
 
 [project.scripts]
 canonic = "canonic.cli.app:app"
@@ -44,6 +47,7 @@ dev = [
     "mypy>=1.0",
     "ruff>=0.9",
     "testcontainers[postgres]>=4.0",
+    "fakesnow>=0.11",
 ]
 
 [build-system]

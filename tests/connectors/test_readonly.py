@@ -44,3 +44,17 @@ class TestAssertReadOnly:
         with pytest.raises(ReadOnlyViolation) as ei:
             assert_read_only(sql)
         assert ei.value.code is ErrorCode.READ_ONLY_VIOLATION
+
+
+class TestSnowflakeDialect:
+    _VARIANT_PATH = "SELECT payload:user.id::string AS uid FROM events"
+
+    def test_variant_path_needs_snowflake_dialect(self) -> None:
+        with pytest.raises(ReadOnlyViolation):
+            assert_read_only(self._VARIANT_PATH)
+        assert_read_only(self._VARIANT_PATH, dialect="snowflake")  # must not raise
+
+    @pytest.mark.parametrize("sql", ["DELETE FROM t", "DROP TABLE t", "SELECT 1; SELECT 2"])
+    def test_writes_still_rejected(self, sql: str) -> None:
+        with pytest.raises(ReadOnlyViolation):
+            assert_read_only(sql, dialect="snowflake")
