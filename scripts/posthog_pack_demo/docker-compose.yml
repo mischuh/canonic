@@ -1,0 +1,49 @@
+# Dockerized PostHog context-pack demo. See README.md for the full walkthrough.
+#
+# Brings up:
+#   - postgres: a real Postgres database, seeded (postgres/init/*.sql) with tables
+#     shaped exactly like PostHog's documented Postgres batch-export format.
+#   - canonic:  the MCP http daemon, built from this demo's own Dockerfile (a copy of the
+#     repo's root Dockerfile plus `git`, see that file's header comment for why). On
+#     start, entrypoint.sh clones canonic-packs from GitHub and installs the "posthog"
+#     context pack against the seeded database, then serves the resulting project over
+#     MCP.
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: posthog
+      POSTGRES_USER: posthog
+      # Local-demo-only value, never a real secret. Matches CANONIC_POSTGRES_PASSWORD
+      # below, which canonic.docker.yaml's connections[].credentials_ref points at.
+      POSTGRES_PASSWORD: posthog-local-dev
+    volumes:
+      - ./postgres/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U posthog -d posthog"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  canonic:
+    build:
+      context: ../..
+      dockerfile: scripts/posthog_pack_demo/Dockerfile
+    depends_on:
+      postgres:
+        # Unlike scripts/local_idp's Keycloak (whose depends_on only waits for the
+        # container to *start*), Postgres's own healthcheck reflects true readiness, so
+        # no extra wait-loop is needed in entrypoint.sh here.
+        condition: service_healthy
+    entrypoint: ["/bin/sh", "/entrypoint.sh"]
+    environment:
+      CANONIC_POSTGRES_PASSWORD: posthog-local-dev
+      # Local-demo-only bearer token. --transport http refuses to start with no auth
+      # mechanism configured at all (canonic.docker.yaml's mcp.auth.tokens).
+      CANONIC_MCP_TOKEN: posthog-demo-local-dev
+    ports:
+      - "7474:7474"
+    volumes:
+      - ./canonic.docker.yaml:/data/posthog-demo/canonic.yaml:ro
+      - ./pack-params.json:/data/posthog-demo/pack-params.json:ro
+      - ./entrypoint.sh:/entrypoint.sh:ro

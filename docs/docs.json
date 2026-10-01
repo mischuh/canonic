@@ -44,6 +44,7 @@
           "cli-reference/sl",
           "cli-reference/mcp",
           "cli-reference/knowledge",
+          "cli-reference/pack",
           "cli-reference/eval",
           "cli-reference/setup",
           "cli-reference/ingest",
@@ -69,6 +70,7 @@
           "guides/jaffle-shop",
           "guides/marketplace",
           "guides/marketplace-keycloak",
+          "guides/posthog-context-pack",
           "guides/rental",
           "guides/saas-analytics"
         ]

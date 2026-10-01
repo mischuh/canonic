@@ -1,0 +1,109 @@
+---
+title: "Guide: PostHog context pack (Docker demo)"
+description: "Spin up a seeded Postgres database, install the posthog context pack against it, and query product-analytics metrics over MCP — no real PostHog instance needed."
+---
+
+The [context-packs mechanism](/cli-reference/pack) installs versioned, pre-curated `semantics/`/`contracts/`/`knowledge/` content for a known system. This guide runs the **posthog** pack ([`canonic-packs`](https://github.com/mischuh/canonic-packs)) end to end against a real (seeded) Postgres database, so you can see the whole story — install, validation, and querying — without a real PostHog instance.
+
+<Info>Full source: [`scripts/posthog_pack_demo/`](https://github.com/mischuh/canonic/tree/main/scripts/posthog_pack_demo)</Info>
+
+## Prerequisites
+
+- Docker with Compose
+- A checkout of the canonic repository (the compose file builds the daemon from `scripts/posthog_pack_demo/Dockerfile`)
+- Network access from inside the container to clone [`canonic-packs`](https://github.com/mischuh/canonic-packs) from GitHub at startup — no local checkout needed, see "Where the pack content comes from" below
+- An MCP client, for example the [MCP Inspector](https://github.com/modelcontextprotocol/inspector), or plain `curl`
+
+## Start
+
+From the repository root:
+
+```bash
+docker compose -f scripts/posthog_pack_demo/docker-compose.yml up --build
+```
+
+Wait for `installing the posthog context pack...`, a line listing the installed files, and then Uvicorn's `Uvicorn running on http://0.0.0.0:7474` line.
+
+| Service | URL | Notes |
+| --- | --- | --- |
+| Postgres | `localhost:5432` | seeded with `posthog_exports.events`/`persons`, PostHog's documented batch-export schema |
+| Canonic MCP endpoint | `http://localhost:7474` | serves the freshly pack-installed project, no auth configured |
+
+## What happened
+
+`entrypoint.sh` ran, non-interactively:
+
+```bash
+canonic pack add posthog \
+  --variant postgres --connection posthog_db \
+  --params-file pack-params.json --yes
+```
+
+Before writing anything, this checked that `posthog_exports.events`/`persons` actually exist on the `posthog_db` connection (`required_tables`, a live introspection call). It then templated and wrote:
+
+- `semantics/posthog_db/ph_events.yaml`, `ph_persons.yaml` — one row per event, one row per `(team_id, distinct_id)`, joined many-to-one.
+- `contracts/metrics/active_users.yaml`, `new_users.yaml`, `activated_users.yaml`, `activation_rate.yaml`.
+- `contracts/guardrails/posthog-exclude-internal-traffic.yaml` — a `mandatory_filter` built from the `internal_email_domains: yourcompany.com` param in `pack-params.json`, always AND-ed into any query against `ph_events` regardless of severity.
+- `knowledge/global/activation-definition.md`, `internal-traffic-caveat.md`.
+
+Every file is stamped `provenance: human_curated` plus a `pack_source: {pack: posthog, version, variant: postgres}` tag, then validated with the project's ordinary semantic/contract/knowledge checks — the same review posture as hand-written content, just starting from a known-good definition instead of an inferred one.
+
+## The seed data
+
+`postgres/init/02_seed.sql` seeds one team (`team_id = 1`) with 30 persons over the last 30 days:
+
+- All 30 signed up (`user_signed_up`).
+- 3 are tagged with an internal `@yourcompany.com` email — excluded from every metric by `exclude-internal-traffic`.
+- 9 of the remaining 27 also fired `report_created` (the activation event).
+- Everyone gets a few `$pageview`/`dashboard_viewed` noise events spread across the window.
+
+With the guardrail applied, that gives:
+
+| Metric | Expected value |
+| --- | --- |
+| `active_users` (30d) | 27 |
+| `new_users` | 27 |
+| `activated_users` | 9 |
+
+The pack's `first_answer` (`active_users`, 30d window) runs automatically right after install — its result is the first thing `canonic pack add` prints.
+
+<Warning>
+`activation_rate` (`kind: ratio` of `activated_users` over `new_users`, both themselves `distinct_count` metrics) currently fails with `unsupported_measure: nested composite metrics are not yet supported` — a pre-existing canonic query-engine limitation this demo surfaced, not a pack or demo defect. Until that's supported, get the same number by querying `activated_users` and `new_users` separately and dividing (9 / 27 ≈ 33% with the seed data above).
+</Warning>
+
+## Query it
+
+```bash
+curl -s http://localhost:7474/mcp \
+  -H "Authorization: Bearer posthog-demo-local-dev" \
+  -H "Content-Type: application/json" \
+  -H "Accept: application/json, text/event-stream" \
+  -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}'
+```
+
+Or connect an MCP client to `http://localhost:7474` with that same bearer token and query `active_users`, `new_users`, or `activated_users` via the `query` tool. `posthog-demo-local-dev` is `canonic.docker.yaml`'s single static demo token (`mcp.auth.tokens`) — `--transport http` refuses to start with no auth mechanism configured at all.
+
+## Stop
+
+```bash
+docker compose -f scripts/posthog_pack_demo/docker-compose.yml down
+```
+
+Add `-v` to also drop the seeded Postgres volume; without it, a later `up` reuses the same data (Postgres only runs its init scripts against a fresh volume) and reinstalls the pack fresh each time (`install_pack` overwrites unconditionally, so this is always safe).
+
+## Where the pack content comes from
+
+No `--repo` is passed, so `canonic pack add` falls back to its own built-in default — the `canonic-packs` GitHub repo (`canonic/cli/commands/pack.py::_DEFAULT_REPO`) — shallow-cloned fresh into `.canonic/packs-cache/` on every container start. That clone needs `git` on `PATH`, which the shared root `Dockerfile` doesn't have (adding it there would grow every image built from it, not just this demo), so this demo builds from its own `Dockerfile` instead — an exact copy of the root one plus `git`.
+
+## Point this at a real PostHog instance
+
+Nothing about the pack mechanism itself changes. Swap `canonic.docker.yaml`'s `posthog_db` connection for your real warehouse's Postgres batch-export database, and either:
+
+- keep `--params-file`/`--yes` and edit `pack-params.json`'s `signup_event`/`activation_event` to your actual event names, or
+- drop both flags and run `canonic pack add posthog` interactively — `choose_from` then queries your live database for a top-50 custom-event picklist instead of using the seeded params.
+
+## Where to go next
+
+- [`canonic pack`](/cli-reference/pack) for every flag, and `pack validate`'s CI-friendly, connection-free path
+- [`canonic setup`](/cli-reference/setup) — the same install routine is also offered from the setup wizard's pack branch
+- [Marketplace with Keycloak](/guides/marketplace-keycloak) for the same "Docker demo on top of a shipped example" pattern applied to OAuth/RBAC instead of context packs

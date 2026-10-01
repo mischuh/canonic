@@ -1,0 +1,46 @@
+# Docker-only project config for this demo (mounted at /data/posthog-demo/canonic.yaml).
+# Nothing under semantics/, contracts/, knowledge/ is checked in here — entrypoint.sh
+# writes all of it on container start via `canonic pack add posthog` (AMENDMENT-context-
+# packs). See README.md.
+
+version: 1
+
+project:
+  name: posthog-pack-demo
+  default_connection: posthog_db
+
+connections:
+  - id: posthog_db
+    type: postgres
+    params:
+      host: postgres   # the compose service name
+      port: 5432
+      dbname: posthog
+      user: posthog
+    credentials_ref: env:CANONIC_POSTGRES_PASSWORD
+    # Deliberately false: this demo database has no warehouse-native row-level-security
+    # layer. Irrelevant here (no tenancy policy is installed), listed for consistency
+    # with the other example configs.
+    rls_enforced: false
+
+mcp:
+  auth:
+    # --transport http refuses to start with no auth mechanism configured at all — a
+    # single static demo token, no claims/policies needed since this project has no
+    # tenancy or role policy installed.
+    tokens:
+      - client_id: demo
+        token_ref: env:CANONIC_MCP_TOKEN
+
+embeddings:
+  model: all-MiniLM-L6-v2
+
+telemetry:
+  enabled: false
+
+runtime:
+  air_gapped: false
+
+logging:
+  level: INFO
+  format: json
