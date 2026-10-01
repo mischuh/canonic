@@ -435,6 +435,93 @@ def test_sqlite_connection_path(runner: CliRunner, tmp_path: Path, monkeypatch) 
     assert conn.credentials_ref is None
 
 
+def _snowflake_input(*auth_answers: str) -> str:
+    """Wizard answers for a Snowflake connection, ``auth_answers`` starting at the auth prompt."""
+    return "\n".join(
+        [
+            "",  # project name
+            "",  # configure a connection now? → default yes
+            "5",  # connection type → snowflake
+            "",  # id → warehouse_sf
+            "xy12345.eu-central-1",  # account
+            "CANONIC",  # user
+            "COMPUTE_WH",  # warehouse
+            "ANALYTICS",  # database
+            "",  # role → user default
+            *auth_answers,
+            "n",  # narrow schemas/tables? → No
+            "",  # configure an llm now? → default yes
+            "",  # llm provider
+            "",  # base url
+            "m",  # model
+            "",  # api key env
+            "",  # preview schema?
+        ]
+    )
+
+
+def test_snowflake_password_path(runner: CliRunner, tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.chdir(tmp_path)
+    _patch_connector(monkeypatch, _FakeConnector(Health(status="ok")))
+
+    result = runner.invoke(app, ["setup"], input=_snowflake_input("", "") + "\n")
+
+    assert result.exit_code == 0, result.output
+    conn = load_config(tmp_path / "canonic.yaml").connections[0]
+    assert conn.type == "snowflake"
+    assert conn.credentials_ref == "env:CANONIC_WAREHOUSE_SF_PASSWORD"
+    assert "private_key_path" not in conn.params
+
+
+def test_snowflake_key_pair_unencrypted_key(runner: CliRunner, tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.chdir(tmp_path)
+    _patch_connector(monkeypatch, _FakeConnector(Health(status="ok")))
+    key_file = tmp_path / "rsa_key.p8"
+    key_file.write_text("pem")
+
+    result = runner.invoke(app, ["setup"], input=_snowflake_input("2", str(key_file), "") + "\n")
+
+    assert result.exit_code == 0, result.output
+    conn = load_config(tmp_path / "canonic.yaml").connections[0]
+    assert conn.params["private_key_path"] == str(key_file)
+    assert conn.credentials_ref is None
+    assert "no file found" not in result.output
+
+
+def test_snowflake_key_pair_with_passphrase_env_var(
+    runner: CliRunner, tmp_path: Path, monkeypatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("SF_KEY_PASSPHRASE", raising=False)
+    _patch_connector(monkeypatch, _FakeConnector(Health(status="ok")))
+
+    result = runner.invoke(
+        app,
+        ["setup"],
+        input=_snowflake_input("2", "~/missing_key.p8", "SF_KEY_PASSPHRASE") + "\n",
+    )
+
+    assert result.exit_code == 0, result.output
+    conn = load_config(tmp_path / "canonic.yaml").connections[0]
+    assert conn.params["private_key_path"] == "~/missing_key.p8"
+    assert conn.credentials_ref == "env:SF_KEY_PASSPHRASE"
+    assert "no file found" in result.output
+    assert "<your-passphrase>" in result.output
+
+
+def test_snowflake_auth_prompt_rejects_invalid_choice(
+    runner: CliRunner, tmp_path: Path, monkeypatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    _patch_connector(monkeypatch, _FakeConnector(Health(status="ok")))
+
+    result = runner.invoke(app, ["setup"], input=_snowflake_input("9", "1", "") + "\n")
+
+    assert result.exit_code == 0, result.output
+    conn = load_config(tmp_path / "canonic.yaml").connections[0]
+    assert conn.credentials_ref == "env:CANONIC_WAREHOUSE_SF_PASSWORD"
+
+
 def test_existing_project_menu_generates_contracts(runner: CliRunner, project_dir: Path) -> None:
     """Option 3 in the existing-project menu writes inferred contracts from sources."""
     # Write a minimal semantic source YAML with a numeric column and no measures.

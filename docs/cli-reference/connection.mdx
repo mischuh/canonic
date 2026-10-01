@@ -48,7 +48,7 @@ canonic connection add --id warehouse --type postgres \
 | `--credentials-ref` | Credential reference (`env:VAR`, `keyring:service`, `file:path`). |
 | `--set-default` | Make this the project default connection. |
 
-A Snowflake connection with key-pair auth (the setup wizard only covers password auth) needs no `--credentials-ref` unless the private key is encrypted, in which case the reference points at its passphrase:
+A Snowflake connection with key-pair auth needs no `--credentials-ref` unless the private key is encrypted, in which case the reference points at its passphrase:
 
 ```bash
 canonic connection add --id warehouse --type snowflake \

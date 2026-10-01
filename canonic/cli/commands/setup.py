@@ -1239,10 +1239,9 @@ def _prompt_redshift_params() -> Connection:
 
 
 def _prompt_snowflake_params() -> Connection:
-    """Collect params for a Snowflake connection (account + password env var).
+    """Collect params for a Snowflake connection (account + password or key pair).
 
-    Key-pair auth (``private_key_path``) and a dedicated read-only role are set by editing
-    canonic.yaml, the wizard covers the password path only.
+    With key-pair auth ``credentials_ref`` only holds the optional key passphrase.
     """
     conn_id = typer.prompt("Connection id", default="warehouse_sf")
     params: dict[str, object] = {
@@ -1252,22 +1251,42 @@ def _prompt_snowflake_params() -> Connection:
         "database": typer.prompt("Database"),
     }
     role = typer.prompt("Role (leave empty for the user's default)", default="")
-    env_var = typer.prompt(
-        "Env var holding the password",
-        default=f"CANONIC_{conn_id.upper()}_PASSWORD",
-    )
-    if not os.environ.get(env_var):
+    while (auth := typer.prompt("Authentication [1=password / 2=key pair]", default="1")) not in (
+        "1",
+        "2",
+    ):
+        _console.print("[red]enter 1 or 2[/red]")
+    credentials_ref: str | None
+    if auth == "2":
+        key_path = typer.prompt("Path to the PEM private key")
+        if not Path(key_path).expanduser().is_file():
+            _console.print(f"[yellow]note:[/yellow] no file found at {key_path}")
+        params["private_key_path"] = key_path
+        env_var = typer.prompt(
+            "Env var holding the key passphrase (leave empty for an unencrypted key)",
+            default="",
+        )
+        credentials_ref = f"env:{env_var}" if env_var else None
+        secret_label = "passphrase"
+    else:
+        env_var = typer.prompt(
+            "Env var holding the password",
+            default=f"CANONIC_{conn_id.upper()}_PASSWORD",
+        )
+        credentials_ref = f"env:{env_var}"
+        secret_label = "password"
+    if env_var and not os.environ.get(env_var):
         _console.print(
             f"\n[yellow]note:[/yellow] [bold]{env_var}[/bold] is not set in your current shell.\n"
             f"  Before the connection test runs, open a new terminal tab and export it:\n"
-            f"  [bold]export {env_var}=<your-password>[/bold]\n"
+            f"  [bold]export {env_var}=<your-{secret_label}>[/bold]\n"
             "  Setup progress is saved. If you need to exit now, re-run [bold]canonic setup[/bold] and it will resume here.\n"
         )
     return Connection(
         id=conn_id,
         type="snowflake",
         params=params,
-        credentials_ref=f"env:{env_var}",
+        credentials_ref=credentials_ref,
         read_only_role=role or None,
     )
 
@@ -1295,8 +1314,9 @@ def _test_connection(conn: Connection) -> Health | None:
         _console.print(f"[red]credential error:[/red] {exc}")
         if conn.credentials_ref and conn.credentials_ref.startswith("env:"):
             env_var = conn.credentials_ref[4:]
+            secret_label = "passphrase" if conn.params.get("private_key_path") else "password"
             _console.print(
-                f"  Set it now:  [bold]export {env_var}=<your-password>[/bold]\n"
+                f"  Set it now:  [bold]export {env_var}=<your-{secret_label}>[/bold]\n"
                 "  Progress is saved — Ctrl-C, set the var, then re-run [bold]canonic setup[/bold] to resume."
             )
         return None
