@@ -19,7 +19,7 @@ from sqlalchemy.exc import DBAPIError
 
 import canonic.credentials
 from canonic.config import Connection
-from canonic.connectors.base import AcquisitionTier, Capability
+from canonic.connectors.base import AcquisitionTier, Capability, ReadOnlyEnforcement
 from canonic.connectors.redshift import RedshiftConnector, _normalize_type, _resolve_search_path
 from canonic.credentials import CredentialProviderRegistry, ResolvedCredential
 from canonic.exc import CredentialError, ReadOnlyViolation, UnknownCredentialProvider
@@ -462,3 +462,12 @@ class TestRedshiftIntegration:
         finally:
             await connector.aclose()
         assert relations == {"analytics.fct_orders"}
+
+
+class TestReadOnlyEnforcement:
+    def test_redshift_rests_on_the_parse_guard_and_says_so(
+        self, fake_provider: _FakeRedshiftIamProvider
+    ) -> None:
+        connector = RedshiftConnector(_provider_backed_connection())
+        assert connector.read_only_enforcement() is ReadOnlyEnforcement.PARSE_ONLY
+        assert len(connector.read_only_warnings()) == 1

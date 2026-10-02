@@ -16,7 +16,7 @@ import pytest
 
 from canonic.config import Connection
 from canonic.connectors import snowflake as sf_module
-from canonic.connectors.base import AcquisitionTier, Capability
+from canonic.connectors.base import AcquisitionTier, Capability, ReadOnlyEnforcement
 from canonic.connectors.factory import default_factory
 from canonic.connectors.snowflake import SnowflakeConnector, _normalize_type
 from canonic.exc import ConnectionError, ReadOnlyViolation
@@ -226,6 +226,35 @@ class TestConstruction:
         health = await SnowflakeConnector(_connection()).test_connection()
         assert health.status == "error"
         assert "pip install snowflake-connector-python" in (health.message or "")
+
+
+class TestReadOnlyEnforcement:
+    async def test_no_role_warns_that_only_the_parse_guard_stands(
+        self, password: None, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _install(monkeypatch)
+        connector = SnowflakeConnector(_connection())
+        health = await connector.test_connection()
+
+        assert connector.read_only_enforcement() is ReadOnlyEnforcement.PARSE_ONLY
+        assert health.status == "ok"
+        assert len(health.warnings) == 1
+        assert "parse guard" in health.warnings[0]
+
+    @pytest.mark.parametrize(
+        ("kwargs"),
+        [{"read_only_role": "CANONIC_RO"}, {"params": {"role": "CANONIC_RO"}}],
+        ids=["read_only_role", "params_role"],
+    )
+    async def test_a_role_lifts_the_warning(
+        self, password: None, monkeypatch: pytest.MonkeyPatch, kwargs: dict[str, Any]
+    ) -> None:
+        _install(monkeypatch)
+        connector = SnowflakeConnector(_connection(**kwargs))
+        health = await connector.test_connection()
+
+        assert connector.read_only_enforcement() is ReadOnlyEnforcement.ROLE
+        assert health.warnings == ()
 
 
 class TestConnect:

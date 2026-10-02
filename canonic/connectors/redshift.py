@@ -49,6 +49,7 @@ from canonic.connectors.base import (
     ForeignKey,
     ForeignKeyRef,
     Health,
+    ReadOnlyEnforcement,
     RelationSchema,
     ResultColumn,
     ResultSet,
@@ -356,7 +357,10 @@ class RedshiftConnector(ConnectorBase):
                 await conn.execute(text("SELECT 1"))
         except Exception as exc:  # by contract test_connection reports, never raises
             return Health(status="error", message=str(exc))
-        return Health(status="ok")
+        return Health(status="ok", warnings=self.read_only_warnings())
+
+    def read_only_enforcement(self) -> ReadOnlyEnforcement:
+        return ReadOnlyEnforcement.PARSE_ONLY
 
     async def introspect_schema(self) -> list[RelationSchema]:
         async with self._acquire() as conn:

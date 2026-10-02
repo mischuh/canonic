@@ -57,6 +57,16 @@ Adding a case: append one line to the relevant `tests/golden/cases/*.jsonl` file
 with a `why` naming the commit/bug it pins, then run `--regen-golden` to generate
 its `.sql`/`.json` artifacts.
 
+### Dialect parity
+
+Authors write `expr` in their warehouse's SQL and canonic does not transpile it, so
+`tests/golden/test_dialect_parity.py` runs every result-locked `rental` case on DuckDB
+and on Snowflake (the in-process `fakesnow` emulator) and compares the numbers to the
+committed SQLite golden. A difference is a bug to fix or a deliberate divergence listed
+in `_KNOWN_DIVERGENCES` with its reason. A new warehouse adds an engine to `_ENGINES`
+and a `rental_on_<engine>` fixture. The emulator proves the compiled SQL runs and agrees,
+not how the real warehouse behaves.
+
 ## `contract_schema` changes
 
 Changes to `CONTRACT_SCHEMA` (`canonic/contract.py`) are a special case and

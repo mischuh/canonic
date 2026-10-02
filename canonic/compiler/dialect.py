@@ -209,6 +209,28 @@ def _rewrite_date_trunc_for_sqlite(node: exp.Expression) -> exp.Expression:
     return cast("exp.Expression", exp.func("DATE", base, exp.Literal.string(modifier)))
 
 
+def _rewrite_timestamp_cast_for_sqlite(node: exp.Expression) -> exp.Expression:
+    """Rewrite ``CAST('<iso>' AS TIMESTAMP[TZ])`` into the offset-free wall-clock text.
+
+    SQLite gives an unknown type name NUMERIC affinity, so ``CAST('2025-03-13T23:59:59-04:00'
+    AS TIMESTAMPTZ)`` evaluates to the integer ``2025`` and every date column then compares
+    as past it. The finality watermark is the one place the compiler emits such a cast.
+    SQLite stores timestamps as text without an offset, so the literal becomes
+    ``'YYYY-MM-DD HH:MM:SS'`` in the watermark's own timezone.
+    """
+    if not (
+        isinstance(node, exp.Cast)
+        and isinstance(node.this, exp.Literal)
+        and node.this.is_string
+        and node.to.this in (exp.DataType.Type.TIMESTAMP, exp.DataType.Type.TIMESTAMPTZ)
+    ):
+        return node
+    text = node.this.name
+    if len(text) < 19 or text[10] not in "T ":
+        return node
+    return exp.Literal.string(f"{text[:10]} {text[11:19]}")
+
+
 class SQLiteDialectAdapter(_GenericDialectAdapter):
     """SQLite renderer — has no ordered-set aggregate for percentile queries."""
 
@@ -218,6 +240,7 @@ class SQLiteDialectAdapter(_GenericDialectAdapter):
     def emit(self, ast: exp.Expression, *, limit: int | None = None) -> str:
         ast = ast.transform(_rewrite_interval_arithmetic_for_sqlite)
         ast = ast.transform(_rewrite_date_trunc_for_sqlite)
+        ast = ast.transform(_rewrite_timestamp_cast_for_sqlite)
         return super().emit(ast, limit=limit)
 
     def supports_percentile_cont(self) -> bool:

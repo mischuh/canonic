@@ -28,6 +28,7 @@ from canonic.connectors.base import (
     ForeignKey,
     ForeignKeyRef,
     Health,
+    ReadOnlyEnforcement,
     RelationSchema,
     ResultColumn,
     ResultSet,
@@ -174,6 +175,11 @@ class DuckDBConnector(ConnectorBase):
             return Health(status="ok")
 
         return await asyncio.to_thread(_check)
+
+    def read_only_enforcement(self) -> ReadOnlyEnforcement:
+        if self._path == ":memory:":
+            return ReadOnlyEnforcement.PARSE_ONLY
+        return ReadOnlyEnforcement.NATIVE
 
     async def introspect_schema(self) -> list[RelationSchema]:
         return await asyncio.to_thread(self._introspect_schema_sync)

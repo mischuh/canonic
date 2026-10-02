@@ -81,6 +81,9 @@ class Connection(BaseModel):
     #: ``db_user``, …) live in ``params`` and are not secrets, the same way a ``file:``
     #: path is not a secret.
     credentials_ref: str | None = None
+    #: Role the session runs under so the warehouse itself refuses writes. Only the
+    #: Snowflake connector reads it today. Without it, read-only rests on the SQL parse
+    #: guard alone and ``connection test`` warns about that.
     read_only_role: str | None = None
     #: Operator attestation that a warehouse-native layer-2 tenant boundary (Postgres/
     #: Redshift row-level security keyed on a session GUC) is enforced on this connection

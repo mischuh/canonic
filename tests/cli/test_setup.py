@@ -717,3 +717,14 @@ def test_add_connection_keeps_env_references_in_existing_yaml(
     assert "env:DB_HOST" in text
     assert "db.prod.internal" not in text
     assert "id: other" in text
+
+
+def test_connection_menu_types_are_registered_connectors() -> None:
+    """Every menu entry must build a connector, so the menu and the factory cannot drift."""
+    from canonic.cli.commands.setup import _CONNECTOR_CHOICES, _CONNECTOR_PROMPTS
+    from canonic.connectors.factory import default_factory
+
+    types = [c.type for c in _CONNECTOR_CHOICES]
+    assert len(types) == len(set(types))
+    assert set(types) <= set(default_factory.registered_types())
+    assert set(_CONNECTOR_PROMPTS) == set(types)

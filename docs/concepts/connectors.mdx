@@ -90,6 +90,17 @@ Unmappable native constructs are recorded with a warning, never silently dropped
 
 For queryable connectors, read-only is defense in depth, not a convention: a read-only role/credential where the engine supports it, a parse-level check on `run_read_only_sql` that rejects anything but a single `SELECT`/`WITH…SELECT`, and a hard row cap plus statement timeout on every execution. Any layer failing aborts with `READ_ONLY_VIOLATION` before the query runs.
 
+How far the engine itself enforces read-only differs per connector, and `canonic connection test` reports it:
+
+| Connector | Engine-side enforcement |
+| --- | --- |
+| `sqlite`, `duckdb` | Native. The file is opened read-only (not for `:memory:`). |
+| `postgres` | Native. Every statement runs in a transaction with `default_transaction_read_only = on`. |
+| `snowflake` | Role. Set `read_only_role` to a role holding `SELECT` grants only. Without one, the test passes with a warning. |
+| `redshift` | None. Redshift has no equivalent session setting we rely on, so connect as a user that holds `SELECT` grants only. The test passes with a warning. |
+
+A connector without engine-side enforcement is still guarded by the parse check. The warning only says that nothing sits behind it.
+
 ## Schema acquisition ladder
 
 When live introspection is unavailable or partial, canonic descends a priority order. Every tier still emits the same `RelationSchema`, tagged with which tier produced it:
