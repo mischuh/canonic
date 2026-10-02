@@ -65,6 +65,7 @@
       {
         "group": "Guides",
         "pages": [
+          "guides/clickhouse",
           "guides/databricks",
           "guides/dutch-railway",
           "guides/ecommerce",

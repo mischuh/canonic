@@ -1341,6 +1341,40 @@ def _prompt_mysql_params() -> Connection:
     )
 
 
+def _prompt_clickhouse_params() -> Connection:
+    """Collect params for a ClickHouse connection (HTTP(S) endpoint + credentials env var)."""
+    conn_id = typer.prompt("Connection id", default="warehouse_clickhouse")
+    host = typer.prompt("Host", default="localhost")
+    secure = typer.confirm("Connect over HTTPS (needed for ClickHouse Cloud)?", default=False)
+    params: dict[str, object] = {
+        "host": host,
+        "port": typer.prompt("HTTP port", default=8443 if secure else 8123, type=int),
+        "user": typer.prompt("User", default="default"),
+    }
+    if secure:
+        params["secure"] = True
+    database = typer.prompt("Database (leave empty for the user's default database)", default="")
+    if database:
+        params["database"] = database
+    env_var = typer.prompt(
+        "Env var holding the password",
+        default=f"CANONIC_{conn_id.upper()}_PASSWORD",
+    )
+    if not os.environ.get(env_var):
+        _console.print(
+            f"\n[yellow]note:[/yellow] [bold]{env_var}[/bold] is not set in your current shell.\n"
+            f"  Before the connection test runs, open a new terminal tab and export it:\n"
+            f"  [bold]export {env_var}=<your-password>[/bold]\n"
+            "  Setup progress is saved. If you need to exit now, re-run [bold]canonic setup[/bold] and it will resume here.\n"
+        )
+    return Connection(
+        id=conn_id,
+        type="clickhouse",
+        params=params,
+        credentials_ref=f"env:{env_var}",
+    )
+
+
 @dataclasses.dataclass(frozen=True, slots=True)
 class _ConnectorChoice:
     """One entry of the connection type menu: how it is listed and how its params are asked."""
@@ -1401,6 +1435,13 @@ _CONNECTOR_CHOICES: tuple[_ConnectorChoice, ...] = (
         "MySQL",
         "— server-based, MySQL 8.0 or newer, requires host/port/credentials",
         _prompt_mysql_params,
+        narrows_schema=True,
+    ),
+    _ConnectorChoice(
+        "clickhouse",
+        "ClickHouse",
+        "— server-based or ClickHouse Cloud, requires host/port/credentials",
+        _prompt_clickhouse_params,
         narrows_schema=True,
     ),
 )

@@ -1,0 +1,95 @@
+---
+title: "Guide: ClickHouse"
+description: "Connect canonic to a ClickHouse server or ClickHouse Cloud with a read-only user, bootstrap a semantic layer, and run your first query."
+---
+
+This guide connects canonic to ClickHouse from scratch: a user that can only read, a connection, and a first bootstrapped semantic layer with a query. Use a small database while you follow it, so you do not touch real data by accident.
+
+<Info>The ClickHouse connector needs the `clickhouse` extra: `pip install 'canonic[clickhouse]'`. Without it, a ClickHouse connection fails with an install hint instead of a stack trace.</Info>
+
+## What you need
+
+- A ClickHouse server or a ClickHouse Cloud service. canonic is tested against the 25.8 LTS release and newer releases.
+- The HTTP(S) interface of the server. canonic talks to port 8123, or 8443 for HTTPS, not to the native port 9000.
+- A database with at least one table or view to read.
+- Permission to create a user and grant privileges on that database.
+
+## Why a dedicated user
+
+canonic parses every statement and refuses anything that is not a single `SELECT`. It also sends each query with `readonly = 2` and a `max_execution_time`, so ClickHouse itself rejects `INSERT`, `ALTER`, `DROP` and every other write. The grants are still the strongest layer, so connect as a user that holds nothing beyond read access.
+
+<Steps>
+  <Step title="Create a read-only user">
+    Run this as an administrator, with your own names:
+
+    ```sql
+    CREATE USER canonic IDENTIFIED BY 'choose-a-password';
+    GRANT SELECT ON shop.* TO canonic;
+    ```
+
+    Introspection reads `system.tables` and `system.columns`, which show a user only the tables it holds a privilege on.
+
+    Do not put `readonly = 1` in the user's settings profile. canonic needs to set `join_use_nulls` on queries that join, and `readonly = 1` refuses any setting change, so those queries would fail. Use grants to restrict the user instead.
+  </Step>
+  <Step title="Export the password">
+    canonic never stores a secret in `canonic.yaml`, only a reference to it. Set the password in your shell before you continue:
+
+    ```bash
+    export CLICKHOUSE_PASSWORD=choose-a-password
+    ```
+  </Step>
+  <Step title="Add the connection">
+    Run `canonic setup` and pick ClickHouse, or add the connection directly:
+
+    ```bash
+    canonic connection add --id warehouse --type clickhouse \
+      --param host=ch.example.com \
+      --param user=canonic \
+      --param database=shop \
+      --credentials-ref env:CLICKHOUSE_PASSWORD --set-default
+    ```
+
+    For ClickHouse Cloud, or any server behind HTTPS, add `--param secure=true`. The port then defaults to 8443 and the server certificate is verified. To limit introspection to some databases, add `schemas` and `tables` to the connection's `params` in `canonic.yaml`, see the [config reference](/reference/config-schema#connections).
+  </Step>
+  <Step title="Test the connection">
+    ```bash
+    canonic connection test warehouse
+    ```
+
+    A passing test means the server answered. Read-only is enforced by the engine for this connector, so no warning is printed.
+  </Step>
+</Steps>
+
+## Naming and types
+
+In ClickHouse a schema is a database, so relations are named `database.table`, for example `shop.orders`. canonic quotes every identifier it emits with double quotes. Introspection returns names exactly as the server stores them, so sources generated from it work as is.
+
+`Nullable` and `LowCardinality` wrappers are looked through. `Int` and `UInt` types of any width are recorded as `int`, `Decimal` types as `decimal`, `Float32` and `Float64` as `float`, `Bool` as `bool`, `Date` and `Date32` as `date`, and `DateTime` and `DateTime64` as `timestamp`. `String`, `FixedString`, `UUID`, `Enum8`, `Enum16` and the IP address types are recorded as `string`. Types without a counterpart, such as `Array`, `Map` and `Tuple`, are recorded as `json` with a warning.
+
+Materialized views and views are recorded as views. Row counts in the schema are the estimates ClickHouse keeps in `system.tables`, which are absent for views.
+
+### Keys and grain
+
+ClickHouse has no foreign keys, and the primary key of a `MergeTree` table is a sorting key that does not make rows unique. canonic therefore reports no primary key for a ClickHouse table. When it drafts a source, the grain is proposed and marked as a draft for you to confirm, instead of being asserted from a key that may repeat.
+
+## What differs from other engines
+
+**Joins return NULL for a missing match.** By default ClickHouse fills the unmatched side of a `LEFT JOIN` with the column's default value, so a missing amount would read as `0`. canonic appends `SETTINGS join_use_nulls = 1` to every query it compiles with a join. The compiled SQL is therefore correct when you copy it out of canonic and run it elsewhere. This is also why canonic runs queries with `readonly = 2` rather than `1`.
+
+**Ratios do not lose their fraction.** A division of two `Decimal` values in ClickHouse keeps the scale of the dividend and truncates, so `2166.666...` would read `2166.66`. canonic casts the numerator of every division to `Float64`.
+
+**Percentiles interpolate.** ClickHouse has no `PERCENTILE_CONT`. canonic renders it as `quantileExactInclusive`, which interpolates between the two middle values the way Postgres and Snowflake do, and casts the column to `Float64` because the function rejects `Decimal` arguments. This differs from SQLite and MySQL, which return an actual row value.
+
+**Weeks start on Monday**, as on the other engines. `dateTrunc` of a `Date` column returns a `Date` for weeks, months, quarters and years, and a `DateTime` for days.
+
+**Timestamps with an offset are parsed explicitly.** The finality watermark carries a UTC offset. ClickHouse 25.8 turns a plain `CAST` of such a string into `NULL` without an error, which would silently drop every row, so canonic renders it with `parseDateTimeBestEffort`.
+
+A `CAST(x AS Decimal)` without precision is `Decimal(10, 0)` in ClickHouse, which silently drops every fraction. canonic widens such a cast to `Decimal(38, 10)`. If you write your own `CAST`, give it an explicit precision and scale.
+
+## Authoring `expr` for ClickHouse
+
+canonic does not transpile the `expr` strings you write in metrics, dimensions and filters. Write them in ClickHouse SQL, for example `toStartOfMonth(created_at)` and `ifNull(discount, 0)`. Aggregate functions in ClickHouse have their own combinators, so `sumIf(amount, status = 'paid')` is the idiomatic form of a conditional sum. Function names are case sensitive.
+
+## Limits
+
+This version authenticates with a user and password over HTTP or HTTPS only, and does not use the native protocol. Result sets are capped by `row_limit` (default 10,000) and every statement runs under `statement_timeout_ms` (default 30,000), which ClickHouse applies as `max_execution_time`.

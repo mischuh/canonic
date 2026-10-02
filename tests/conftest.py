@@ -295,3 +295,59 @@ def mysql_server() -> Iterator[MySQLServer]:
         )
     finally:
         container.stop()
+
+
+@dataclass(frozen=True, slots=True)
+class ClickHouseServer:
+    """A throwaway ClickHouse server shared by every test that needs a real one."""
+
+    host: str
+    port: int
+    user: str
+    password: str
+
+    def execute(self, statements: list[str], *, database: str | None = None) -> None:
+        """Run ``statements`` over the HTTP interface as the test user."""
+        import clickhouse_connect
+
+        client = clickhouse_connect.get_client(
+            host=self.host,
+            port=self.port,
+            username=self.user,
+            password=self.password,
+            database=database or "default",
+        )
+        try:
+            for statement in statements:
+                client.command(statement)
+        finally:
+            client.close()
+
+    def new_database(self, name: str) -> str:
+        """Create an empty database, so suites never share tables."""
+        self.execute([f"CREATE DATABASE `{name}`"])
+        return name
+
+
+@pytest.fixture(scope="session")
+def clickhouse_server() -> Iterator[ClickHouseServer]:
+    """A real ClickHouse 25.8 LTS in Docker, skipped cleanly when Docker or a driver is missing."""
+    try:
+        import clickhouse_connect  # noqa: F401
+        from testcontainers.clickhouse import ClickHouseContainer
+    except ImportError:
+        pytest.skip("clickhouse-connect or testcontainers not installed")
+    try:
+        container = ClickHouseContainer("clickhouse/clickhouse-server:25.8")
+        container.start()
+    except Exception as exc:  # Docker not running / image unavailable
+        pytest.skip(f"Docker unavailable: {exc}")
+    try:
+        yield ClickHouseServer(
+            host=container.get_container_host_ip(),
+            port=int(container.get_exposed_port(8123)),
+            user=container.username,
+            password=container.password,
+        )
+    finally:
+        container.stop()

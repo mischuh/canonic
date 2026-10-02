@@ -41,7 +41,7 @@ See the [Rental guide](/guides/rental) for the full walkthrough behind this reco
     Give your canonic project a name.
   </Step>
   <Step title="Connect a source">
-    SQLite/DuckDB file, or Postgres, MySQL, Redshift, Snowflake or Databricks if you have a server or account.
+    SQLite/DuckDB file, or Postgres, MySQL, ClickHouse, Redshift, Snowflake or Databricks if you have a server or account.
   </Step>
   <Step title="Configure an LLM (optional)">
     Skippable: the core works without one. See [Configuring an LLM](/configuring-an-llm).
@@ -55,10 +55,10 @@ See the [Rental guide](/guides/rental) for the full walkthrough behind this reco
 </Steps>
 
 <Warning>
-  Connecting to Postgres, MySQL, Redshift, Snowflake or Databricks, or configuring an LLM provider, needs a credential. Set the corresponding environment variable **before** running `canonic setup`: canonic never stores secrets in `canonic.yaml` directly, only a `credentials_ref` like `env:WAREHOUSE_PASSWORD` pointing at it:
+  Connecting to Postgres, MySQL, ClickHouse, Redshift, Snowflake or Databricks, or configuring an LLM provider, needs a credential. Set the corresponding environment variable **before** running `canonic setup`: canonic never stores secrets in `canonic.yaml` directly, only a `credentials_ref` like `env:WAREHOUSE_PASSWORD` pointing at it:
 
   ```bash
-  export WAREHOUSE_PASSWORD=...      # for a Postgres/MySQL/Redshift/Snowflake/Databricks connection
+  export WAREHOUSE_PASSWORD=...      # for a Postgres/MySQL/ClickHouse/Redshift/Snowflake/Databricks connection
   export ANTHROPIC_API_KEY=...       # or OPENAI_API_KEY / CANONIC_LLM_API_KEY, if configuring an LLM
   ```
 

@@ -11,7 +11,8 @@ the compiled Snowflake SQL parses, executes and yields the same numbers, not how
 warehouse behaves. Live behavior stays with the connector's own live tests.
 
 MySQL has no emulator either, so it runs against a real ``mysql:8.4`` container through
-testcontainers and is skipped when Docker is not available.
+testcontainers and is skipped when Docker is not available. ClickHouse does the same with a
+``clickhouse-server:25.8`` (LTS) container.
 
 Databricks has no emulator, so it is compile-only here: every rental case must compile to SQL
 that parses as Databricks SQL and keeps percentiles exact. Its numbers are only checked by the
@@ -37,6 +38,7 @@ from canonic.core.service import CanonicService
 from .cases import GoldenCase, load_all_cases
 from .conftest import EXAMPLES_ROOT
 from .parity import (
+    CLICKHOUSE_PASSWORD_ENV,
     DATABRICKS_TOKEN_ENV,
     MYSQL_PASSWORD_ENV,
     SNOWFLAKE_DATABASE,
@@ -44,6 +46,7 @@ from .parity import (
     SNOWFLAKE_SCHEMA,
     comparable_rows,
     seed_statements,
+    write_clickhouse_rental_project,
     write_databricks_rental_project,
     write_duckdb_rental_project,
     write_mysql_rental_project,
@@ -54,7 +57,7 @@ from .runner import run_case
 if TYPE_CHECKING:
     from collections.abc import Iterator
 
-    from tests.conftest import MySQLServer
+    from tests.conftest import ClickHouseServer, MySQLServer
 
 pytestmark = pytest.mark.release_gate
 
@@ -62,7 +65,7 @@ _GOLDEN_DIR = Path(__file__).parent / "golden"
 _SETUP_SQL = EXAMPLES_ROOT / "rental" / "setup.sql"
 
 #: The engines compared against the SQLite golden, each with a ``rental_on_<engine>`` fixture.
-_ENGINES = ("duckdb", "snowflake", "mysql")
+_ENGINES = ("duckdb", "snowflake", "mysql", "clickhouse")
 
 _MEDIAN_REASON = (
     "SQLite has no PERCENTILE_CONT, so the compiler falls back to nearest-rank and returns "
@@ -72,8 +75,16 @@ _MEDIAN_REASON = (
     "carries a warning about the interpolation."
 )
 
+_CLICKHOUSE_MEDIAN_REASON = (
+    "SQLite has no PERCENTILE_CONT, so the compiler falls back to nearest-rank and returns "
+    "an actual row value (489.93). ClickHouse interpolates between the two middle values of the "
+    "32 rows through quantileExactInclusive and returns 544.945, the same number Postgres gives. "
+    "The SQLite result already carries a warning about the interpolation."
+)
+
 #: (engine, case id) -> why that engine is allowed to differ from the SQLite golden.
 _KNOWN_DIVERGENCES: dict[tuple[str, str], str] = {
+    ("clickhouse", "rental_median_rental_amount"): _CLICKHOUSE_MEDIAN_REASON,
     ("duckdb", "rental_median_rental_amount"): _MEDIAN_REASON,
     ("snowflake", "rental_median_rental_amount"): _MEDIAN_REASON,
 }
@@ -109,6 +120,31 @@ def rental_on_mysql(
     )
     env = pytest.MonkeyPatch()
     env.setenv(MYSQL_PASSWORD_ENV, mysql_server.password)
+    try:
+        yield CanonicService.from_project(dest)
+    finally:
+        env.undo()
+
+
+@pytest.fixture(scope="session")
+def rental_on_clickhouse(
+    tmp_path_factory: pytest.TempPathFactory, clickhouse_server: ClickHouseServer
+) -> Iterator[CanonicService]:
+    database = clickhouse_server.new_database("rental")
+    clickhouse_server.execute(
+        seed_statements(_SETUP_SQL.read_text(), "clickhouse"), database=database
+    )
+    dest = tmp_path_factory.mktemp("rental_clickhouse")
+    write_clickhouse_rental_project(
+        EXAMPLES_ROOT / "rental",
+        dest,
+        host=clickhouse_server.host,
+        port=clickhouse_server.port,
+        user=clickhouse_server.user,
+        database=database,
+    )
+    env = pytest.MonkeyPatch()
+    env.setenv(CLICKHOUSE_PASSWORD_ENV, clickhouse_server.password)
     try:
         yield CanonicService.from_project(dest)
     finally:

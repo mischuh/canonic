@@ -19,6 +19,7 @@ from canonic.semantic.models import NormalizedType
 
 __all__ = [
     "DIALECT_ADAPTERS",
+    "ClickHouseDialectAdapter",
     "DatabricksDialectAdapter",
     "DialectAdapter",
     "MySQLDialectAdapter",
@@ -95,6 +96,17 @@ _MYSQL_TYPE_MAP: dict[NormalizedType, str] = {
     NormalizedType.DATE: "DATE",
     NormalizedType.TIMESTAMP: "DATETIME",
     NormalizedType.JSON: "JSON",
+}
+
+_CLICKHOUSE_TYPE_MAP: dict[NormalizedType, str] = {
+    NormalizedType.STRING: "String",
+    NormalizedType.INT: "Int64",
+    NormalizedType.DECIMAL: "Decimal(38, 10)",
+    NormalizedType.FLOAT: "Float64",
+    NormalizedType.BOOL: "Bool",
+    NormalizedType.DATE: "Date",
+    NormalizedType.TIMESTAMP: "DateTime64(3)",
+    NormalizedType.JSON: "String",
 }
 
 _SQLITE_TYPE_MAP: dict[NormalizedType, str] = {
@@ -366,6 +378,116 @@ class MySQLDialectAdapter(_GenericDialectAdapter):
         return False
 
 
+def _rewrite_percentile_for_clickhouse(node: exp.Expression) -> exp.Expression:
+    """Rewrite ``PERCENTILE_CONT(q) WITHIN GROUP (ORDER BY col)`` into ``quantileExactInclusive``.
+
+    ClickHouse has no ordered-set aggregate. ``quantileExactInclusive(q)(col)`` interpolates
+    between neighbouring values the same way ``PERCENTILE_CONT`` does and skips NULLs, whereas
+    ``quantileExact`` would return an existing value. A descending order is the same percentile
+    taken from the other end, so the fraction becomes ``1 - q``. The column is cast to
+    ``Float64`` because the function rejects ``Decimal`` arguments, and Postgres returns a double
+    there as well. Anything that is not a single ordering key with a literal fraction is left
+    alone.
+    """
+    if not (isinstance(node, exp.WithinGroup) and isinstance(node.this, exp.PercentileCont)):
+        return node
+    fraction = node.this.this
+    keys = node.expression.expressions
+    if not (isinstance(fraction, exp.Literal) and not fraction.is_string and len(keys) == 1):
+        return node
+    ordered = keys[0]
+    quantile = float(fraction.name)
+    if ordered.args.get("desc"):
+        quantile = 1 - quantile
+    return exp.ParameterizedAgg(
+        this="quantileExactInclusive",
+        expressions=[exp.Literal.number(format(quantile, ".15g"))],
+        params=[exp.Cast(this=ordered.this.copy(), to=exp.DataType.build("DOUBLE"))],
+    )
+
+
+def _parse_timestamp_literal_for_clickhouse(node: exp.Expression) -> exp.Expression:
+    """Rewrite ``CAST('<iso>' AS TIMESTAMP[TZ])`` into ``parseDateTimeBestEffort('<iso>')``.
+
+    The finality watermark is the one place the compiler casts a string literal to a timestamp,
+    and it carries a UTC offset. ClickHouse 25.8 LTS turns such a cast into NULL without an
+    error, so every ``<= watermark`` filter would silently drop all rows, while 26.x parses it.
+    ``parseDateTimeBestEffort`` honours the offset on both and yields the same instant.
+    """
+    if not (
+        isinstance(node, exp.Cast)
+        and isinstance(node.this, exp.Literal)
+        and node.this.is_string
+        and node.to.this in (exp.DataType.Type.TIMESTAMP, exp.DataType.Type.TIMESTAMPTZ)
+    ):
+        return node
+    return exp.Anonymous(this="parseDateTimeBestEffort", expressions=[node.this.copy()])
+
+
+def _divide_as_float_for_clickhouse(node: exp.Expression) -> exp.Expression:
+    """Rewrite ``a / b`` into ``CAST(a AS Float64) / b``.
+
+    A ``Decimal`` division in ClickHouse keeps the scale of the dividend and truncates, so
+    ``SUM(repair_cost) / COUNT(*)`` on a ``Decimal(38, 2)`` column turns 2166.666... into 2166.66,
+    where Postgres keeps the fraction and SQLite divides as ``REAL``. Every ratio the compiler
+    emits is such a division. Integers and floats already divide as ``Float64``, so the cast only
+    changes the decimal case.
+    """
+    if not isinstance(node, exp.Div):
+        return node
+    numerator = node.this
+    if isinstance(numerator, exp.Cast) and numerator.to.this == exp.DataType.Type.DOUBLE:
+        return node
+    return exp.Div(
+        this=exp.Cast(this=numerator.copy(), to=exp.DataType.build("DOUBLE")),
+        expression=node.expression.copy(),
+    )
+
+
+def _widen_bare_decimal_for_clickhouse(node: exp.Expression) -> exp.Expression:
+    """Give a parameterless ``CAST(x AS Decimal)`` an explicit precision and scale.
+
+    ClickHouse reads a bare ``Decimal`` as ``Decimal(10, 0)``, which rounds every fraction away,
+    while Postgres, DuckDB and Snowflake keep them.
+    """
+    if not (
+        isinstance(node, exp.Cast)
+        and node.to.this == exp.DataType.Type.DECIMAL
+        and not node.to.expressions
+    ):
+        return node
+    return exp.Cast(this=node.this, to=exp.DataType.build("DECIMAL(38, 10)"))
+
+
+class ClickHouseDialectAdapter(_GenericDialectAdapter):
+    """ClickHouse renderer.
+
+    A LEFT JOIN fills unmatched columns with the type default (``0``, empty string) instead of
+    NULL unless ``join_use_nulls`` is on, which would turn missing rows into real zeros and break
+    every ratio. A query with a join therefore carries ``SETTINGS join_use_nulls = 1`` itself, so
+    the compiled SQL gives the same numbers when it is run outside Canonic. The clause is a
+    setting change, so the connector runs queries with ``readonly = 2`` rather than ``1``.
+    """
+
+    def __init__(self) -> None:
+        super().__init__("clickhouse", _CLICKHOUSE_TYPE_MAP)
+
+    def emit(self, ast: exp.Expression, *, limit: int | None = None) -> str:
+        ast = ast.transform(_rewrite_percentile_for_clickhouse)
+        ast = ast.transform(_parse_timestamp_literal_for_clickhouse)
+        ast = ast.transform(_widen_bare_decimal_for_clickhouse)
+        ast = ast.transform(_divide_as_float_for_clickhouse)
+        if isinstance(ast, (exp.Select, exp.Union)) and ast.find(exp.Join) is not None:
+            if isinstance(ast, exp.Union):
+                # SETTINGS belongs to a SELECT, so a UNION is wrapped to carry it.
+                ast = exp.Select().select(exp.Star()).from_(exp.alias_(ast.subquery(), "_u"))
+            ast.set(
+                "settings",
+                [exp.EQ(this=exp.var("join_use_nulls"), expression=exp.Literal.number(1))],
+            )
+        return super().emit(ast, limit=limit)
+
+
 # Pre-built adapters for the supported query connectors. Redshift is Postgres
 # wire-compatible, so it reuses the Postgres type map (spec-drift A1) rather than getting
 # its own — but it's a first-class registry entry, not the "any sqlglot dialect works"
@@ -377,6 +499,7 @@ DIALECT_ADAPTERS: dict[str, DialectAdapter] = {
     "snowflake": _GenericDialectAdapter("snowflake", _SNOWFLAKE_TYPE_MAP),
     "databricks": DatabricksDialectAdapter(),
     "mysql": MySQLDialectAdapter(),
+    "clickhouse": ClickHouseDialectAdapter(),
     "sqlite": SQLiteDialectAdapter(),
 }
 
