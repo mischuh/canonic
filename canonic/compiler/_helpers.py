@@ -841,6 +841,13 @@ def _qualify_columns(
             if node.table:
                 used.add(node.table)
                 return node
+            derived = _find_dimension(node.name, sources_by_name, owner, alias_to_source)
+            if derived is not None and derived[1].expr is not None:
+                # A derived dimension has no column to bind to, so a filter on its name
+                # inlines the expression itself (without time bucketing, like a column dim).
+                alias, dim = derived
+                used.add(alias)
+                return exp.paren(_dimension_base_expr(alias, dim), copy=False)
             binding = _bind_name(node.name, sources_by_name, owner, alias_to_source)
             if binding is None:
                 raise UnreachableError(f"filter references unknown name {node.name!r}")
