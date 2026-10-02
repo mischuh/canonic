@@ -13,6 +13,10 @@ This guide connects canonic to a Databricks workspace from scratch: a service pr
 - A catalog with at least one schema of tables or views to read.
 - Permission to create a service principal and grant privileges on the catalog.
 
+<Note>
+  A Databricks Free Edition workspace works for trying this out. The connector was tested there with a personal access token of the workspace user, against the default catalog `workspace`. Such a session runs as the owner of the data and could write, so only the parse guard stands between canonic and a write. Use a service principal with read-only grants for anything beyond a trial.
+</Note>
+
 ## Why a service principal
 
 Databricks has no read-only session flag and no role to switch to. A session runs as the principal that authenticated, so the safety of a connection is what that principal may do. canonic also parses every statement and refuses anything that is not a single `SELECT`, but the grants are the part Databricks itself enforces. `canonic connection test` passes with a warning that says as much.
@@ -73,6 +77,10 @@ Unity Catalog identifiers are case-insensitive and stored in lower case. canonic
 Declared primary and foreign keys are informational in Databricks and optional. canonic reads them when your principal can see them, to help infer joins, and carries on without them when it cannot.
 
 `ARRAY`, `MAP`, `STRUCT`, `VARIANT` and `BINARY` columns are recorded as `json`. canonic emits `PERCENTILE_CONT` as the exact ordered-set aggregate and does not approximate it.
+
+## The `samples` catalog
+
+Introspection reads each catalog's own `information_schema`. In the built-in `samples` catalog that view lists the tables of schemas such as `tpch` but returns columns for only some of them, so canonic finds no usable relations there. Copy the tables you want into a schema of your own catalog, for example with `CREATE TABLE workspace.demo.orders AS SELECT * FROM samples.tpch.orders`, and point the connection at that catalog.
 
 ## Authoring `expr` for Databricks
 

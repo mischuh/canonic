@@ -67,6 +67,12 @@ in `_KNOWN_DIVERGENCES` with its reason. A new warehouse adds an engine to `_ENG
 and a `rental_on_<engine>` fixture. The emulator proves the compiled SQL runs and agrees,
 not how the real warehouse behaves.
 
+Databricks has no emulator, so its rental cases are compile-only in the same file. Each one must
+compile to SQL that parses as Databricks SQL and must not contain `PERCENTILE_APPROX`, which
+sqlglot would otherwise substitute for the exact percentile. Its numbers are only checked by
+`tests/connectors/test_databricks_live.py`, which runs against a real workspace and is skipped
+unless `CANONIC_TEST_DATABRICKS_HOST` is set.
+
 ## `contract_schema` changes
 
 Changes to `CONTRACT_SCHEMA` (`canonic/contract.py`) are a special case and
