@@ -24,6 +24,7 @@ if TYPE_CHECKING:
 
 from canonic.compiler._helpers import (
     _alias,
+    _dim_mask_strategy,
     _dimension_expr,
     _dimension_output_names,
     _find_measure,
@@ -142,7 +143,9 @@ def _build_opaque(
     projections: list[exp.Expression] = []
     mask = dim_mask or {}
     for (src, dim), name in zip(dimensions, _dimension_output_names(dimensions), strict=True):
-        projections.append(_alias(_dimension_expr(src, dim, mask.get((src, dim.column))), name))
+        projections.append(
+            _alias(_dimension_expr(src, dim, _dim_mask_strategy(mask, src, dim)), name)
+        )
     projections.append(_alias(_measure_expr(metric.source, metric.measure), alias))
     select = select.select(*projections)
     select = _from_and_joins(select, owner, join_edges, sources_by_name)

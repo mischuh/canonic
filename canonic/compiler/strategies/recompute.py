@@ -30,6 +30,7 @@ from canonic.compiler._helpers import (
     _alias,
     _bind_name,
     _combine_population_filters,
+    _dim_mask_strategy,
     _dimension_expr,
     _dimension_output_names,
     _from_and_joins,
@@ -225,7 +226,7 @@ def _build_recompute(
     group_exprs: list[exp.Expression] = []
     mask = dim_mask or {}
     for (src, dim), name in zip(dimensions, _dimension_output_names(dimensions), strict=True):
-        expr = _dimension_expr(src, dim, mask.get((src, dim.column)))
+        expr = _dimension_expr(src, dim, _dim_mask_strategy(mask, src, dim))
         projections.append(_alias(expr, name))
         group_exprs.append(expr)
     projections.append(_alias(agg_expr, metric_name))
@@ -272,7 +273,7 @@ def _build_percentile_fallback(
     partition_exprs: list[exp.Expression] = []
     mask = dim_mask or {}
     for (src, dim), name in zip(dimensions, dim_names, strict=True):
-        expr = _dimension_expr(src, dim, mask.get((src, dim.column)))
+        expr = _dimension_expr(src, dim, _dim_mask_strategy(mask, src, dim))
         inner_projections.append(_alias(expr, name))
         partition_exprs.append(expr)
     inner_projections.append(_alias(col_expr, _VAL))

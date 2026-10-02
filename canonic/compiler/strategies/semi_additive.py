@@ -27,6 +27,8 @@ if TYPE_CHECKING:
 from canonic.compiler._helpers import (
     _alias,
     _build_simple,
+    _dim_mask_strategy,
+    _dimension_base_expr,
     _dimension_expr,
     _dimension_output_names,
     _find_dimension,
@@ -227,7 +229,7 @@ def _build_semi_additive(
     (AMENDMENT §3.5). With no prefix the names are unchanged, which is what keeps a
     single-metric query byte-identical to what it compiled to before.
     """
-    collapse_col = exp.column(collapse_dim.column, table=collapse_alias)
+    collapse_col = _dimension_base_expr(collapse_alias, collapse_dim)
 
     if collapse_agg in {CollapseAgg.LAST, CollapseAgg.FIRST}:
         order_dir = "DESC" if collapse_agg is CollapseAgg.LAST else "ASC"
@@ -242,7 +244,7 @@ def _build_semi_additive(
         seen_names: set[str] = set()
         mask = dim_mask or {}
         for (src, dim), name in zip(dimensions, dim_names, strict=True):
-            expr = _dimension_expr(src, dim, mask.get((src, dim.column)))
+            expr = _dimension_expr(src, dim, _dim_mask_strategy(mask, src, dim))
             inner_projections.append(_alias(expr, name))
             seen_names.add(name)
 
@@ -319,7 +321,7 @@ def _build_semi_additive(
     inner_group: list[exp.Expression] = []
     mask = dim_mask or {}
     for (src, dim), name in zip(dimensions, dim_names, strict=True):
-        expr = _dimension_expr(src, dim, mask.get((src, dim.column)))
+        expr = _dimension_expr(src, dim, _dim_mask_strategy(mask, src, dim))
         inner_projections.append(_alias(expr, name))
         inner_group.append(expr)
     inner_projections.append(_alias(_measure_expr(owner, measure), "m"))

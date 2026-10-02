@@ -20,7 +20,11 @@ from pydantic import BaseModel, ConfigDict
 
 from canonic.exc import KnowledgeReferenceError
 from canonic.knowledge.models import KnowledgeScope
-from canonic.semantic.models import Measure, compute_measure_fingerprint
+from canonic.semantic.models import (
+    Measure,
+    compute_dimension_fingerprint,
+    compute_measure_fingerprint,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Iterable, Iterator
@@ -62,24 +66,29 @@ class EntityIndex(BaseModel):
     names: frozenset[str]
     # Fully-qualified measure name → live Measure, for rendering and drift (SPEC-E6 §7).
     measures: dict[str, Measure] = {}
+    # Fully-qualified derived-dimension name → fingerprint, for drift (AMENDMENT-dimension-expr §5).
+    dimension_fingerprints: dict[str, str] = {}
 
     def __contains__(self, fq_name: str) -> bool:
         return fq_name in self.names
 
     def current_fingerprint(self, fq_name: str) -> str | None:
-        """Live fingerprint of the measure named ``fq_name``, or ``None`` if it is not one.
+        """Live fingerprint of the measure or derived dimension named ``fq_name``, else ``None``.
 
         ``None`` covers both a non-measure name and a measure that has disappeared — a
         disappeared reference is pruning's concern (SPEC-E6 §3.2), not a drift review flag.
         """
         measure = self.measures.get(fq_name)
-        return compute_measure_fingerprint(measure) if measure is not None else None
+        if measure is not None:
+            return compute_measure_fingerprint(measure)
+        return self.dimension_fingerprints.get(fq_name)
 
     @classmethod
     def from_sources(cls, sources: Iterable[SemanticSource]) -> EntityIndex:
         """Enumerate every fully-qualified entity name exposed by ``sources``."""
         names: set[str] = set()
         measures: dict[str, Measure] = {}
+        dimension_fingerprints: dict[str, str] = {}
         for source in sources:
             base = f"{source.connection}.{source.name}"
             names.add(base)
@@ -90,8 +99,15 @@ class EntityIndex(BaseModel):
                 names.add(fq_name)
                 measures[fq_name] = measure
             for dimension in source.dimensions:
-                names.add(f"{base}.{dimension.name}")
-        return cls(names=frozenset(names), measures=measures)
+                fq_name = f"{base}.{dimension.name}"
+                names.add(fq_name)
+                if (fingerprint := compute_dimension_fingerprint(dimension)) is not None:
+                    dimension_fingerprints[fq_name] = fingerprint
+        return cls(
+            names=frozenset(names),
+            measures=measures,
+            dimension_fingerprints=dimension_fingerprints,
+        )
 
 
 class PageIndex(BaseModel):
