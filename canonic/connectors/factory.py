@@ -15,6 +15,7 @@ from canonic.connectors.duckdb import DuckDBConnector
 from canonic.connectors.evidence import GenericEvidenceConnector
 from canonic.connectors.looker import LookerConnector
 from canonic.connectors.metabase import MetabaseConnector
+from canonic.connectors.mysql import MySQLConnector
 from canonic.connectors.notion import DEFAULT_API_VERSION as _NOTION_DEFAULT_API_VERSION
 from canonic.connectors.notion import make_notion_connector
 from canonic.connectors.postgres import PostgresConnector
@@ -135,6 +136,7 @@ def _build_default_factory() -> ConnectorFactory:
     factory.register("duckdb", DuckDBConnector)
     factory.register("looker", LookerConnector)
     factory.register("metabase", MetabaseConnector)
+    factory.register("mysql", MySQLConnector)
     factory.register("notion", _make_notion)
     factory.register("postgres", PostgresConnector)
     factory.register("redshift", RedshiftConnector)

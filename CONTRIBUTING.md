@@ -61,11 +61,12 @@ its `.sql`/`.json` artifacts.
 
 Authors write `expr` in their warehouse's SQL and canonic does not transpile it, so
 `tests/golden/test_dialect_parity.py` runs every result-locked `rental` case on DuckDB
-and on Snowflake (the in-process `fakesnow` emulator) and compares the numbers to the
+and on Snowflake (the in-process `fakesnow` emulator) and MySQL and compares the numbers to the
 committed SQLite golden. A difference is a bug to fix or a deliberate divergence listed
 in `_KNOWN_DIVERGENCES` with its reason. A new warehouse adds an engine to `_ENGINES`
 and a `rental_on_<engine>` fixture. The emulator proves the compiled SQL runs and agrees,
-not how the real warehouse behaves.
+not how the real warehouse behaves. MySQL has no emulator, so it runs against a real
+`mysql:8.4` container through testcontainers and is skipped when Docker is not available.
 
 ## `contract_schema` changes
 

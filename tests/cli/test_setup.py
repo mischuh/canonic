@@ -468,6 +468,59 @@ def test_databricks_wizard_path(runner: CliRunner, tmp_path: Path, monkeypatch) 
     assert conn.read_only_role is None
 
 
+def test_mysql_wizard_path(runner: CliRunner, tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.chdir(tmp_path)
+    _patch_connector(monkeypatch, _FakeConnector(Health(status="ok")))
+    answers = "\n".join(
+        [
+            "",  # project name
+            "",  # configure a connection now? → default yes
+            "7",  # connection type → mysql
+            "",  # id → warehouse_mysql
+            "db.example.com",  # host
+            "",  # port → 3306
+            "reader",  # user
+            "shop",  # database
+            "",  # password env var → default
+            "n",  # narrow schemas/tables? → No
+            "",  # configure an llm now? → default yes
+            "",  # llm provider
+            "",  # base url
+            "m",  # model
+            "",  # api key env
+            "",  # preview schema?
+        ]
+    )
+
+    result = runner.invoke(app, ["setup"], input=answers + "\n")
+
+    assert result.exit_code == 0, result.output
+    conn = load_config(tmp_path / "canonic.yaml").connections[0]
+    assert conn.type == "mysql"
+    assert conn.credentials_ref == "env:CANONIC_WAREHOUSE_MYSQL_PASSWORD"
+    assert conn.params == {
+        "host": "db.example.com",
+        "port": 3306,
+        "user": "reader",
+        "database": "shop",
+    }
+    assert conn.read_only_role is None
+
+
+def test_mysql_wizard_omits_an_empty_database(
+    runner: CliRunner, tmp_path: Path, monkeypatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    _patch_connector(monkeypatch, _FakeConnector(Health(status="ok")))
+    answers = "\n".join(["", "", "7", "", "", "", "reader", "", "", "n", "", "", "", "m", "", ""])
+
+    result = runner.invoke(app, ["setup"], input=answers + "\n")
+
+    assert result.exit_code == 0, result.output
+    conn = load_config(tmp_path / "canonic.yaml").connections[0]
+    assert "database" not in conn.params
+
+
 def _snowflake_input(*auth_answers: str) -> str:
     """Wizard answers for a Snowflake connection, ``auth_answers`` starting at the auth prompt."""
     return "\n".join(

@@ -1309,6 +1309,38 @@ def _prompt_databricks_params() -> Connection:
     )
 
 
+def _prompt_mysql_params() -> Connection:
+    """Collect params for a MySQL connection (server + credentials env var)."""
+    conn_id = typer.prompt("Connection id", default="warehouse_mysql")
+    params: dict[str, object] = {
+        "host": typer.prompt("Host", default="localhost"),
+        "port": typer.prompt("Port", default=3306, type=int),
+        "user": typer.prompt("User"),
+    }
+    database = typer.prompt(
+        "Database (leave empty for every database the user can see)", default=""
+    )
+    if database:
+        params["database"] = database
+    env_var = typer.prompt(
+        "Env var holding the password",
+        default=f"CANONIC_{conn_id.upper()}_PASSWORD",
+    )
+    if not os.environ.get(env_var):
+        _console.print(
+            f"\n[yellow]note:[/yellow] [bold]{env_var}[/bold] is not set in your current shell.\n"
+            f"  Before the connection test runs, open a new terminal tab and export it:\n"
+            f"  [bold]export {env_var}=<your-password>[/bold]\n"
+            "  Setup progress is saved. If you need to exit now, re-run [bold]canonic setup[/bold] and it will resume here.\n"
+        )
+    return Connection(
+        id=conn_id,
+        type="mysql",
+        params=params,
+        credentials_ref=f"env:{env_var}",
+    )
+
+
 @dataclasses.dataclass(frozen=True, slots=True)
 class _ConnectorChoice:
     """One entry of the connection type menu: how it is listed and how its params are asked."""
@@ -1362,6 +1394,13 @@ _CONNECTOR_CHOICES: tuple[_ConnectorChoice, ...] = (
         "Databricks",
         "— SQL warehouse, requires hostname/HTTP path/access token",
         _prompt_databricks_params,
+        narrows_schema=True,
+    ),
+    _ConnectorChoice(
+        "mysql",
+        "MySQL",
+        "— server-based, MySQL 8.0 or newer, requires host/port/credentials",
+        _prompt_mysql_params,
         narrows_schema=True,
     ),
 )

@@ -42,6 +42,7 @@ Implement `introspect_schema` + `run_read_only_sql`: these feed the [semantic la
 | `sqlite` | Local `.db` file, no server, no network. |
 | `duckdb` | Local `.duckdb` file, or reads CSV/Parquet/JSON directly. |
 | `redshift` | Postgres-compatible catalog surface. |
+| `mysql` | `information_schema` introspection on MySQL 8.0 or newer, password auth. Needs the `mysql` extra: `pip install 'canonic[mysql]'`. See the [MySQL guide](/guides/mysql). |
 | `snowflake` | `INFORMATION_SCHEMA` introspection, password or key-pair auth. Needs the `snowflake` extra: `pip install 'canonic[snowflake]'`. See the [Snowflake guide](/guides/snowflake). |
 | `databricks` | Unity Catalog `information_schema` introspection on a SQL warehouse, access token auth. Needs the `databricks` extra: `pip install 'canonic[databricks]'`. See the [Databricks guide](/guides/databricks). |
 
@@ -97,6 +98,7 @@ How far the engine itself enforces read-only differs per connector, and `canonic
 | --- | --- |
 | `sqlite`, `duckdb` | Native. The file is opened read-only (not for `:memory:`). |
 | `postgres` | Native. Every statement runs in a transaction with `default_transaction_read_only = on`. |
+| `mysql` | Native. Every statement runs in a session set to `TRANSACTION READ ONLY`. |
 | `snowflake` | Role. Set `read_only_role` to a role holding `SELECT` grants only. Without one, the test passes with a warning. |
 | `databricks` | None. Databricks has no read-only session flag and no role to switch to, so connect as a service principal that holds `USE CATALOG`, `USE SCHEMA` and `SELECT` only. The test passes with a warning. |
 | `redshift` | None. Redshift has no equivalent session setting we rely on, so connect as a user that holds `SELECT` grants only. The test passes with a warning. |

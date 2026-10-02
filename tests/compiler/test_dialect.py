@@ -90,6 +90,7 @@ def test_adapter_for_registered_dialects() -> None:
     assert adapter_for("duckdb").dialect == "duckdb"
     assert adapter_for("snowflake").dialect == "snowflake"
     assert adapter_for("databricks").dialect == "databricks"
+    assert adapter_for("mysql").dialect == "mysql"
     assert adapter_for("sqlite").dialect == "sqlite"
 
 
@@ -208,6 +209,69 @@ def test_databricks_adapter_emits_native_sql_with_exact_percentile() -> None:
     assert "INTERVAL '3' MONTH" in sql
     assert sql.endswith("LIMIT 10")
     assert adapter_for("databricks").supports_percentile_cont()
+
+
+def test_mysql_type_map() -> None:
+    a = adapter_for("mysql")
+    assert a.map_type(NormalizedType.STRING) == "VARCHAR(255)"
+    assert a.map_type(NormalizedType.INT) == "BIGINT"
+    assert a.map_type(NormalizedType.DECIMAL) == "DECIMAL(38, 10)"
+    assert a.map_type(NormalizedType.TIMESTAMP) == "DATETIME"
+    assert a.map_type(NormalizedType.JSON) == "JSON"
+
+
+def test_mysql_adapter_quotes_with_backticks_and_limits() -> None:
+    sql = adapter_for("mysql").emit(sqlglot.parse_one("SELECT amount FROM orders"), limit=10)
+    assert sql == "SELECT `amount` FROM `orders` LIMIT 10"
+
+
+def test_mysql_adapter_has_no_exact_percentile() -> None:
+    """MySQL has no ordered-set aggregate, so the compiler takes the CUME_DIST fallback."""
+    assert not adapter_for("mysql").supports_percentile_cont()
+
+
+@pytest.mark.parametrize(
+    ("unit", "expected"),
+    [
+        ("day", "CAST(`o`.`d` AS DATE)"),
+        ("week", "DATE_SUB(CAST(`o`.`d` AS DATE), INTERVAL (WEEKDAY(`o`.`d`)) DAY)"),
+        ("month", "DATE_SUB(CAST(`o`.`d` AS DATE), INTERVAL (DAYOFMONTH(`o`.`d`) - 1) DAY)"),
+        (
+            "quarter",
+            "DATE_ADD(MAKEDATE(YEAR(`o`.`d`), 1), INTERVAL (QUARTER(`o`.`d`) - 1) QUARTER)",
+        ),
+        ("year", "MAKEDATE(YEAR(`o`.`d`), 1)"),
+    ],
+)
+def test_mysql_date_trunc_buckets_to_the_start_of_the_period(unit: str, expected: str) -> None:
+    """sqlglot's own DATE_TRUNC rewrite counts units from year 0, so a week would start on Sunday."""
+    trunc = exp.func("DATE_TRUNC", exp.Literal.string(unit), exp.column("d", table="o"))
+    sql = adapter_for("mysql").emit(exp.select(trunc).from_("o"))
+    assert sql == f"SELECT {expected} FROM `o`"
+
+
+def test_mysql_watermark_cast_keeps_wall_clock_text() -> None:
+    """MySQL's ``DATETIME`` has no offset, so the watermark literal must not carry one."""
+    neutral = sqlglot.parse_one(
+        "SELECT 1 FROM t WHERE d <= CAST('2025-03-13T23:59:59-04:00' AS TIMESTAMPTZ)",
+        dialect="postgres",
+    )
+    sql = adapter_for("mysql").emit(neutral)
+    assert "'2025-03-13 23:59:59'" in sql
+    assert "-04:00" not in sql
+
+
+def test_mysql_bare_decimal_cast_keeps_its_fraction() -> None:
+    """A bare ``DECIMAL`` is ``DECIMAL(10, 0)`` in MySQL and would round every fraction away."""
+    neutral = sqlglot.parse_one("SELECT CAST(x AS NUMERIC), CAST(y AS NUMERIC(10, 2)) FROM t")
+    sql = adapter_for("mysql").emit(neutral)
+    assert "CAST(`x` AS DECIMAL(65, 30))" in sql
+    assert "CAST(`y` AS DECIMAL(10, 2))" in sql
+
+
+def test_mysql_adapter_refuses_writes() -> None:
+    with pytest.raises(exc.ReadOnlyViolation):
+        adapter_for("mysql").emit(sqlglot.parse_one("DELETE FROM t", dialect="mysql"))
 
 
 def test_sqlite_watermark_cast_keeps_wall_clock_text() -> None:

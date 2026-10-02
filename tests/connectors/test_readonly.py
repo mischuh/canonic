@@ -72,3 +72,24 @@ class TestDatabricksDialect:
     def test_writes_still_rejected(self, sql: str) -> None:
         with pytest.raises(ReadOnlyViolation):
             assert_read_only(sql, dialect="databricks")
+
+
+class TestMySQLDialect:
+    def test_backticks_need_mysql_dialect(self) -> None:
+        sql = "SELECT `order`.`id` FROM `shop`.`order`"
+        with pytest.raises(ReadOnlyViolation):
+            assert_read_only(sql)
+        assert_read_only(sql, dialect="mysql")  # must not raise
+
+    @pytest.mark.parametrize(
+        "sql",
+        [
+            "DELETE FROM t",
+            "DROP TABLE t",
+            "SELECT 1; SELECT 2",
+            "SELECT * FROM t INTO OUTFILE '/tmp/x'",
+        ],
+    )
+    def test_writes_still_rejected(self, sql: str) -> None:
+        with pytest.raises(ReadOnlyViolation):
+            assert_read_only(sql, dialect="mysql")

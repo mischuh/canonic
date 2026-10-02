@@ -1,0 +1,82 @@
+---
+title: "Guide: MySQL"
+description: "Connect canonic to a MySQL 8 database with a read-only user, bootstrap a semantic layer, and run your first query."
+---
+
+This guide connects canonic to a MySQL server from scratch: a user that can only read, a connection, and a first bootstrapped semantic layer with a query. Use a small database while you follow it, so you do not touch real data by accident.
+
+<Info>The MySQL connector needs the `mysql` extra: `pip install 'canonic[mysql]'`. Without it, a MySQL connection fails with an install hint instead of a stack trace.</Info>
+
+## What you need
+
+- A MySQL server, version 8.0 or newer. Older servers have no common table expressions, which the compiler relies on, and `canonic connection test` reports them as unsupported.
+- A database with at least one table or view to read.
+- Permission to create a user and grant privileges on that database.
+
+## Why a dedicated user
+
+canonic parses every statement and refuses anything that is not a single `SELECT`. It also puts each session into `TRANSACTION READ ONLY` and sets `max_execution_time` before it runs your query, so MySQL itself rejects writes. The grants are still the strongest layer, so connect as a user that holds nothing beyond read access.
+
+<Steps>
+  <Step title="Create a read-only user">
+    Run this as an administrator, with your own names:
+
+    ```sql
+    CREATE USER 'canonic'@'%' IDENTIFIED BY 'choose-a-password';
+    GRANT SELECT ON shop.* TO 'canonic'@'%';
+    ```
+
+    Introspection reads `information_schema`, which shows a user only the tables it holds a privilege on.
+  </Step>
+  <Step title="Export the password">
+    canonic never stores a secret in `canonic.yaml`, only a reference to it. Set the password in your shell before you continue:
+
+    ```bash
+    export MYSQL_PASSWORD=choose-a-password
+    ```
+  </Step>
+  <Step title="Add the connection">
+    Run `canonic setup` and pick MySQL, or add the connection directly:
+
+    ```bash
+    canonic connection add --id warehouse --type mysql \
+      --param host=db.example.com \
+      --param user=canonic \
+      --param database=shop \
+      --credentials-ref env:MYSQL_PASSWORD --set-default
+    ```
+
+    To limit introspection to some schemas, add `schemas` and `tables` to the connection's `params` in `canonic.yaml`, see the [config reference](/reference/config-schema#connections). Set `ssl: true` to verify the server certificate when the server is not on a trusted network.
+  </Step>
+  <Step title="Test the connection">
+    ```bash
+    canonic connection test warehouse
+    ```
+
+    A passing test means the server answered and runs MySQL 8.0 or newer. Read-only is enforced by the engine for this connector, so no warning is printed.
+  </Step>
+</Steps>
+
+## Naming and types
+
+In MySQL a schema is a database, so relations are named `database.table`, for example `shop.orders`. canonic quotes every identifier it emits with backticks. Whether table names are case sensitive depends on the server's operating system and its `lower_case_table_names` setting. Introspection returns names exactly as the server stores them, so sources generated from it work as is.
+
+`tinyint(1)` columns are recorded as `bool`, as MySQL uses that type for booleans. `text`, `enum` and `set` columns are recorded as `string`, and `datetime` and `timestamp` as `timestamp`. `json` columns are recorded as `json`. Types without a counterpart, such as `blob` and the spatial types, are recorded as `json` with a warning.
+
+Row counts in the schema are the estimates MySQL keeps in `information_schema`, which are approximate for InnoDB tables and absent for views.
+
+## What differs from other engines
+
+MySQL has no `DATE_TRUNC`, so canonic renders each granularity as date arithmetic. Weeks start on Monday, quarters and months on their first day, and the result is a `DATE`.
+
+MySQL also has no ordered-set `PERCENTILE_CONT`. canonic computes percentiles with `CUME_DIST()` instead and returns an actual row value (nearest rank) where Postgres or Snowflake would interpolate between the two middle values. The result carries a warning about this.
+
+A `CAST(x AS DECIMAL)` without precision is `DECIMAL(10, 0)` in MySQL, which silently drops every fraction. canonic widens such a cast to `DECIMAL(65, 30)`. If you write your own `CAST`, give it an explicit precision and scale.
+
+## Authoring `expr` for MySQL
+
+canonic does not transpile the `expr` strings you write in metrics, dimensions and filters. Write them in MySQL SQL, for example `DATE_FORMAT(created_at, '%Y-%m')` and `IFNULL(discount, 0)`. MySQL has no `FILTER (WHERE ...)` clause, so use `SUM(CASE WHEN ... THEN amount END)` instead.
+
+## Limits
+
+This version authenticates with a user and password only. MariaDB is not tested. Result sets are capped by `row_limit` (default 10,000) and every statement runs under `statement_timeout_ms` (default 30,000), which MySQL applies as `max_execution_time` to `SELECT` statements.
