@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.30.0](https://github.com/mischuh/canonic/compare/v0.29.0...v0.30.0) (2026-10-02)
+
+
+### Features
+
+* **cli:** offer key-pair auth in the snowflake setup wizard ([#345](https://github.com/mischuh/canonic/issues/345)) ([6fb536b](https://github.com/mischuh/canonic/commit/6fb536b9694b092b3d9c33e0fe7cd12ae2ee1560))
+* **connectors:** add clickhouse connector and dialect adapter ([#350](https://github.com/mischuh/canonic/issues/350)) ([607d661](https://github.com/mischuh/canonic/commit/607d6619448b0494468f820bb718690e4fe44d73))
+* **connectors:** add databricks connector and dialect adapter ([#347](https://github.com/mischuh/canonic/issues/347)) ([9598150](https://github.com/mischuh/canonic/commit/95981506f218d82a87f29e6eb1af4505932c3a93))
+* **connectors:** add mysql connector and dialect adapter ([#349](https://github.com/mischuh/canonic/issues/349)) ([aeb5bb2](https://github.com/mischuh/canonic/commit/aeb5bb264f04d939d0188dc9919ecde775d787cc))
+* **connectors:** add snowflake connector and dialect adapter ([#343](https://github.com/mischuh/canonic/issues/343)) ([8b19211](https://github.com/mischuh/canonic/commit/8b19211f25e006cf88eb63ffda3af996e873c11d))
+* **connectors:** make adding a warehouse safer and report read-only enforcement ([#346](https://github.com/mischuh/canonic/issues/346)) ([ab3cea0](https://github.com/mischuh/canonic/commit/ab3cea0d1cbbafa3a047ec7eadc8606c3607019b))
+
+
+### Documentation
+
+* **connectors:** add databricks free edition and parity notes ([#348](https://github.com/mischuh/canonic/issues/348)) ([be187db](https://github.com/mischuh/canonic/commit/be187db7016043625ad84e072d8f36368fb8ebef))
+
 ## [0.29.0](https://github.com/mischuh/canonic/compare/v0.28.0...v0.29.0) (2026-10-01)
 
 
