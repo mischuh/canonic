@@ -176,3 +176,27 @@ def test_snowflake_adapter_emits_native_sql() -> None:
     assert 'PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY "o"."amount")' in sql
     assert sql.endswith("LIMIT 10")
     assert adapter_for("snowflake").supports_percentile_cont()
+
+
+def test_sqlite_watermark_cast_keeps_wall_clock_text() -> None:
+    """A ``CAST('<iso>' AS TIMESTAMPTZ)`` watermark must not collapse to an integer on SQLite.
+
+    SQLite gives an unknown type name NUMERIC affinity, so the cast turns the ISO string
+    into ``2025`` and every date column then compares as past the watermark. The adapter
+    rewrites it to the offset-free wall-clock text SQLite stores timestamps as.
+    """
+    import sqlite3
+
+    ast = sqlglot.parse_one(
+        "SELECT d FROM t WHERE d <= CAST('2025-03-13T23:59:59-04:00' AS TIMESTAMPTZ)",
+        dialect="postgres",
+    )
+    sql = adapter_for("sqlite").emit(ast)
+    assert "TIMESTAMPTZ" not in sql
+    con = sqlite3.connect(":memory:")
+    con.execute("CREATE TABLE t (d TEXT)")
+    con.executemany(
+        "INSERT INTO t VALUES (?)",
+        [("2025-03-10",), ("2025-03-13 12:00:00",), ("2025-03-14",)],
+    )
+    assert [r[0] for r in con.execute(sql)] == ["2025-03-10", "2025-03-13 12:00:00"]

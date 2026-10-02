@@ -111,6 +111,12 @@ The compiler builds one dialect-neutral SQLGlot AST. A dialect adapter transpile
 
 Dialects shipped today: **PostgreSQL**, **Redshift**, **Snowflake**, **DuckDB**, **SQLite**, matching the [queryable connectors](/concepts/connectors#queryable-primary). A dialect name with no registered adapter fails with `UnsupportedDialectError` (exit `13`) instead of silently compiling the wrong SQL flavor. Snowflake supports `PERCENTILE_CONT` natively. Because every identifier is quoted, source and column names must match the case Snowflake stores, which is upper case unless the object was created with a quoted lower-case name.
 
+### Timestamps on SQLite
+
+SQLite has no timestamp type and stores timestamps as text without a UTC offset. A [finality](/concepts/contracts-and-guardrails#finality) query compares the time column against the watermark, which the neutral AST emits as `CAST('2025-03-13T23:59:59-04:00' AS TIMESTAMPTZ)`. Every other dialect understands that cast. SQLite would turn it into the integer `2025` and classify every row as past the watermark.
+
+The SQLite adapter therefore rewrites the cast into the watermark's wall-clock text in its own timezone, here `'2025-03-13 23:59:59'`. The offset is dropped on purpose and the value is not converted to UTC. The watermark is defined as an instant in a business timezone, and a SQLite column holds local wall-clock values. Converting to UTC would shift the day boundary for date-only columns. If your SQLite timestamps are stored in UTC, express the watermark in UTC as well.
+
 ## Determinism & headless
 
 No part of the compiler consults an LLM or the wall clock (beyond an explicit `as_of` on relative dates). In headless/CI invocation, each error class maps to a distinct process exit code (`UNRESOLVED`, `AMBIGUOUS`, `UNREACHABLE`, `AMBIGUOUS_JOIN_PATH`, `UNSUPPORTED_MEASURE`, `FANOUT_UNSAFE`, `GUARDRAIL_BLOCK`, `VALIDATION_FAILED`, `ASSERTION_FAILED`), see [`canonic assert`](/cli-reference/query-sql-assert#canonic-assert) for how this backs the accuracy CI gate.
