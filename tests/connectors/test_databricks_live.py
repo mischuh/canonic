@@ -1,14 +1,15 @@
 """Live tests for the Databricks connector against a real workspace (``integration``).
 
 Skipped unless ``CANONIC_TEST_DATABRICKS_HOST`` is set. One-time setup: run
-``fixtures/databricks_live_setup.sql`` in a SQL editor. It creates the ``canonic_test.shop``
-data these tests assert on and grants a service principal read access only.
+``fixtures/databricks_live_setup.sql`` in a SQL editor. It creates the
+``workspace.canonic_test`` data these tests assert on.
 
 Environment:
     CANONIC_TEST_DATABRICKS_HOST         server hostname, required
     CANONIC_TEST_DATABRICKS_HTTP_PATH    SQL warehouse HTTP path, required
-    CANONIC_TEST_DATABRICKS_TOKEN        access token of the read-only principal, required
-    CANONIC_TEST_DATABRICKS_CATALOG      default canonic_test
+    CANONIC_TEST_DATABRICKS_TOKEN        access token, required
+    CANONIC_TEST_DATABRICKS_CATALOG      default workspace
+    CANONIC_TEST_DATABRICKS_SCHEMA       default canonic_test
 """
 
 from __future__ import annotations
@@ -31,8 +32,9 @@ pytestmark = [
 ]
 
 _PREFIX = "CANONIC_TEST_DATABRICKS_"
-_CATALOG = os.environ.get(f"{_PREFIX}CATALOG", "canonic_test")
-_ORDERS = f"`{_CATALOG}`.`shop`.`orders`"
+_CATALOG = os.environ.get(f"{_PREFIX}CATALOG", "workspace")
+_SCHEMA = os.environ.get(f"{_PREFIX}SCHEMA", "canonic_test")
+_ORDERS = f"`{_CATALOG}`.`{_SCHEMA}`.`orders`"
 
 
 def _connector(**extra_params: Any) -> DatabricksConnector:
@@ -40,7 +42,7 @@ def _connector(**extra_params: Any) -> DatabricksConnector:
         "server_hostname": os.environ[f"{_PREFIX}HOST"],
         "http_path": os.environ[f"{_PREFIX}HTTP_PATH"],
         "catalog": _CATALOG,
-        "schemas": ["shop"],
+        "schemas": [_SCHEMA],
         **extra_params,
     }
     return DatabricksConnector(
@@ -67,13 +69,13 @@ async def test_connection_reports_the_parse_only_warning(connector: DatabricksCo
 async def test_introspection_relations_and_kinds(connector: DatabricksConnector) -> None:
     by_relation = {s.relation: s for s in await connector.introspect_schema()}
 
-    assert {"shop.orders", "shop.customers", "shop.v_orders"} <= set(by_relation)
-    assert by_relation["shop.orders"].kind == "table"
-    assert by_relation["shop.v_orders"].kind == "view"
+    assert {f"{_SCHEMA}.orders", f"{_SCHEMA}.customers", f"{_SCHEMA}.v_orders"} <= set(by_relation)
+    assert by_relation[f"{_SCHEMA}.orders"].kind == "table"
+    assert by_relation[f"{_SCHEMA}.v_orders"].kind == "view"
 
 
 async def test_introspection_columns_and_declared_keys(connector: DatabricksConnector) -> None:
-    orders = {s.relation: s for s in await connector.introspect_schema()}["shop.orders"]
+    orders = {s.relation: s for s in await connector.introspect_schema()}[f"{_SCHEMA}.orders"]
 
     assert [(c.name, c.type) for c in orders.columns] == [
         ("id", "int"),
@@ -84,11 +86,11 @@ async def test_introspection_columns_and_declared_keys(connector: DatabricksConn
     assert orders.primary_key == ["id"]
     assert [
         (f.columns, f.references.relation, f.references.columns) for f in orders.foreign_keys
-    ] == [(["customer_id"], "shop.customers", ["id"])]
+    ] == [(["customer_id"], f"{_SCHEMA}.customers", ["id"])]
 
 
 async def test_describe_view(connector: DatabricksConnector) -> None:
-    columns = await connector.describe_relation(f"{_CATALOG}.shop.v_orders")
+    columns = await connector.describe_relation(f"{_CATALOG}.{_SCHEMA}.v_orders")
     assert [c.name for c in columns] == ["id", "customer_id", "amount"]
 
 

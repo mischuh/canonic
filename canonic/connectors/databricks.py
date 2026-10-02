@@ -237,7 +237,7 @@ class DatabricksConnector(ConnectorBase):
             "session_configuration": {
                 "STATEMENT_TIMEOUT": str(math.ceil(self._statement_timeout_ms / 1000)),
             },
-            "_user_agent_entry": _USER_AGENT,
+            "user_agent_entry": _USER_AGENT,
         }
         for key, value in (("catalog", self._catalog), ("schema", self._schema)):
             if value:
