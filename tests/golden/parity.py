@@ -2,8 +2,8 @@
 
 Authors write ``expr`` in their warehouse's own SQL and canonic does not transpile it, so
 the same metric can mean different numbers per dialect. These helpers seed the SQLite
-``setup.sql`` into DuckDB, Snowflake (through the in-process ``fakesnow`` emulator) and a real
-MySQL server, and point a project copy at it, which lets ``test_dialect_parity.py`` compare the engines'
+``setup.sql`` into DuckDB, Snowflake (through the in-process ``fakesnow`` emulator) and real
+MySQL and ClickHouse servers, and point a project copy at it, which lets ``test_dialect_parity.py`` compare the engines'
 answers case by case.
 """
 
@@ -22,6 +22,7 @@ if TYPE_CHECKING:
     from pathlib import Path
 
 __all__ = [
+    "CLICKHOUSE_PASSWORD_ENV",
     "DATABRICKS_TOKEN_ENV",
     "MYSQL_PASSWORD_ENV",
     "SNOWFLAKE_DATABASE",
@@ -29,6 +30,7 @@ __all__ = [
     "SNOWFLAKE_SCHEMA",
     "comparable_rows",
     "seed_statements",
+    "write_clickhouse_rental_project",
     "write_databricks_rental_project",
     "write_duckdb_rental_project",
     "write_mysql_rental_project",
@@ -45,6 +47,10 @@ DATABRICKS_TOKEN_ENV = "CANONIC_PARITY_DATABRICKS_TOKEN"
 
 MYSQL_PASSWORD_ENV = "CANONIC_PARITY_MYSQL_PASSWORD"
 
+CLICKHOUSE_PASSWORD_ENV = "CANONIC_PARITY_CLICKHOUSE_PASSWORD"
+
+_CLICKHOUSE_TABLE_SUFFIX = " ENGINE = MergeTree ORDER BY tuple()"
+
 _SIG_DIGITS = 9
 
 
@@ -53,6 +59,40 @@ def _text_as_varchar(node: exp.Expression) -> exp.Expression:
     if isinstance(node, exp.DataType) and node.this == exp.DataType.Type.TEXT:
         return exp.DataType.build("VARCHAR(255)")
     return node
+
+
+def _clickhouse_column(node: exp.Expression) -> exp.Expression:
+    """Make one column ClickHouse-shaped: drop constraints and keep ``Nullable`` only where needed.
+
+    sqlglot renders every type as ``Nullable(...)`` unless told otherwise, so a column that is
+    ``NOT NULL`` or a primary key opts out. SQLite stores dates as ``TEXT``, which ClickHouse
+    would not compare to a timestamp, so a text column named ``*_date`` becomes ``Date``.
+    """
+    if not isinstance(node, exp.ColumnDef):
+        return node
+    kinds = [c.args.get("kind") for c in node.args.get("constraints") or []]
+    required = any(
+        isinstance(kind, (exp.NotNullColumnConstraint, exp.PrimaryKeyColumnConstraint))
+        for kind in kinds
+    )
+    node.set("constraints", None)
+    data_type = node.args["kind"]
+    if data_type.this == exp.DataType.Type.TEXT and node.name.endswith("_date"):
+        data_type = exp.DataType.build("DATE")
+        node.set("kind", data_type)
+    data_type.set("nullable", False if required else None)
+    return node
+
+
+def _clickhouse_create(statement: exp.Create) -> str:
+    """Render a SQLite ``CREATE TABLE`` as ClickHouse DDL, which needs an engine and no keys."""
+    schema = statement.this
+    schema.set(
+        "expressions",
+        [c for c in schema.expressions if isinstance(c, exp.ColumnDef)],
+    )
+    statement = statement.transform(_clickhouse_column)
+    return statement.sql(dialect="clickhouse") + _CLICKHOUSE_TABLE_SUFFIX
 
 
 def seed_statements(setup_sql: str, dialect: str, *, identify: bool = False) -> list[str]:
@@ -65,6 +105,11 @@ def seed_statements(setup_sql: str, dialect: str, *, identify: bool = False) -> 
     statements = [s for s in parsed if not isinstance(s, exp.Pragma)]
     if dialect == "mysql":
         statements = [s.transform(_text_as_varchar) for s in statements]
+    if dialect == "clickhouse":
+        return [
+            _clickhouse_create(s) if isinstance(s, exp.Create) else s.sql(dialect=dialect)
+            for s in statements
+        ]
     return [s.sql(dialect=dialect, identify=identify) for s in statements]
 
 
@@ -106,6 +151,21 @@ def write_mysql_rental_project(
             "type": "mysql",
             "params": {"host": host, "port": port, "user": user, "database": database},
             "credentials_ref": f"env:{MYSQL_PASSWORD_ENV}",
+        },
+    )
+
+
+def write_clickhouse_rental_project(
+    source: Path, dest: Path, *, host: str, port: int, user: str, database: str
+) -> None:
+    """Copy the rental project to ``dest`` and point it at a ClickHouse server seeded with the data."""
+    _copy_project(
+        source,
+        dest,
+        {
+            "type": "clickhouse",
+            "params": {"host": host, "port": port, "user": user, "database": database},
+            "credentials_ref": f"env:{CLICKHOUSE_PASSWORD_ENV}",
         },
     )
 

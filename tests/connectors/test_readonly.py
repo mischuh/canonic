@@ -93,3 +93,25 @@ class TestMySQLDialect:
     def test_writes_still_rejected(self, sql: str) -> None:
         with pytest.raises(ReadOnlyViolation):
             assert_read_only(sql, dialect="mysql")
+
+
+class TestClickHouseDialect:
+    def test_clickhouse_only_syntax_needs_clickhouse_dialect(self) -> None:
+        sql = "SELECT quantileExactInclusive(0.5)(x) FROM t SETTINGS join_use_nulls = 1"
+        with pytest.raises(ReadOnlyViolation):
+            assert_read_only(sql)
+        assert_read_only(sql, dialect="clickhouse")  # must not raise
+
+    @pytest.mark.parametrize(
+        "sql",
+        [
+            "INSERT INTO t VALUES (1)",
+            "DROP TABLE t",
+            "ALTER TABLE t DELETE WHERE 1",
+            "SELECT 1; SELECT 2",
+            "SELECT * FROM t INTO OUTFILE '/tmp/x'",
+        ],
+    )
+    def test_writes_still_rejected(self, sql: str) -> None:
+        with pytest.raises(ReadOnlyViolation):
+            assert_read_only(sql, dialect="clickhouse")

@@ -599,6 +599,7 @@ def test_require_capability_passes_through_declared_cap(
 _EVIDENCE_ONLY_TYPES = {"dbt", "looker", "metabase", "notion", "url"}
 
 _QUERY_CONNECTIONS: dict[str, dict[str, Any]] = {
+    "clickhouse": {"host": "localhost", "user": "u", "database": "db"},
     "databricks": {"server_hostname": "dbc-1.cloud.databricks.com", "http_path": "/sql/1.0/w/x"},
     "duckdb": {"path": "x.duckdb"},
     "mysql": {"host": "localhost", "user": "u", "database": "db"},

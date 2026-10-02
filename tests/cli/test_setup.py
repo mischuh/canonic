@@ -521,6 +521,68 @@ def test_mysql_wizard_omits_an_empty_database(
     assert "database" not in conn.params
 
 
+def test_clickhouse_wizard_path(runner: CliRunner, tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.chdir(tmp_path)
+    _patch_connector(monkeypatch, _FakeConnector(Health(status="ok")))
+    answers = "\n".join(
+        [
+            "",  # project name
+            "",  # configure a connection now? → default yes
+            "8",  # connection type → clickhouse
+            "",  # id → warehouse_clickhouse
+            "ch.example.com",  # host
+            "n",  # HTTPS? → No
+            "",  # port → 8123
+            "",  # user → default
+            "events",  # database
+            "",  # password env var → default
+            "n",  # narrow schemas/tables? → No
+            "",  # configure an llm now? → default yes
+            "",  # llm provider
+            "",  # base url
+            "m",  # model
+            "",  # api key env
+            "",  # preview schema?
+        ]
+    )
+
+    result = runner.invoke(app, ["setup"], input=answers + "\n")
+
+    assert result.exit_code == 0, result.output
+    conn = load_config(tmp_path / "canonic.yaml").connections[0]
+    assert conn.type == "clickhouse"
+    assert conn.credentials_ref == "env:CANONIC_WAREHOUSE_CLICKHOUSE_PASSWORD"
+    assert conn.params == {
+        "host": "ch.example.com",
+        "port": 8123,
+        "user": "default",
+        "database": "events",
+    }
+    assert conn.read_only_role is None
+
+
+def test_clickhouse_wizard_https_defaults_to_the_secure_port(
+    runner: CliRunner, tmp_path: Path, monkeypatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    _patch_connector(monkeypatch, _FakeConnector(Health(status="ok")))
+    answers = "\n".join(
+        ["", "", "8", "", "abc.clickhouse.cloud", "y", "", "reader", "", "", "n"]
+        + ["", "", "", "m", "", ""]
+    )
+
+    result = runner.invoke(app, ["setup"], input=answers + "\n")
+
+    assert result.exit_code == 0, result.output
+    conn = load_config(tmp_path / "canonic.yaml").connections[0]
+    assert conn.params == {
+        "host": "abc.clickhouse.cloud",
+        "port": 8443,
+        "user": "reader",
+        "secure": True,
+    }
+
+
 def _snowflake_input(*auth_answers: str) -> str:
     """Wizard answers for a Snowflake connection, ``auth_answers`` starting at the auth prompt."""
     return "\n".join(

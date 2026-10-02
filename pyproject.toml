@@ -40,6 +40,9 @@ mysql = [
 databricks = [
     "databricks-sql-connector>=4.0",
 ]
+clickhouse = [
+    "clickhouse-connect>=1.9",
+]
 
 [project.scripts]
 canonic = "canonic.cli.app:app"
@@ -54,6 +57,7 @@ dev = [
     "ruff>=0.9",
     "testcontainers[postgres,mysql]>=4.0",
     "pymysql>=1.1",
+    "clickhouse-connect>=1.9",
     "fakesnow>=0.11",
 ]
 

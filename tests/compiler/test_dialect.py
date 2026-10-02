@@ -91,6 +91,7 @@ def test_adapter_for_registered_dialects() -> None:
     assert adapter_for("snowflake").dialect == "snowflake"
     assert adapter_for("databricks").dialect == "databricks"
     assert adapter_for("mysql").dialect == "mysql"
+    assert adapter_for("clickhouse").dialect == "clickhouse"
     assert adapter_for("sqlite").dialect == "sqlite"
 
 
@@ -272,6 +273,114 @@ def test_mysql_bare_decimal_cast_keeps_its_fraction() -> None:
 def test_mysql_adapter_refuses_writes() -> None:
     with pytest.raises(exc.ReadOnlyViolation):
         adapter_for("mysql").emit(sqlglot.parse_one("DELETE FROM t", dialect="mysql"))
+
+
+def test_clickhouse_type_map() -> None:
+    a = adapter_for("clickhouse")
+    assert a.map_type(NormalizedType.STRING) == "String"
+    assert a.map_type(NormalizedType.INT) == "Int64"
+    assert a.map_type(NormalizedType.DECIMAL) == "Decimal(38, 10)"
+    assert a.map_type(NormalizedType.BOOL) == "Bool"
+    assert a.map_type(NormalizedType.TIMESTAMP) == "DateTime64(3)"
+    assert a.map_type(NormalizedType.JSON) == "String"
+
+
+def test_clickhouse_adapter_quotes_with_double_quotes_and_limits() -> None:
+    sql = adapter_for("clickhouse").emit(sqlglot.parse_one("SELECT amount FROM orders"), limit=10)
+    assert sql == 'SELECT "amount" FROM "orders" LIMIT 10'
+
+
+def test_clickhouse_adapter_keeps_a_native_percentile() -> None:
+    """The percentile is rewritten to ``quantileExactInclusive``, so no window fallback is needed."""
+    assert adapter_for("clickhouse").supports_percentile_cont()
+
+
+@pytest.mark.parametrize(
+    ("order", "fraction"),
+    [("v", "0.25"), ("v DESC", "0.75")],
+)
+def test_clickhouse_percentile_interpolates_like_percentile_cont(order: str, fraction: str) -> None:
+    """``quantileExact`` would return an existing value, ``quantileExactInclusive`` interpolates."""
+    neutral = sqlglot.parse_one(
+        f"SELECT PERCENTILE_CONT(0.25) WITHIN GROUP (ORDER BY {order}) FROM t", dialect="postgres"
+    )
+    sql = adapter_for("clickhouse").emit(neutral)
+    assert (
+        sql == f'SELECT quantileExactInclusive({fraction})(CAST("v" AS Nullable(Float64))) FROM "t"'
+    )
+
+
+def test_clickhouse_percentile_with_several_ordering_keys_is_left_alone() -> None:
+    neutral = sqlglot.parse_one(
+        "SELECT PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY a, b) FROM t", dialect="postgres"
+    )
+    assert "quantileExactInclusive" not in adapter_for("clickhouse").emit(neutral)
+
+
+def test_clickhouse_week_starts_on_monday() -> None:
+    trunc = exp.func("DATE_TRUNC", exp.Literal.string("week"), exp.column("d", table="o"))
+    sql = adapter_for("clickhouse").emit(exp.select(trunc).from_("o"))
+    assert sql == 'SELECT dateTrunc(\'WEEK\', "o"."d") FROM "o"'
+
+
+def test_clickhouse_bare_decimal_cast_keeps_its_fraction() -> None:
+    """A bare ``Decimal`` is ``Decimal(10, 0)`` in ClickHouse and would round every fraction away."""
+    neutral = sqlglot.parse_one("SELECT CAST(x AS NUMERIC), CAST(y AS NUMERIC(10, 2)) FROM t")
+    sql = adapter_for("clickhouse").emit(neutral)
+    assert 'CAST("x" AS Nullable(Decimal(38, 10)))' in sql
+    assert 'CAST("y" AS Nullable(Decimal(10, 2)))' in sql
+
+
+def test_clickhouse_division_does_not_truncate_decimals() -> None:
+    """``Decimal(38, 2) / UInt64`` keeps two decimals in ClickHouse, so 2166.67 would read 2166.66."""
+    neutral = sqlglot.parse_one("SELECT s / NULLIF(c, 0) AS r FROM t")
+    sql = adapter_for("clickhouse").emit(neutral)
+    assert sql == 'SELECT CAST("s" AS Nullable(Float64)) / nullIf("c", 0) AS "r" FROM "t"'
+    assert adapter_for("clickhouse").emit(neutral) == sql  # idempotent on a second render
+
+
+def test_clickhouse_watermark_is_parsed_by_best_effort_not_cast() -> None:
+    """ClickHouse 25.8 turns ``CAST('<iso with offset>' AS DateTime)`` into NULL without an error."""
+    neutral = sqlglot.parse_one(
+        "SELECT 1 FROM t WHERE d <= CAST('2025-03-13T23:59:59-04:00' AS TIMESTAMPTZ)",
+        dialect="postgres",
+    )
+    sql = adapter_for("clickhouse").emit(neutral)
+    assert "parseDateTimeBestEffort('2025-03-13T23:59:59-04:00')" in sql
+    assert "CAST('2025" not in sql
+
+
+def test_clickhouse_join_carries_join_use_nulls() -> None:
+    """Without it a LEFT JOIN fills unmatched columns with ``0`` instead of NULL."""
+    neutral = sqlglot.parse_one("SELECT a.x FROM a LEFT JOIN b ON a.id = b.id")
+    sql = adapter_for("clickhouse").emit(neutral, limit=5)
+    assert sql.endswith("LIMIT 5 SETTINGS join_use_nulls = 1")
+
+
+def test_clickhouse_join_inside_a_cte_carries_join_use_nulls() -> None:
+    neutral = sqlglot.parse_one(
+        "WITH c AS (SELECT a.x FROM a CROSS JOIN b) SELECT x FROM c", dialect="postgres"
+    )
+    assert adapter_for("clickhouse").emit(neutral).endswith("SETTINGS join_use_nulls = 1")
+
+
+def test_clickhouse_query_without_a_join_has_no_settings_clause() -> None:
+    sql = adapter_for("clickhouse").emit(sqlglot.parse_one("SELECT x FROM a"))
+    assert "SETTINGS" not in sql
+
+
+def test_clickhouse_union_with_a_join_is_wrapped_to_carry_the_setting() -> None:
+    neutral = sqlglot.parse_one(
+        "SELECT a.x FROM a LEFT JOIN b ON a.id = b.id UNION ALL SELECT x FROM c"
+    )
+    sql = adapter_for("clickhouse").emit(neutral)
+    assert sql.startswith('SELECT * FROM (SELECT "a"."x" FROM "a" LEFT JOIN')
+    assert sql.endswith('AS "_u" SETTINGS join_use_nulls = 1')
+
+
+def test_clickhouse_adapter_refuses_writes() -> None:
+    with pytest.raises(exc.ReadOnlyViolation):
+        adapter_for("clickhouse").emit(sqlglot.parse_one("DELETE FROM t", dialect="clickhouse"))
 
 
 def test_sqlite_watermark_cast_keeps_wall_clock_text() -> None:

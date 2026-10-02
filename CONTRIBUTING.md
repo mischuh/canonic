@@ -61,12 +61,15 @@ its `.sql`/`.json` artifacts.
 
 Authors write `expr` in their warehouse's SQL and canonic does not transpile it, so
 `tests/golden/test_dialect_parity.py` runs every result-locked `rental` case on DuckDB
-and on Snowflake (the in-process `fakesnow` emulator) and MySQL and compares the numbers to the
+and on Snowflake (the in-process `fakesnow` emulator), MySQL and ClickHouse and compares the numbers to the
 committed SQLite golden. A difference is a bug to fix or a deliberate divergence listed
 in `_KNOWN_DIVERGENCES` with its reason. A new warehouse adds an engine to `_ENGINES`
 and a `rental_on_<engine>` fixture. The emulator proves the compiled SQL runs and agrees,
 not how the real warehouse behaves. MySQL has no emulator, so it runs against a real
-`mysql:8.4` container through testcontainers and is skipped when Docker is not available.
+`mysql:8.4` container through testcontainers and is skipped when Docker is not available. ClickHouse
+does the same with a `clickhouse/clickhouse-server:25.8` (LTS) container. Run on the oldest supported
+release, because newer ones can hide a difference (25.8 turns a `CAST` of a timestamp string with an
+offset into `NULL`, 26.x parses it).
 
 Databricks has no emulator, so its rental cases are compile-only in the same file. Each one must
 compile to SQL that parses as Databricks SQL and must not contain `PERCENTILE_APPROX`, which
