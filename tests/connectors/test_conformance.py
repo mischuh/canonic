@@ -601,6 +601,7 @@ _EVIDENCE_ONLY_TYPES = {"dbt", "looker", "metabase", "notion", "url"}
 _QUERY_CONNECTIONS: dict[str, dict[str, Any]] = {
     "databricks": {"server_hostname": "dbc-1.cloud.databricks.com", "http_path": "/sql/1.0/w/x"},
     "duckdb": {"path": "x.duckdb"},
+    "mysql": {"host": "localhost", "user": "u", "database": "db"},
     "postgres": {"host": "localhost", "user": "u", "dbname": "db"},
     "redshift": {"host": "localhost", "user": "u", "dbname": "db"},
     "snowflake": {"account": "xy12345", "user": "u", "warehouse": "WH", "database": "DB"},

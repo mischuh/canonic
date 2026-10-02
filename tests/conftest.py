@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any
 
@@ -24,7 +25,7 @@ from canonic.core.service import CanonicService
 from canonic.semantic.models import Column, Dimension, Measure, SemanticSource
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Iterator
     from pathlib import Path
 
 
@@ -227,3 +228,70 @@ def report_project(tmp_path: Path) -> Path:
         "  - title: Revenue by status\n    query: {metrics: [revenue], dimensions: [status]}\n"
     )
     return tmp_path
+
+
+@dataclass(frozen=True, slots=True)
+class MySQLServer:
+    """A throwaway MySQL 8 server shared by every test that needs a real one."""
+
+    host: str
+    port: int
+    user: str
+    password: str
+    root_password: str
+
+    def execute(
+        self, statements: list[str], *, database: str | None = None, root: bool = False
+    ) -> None:
+        """Run ``statements`` over a synchronous connection, as the test user or as root."""
+        import pymysql
+
+        connection = pymysql.connect(
+            host=self.host,
+            port=self.port,
+            user="root" if root else self.user,
+            password=self.root_password if root else self.password,
+            database=database,
+            autocommit=True,
+        )
+        try:
+            with connection.cursor() as cursor:
+                for statement in statements:
+                    cursor.execute(statement)
+        finally:
+            connection.close()
+
+    def new_database(self, name: str) -> str:
+        """Create an empty database the test user may fully use, so suites never share tables."""
+        self.execute(
+            [
+                f"CREATE DATABASE `{name}`",
+                f"GRANT ALL ON `{name}`.* TO '{self.user}'@'%'",
+            ],
+            root=True,
+        )
+        return name
+
+
+@pytest.fixture(scope="session")
+def mysql_server() -> Iterator[MySQLServer]:
+    """A real MySQL 8.4 in Docker, skipped cleanly when Docker or testcontainers is missing."""
+    try:
+        from testcontainers.mysql import MySqlContainer
+    except ImportError:
+        pytest.skip("testcontainers[mysql] not installed")
+    try:
+        container = MySqlContainer("mysql:8.4")
+        container.start()
+    except Exception as exc:  # Docker not running / image unavailable
+        pytest.skip(f"Docker unavailable: {exc}")
+    try:
+        yield MySQLServer(
+            host=container.get_container_host_ip(),
+            port=int(container.get_exposed_port(3306)),
+            user=container.username,
+            password=container.password,
+            root_password=container.root_password,
+        )
+    finally:
+        container.stop()

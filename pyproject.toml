@@ -34,6 +34,12 @@ tasks = [
 snowflake = [
     "snowflake-connector-python>=3.12",
 ]
+mysql = [
+    "pymysql>=1.1",
+]
+databricks = [
+    "databricks-sql-connector>=4.0",
+]
 
 [project.scripts]
 canonic = "canonic.cli.app:app"
@@ -46,7 +52,8 @@ dev = [
     "hypothesis>=6",
     "mypy>=1.0",
     "ruff>=0.9",
-    "testcontainers[postgres]>=4.0",
+    "testcontainers[postgres,mysql]>=4.0",
+    "pymysql>=1.1",
     "fakesnow>=0.11",
 ]
 

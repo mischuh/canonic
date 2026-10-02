@@ -71,6 +71,7 @@
           "guides/jaffle-shop",
           "guides/marketplace",
           "guides/marketplace-keycloak",
+          "guides/mysql",
           "guides/posthog-context-pack",
           "guides/rental",
           "guides/saas-analytics",

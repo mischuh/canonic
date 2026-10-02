@@ -2,8 +2,8 @@
 
 Authors write ``expr`` in their warehouse's own SQL and canonic does not transpile it, so
 the same metric can mean different numbers per dialect. These helpers seed the SQLite
-``setup.sql`` into DuckDB and Snowflake (through the in-process ``fakesnow`` emulator) and
-point a project copy at it, which lets ``test_dialect_parity.py`` compare the engines'
+``setup.sql`` into DuckDB, Snowflake (through the in-process ``fakesnow`` emulator) and a real
+MySQL server, and point a project copy at it, which lets ``test_dialect_parity.py`` compare the engines'
 answers case by case.
 """
 
@@ -23,6 +23,7 @@ if TYPE_CHECKING:
 
 __all__ = [
     "DATABRICKS_TOKEN_ENV",
+    "MYSQL_PASSWORD_ENV",
     "SNOWFLAKE_DATABASE",
     "SNOWFLAKE_PASSWORD_ENV",
     "SNOWFLAKE_SCHEMA",
@@ -30,6 +31,7 @@ __all__ = [
     "seed_statements",
     "write_databricks_rental_project",
     "write_duckdb_rental_project",
+    "write_mysql_rental_project",
     "write_snowflake_rental_project",
 ]
 
@@ -41,7 +43,16 @@ SNOWFLAKE_PASSWORD_ENV = "CANONIC_PARITY_SNOWFLAKE_PASSWORD"
 
 DATABRICKS_TOKEN_ENV = "CANONIC_PARITY_DATABRICKS_TOKEN"
 
+MYSQL_PASSWORD_ENV = "CANONIC_PARITY_MYSQL_PASSWORD"
+
 _SIG_DIGITS = 9
+
+
+def _text_as_varchar(node: exp.Expression) -> exp.Expression:
+    """Turn ``TEXT`` into ``VARCHAR(255)``, since MySQL cannot index or make a ``TEXT`` column unique."""
+    if isinstance(node, exp.DataType) and node.this == exp.DataType.Type.TEXT:
+        return exp.DataType.build("VARCHAR(255)")
+    return node
 
 
 def seed_statements(setup_sql: str, dialect: str, *, identify: bool = False) -> list[str]:
@@ -51,9 +62,10 @@ def seed_statements(setup_sql: str, dialect: str, *, identify: bool = False) -> 
     emits, and Snowflake only matches a quoted lower-case name against a table created that way.
     """
     parsed = [s for s in sqlglot.parse(setup_sql, read="sqlite") if s is not None]
-    return [
-        s.sql(dialect=dialect, identify=identify) for s in parsed if not isinstance(s, exp.Pragma)
-    ]
+    statements = [s for s in parsed if not isinstance(s, exp.Pragma)]
+    if dialect == "mysql":
+        statements = [s.transform(_text_as_varchar) for s in statements]
+    return [s.sql(dialect=dialect, identify=identify) for s in statements]
 
 
 def _copy_project(source: Path, dest: Path, connection: dict[str, Any]) -> None:
@@ -81,6 +93,21 @@ def write_duckdb_rental_project(source: Path, dest: Path, setup_sql: str) -> Non
             con.execute(statement)
     finally:
         con.close()
+
+
+def write_mysql_rental_project(
+    source: Path, dest: Path, *, host: str, port: int, user: str, database: str
+) -> None:
+    """Copy the rental project to ``dest`` and point it at a MySQL server seeded with the data."""
+    _copy_project(
+        source,
+        dest,
+        {
+            "type": "mysql",
+            "params": {"host": host, "port": port, "user": user, "database": database},
+            "credentials_ref": f"env:{MYSQL_PASSWORD_ENV}",
+        },
+    )
 
 
 def write_snowflake_rental_project(source: Path, dest: Path) -> None:

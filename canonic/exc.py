@@ -244,7 +244,7 @@ class UnknownConnectorType(ConnectionError):
 class UnsupportedDialectError(ConnectionError):
     """A dialect name has no compiler ``DialectAdapter`` — no silent SQL-flavor fallback.
 
-    Only postgres/redshift/duckdb/snowflake/databricks/sqlite (SPEC-E2 §.. — dialect coverage decided at
+    Only postgres/redshift/duckdb/snowflake/databricks/mysql/sqlite (SPEC-E2 §.. — dialect coverage decided at
     P0) have a real adapter in ``canonic.compiler.dialect.DIALECT_ADAPTERS``. ``adapter_for()`` used to
     construct a generic adapter for any dialect name sqlglot happened to recognize, or fall
     back to Postgres for anything else — silently compiling the wrong SQL flavor with no

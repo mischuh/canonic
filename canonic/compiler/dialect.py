@@ -11,6 +11,7 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from typing import cast
 
+import sqlglot
 from sqlglot import exp
 
 from canonic.exc import ReadOnlyViolation, UnsupportedDialectError
@@ -20,6 +21,7 @@ __all__ = [
     "DIALECT_ADAPTERS",
     "DatabricksDialectAdapter",
     "DialectAdapter",
+    "MySQLDialectAdapter",
     "PostgresDialectAdapter",
     "SQLiteDialectAdapter",
     "TYPE_TO_DIALECT",
@@ -82,6 +84,17 @@ _DATABRICKS_TYPE_MAP: dict[NormalizedType, str] = {
     NormalizedType.DATE: "DATE",
     NormalizedType.TIMESTAMP: "TIMESTAMP",
     NormalizedType.JSON: "STRING",
+}
+
+_MYSQL_TYPE_MAP: dict[NormalizedType, str] = {
+    NormalizedType.STRING: "VARCHAR(255)",
+    NormalizedType.INT: "BIGINT",
+    NormalizedType.DECIMAL: "DECIMAL(38, 10)",
+    NormalizedType.FLOAT: "DOUBLE",
+    NormalizedType.BOOL: "BOOLEAN",
+    NormalizedType.DATE: "DATE",
+    NormalizedType.TIMESTAMP: "DATETIME",
+    NormalizedType.JSON: "JSON",
 }
 
 _SQLITE_TYPE_MAP: dict[NormalizedType, str] = {
@@ -221,9 +234,11 @@ def _rewrite_date_trunc_for_sqlite(node: exp.Expression) -> exp.Expression:
     return cast("exp.Expression", exp.func("DATE", base, exp.Literal.string(modifier)))
 
 
-def _rewrite_timestamp_cast_for_sqlite(node: exp.Expression) -> exp.Expression:
+def _strip_offset_from_timestamp_cast(node: exp.Expression) -> exp.Expression:
     """Rewrite ``CAST('<iso>' AS TIMESTAMP[TZ])`` into the offset-free wall-clock text.
 
+    Used by SQLite and MySQL. MySQL's ``DATETIME`` has no offset either, and sqlglot renders the
+    cast as ``TIMESTAMP('<iso with offset>')``, which MySQL does not parse the offset of.
     SQLite gives an unknown type name NUMERIC affinity, so ``CAST('2025-03-13T23:59:59-04:00'
     AS TIMESTAMPTZ)`` evaluates to the integer ``2025`` and every date column then compares
     as past it. The finality watermark is the one place the compiler emits such a cast.
@@ -252,7 +267,7 @@ class SQLiteDialectAdapter(_GenericDialectAdapter):
     def emit(self, ast: exp.Expression, *, limit: int | None = None) -> str:
         ast = ast.transform(_rewrite_interval_arithmetic_for_sqlite)
         ast = ast.transform(_rewrite_date_trunc_for_sqlite)
-        ast = ast.transform(_rewrite_timestamp_cast_for_sqlite)
+        ast = ast.transform(_strip_offset_from_timestamp_cast)
         return super().emit(ast, limit=limit)
 
     def supports_percentile_cont(self) -> bool:
@@ -291,6 +306,66 @@ class DatabricksDialectAdapter(_GenericDialectAdapter):
         return super().emit(ast, limit=limit)
 
 
+# MySQL has no DATE_TRUNC. sqlglot's own rewrite counts whole units from year 0, which starts
+# weeks on Sunday where Postgres and the other engines start them on Monday, so each unit gets an
+# explicit template. ``__x`` stands for the truncated expression.
+_MYSQL_TRUNC_TEMPLATES: dict[str, str] = {
+    "day": "CAST(__x AS DATE)",
+    "week": "DATE_SUB(CAST(__x AS DATE), INTERVAL WEEKDAY(__x) DAY)",
+    "month": "DATE_SUB(CAST(__x AS DATE), INTERVAL (DAYOFMONTH(__x) - 1) DAY)",
+    "quarter": "DATE_ADD(MAKEDATE(YEAR(__x), 1), INTERVAL (QUARTER(__x) - 1) QUARTER)",
+    "year": "MAKEDATE(YEAR(__x), 1)",
+}
+
+
+def _rewrite_date_trunc_for_mysql(node: exp.Expression) -> exp.Expression:
+    """Rewrite ``DATE_TRUNC(unit, col)`` into MySQL date arithmetic that yields the bucket start."""
+    if not isinstance(node, exp.DateTrunc):
+        return node
+    unit = node.args.get("unit")
+    template = _MYSQL_TRUNC_TEMPLATES.get(unit.name.lower() if unit is not None else "")
+    if template is None:
+        return node
+    base = node.this
+    return cast(
+        "exp.Expression",
+        sqlglot.parse_one(template, read="mysql").transform(
+            lambda n: base.copy() if isinstance(n, exp.Column) and n.name == "__x" else n
+        ),
+    )
+
+
+def _widen_bare_decimal_for_mysql(node: exp.Expression) -> exp.Expression:
+    """Give a parameterless ``CAST(x AS DECIMAL)`` an explicit precision and scale.
+
+    MySQL reads a bare ``DECIMAL`` as ``DECIMAL(10, 0)``, which silently rounds every fraction
+    away, while Postgres, DuckDB and Snowflake keep them.
+    """
+    if not (
+        isinstance(node, exp.Cast)
+        and node.to.this == exp.DataType.Type.DECIMAL
+        and not node.to.expressions
+    ):
+        return node
+    return exp.Cast(this=node.this, to=exp.DataType.build("DECIMAL(65, 30)"))
+
+
+class MySQLDialectAdapter(_GenericDialectAdapter):
+    """MySQL renderer. Needs MySQL 8.0 for CTEs and has no ordered-set percentile aggregate."""
+
+    def __init__(self) -> None:
+        super().__init__("mysql", _MYSQL_TYPE_MAP)
+
+    def emit(self, ast: exp.Expression, *, limit: int | None = None) -> str:
+        ast = ast.transform(_rewrite_date_trunc_for_mysql)
+        ast = ast.transform(_strip_offset_from_timestamp_cast)
+        ast = ast.transform(_widen_bare_decimal_for_mysql)
+        return super().emit(ast, limit=limit)
+
+    def supports_percentile_cont(self) -> bool:
+        return False
+
+
 # Pre-built adapters for the supported query connectors. Redshift is Postgres
 # wire-compatible, so it reuses the Postgres type map (spec-drift A1) rather than getting
 # its own — but it's a first-class registry entry, not the "any sqlglot dialect works"
@@ -301,6 +376,7 @@ DIALECT_ADAPTERS: dict[str, DialectAdapter] = {
     "duckdb": _GenericDialectAdapter("duckdb", _DUCKDB_TYPE_MAP),
     "snowflake": _GenericDialectAdapter("snowflake", _SNOWFLAKE_TYPE_MAP),
     "databricks": DatabricksDialectAdapter(),
+    "mysql": MySQLDialectAdapter(),
     "sqlite": SQLiteDialectAdapter(),
 }
 
