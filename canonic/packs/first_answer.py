@@ -79,9 +79,7 @@ def _window_since(window: str) -> date | None:
 
 
 def _day_dimension(source: SemanticSource) -> Dimension | None:
-    col_by_name = {c.name: c for c in source.columns}
     for dim in source.dimensions:
-        col = col_by_name.get(dim.column)
-        if col is not None and col.type in _DATE_DIM_TYPES and dim.granularity == "day":
+        if dim.value_type(source.columns) in _DATE_DIM_TYPES and dim.granularity == "day":
             return dim
     return None

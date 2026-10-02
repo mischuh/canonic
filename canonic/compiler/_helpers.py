@@ -167,10 +167,11 @@ def _denied_filter_columns(
 ) -> frozenset[tuple[str, str]]:
     """``(source, physical column)`` pairs backing a dimension the policy denies."""
     return frozenset(
-        (src.name, dim.column)
+        (src.name, column)
         for src in sources_by_name.values()
         for dim in src.dimensions
         if not effective_policy.dimension_allowed(dim.name)
+        for column in dim.backing_columns()
     )
 
 
@@ -429,6 +430,18 @@ def _guardrail_join_sources(
     return referenced
 
 
+def _dimension_base_expr(source: str, dim: Dimension) -> exp.Expression:
+    """The dimension's value before time bucketing: its column, or its parsed ``expr``.
+
+    An ``expr`` is parsed and qualified to *source* the same way a measure expression is,
+    so it renders per dialect and never splices caller text into the SQL.
+    """
+    if dim.expr is not None:
+        return _qualify_to(_parse(dim.expr), source)
+    assert dim.column is not None  # noqa: S101 — Dimension guarantees column xor expr
+    return exp.column(dim.column, table=source)
+
+
 def _dimension_expr(
     source: str,
     dim: Dimension,
@@ -442,11 +455,25 @@ def _dimension_expr(
     dimension merging distinct underlying values into one output row is the intended
     effect of column masking, not a side effect to guard against.
     """
-    col = exp.column(dim.column, table=source)
+    col = _dimension_base_expr(source, dim)
     expr = _func("DATE_TRUNC", exp.Literal.string(dim.granularity), col) if dim.granularity else col
     if mask_strategy is not None:
         expr = _apply_mask(expr, mask_strategy)
     return expr
+
+
+def _dim_mask_strategy(mask: DimMask, source: str, dim: Dimension) -> MaskStrategy | None:
+    """The masking strategy that applies to *dim* on *source*, or ``None``.
+
+    A derived dimension reads columns a masking rule may name, so it fails closed: if any
+    column it reads is masked, the whole derived value is masked, not just a bare column.
+    Columns are checked in sorted order so the choice is deterministic.
+    """
+    for column in sorted(dim.backing_columns()):
+        strategy = mask.get((source, column))
+        if strategy is not None:
+            return strategy
+    return None
 
 
 def _apply_mask(expr: exp.Expression, strategy: MaskStrategy) -> exp.Expression:
@@ -479,7 +506,7 @@ def _resolve_dim_mask(
     convention ``tenancy.yaml``'s ``scoped_sources``/``shared_sources`` use — so a rule
     applies to every alias in this leaf's tree that resolves to that source, self-joins
     included. Returns an alias/column-keyed lookup so callers holding a
-    ``(src, dim.column)`` pair from :func:`_dimension_expr`'s call sites need only a plain
+    ``(src, column)`` pair from :func:`_dim_mask_strategy`'s call sites need only a plain
     dict lookup.
     """
     if not masking:
@@ -545,7 +572,7 @@ def _build_simple(
     aliases = measure_aliases or [m.measure.name for m in metrics]
     mask = dim_mask or {}
     for (src, dim), name in zip(dimensions, _dimension_output_names(dimensions), strict=True):
-        expr = _dimension_expr(src, dim, mask.get((src, dim.column)))
+        expr = _dimension_expr(src, dim, _dim_mask_strategy(mask, src, dim))
         projections.append(_alias(expr, name))
         group_exprs.append(expr)
     for i, m in enumerate(metrics):
@@ -587,7 +614,7 @@ def _build_dedup_inner(
     mask = dim_mask or {}
     for (src, dim), name in zip(dimensions, dim_names, strict=True):
         inner_projections.append(
-            _alias(_dimension_expr(src, dim, mask.get((src, dim.column))), name)
+            _alias(_dimension_expr(src, dim, _dim_mask_strategy(mask, src, dim)), name)
         )
     for m in metrics:
         for input_col in _input_columns(m.measure):
@@ -782,7 +809,7 @@ def _bind_name(
     a distinct_on column should resolve to the metric's owning source if present.
     """
     dim = _find_dimension(name, sources_by_name, owner, alias_to_source)
-    if dim is not None:
+    if dim is not None and dim[1].column is not None:
         return dim[0], dim[1].column
 
     # Priority 1: check the owner source first (if provided).
@@ -865,8 +892,7 @@ def _find_time_dim_name(
         source = sources_by_name.get(src_name)
         if source is None:
             continue
-        col = next((c for c in source.columns if c.name == dim.column), None)
-        if col is not None and col.type in _TIME_TYPES:
+        if dim.value_type(source.columns) in _TIME_TYPES:
             return dim.name
     return None
 
@@ -985,7 +1011,7 @@ def _build_finality_union(
         gate_col: exp.Expression | None = None
         for _src, dim in branch_dims:
             if dim.name == time_dim_name:
-                gate_col = exp.column(dim.column, table=src_name)
+                gate_col = _dimension_base_expr(src_name, dim)
                 break
         if gate_col is None:
             raise UnreachableError(
@@ -1053,7 +1079,7 @@ def _build_finality_union(
             select = select.select(*projections).from_(_alias(inner.subquery(), _DEDUP_ALIAS))
         else:
             for (b_src, dim), name in zip(branch_dims, dim_names, strict=True):
-                expr = _dimension_expr(b_src, dim, branch_dim_mask.get((b_src, dim.column)))
+                expr = _dimension_expr(b_src, dim, _dim_mask_strategy(branch_dim_mask, b_src, dim))
                 projections.append(_alias(expr, name))
                 group_exprs.append(expr)
             for i, m in enumerate(branch_metrics):

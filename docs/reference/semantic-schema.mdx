@@ -23,7 +23,7 @@ A semantic source (`semantics/<connection-id>/<name>.yaml`) is validated against
 | `finality` | `FinalityMeta` | `{watermark: null}` | Per-source finality watermark, see below. |
 | `meta` | `SourceMeta` | `{provenance: inferred}` | System-managed provenance metadata, see below. |
 
-Cross-field rules enforced at write time: column, measure, dimension, and join-alias names must each be unique within the file. Every `grain` entry and every `dimensions[].column` must reference a declared column. Every column a measure's `expr` touches must be declared. Violations raise a located `SemanticValidationError` (file + YAML path), not a silent drop.
+Cross-field rules enforced at write time: column, measure, dimension, and join-alias names must each be unique within the file. Every `grain` entry and every `dimensions[].column` must reference a declared column, and so must every column a `dimensions[].expr` touches. Every column a measure's `expr` touches must be declared. Violations raise a located `SemanticValidationError` (file + YAML path), not a silent drop.
 
 `name` is how every other file in the project refers to this source, in joins, metric bindings, and guardrails. `connection` ties the source to a connection defined in your project config, and `table` is the physical table or view the compiler queries at runtime. `grain` lists the columns that make each row unique. Get this wrong and join fanout can silently double-count measures, so the compiler treats it as a required declaration, not a guess.
 
@@ -69,18 +69,21 @@ A measure is `is_p0_compilable` only if it's `additive` and its `expr` parses to
 ```yaml
 dimensions:
   - { name: order_date, column: created_at, granularity: day, label: "Order Date" }
+  - { name: charge_date, expr: "to_timestamp(created)", type: timestamp, granularity: day }
 ```
 
 | Field | Type | Default | Governs |
 | --- | --- | --- | --- |
 | `name` | `str` | n/a (required) | Dimension identifier, unique within the file. |
-| `column` | `str` | n/a (required) | Must reference a declared column. |
-| `granularity` | `str \| null` | `null` | Time bucketing, e.g. `day`, `month`. |
+| `column` | `str \| null` | `null` | Must reference a declared column. Exactly one of `column` and `expr`. |
+| `expr` | `str \| null` | `null` | Derived value computed from this source's declared columns. Exactly one of `column` and `expr`. |
+| `type` | `str \| null` | `null` | Required with `expr`, one of the normalized column types. Ignored with `column`. |
+| `granularity` | `str \| null` | `null` | Time bucketing, e.g. `day`, `month`. With `expr`, `type` must be `date` or `timestamp`. |
 | `label` | `str \| null` | `null` | Human-readable display name. |
 | `description` | `str \| null` | `null` | Free-text explanation. |
 | `aliases` | `list[str]` | `[]` | Alternate lookup names. |
 
-A dimension exposes a column for grouping or filtering. `column` must point at a column declared in `columns`, canonic won't infer or guess it. `granularity` only applies to time columns and controls how they get bucketed, for example `day` or `month`. Leave it `null` for non-time dimensions. `label` and `description` are for humans and agents reading the schema and don't affect compilation. `aliases` lets a dimension resolve under more than one name, useful when different teams call the same column by different names.
+A dimension exposes a column for grouping or filtering. `column` must point at a column declared in `columns`, canonic won't infer or guess it. `granularity` only applies to time columns and controls how they get bucketed, for example `day` or `month`. Leave it `null` for non-time dimensions. `expr` derives a value from the source's own columns, for example `to_timestamp(created)` for an epoch-seconds column or `split_part(email, '@', 2)` for a domain. It is written in the dialect of the connection (canonic does not translate it), may only read columns declared on the same source, and has no column to infer a type from, so `type` is required. A role's masking rule on any column an `expr` reads masks the whole derived value. Filters and `distinct_on` cannot reference a derived dimension by name, only raw columns. `label` and `description` are for humans and agents reading the schema and don't affect compilation. `aliases` lets a dimension resolve under more than one name, useful when different teams call the same column by different names.
 
 ## `joins[]`
 

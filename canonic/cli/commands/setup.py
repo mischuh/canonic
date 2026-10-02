@@ -499,10 +499,8 @@ def _best_dimension(source: SemanticSource) -> Dimension | None:
     """Prefer DATE/TIMESTAMP/BOOLEAN-backed dimensions; fall back to the first dimension."""
     if not source.dimensions:
         return None
-    col_by_name = {c.name: c for c in source.columns}
     for dim in source.dimensions:
-        col = col_by_name.get(dim.column)
-        if col is not None and col.type in _LOW_CARDINALITY_TYPES:
+        if dim.value_type(source.columns) in _LOW_CARDINALITY_TYPES:
             return dim
     return source.dimensions[0]
 

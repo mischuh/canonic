@@ -27,6 +27,7 @@ __all__ = [
     "SemanticSource",
     "SemanticValidationError",
     "SourceMeta",
+    "compute_dimension_fingerprint",
     "compute_measure_fingerprint",
 ]
 
@@ -160,17 +161,70 @@ def compute_measure_fingerprint(measure: Measure) -> str:
     return f"sha256:{digest}"
 
 
+def compute_dimension_fingerprint(dimension: Dimension) -> str | None:
+    """Stable sha256 over a derived dimension's definition, for drift detection (SPEC-E6 §7).
+
+    Covers ``(expr, type, description)`` as AMENDMENT-dimension-expr §5 specifies. A
+    column-based dimension has no expression to drift, so it has no fingerprint.
+    """
+    if dimension.expr is None:
+        return None
+    payload = {
+        "expr": dimension.expr,
+        "type": dimension.type.value if dimension.type else None,
+        "description": dimension.description,
+    }
+    digest = hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()
+    return f"sha256:{digest}"
+
+
 class Dimension(BaseModel):
-    """A column exposed for grouping/filtering, optionally time-bucketed."""
+    """A column or derived expression exposed for grouping/filtering, optionally time-bucketed.
+
+    Exactly one of ``column`` and ``expr`` is set (AMENDMENT-dimension-expr). An ``expr``
+    dimension has no source column to infer a type from, so ``type`` is required there.
+    """
 
     model_config = ConfigDict(frozen=True)
 
     name: str
-    column: str
+    column: str | None = None
+    expr: str | None = None  # [P1] derived dimension, same-source columns only
+    type: NormalizedType | None = None  # required with ``expr``, ignored for ``column``
     granularity: str | None = None  # [P1] time granularity, e.g. "day"
     label: str | None = None  # human-readable display name, e.g. "Product Type"
     description: str | None = None  # freetext explanation
     aliases: list[str] = []  # alternate lookup names, e.g. ["product_type"]
+
+    @model_validator(mode="after")
+    def _validate_column_xor_expr(self) -> Dimension:
+        if (self.column is None) == (self.expr is None):
+            raise ValueError(f"dimension {self.name!r} must set exactly one of 'column' and 'expr'")
+        if self.expr is not None and self.type is None:
+            raise ValueError(f"dimension {self.name!r} sets 'expr' and therefore requires 'type'")
+        if (
+            self.expr is not None
+            and self.granularity is not None
+            and self.type not in {NormalizedType.DATE, NormalizedType.TIMESTAMP}
+        ):
+            raise ValueError(
+                f"dimension {self.name!r} sets 'granularity' on an expression of type "
+                f"{self.type.value if self.type else None!r}; it must be date or timestamp"
+            )
+        return self
+
+    def backing_columns(self) -> set[str]:
+        """Physical column names this dimension reads (the one column, or the expr's columns)."""
+        if self.column is not None:
+            return {self.column}
+        assert self.expr is not None  # noqa: S101 — guaranteed by the validator above
+        return _columns_in_expr(self.expr)
+
+    def value_type(self, columns: list[Column]) -> NormalizedType | None:
+        """The dimension's type: declared for ``expr``, else the backing column's."""
+        if self.expr is not None:
+            return self.type
+        return next((c.type for c in columns if c.name == self.column), None)
 
 
 class Join(BaseModel):
@@ -272,13 +326,25 @@ class SemanticSource(BaseModel):
                     ("grain", i), f"grain column {g!r} is not a declared column"
                 )
 
-        # Dimension column references must be declared.
+        # Dimension column and expr references must be declared on this source.
         for i, dim in enumerate(self.dimensions):
-            if dim.column not in column_names:
-                raise SemanticValidationError(
-                    ("dimensions", i, "column"),
-                    f"dimension {dim.name!r} references undeclared column {dim.column!r}",
-                )
+            if dim.column is not None:
+                if dim.column not in column_names:
+                    raise SemanticValidationError(
+                        ("dimensions", i, "column"),
+                        f"dimension {dim.name!r} references undeclared column {dim.column!r}",
+                    )
+                continue
+            try:
+                refs = dim.backing_columns()
+            except ValueError as exc:
+                raise SemanticValidationError(("dimensions", i, "expr"), str(exc)) from exc
+            for ref in sorted(refs):
+                if ref not in column_names:
+                    raise SemanticValidationError(
+                        ("dimensions", i, "expr"),
+                        f"dimension {dim.name!r} references undeclared column {ref!r}",
+                    )
 
         # Measure expressions may reference only declared columns.
         for i, measure in enumerate(self.measures):

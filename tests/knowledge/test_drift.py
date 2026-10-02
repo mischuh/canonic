@@ -88,3 +88,33 @@ def test_never_validated_yields_signal(
     assert signal.age_days is None
     assert signal.last_validated_at is None
     assert "never validated" in signal.message
+
+
+def _derived_index(expr: str) -> EntityIndex:
+    from canonic.knowledge.validation import EntityIndex
+    from canonic.semantic.models import Column, Dimension, SemanticSource
+
+    source = SemanticSource(
+        name="charges",
+        connection="warehouse_pg",
+        table="stripe.charges",
+        grain=["id"],
+        columns=[Column(name="id", type="string"), Column(name="created", type="int")],
+        dimensions=[Dimension(name="charge_date", expr=expr, type="timestamp")],
+    )
+    return EntityIndex.from_sources([source])
+
+
+def test_changed_dimension_expr_flags_for_review(
+    make_page: Callable[..., KnowledgePage],
+) -> None:
+    """Changing a derived dimension's expr flags bound pages like a measure change (D6 AC1)."""
+    fq_name = "warehouse_pg.charges.charge_date"
+    bound = _derived_index("to_timestamp(created)").current_fingerprint(fq_name)
+    assert bound is not None
+    page = make_page(meta=KnowledgePageMeta(bound_fingerprints={fq_name: bound}))
+
+    assert DriftDetector().flagged_for_review(page, _derived_index("to_timestamp(created)")) == []
+    assert DriftDetector().flagged_for_review(
+        page, _derived_index("to_timestamp(created / 1000)")
+    ) == [fq_name]

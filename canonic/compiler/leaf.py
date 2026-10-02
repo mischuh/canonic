@@ -26,6 +26,7 @@ from canonic.compiler._helpers import (
     _build_deduped,
     _build_finality_union,
     _build_simple,
+    _dim_mask_strategy,
     _dimension_expr,
     _dimension_output_names,
     _enforce_guardrails,
@@ -569,7 +570,7 @@ def plan_leaf(
         strategy=strategy,
         dimensions=tuple(_dimension_output_names(dimensions)),
         dimension_exprs=tuple(
-            _render(_dimension_expr(src, dim, dim_mask.get((src, dim.column))))
+            _render(_dimension_expr(src, dim, _dim_mask_strategy(dim_mask, src, dim)))
             for src, dim in dimensions
         ),
         filters=tuple(_render(c) for c in scoping.where_conditions),

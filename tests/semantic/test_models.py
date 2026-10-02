@@ -105,6 +105,68 @@ def test_dimension_references_undeclared_column() -> None:
         SemanticSource.model_validate(raw)
 
 
+def test_dimension_with_column_and_expr_rejected() -> None:
+    raw = _minimal(
+        "  - { name: id, type: string }",
+        dimensions='  - { name: d, column: id, expr: "upper(id)", type: string }',
+    )
+    with pytest.raises(ValidationError, match="exactly one of 'column' and 'expr'"):
+        SemanticSource.model_validate(raw)
+
+
+def test_dimension_with_neither_column_nor_expr_rejected() -> None:
+    raw = _minimal("  - { name: id, type: string }", dimensions="  - { name: d }")
+    with pytest.raises(ValidationError, match="exactly one of 'column' and 'expr'"):
+        SemanticSource.model_validate(raw)
+
+
+def test_expr_dimension_requires_type() -> None:
+    raw = _minimal(
+        "  - { name: id, type: string }",
+        dimensions='  - { name: d, expr: "upper(id)" }',
+    )
+    with pytest.raises(ValidationError, match="requires 'type'"):
+        SemanticSource.model_validate(raw)
+
+
+def test_expr_dimension_references_undeclared_column() -> None:
+    raw = _minimal(
+        "  - { name: id, type: string }",
+        dimensions='  - { name: d, expr: "upper(ghost)", type: string }',
+    )
+    with pytest.raises(ValidationError, match="undeclared column 'ghost'"):
+        SemanticSource.model_validate(raw)
+
+
+def test_unparseable_expr_dimension_rejected() -> None:
+    raw = _minimal(
+        "  - { name: id, type: string }",
+        dimensions='  - { name: d, expr: "upper(", type: string }',
+    )
+    with pytest.raises(ValidationError, match="cannot parse expression"):
+        SemanticSource.model_validate(raw)
+
+
+def test_granularity_on_non_time_expr_rejected() -> None:
+    raw = _minimal(
+        "  - { name: id, type: string }",
+        dimensions='  - { name: d, expr: "upper(id)", type: string, granularity: day }',
+    )
+    with pytest.raises(ValidationError, match="must be date or timestamp"):
+        SemanticSource.model_validate(raw)
+
+
+def test_expr_dimension_with_declared_columns_parses() -> None:
+    raw = _minimal(
+        "  - { name: created, type: int }",
+        dimensions=(
+            '  - { name: d, expr: "to_timestamp(created)", type: timestamp, granularity: day }'
+        ),
+    )
+    src = SemanticSource.model_validate(raw)
+    assert src.dimensions[0].backing_columns() == {"created"}
+
+
 class TestIsP0Compilable:
     def test_additive_sum_is_compilable(self) -> None:
         assert Measure(name="r", expr="sum(amount)").is_p0_compilable is True

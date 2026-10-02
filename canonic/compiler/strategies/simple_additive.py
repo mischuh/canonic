@@ -118,9 +118,8 @@ def _time_column_names(
         if source is None:
             continue
         for dim in source.dimensions:
-            col = next((c for c in source.columns if c.name == dim.column), None)
-            if col is not None and col.type in _TIME_TYPES:
-                names.add(dim.column)
+            if dim.value_type(source.columns) in _TIME_TYPES:
+                names |= dim.backing_columns()
                 names.add(dim.name)
     return frozenset(names)
 
