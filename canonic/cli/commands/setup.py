@@ -1282,6 +1282,33 @@ def _prompt_snowflake_params() -> Connection:
     )
 
 
+def _prompt_databricks_params() -> Connection:
+    """Collect params for a Databricks SQL warehouse connection (host, HTTP path, token)."""
+    conn_id = typer.prompt("Connection id", default="warehouse_dbx")
+    params: dict[str, object] = {
+        "server_hostname": typer.prompt("Server hostname (e.g. dbc-1234.cloud.databricks.com)"),
+        "http_path": typer.prompt("SQL warehouse HTTP path (e.g. /sql/1.0/warehouses/abc123)"),
+        "catalog": typer.prompt("Catalog"),
+    }
+    env_var = typer.prompt(
+        "Env var holding the access token",
+        default=f"CANONIC_{conn_id.upper()}_TOKEN",
+    )
+    if not os.environ.get(env_var):
+        _console.print(
+            f"\n[yellow]note:[/yellow] [bold]{env_var}[/bold] is not set in your current shell.\n"
+            f"  Before the connection test runs, open a new terminal tab and export it:\n"
+            f"  [bold]export {env_var}=<your-access-token>[/bold]\n"
+            "  Setup progress is saved. If you need to exit now, re-run [bold]canonic setup[/bold] and it will resume here.\n"
+        )
+    return Connection(
+        id=conn_id,
+        type="databricks",
+        params=params,
+        credentials_ref=f"env:{env_var}",
+    )
+
+
 @dataclasses.dataclass(frozen=True, slots=True)
 class _ConnectorChoice:
     """One entry of the connection type menu: how it is listed and how its params are asked."""
@@ -1328,6 +1355,13 @@ _CONNECTOR_CHOICES: tuple[_ConnectorChoice, ...] = (
         "Snowflake",
         "— requires account/user/warehouse/credentials",
         _prompt_snowflake_params,
+        narrows_schema=True,
+    ),
+    _ConnectorChoice(
+        "databricks",
+        "Databricks",
+        "— SQL warehouse, requires hostname/HTTP path/access token",
+        _prompt_databricks_params,
         narrows_schema=True,
     ),
 )

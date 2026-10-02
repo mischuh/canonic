@@ -22,11 +22,13 @@ if TYPE_CHECKING:
     from pathlib import Path
 
 __all__ = [
+    "DATABRICKS_TOKEN_ENV",
     "SNOWFLAKE_DATABASE",
     "SNOWFLAKE_PASSWORD_ENV",
     "SNOWFLAKE_SCHEMA",
     "comparable_rows",
     "seed_statements",
+    "write_databricks_rental_project",
     "write_duckdb_rental_project",
     "write_snowflake_rental_project",
 ]
@@ -36,6 +38,8 @@ __all__ = [
 SNOWFLAKE_DATABASE = "RENTAL"
 SNOWFLAKE_SCHEMA = "PUBLIC"
 SNOWFLAKE_PASSWORD_ENV = "CANONIC_PARITY_SNOWFLAKE_PASSWORD"
+
+DATABRICKS_TOKEN_ENV = "CANONIC_PARITY_DATABRICKS_TOKEN"
 
 _SIG_DIGITS = 9
 
@@ -98,6 +102,26 @@ def write_snowflake_rental_project(source: Path, dest: Path) -> None:
                 "schema": SNOWFLAKE_SCHEMA,
             },
             "credentials_ref": f"env:{SNOWFLAKE_PASSWORD_ENV}",
+        },
+    )
+
+
+def write_databricks_rental_project(source: Path, dest: Path) -> None:
+    """Copy the rental project to ``dest`` and point it at a Databricks workspace.
+
+    There is no Databricks emulator, so the project is only ever compiled, never executed.
+    """
+    _copy_project(
+        source,
+        dest,
+        {
+            "type": "databricks",
+            "params": {
+                "server_hostname": "dbc-unused.cloud.databricks.com",
+                "http_path": "/sql/1.0/warehouses/unused",
+                "catalog": "rental",
+            },
+            "credentials_ref": f"env:{DATABRICKS_TOKEN_ENV}",
         },
     )
 

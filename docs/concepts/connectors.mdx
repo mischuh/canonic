@@ -43,6 +43,7 @@ Implement `introspect_schema` + `run_read_only_sql`: these feed the [semantic la
 | `duckdb` | Local `.duckdb` file, or reads CSV/Parquet/JSON directly. |
 | `redshift` | Postgres-compatible catalog surface. |
 | `snowflake` | `INFORMATION_SCHEMA` introspection, password or key-pair auth. Needs the `snowflake` extra: `pip install 'canonic[snowflake]'`. See the [Snowflake guide](/guides/snowflake). |
+| `databricks` | Unity Catalog `information_schema` introspection on a SQL warehouse, access token auth. Needs the `databricks` extra: `pip install 'canonic[databricks]'`. See the [Databricks guide](/guides/databricks). |
 
 <Note>
   Snowflake stores unquoted identifiers in upper case, and canonic quotes every identifier it emits. Relation and column names in a semantic source must therefore match the stored case, for example `PUBLIC.ORDERS`. Introspection returns names exactly as Snowflake stores them, so sources generated from it work as is. Snowflake has no read-only session flag, so point `read_only_role` at a role that only holds `SELECT` grants.
@@ -97,6 +98,7 @@ How far the engine itself enforces read-only differs per connector, and `canonic
 | `sqlite`, `duckdb` | Native. The file is opened read-only (not for `:memory:`). |
 | `postgres` | Native. Every statement runs in a transaction with `default_transaction_read_only = on`. |
 | `snowflake` | Role. Set `read_only_role` to a role holding `SELECT` grants only. Without one, the test passes with a warning. |
+| `databricks` | None. Databricks has no read-only session flag and no role to switch to, so connect as a service principal that holds `USE CATALOG`, `USE SCHEMA` and `SELECT` only. The test passes with a warning. |
 | `redshift` | None. Redshift has no equivalent session setting we rely on, so connect as a user that holds `SELECT` grants only. The test passes with a warning. |
 
 A connector without engine-side enforcement is still guarded by the parse check. The warning only says that nothing sits behind it.

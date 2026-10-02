@@ -58,3 +58,17 @@ class TestSnowflakeDialect:
     def test_writes_still_rejected(self, sql: str) -> None:
         with pytest.raises(ReadOnlyViolation):
             assert_read_only(sql, dialect="snowflake")
+
+
+class TestDatabricksDialect:
+    _VARIANT_PATH = "SELECT payload:user.id AS uid FROM `main`.`raw`.`events`"
+
+    def test_backticks_and_variant_path_need_databricks_dialect(self) -> None:
+        with pytest.raises(ReadOnlyViolation):
+            assert_read_only(self._VARIANT_PATH)
+        assert_read_only(self._VARIANT_PATH, dialect="databricks")  # must not raise
+
+    @pytest.mark.parametrize("sql", ["DELETE FROM t", "DROP TABLE t", "SELECT 1; SELECT 2"])
+    def test_writes_still_rejected(self, sql: str) -> None:
+        with pytest.raises(ReadOnlyViolation):
+            assert_read_only(sql, dialect="databricks")

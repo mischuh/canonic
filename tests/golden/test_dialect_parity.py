@@ -10,6 +10,10 @@ Snowflake runs on ``fakesnow``, an in-process emulator that translates to DuckDB
 the compiled Snowflake SQL parses, executes and yields the same numbers, not how the real
 warehouse behaves. Live behavior stays with the connector's own live tests.
 
+Databricks has no emulator, so it is compile-only here: every rental case must compile to SQL
+that parses as Databricks SQL and keeps percentiles exact. Its numbers are only checked by the
+live tests.
+
 A difference is either a bug to fix or a documented, deliberate divergence listed in
 ``_KNOWN_DIVERGENCES`` with the reason. It is never silently tolerated.
 """
@@ -23,17 +27,20 @@ from typing import TYPE_CHECKING
 import fakesnow
 import pytest
 import snowflake.connector
+import sqlglot
 
 from canonic.core.service import CanonicService
 
 from .cases import GoldenCase, load_all_cases
 from .conftest import EXAMPLES_ROOT
 from .parity import (
+    DATABRICKS_TOKEN_ENV,
     SNOWFLAKE_DATABASE,
     SNOWFLAKE_PASSWORD_ENV,
     SNOWFLAKE_SCHEMA,
     comparable_rows,
     seed_statements,
+    write_databricks_rental_project,
     write_duckdb_rental_project,
     write_snowflake_rental_project,
 )
@@ -121,6 +128,23 @@ async def test_engine_matches_sqlite_golden(
         f"the example's semantics mean the same on both, then fix the compiler or list the "
         f"case in _KNOWN_DIVERGENCES with the reason."
     )
+
+
+@pytest.mark.parametrize("case", _PARITY_CASES, ids=lambda c: c.id)
+def test_databricks_compiles_to_parseable_exact_sql(
+    case: GoldenCase, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from canonic.compiler.query import SemanticQuery
+
+    monkeypatch.setenv(DATABRICKS_TOKEN_ENV, "unused")
+    write_databricks_rental_project(EXAMPLES_ROOT / "rental", tmp_path)
+    service = CanonicService.from_project(tmp_path)
+
+    compiled = service.compile_query(SemanticQuery(**case.query))
+
+    assert compiled.dialect == "databricks"
+    assert sqlglot.parse_one(compiled.sql, read="databricks") is not None
+    assert "PERCENTILE_APPROX" not in compiled.sql.upper()
 
 
 def test_known_divergences_name_real_cases() -> None:

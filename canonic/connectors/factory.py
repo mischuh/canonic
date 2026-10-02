@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from canonic.connectors.databricks import DatabricksConnector
 from canonic.connectors.dbt import DbtConnector
 from canonic.connectors.duckdb import DuckDBConnector
 from canonic.connectors.evidence import GenericEvidenceConnector
@@ -129,6 +130,7 @@ class ConnectorFactory:
 
 def _build_default_factory() -> ConnectorFactory:
     factory = ConnectorFactory()
+    factory.register("databricks", DatabricksConnector)
     factory.register("dbt", _make_dbt)
     factory.register("duckdb", DuckDBConnector)
     factory.register("looker", LookerConnector)

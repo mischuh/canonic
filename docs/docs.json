@@ -65,6 +65,7 @@
       {
         "group": "Guides",
         "pages": [
+          "guides/databricks",
           "guides/dutch-railway",
           "guides/ecommerce",
           "guides/jaffle-shop",
