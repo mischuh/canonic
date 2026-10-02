@@ -1128,37 +1128,23 @@ def _prompt_connection_or_skip(root: Path) -> Connection | None:
 def _prompt_connection(root: Path) -> Connection:
     """Prompt for connection type then collect type-specific params, test-gated."""
     _console.print(Panel.fit("Configure the first data connection.", title="connection"))
-    _console.print(
-        "  [bold][1][/bold] SQLite   — local .db file, no credentials, works offline [dim](recommended for a first try)[/dim]"
-    )
-    _console.print(
-        "  [bold][2][/bold] DuckDB   — local .duckdb file, analytical workloads, no credentials"
-    )
-    _console.print("  [bold][3][/bold] Postgres — server-based, requires host/port/credentials")
-    _console.print("  [bold][4][/bold] Redshift — Amazon Redshift, requires host/port/credentials")
-    _console.print("  [bold][5][/bold] Snowflake — requires account/user/warehouse/credentials")
+    width = max(len(c.label) for c in _CONNECTOR_CHOICES)
+    for number, spec in enumerate(_CONNECTOR_CHOICES, start=1):
+        _console.print(f"  [bold][{number}][/bold] {spec.label:<{width}} {spec.description}")
+    numbers = " / ".join(f"{n}={c.type}" for n, c in enumerate(_CONNECTOR_CHOICES, start=1))
+    valid = ", ".join(str(n) for n in range(1, len(_CONNECTOR_CHOICES) + 1))
     while True:
-        choice = typer.prompt(
-            "Type [1=sqlite / 2=duckdb / 3=postgres / 4=redshift / 5=snowflake]", default="1"
-        )
-        if choice == "1":
-            conn = _prompt_sqlite_params()
-        elif choice == "2":
-            conn = _prompt_duckdb_params()
-        elif choice == "3":
-            conn = _prompt_postgres_params()
-        elif choice == "4":
-            conn = _prompt_redshift_params()
-        elif choice == "5":
-            conn = _prompt_snowflake_params()
-        else:
-            _console.print("[red]enter 1, 2, 3, 4 or 5[/red]")
+        choice = typer.prompt(f"Type [{numbers}]", default="1")
+        if not (choice.isdigit() and 1 <= int(choice) <= len(_CONNECTOR_CHOICES)):
+            _console.print(f"[red]enter one of {valid}[/red]")
             continue
+        spec = _CONNECTOR_CHOICES[int(choice) - 1]
+        conn = spec.prompt()
 
         health = _test_connection(conn)
         if health is not None and health.status == "ok":
             _console.print("[green]✓[/green] connection test passed")
-            if conn.type in ("postgres", "redshift", "snowflake"):
+            if spec.narrows_schema:
                 conn = _maybe_narrow_schema(conn)
             return conn
 
@@ -1291,14 +1277,60 @@ def _prompt_snowflake_params() -> Connection:
     )
 
 
+@dataclasses.dataclass(frozen=True, slots=True)
+class _ConnectorChoice:
+    """One entry of the connection type menu: how it is listed and how its params are asked."""
+
+    type: str
+    label: str
+    description: str
+    prompt: Callable[[], Connection]
+    #: Whether a passing connection test offers to narrow introspection to some schemas.
+    narrows_schema: bool = False
+
+
+#: The connection type menu in display order. The position is the number the user types.
+#: A new warehouse is added here and in the connector factory, nowhere else.
+_CONNECTOR_CHOICES: tuple[_ConnectorChoice, ...] = (
+    _ConnectorChoice(
+        "sqlite",
+        "SQLite",
+        "— local .db file, no credentials, works offline [dim](recommended for a first try)[/dim]",
+        _prompt_sqlite_params,
+    ),
+    _ConnectorChoice(
+        "duckdb",
+        "DuckDB",
+        "— local .duckdb file, analytical workloads, no credentials",
+        _prompt_duckdb_params,
+    ),
+    _ConnectorChoice(
+        "postgres",
+        "Postgres",
+        "— server-based, requires host/port/credentials",
+        _prompt_postgres_params,
+        narrows_schema=True,
+    ),
+    _ConnectorChoice(
+        "redshift",
+        "Redshift",
+        "— Amazon Redshift, requires host/port/credentials",
+        _prompt_redshift_params,
+        narrows_schema=True,
+    ),
+    _ConnectorChoice(
+        "snowflake",
+        "Snowflake",
+        "— requires account/user/warehouse/credentials",
+        _prompt_snowflake_params,
+        narrows_schema=True,
+    ),
+)
+
 #: connector type → the prompt function collecting its params, for a pack variant's
 #: pinned ``connector`` (§5.2, `_prompt_pack_connection` above).
 _CONNECTOR_PROMPTS: dict[str, Callable[[], Connection]] = {
-    "postgres": _prompt_postgres_params,
-    "redshift": _prompt_redshift_params,
-    "snowflake": _prompt_snowflake_params,
-    "sqlite": _prompt_sqlite_params,
-    "duckdb": _prompt_duckdb_params,
+    c.type: c.prompt for c in _CONNECTOR_CHOICES
 }
 
 
