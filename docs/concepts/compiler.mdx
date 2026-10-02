@@ -109,7 +109,7 @@ When a metric is composed from parts, the result inherits the **most conservativ
 
 The compiler builds one dialect-neutral SQLGlot AST. A dialect adapter transpiles it to the target engine: type mapping, identifier quoting, `LIMIT` injection, and the read-only guarantee. Adding a database and supporting its SQL dialect are independent concerns.
 
-Dialects shipped today: **PostgreSQL**, **Redshift**, **Snowflake**, **DuckDB**, **SQLite**, matching the [queryable connectors](/concepts/connectors#queryable-primary). A dialect name with no registered adapter fails with `UnsupportedDialectError` (exit `13`) instead of silently compiling the wrong SQL flavor. Snowflake supports `PERCENTILE_CONT` natively. Because every identifier is quoted, source and column names must match the case Snowflake stores, which is upper case unless the object was created with a quoted lower-case name.
+Dialects shipped today: **PostgreSQL**, **Redshift**, **Snowflake**, **Databricks**, **DuckDB**, **SQLite**, matching the [queryable connectors](/concepts/connectors#queryable-primary). A dialect name with no registered adapter fails with `UnsupportedDialectError` (exit `13`) instead of silently compiling the wrong SQL flavor. Snowflake supports `PERCENTILE_CONT` natively. Databricks does too, and the Databricks adapter keeps it exact rather than letting sqlglot rewrite it to the approximate `PERCENTILE_APPROX`. Because every identifier is quoted, source and column names must match the case Snowflake stores, which is upper case unless the object was created with a quoted lower-case name.
 
 ### Timestamps on SQLite
 

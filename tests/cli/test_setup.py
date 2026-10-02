@@ -435,6 +435,39 @@ def test_sqlite_connection_path(runner: CliRunner, tmp_path: Path, monkeypatch) 
     assert conn.credentials_ref is None
 
 
+def test_databricks_wizard_path(runner: CliRunner, tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.chdir(tmp_path)
+    _patch_connector(monkeypatch, _FakeConnector(Health(status="ok")))
+    answers = "\n".join(
+        [
+            "",  # project name
+            "",  # configure a connection now? → default yes
+            "6",  # connection type → databricks
+            "",  # id → warehouse_dbx
+            "dbc-1234.cloud.databricks.com",  # server hostname
+            "/sql/1.0/warehouses/abc123",  # http path
+            "analytics",  # catalog
+            "",  # token env var → default
+            "n",  # narrow schemas/tables? → No
+            "",  # configure an llm now? → default yes
+            "",  # llm provider
+            "",  # base url
+            "m",  # model
+            "",  # api key env
+            "",  # preview schema?
+        ]
+    )
+
+    result = runner.invoke(app, ["setup"], input=answers + "\n")
+
+    assert result.exit_code == 0, result.output
+    conn = load_config(tmp_path / "canonic.yaml").connections[0]
+    assert conn.type == "databricks"
+    assert conn.credentials_ref == "env:CANONIC_WAREHOUSE_DBX_TOKEN"
+    assert conn.params["catalog"] == "analytics"
+    assert conn.read_only_role is None
+
+
 def _snowflake_input(*auth_answers: str) -> str:
     """Wizard answers for a Snowflake connection, ``auth_answers`` starting at the auth prompt."""
     return "\n".join(

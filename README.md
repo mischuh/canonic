@@ -89,7 +89,7 @@ canonic setup
 
 ![canonic setup end-to-end on the vehicle rental example](https://raw.githubusercontent.com/mischuh/canonic/main/docs/demo_canonic_setup.gif)
 
-The wizard names your project, connects a source, optionally configures an LLM, drafts your semantics from the live schema, then runs a real query and shows the answer with its freshness and definition. A server-based database (Postgres, Redshift or Snowflake) or an LLM provider needs a credential in an environment variable *before* you run `canonic setup` (canonic never stores secrets in `canonic.yaml` directly).
+The wizard names your project, connects a source, optionally configures an LLM, drafts your semantics from the live schema, then runs a real query and shows the answer with its freshness and definition. A server-based database (Postgres, Redshift, Snowflake or Databricks) or an LLM provider needs a credential in an environment variable *before* you run `canonic setup` (canonic never stores secrets in `canonic.yaml` directly).
 
 Don't have a database handy? `examples/` ships 5 ready-to-run sample projects (dbt Jaffle Shop, e-commerce, vehicle rental, SaaS analytics, Dutch railway), see the [guides](https://docs.getcanonic.app/guides/jaffle-shop).
 

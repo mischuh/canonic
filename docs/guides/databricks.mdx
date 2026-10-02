@@ -1,0 +1,83 @@
+---
+title: "Guide: Databricks"
+description: "Connect canonic to a Databricks SQL warehouse with a read-only service principal, bootstrap a semantic layer, and run your first query."
+---
+
+This guide connects canonic to a Databricks workspace from scratch: a service principal that can only read, an access token, a connection, and a first bootstrapped semantic layer with a query. Use a small schema while you follow it, so you do not touch real data by accident.
+
+<Info>The Databricks connector needs the `databricks` extra: `pip install 'canonic[databricks]'`. Without it, a Databricks connection fails with an install hint instead of a stack trace.</Info>
+
+## What you need
+
+- A Databricks workspace with Unity Catalog and a **SQL warehouse**. A serverless warehouse is the cheapest way to start.
+- A catalog with at least one schema of tables or views to read.
+- Permission to create a service principal and grant privileges on the catalog.
+
+## Why a service principal
+
+Databricks has no read-only session flag and no role to switch to. A session runs as the principal that authenticated, so the safety of a connection is what that principal may do. canonic also parses every statement and refuses anything that is not a single `SELECT`, but the grants are the part Databricks itself enforces. `canonic connection test` passes with a warning that says as much.
+
+Connect as a dedicated service principal and grant it nothing beyond read access. Avoid your personal login for anything that runs unattended.
+
+<Steps>
+  <Step title="Create the service principal and a token">
+    In the workspace, open **Settings**, then **Identity and access**, and add a service principal. Generate a personal access token for it. Copy the token once, Databricks does not show it again.
+  </Step>
+  <Step title="Grant read access only">
+    Run this in a SQL editor as a user who owns the catalog, with your own names:
+
+    ```sql
+    GRANT USE CATALOG ON CATALOG analytics TO `canonic-sp`;
+    GRANT USE SCHEMA ON SCHEMA analytics.shop TO `canonic-sp`;
+    GRANT SELECT ON SCHEMA analytics.shop TO `canonic-sp`;
+    ```
+
+    The service principal also needs **Can use** on the SQL warehouse. Set that under the warehouse's permissions.
+  </Step>
+  <Step title="Find the connection details">
+    Open the SQL warehouse and its **Connection details** tab. You need the **Server hostname**, for example `dbc-1234abcd-5678.cloud.databricks.com`, and the **HTTP path**, for example `/sql/1.0/warehouses/abc123def456`.
+  </Step>
+  <Step title="Export the token">
+    canonic never stores a secret in `canonic.yaml`, only a reference to it. Set the token in your shell before you continue:
+
+    ```bash
+    export DATABRICKS_TOKEN=dapi...
+    ```
+  </Step>
+  <Step title="Add the connection">
+    Run `canonic setup` and pick Databricks, or add the connection directly:
+
+    ```bash
+    canonic connection add --id warehouse --type databricks \
+      --param server_hostname=dbc-1234abcd-5678.cloud.databricks.com \
+      --param http_path=/sql/1.0/warehouses/abc123def456 \
+      --param catalog=analytics \
+      --credentials-ref env:DATABRICKS_TOKEN --set-default
+    ```
+
+    To limit introspection to some schemas, add `schemas` and `tables` to the connection's `params` in `canonic.yaml`, see the [config reference](/reference/config-schema#connections).
+  </Step>
+  <Step title="Test the connection">
+    ```bash
+    canonic connection test warehouse
+    ```
+
+    A passing test prints a warning that read-only rests on the SQL parse guard. That is expected. It goes away only for engines that enforce it themselves.
+  </Step>
+</Steps>
+
+## Naming and types
+
+Unity Catalog identifiers are case-insensitive and stored in lower case. canonic quotes every identifier it emits, with backticks on Databricks, and introspection returns names exactly as Unity Catalog stores them, so sources generated from it work as is.
+
+Declared primary and foreign keys are informational in Databricks and optional. canonic reads them when your principal can see them, to help infer joins, and carries on without them when it cannot.
+
+`ARRAY`, `MAP`, `STRUCT`, `VARIANT` and `BINARY` columns are recorded as `json`. canonic emits `PERCENTILE_CONT` as the exact ordered-set aggregate and does not approximate it.
+
+## Authoring `expr` for Databricks
+
+canonic does not transpile the `expr` strings you write in metrics, dimensions and filters. Write them in Databricks SQL, for example `date_trunc('MONTH', created_at)` and `try_cast(amount AS DECIMAL(18, 2))`.
+
+## Limits
+
+This version authenticates with an access token only. OAuth machine-to-machine authentication is not supported yet. Result sets are capped by `row_limit` (default 10,000) and every statement runs under `statement_timeout_ms` (default 30,000).

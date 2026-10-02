@@ -76,7 +76,7 @@ class Connection(BaseModel):
     #: Where this connection's secret is resolved from, never the secret itself.
     #: ``env:``/``keyring:``/``file:`` resolve once to a fixed string; ``provider:<name>``
     #: resolves through a registered credential provider on every connect, for warehouses
-    #: whose credentials expire (Redshift IAM, and later Snowflake/BigQuery). The
+    #: whose credentials expire (Redshift IAM, and later Snowflake/Databricks/BigQuery). The
     #: parameters a provider needs to do its fetch (``region``, ``cluster_id``,
     #: ``db_user``, …) live in ``params`` and are not secrets, the same way a ``file:``
     #: path is not a secret.

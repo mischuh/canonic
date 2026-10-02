@@ -89,6 +89,7 @@ def test_adapter_for_registered_dialects() -> None:
     assert adapter_for("redshift").dialect == "redshift"
     assert adapter_for("duckdb").dialect == "duckdb"
     assert adapter_for("snowflake").dialect == "snowflake"
+    assert adapter_for("databricks").dialect == "databricks"
     assert adapter_for("sqlite").dialect == "sqlite"
 
 
@@ -176,6 +177,37 @@ def test_snowflake_adapter_emits_native_sql() -> None:
     assert 'PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY "o"."amount")' in sql
     assert sql.endswith("LIMIT 10")
     assert adapter_for("snowflake").supports_percentile_cont()
+
+
+def test_databricks_type_map() -> None:
+    a = adapter_for("databricks")
+    assert a.map_type(NormalizedType.STRING) == "STRING"
+    assert a.map_type(NormalizedType.INT) == "BIGINT"
+    assert a.map_type(NormalizedType.TIMESTAMP) == "TIMESTAMP"
+    assert a.map_type(NormalizedType.JSON) == "STRING"
+
+
+def test_databricks_adapter_emits_native_sql_with_exact_percentile() -> None:
+    """Identifiers use backticks and the percentile stays ``PERCENTILE_CONT``.
+
+    sqlglot's own Databricks generator turns the ordered-set form into ``PERCENTILE_APPROX``,
+    an approximation that would change the numbers, so the adapter must not let that through.
+    """
+    import sqlglot
+
+    neutral = sqlglot.parse_one(
+        "SELECT DATE_TRUNC('month', o.created_at) AS m, "
+        "PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY o.amount) AS p50 "
+        "FROM orders AS o WHERE o.created_at >= CURRENT_DATE - INTERVAL '3' MONTH",
+        dialect="postgres",
+    )
+    sql = adapter_for("databricks").emit(neutral, limit=10)
+    assert "DATE_TRUNC('MONTH', `o`.`created_at`)" in sql
+    assert "PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY `o`.`amount`)" in sql
+    assert "PERCENTILE_APPROX" not in sql
+    assert "INTERVAL '3' MONTH" in sql
+    assert sql.endswith("LIMIT 10")
+    assert adapter_for("databricks").supports_percentile_cont()
 
 
 def test_sqlite_watermark_cast_keeps_wall_clock_text() -> None:

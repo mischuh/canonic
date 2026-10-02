@@ -18,6 +18,7 @@ from canonic.semantic.models import NormalizedType
 
 __all__ = [
     "DIALECT_ADAPTERS",
+    "DatabricksDialectAdapter",
     "DialectAdapter",
     "PostgresDialectAdapter",
     "SQLiteDialectAdapter",
@@ -70,6 +71,17 @@ _SNOWFLAKE_TYPE_MAP: dict[NormalizedType, str] = {
     NormalizedType.DATE: "DATE",
     NormalizedType.TIMESTAMP: "TIMESTAMP_TZ",
     NormalizedType.JSON: "VARIANT",
+}
+
+_DATABRICKS_TYPE_MAP: dict[NormalizedType, str] = {
+    NormalizedType.STRING: "STRING",
+    NormalizedType.INT: "BIGINT",
+    NormalizedType.DECIMAL: "DECIMAL",
+    NormalizedType.FLOAT: "DOUBLE",
+    NormalizedType.BOOL: "BOOLEAN",
+    NormalizedType.DATE: "DATE",
+    NormalizedType.TIMESTAMP: "TIMESTAMP",
+    NormalizedType.JSON: "STRING",
 }
 
 _SQLITE_TYPE_MAP: dict[NormalizedType, str] = {
@@ -247,6 +259,38 @@ class SQLiteDialectAdapter(_GenericDialectAdapter):
         return False
 
 
+def _keep_exact_percentile_for_databricks(node: exp.Expression) -> exp.Expression:
+    """Keep ``PERCENTILE_CONT(q) WITHIN GROUP (ORDER BY col)`` exact on Databricks.
+
+    sqlglot's Spark and Databricks generators rewrite the ordered-set form into
+    ``PERCENTILE_APPROX(col, q)``, which is an approximation and returns different numbers.
+    Databricks supports the exact ordered-set aggregate natively, so the node is rebuilt as a
+    plain function call the generator leaves alone. The ordering keys lose their explicit
+    ``NULLS`` modifier, which the ordered-set syntax does not take and an aggregate ignores.
+    """
+    if not (isinstance(node, exp.WithinGroup) and isinstance(node.this, exp.PercentileCont)):
+        return node
+    keys: list[exp.Expression] = []
+    for ordered in node.expression.expressions:
+        key = ordered.this.copy()
+        keys.append(exp.Ordered(this=key, desc=True) if ordered.args.get("desc") else key)
+    return exp.WithinGroup(
+        this=exp.Anonymous(this="PERCENTILE_CONT", expressions=[node.this.this.copy()]),
+        expression=exp.Order(expressions=keys),
+    )
+
+
+class DatabricksDialectAdapter(_GenericDialectAdapter):
+    """Databricks renderer, which keeps percentiles exact instead of approximating them."""
+
+    def __init__(self) -> None:
+        super().__init__("databricks", _DATABRICKS_TYPE_MAP)
+
+    def emit(self, ast: exp.Expression, *, limit: int | None = None) -> str:
+        ast = ast.transform(_keep_exact_percentile_for_databricks)
+        return super().emit(ast, limit=limit)
+
+
 # Pre-built adapters for the supported query connectors. Redshift is Postgres
 # wire-compatible, so it reuses the Postgres type map (spec-drift A1) rather than getting
 # its own — but it's a first-class registry entry, not the "any sqlglot dialect works"
@@ -256,6 +300,7 @@ DIALECT_ADAPTERS: dict[str, DialectAdapter] = {
     "redshift": _GenericDialectAdapter("redshift", _POSTGRES_TYPE_MAP),
     "duckdb": _GenericDialectAdapter("duckdb", _DUCKDB_TYPE_MAP),
     "snowflake": _GenericDialectAdapter("snowflake", _SNOWFLAKE_TYPE_MAP),
+    "databricks": DatabricksDialectAdapter(),
     "sqlite": SQLiteDialectAdapter(),
 }
 
