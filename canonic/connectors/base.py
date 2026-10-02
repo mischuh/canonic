@@ -42,6 +42,7 @@ __all__ = [
     "Health",
     "JoinSpec",
     "ObservedQuery",
+    "ReadOnlyEnforcement",
     "ReadOnlyViolation",
     "RelationSchema",
     "ResultColumn",
@@ -70,6 +71,27 @@ class Capability(StrEnum):
     EXTRACT_EVIDENCE = "extract_evidence"
 
 
+class ReadOnlyEnforcement(StrEnum):
+    """How far a query connector's read-only guarantee reaches beyond the SQL parse guard.
+
+    Every connector runs ``assert_read_only`` before a statement leaves the process. This
+    says whether the warehouse itself also refuses writes on that session.
+    """
+
+    NATIVE = "native"
+    """The engine refuses writes on the session (read-only transaction or file mode)."""
+    ROLE = "role"
+    """The session runs under a role that is meant to hold SELECT grants only."""
+    PARSE_ONLY = "parse_only"
+    """Nothing but the parse guard stands between a bypass and a write."""
+
+
+READ_ONLY_PARSE_ONLY_WARNING = (
+    "read-only is enforced by the SQL parse guard only. "
+    "Connect with a role or user that holds SELECT grants and nothing else."
+)
+
+
 class AcquisitionTier(StrEnum):
     """Schema acquisition ladder tier that produced a RelationSchema."""
 
@@ -88,6 +110,8 @@ class Health(BaseModel):
 
     status: Literal["ok", "error"]
     message: str | None = None
+    #: Non-fatal findings on a passing test, such as a weak read-only guarantee.
+    warnings: tuple[str, ...] = ()
 
 
 class ColumnInfo(BaseModel):
@@ -401,6 +425,20 @@ class ConnectorBase(ABC):
     @abstractmethod
     async def test_connection(self) -> Health:
         """Test reachability and credentials; return Health."""
+
+    def read_only_enforcement(self) -> ReadOnlyEnforcement | None:
+        """Return how the warehouse enforces read-only, or ``None`` if the connector runs no SQL.
+
+        A connector advertising ``RUN_READ_ONLY_SQL`` must override this, which the
+        connector conformance suite checks.
+        """
+        return None
+
+    def read_only_warnings(self) -> tuple[str, ...]:
+        """Warnings for ``test_connection`` when read-only rests on the parse guard alone."""
+        if self.read_only_enforcement() is ReadOnlyEnforcement.PARSE_ONLY:
+            return (READ_ONLY_PARSE_ONLY_WARNING,)
+        return ()
 
     async def aclose(self) -> None:  # noqa: B027 — intentional no-op default; stateful subclasses override
         """Release any held resources (connection pools, sockets).

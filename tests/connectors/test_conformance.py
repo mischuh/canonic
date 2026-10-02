@@ -594,3 +594,43 @@ def test_require_capability_passes_through_declared_cap(
     cap = Capability.TEST_CONNECTION
     result = require_capability(any_offline_connector, cap)
     assert result is any_offline_connector
+
+
+_EVIDENCE_ONLY_TYPES = {"dbt", "looker", "metabase", "notion", "url"}
+
+_QUERY_CONNECTIONS: dict[str, dict[str, Any]] = {
+    "duckdb": {"path": "x.duckdb"},
+    "postgres": {"host": "localhost", "user": "u", "dbname": "db"},
+    "redshift": {"host": "localhost", "user": "u", "dbname": "db"},
+    "snowflake": {"account": "xy12345", "user": "u", "warehouse": "WH", "database": "DB"},
+    "sqlite": {"path": "x.db"},
+}
+
+
+def test_every_query_connector_type_is_covered_by_the_enforcement_check() -> None:
+    """A new warehouse type must be added to ``_QUERY_CONNECTIONS`` before this passes."""
+    from canonic.connectors.factory import default_factory
+
+    registered = set(default_factory.registered_types()) - _EVIDENCE_ONLY_TYPES
+    assert registered == set(_QUERY_CONNECTIONS)
+
+
+@pytest.mark.parametrize("connector_type", sorted(_QUERY_CONNECTIONS))
+def test_query_connectors_declare_their_read_only_enforcement(
+    connector_type: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from canonic.config import Connection
+    from canonic.connectors.base import ReadOnlyEnforcement
+    from canonic.connectors.factory import default_factory
+
+    monkeypatch.setenv("CANONIC_TEST_SECRET", "secret")
+    connection = Connection(
+        id="c",
+        type=connector_type,
+        params=_QUERY_CONNECTIONS[connector_type],
+        credentials_ref="env:CANONIC_TEST_SECRET" if connector_type != "sqlite" else None,
+    )
+    connector = default_factory.create(connection)
+
+    assert Capability.RUN_READ_ONLY_SQL in connector.capabilities()
+    assert isinstance(connector.read_only_enforcement(), ReadOnlyEnforcement)

@@ -133,7 +133,14 @@ def test(
                 health = await connector.test_connection()
             finally:
                 await connector.aclose()
-            results.append({"id": conn.id, "status": health.status, "message": health.message})
+            results.append(
+                {
+                    "id": conn.id,
+                    "status": health.status,
+                    "message": health.message,
+                    "warnings": list(health.warnings),
+                }
+            )
         return results
 
     results = asyncio.run(_run_tests())
@@ -147,6 +154,8 @@ def test(
         status_str = "[green]ok[/green]" if r["status"] == "ok" else "[red]error[/red]"
         msg_str = f"  {r['message']}" if r["message"] else ""
         _console.print(f"{r['id']}: {status_str}{msg_str}")
+        for warning in r["warnings"]:
+            _console.print(f"  [yellow]warning:[/yellow] {warning}")
 
     if not all_ok:
         raise typer.Exit(1)

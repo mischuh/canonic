@@ -886,6 +886,7 @@ def _prompt_pack_connection(root: Path, variant: Variant) -> Connection:
         health = _test_connection(conn)
         if health is not None and health.status == "ok":
             _console.print("[green]✓[/green] connection test passed")
+            _print_health_warnings(health)
             return conn
         if health is not None:
             _console.print(f"[red]connection test failed:[/red] {health.message}")
@@ -1144,6 +1145,7 @@ def _prompt_connection(root: Path) -> Connection:
         health = _test_connection(conn)
         if health is not None and health.status == "ok":
             _console.print("[green]✓[/green] connection test passed")
+            _print_health_warnings(health)
             if spec.narrows_schema:
                 conn = _maybe_narrow_schema(conn)
             return conn
@@ -1236,7 +1238,10 @@ def _prompt_snowflake_params() -> Connection:
         "warehouse": typer.prompt("Warehouse"),
         "database": typer.prompt("Database"),
     }
-    role = typer.prompt("Role (leave empty for the user's default)", default="")
+    role = typer.prompt(
+        "Read-only role holding SELECT grants only (recommended, empty uses the user's default)",
+        default="",
+    )
     while (auth := typer.prompt("Authentication [1=password / 2=key pair]", default="1")) not in (
         "1",
         "2",
@@ -1332,6 +1337,12 @@ _CONNECTOR_CHOICES: tuple[_ConnectorChoice, ...] = (
 _CONNECTOR_PROMPTS: dict[str, Callable[[], Connection]] = {
     c.type: c.prompt for c in _CONNECTOR_CHOICES
 }
+
+
+def _print_health_warnings(health: Health) -> None:
+    """Show the non-fatal findings of a passing connection test."""
+    for warning in health.warnings:
+        _console.print(f"[yellow]warning:[/yellow] {warning}")
 
 
 def _test_connection(conn: Connection) -> Health | None:

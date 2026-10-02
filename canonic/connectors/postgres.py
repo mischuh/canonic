@@ -28,6 +28,7 @@ from canonic.connectors.base import (
     ForeignKey,
     ForeignKeyRef,
     Health,
+    ReadOnlyEnforcement,
     RelationSchema,
     ResultColumn,
     ResultSet,
@@ -252,6 +253,9 @@ class PostgresConnector(ConnectorBase):
         except Exception as exc:  # by contract test_connection reports, never raises
             return Health(status="error", message=str(exc))
         return Health(status="ok")
+
+    def read_only_enforcement(self) -> ReadOnlyEnforcement:
+        return ReadOnlyEnforcement.NATIVE
 
     async def introspect_schema(self) -> list[RelationSchema]:
         engine = self._get_engine()
