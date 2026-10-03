@@ -97,3 +97,47 @@ def test_manifest_requires_at_least_one_variant():
         PackManifest.model_validate(
             {"pack": "x", "version": "0.1.0", "variants": [], "provides": {}}
         )
+
+
+def _manifest(**extra):
+    from canonic.packs.manifest import PackManifest
+
+    return PackManifest.model_validate(
+        {
+            "pack": "x",
+            "version": "0.2.0",
+            "variants": [{"id": "a", "label": "A", "mapping": "m.yaml"}],
+            "provides": {},
+            **extra,
+        }
+    )
+
+
+def test_manifest_without_min_canonic_version_is_always_compatible():
+    _manifest().check_compatible("0.1.0")
+
+
+@pytest.mark.parametrize("running", ["0.32.0", "0.32.1", "0.33.0", "1.0.0", "0.32.0.dev3"])
+def test_manifest_is_compatible_with_equal_or_newer_canonic(running):
+    _manifest(min_canonic_version="0.32.0").check_compatible(running)
+
+
+@pytest.mark.parametrize("running", ["0.31.0", "0.31.9", "0.9.0"])
+def test_manifest_rejects_older_canonic_with_an_upgrade_hint(running):
+    with pytest.raises(PackError, match=rf"needs canonic 0\.32\.0 or newer.*is canonic {running}"):
+        _manifest(min_canonic_version="0.32.0").check_compatible(running)
+
+
+def test_unknown_canonic_version_is_not_blocked():
+    _manifest(min_canonic_version="0.32.0").check_compatible("unknown")
+
+
+def test_min_canonic_version_must_be_a_plain_release():
+    with pytest.raises(ValidationError, match="plain release"):
+        _manifest(min_canonic_version=">=0.32")
+
+
+def test_misspelled_manifest_field_is_rejected():
+    """A typo in ``min_canonic_version`` would silently drop the guard, so it must fail."""
+    with pytest.raises(ValidationError, match="Extra inputs are not permitted"):
+        _manifest(min_canonc_version="0.32.0")

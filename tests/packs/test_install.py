@@ -146,3 +146,18 @@ def test_install_pack_is_idempotent_on_reinstall(tmp_path, fixture_pack_dir, wid
 
     sources = list_semantic_sources(root)
     assert len(sources) == 1
+
+
+def test_install_pack_refuses_a_too_old_canonic_before_writing(tmp_path, fixture_pack_dir):
+    """A pack that needs a newer canonic must not install a silently degraded copy."""
+    root = tmp_path / "project"
+    scaffold_project(root)
+    manifest = load_pack_manifest(fixture_pack_dir).model_copy(
+        update={"min_canonic_version": "999.0.0"}
+    )
+    variant = manifest.variant("duckdb")
+
+    with pytest.raises(PackError, match="needs canonic 999.0.0 or newer"):
+        install_pack(root, fixture_pack_dir, manifest, variant, {"connection_id": "widgets_db"})
+
+    assert not (root / "semantics" / "widgets_db").exists()
