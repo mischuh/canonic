@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.31.0](https://github.com/mischuh/canonic/compare/v0.30.0...v0.31.0) (2026-10-03)
+
+
+### Features
+
+* **semantic:** add expr and type to dimensions for derived values ([#351](https://github.com/mischuh/canonic/issues/351)) ([6406593](https://github.com/mischuh/canonic/commit/640659350b9dd725017fc6edbb575d23cffdf57b))
+
+
+### Bug Fixes
+
+* **compiler:** inline derived dimension expressions in filters ([#353](https://github.com/mischuh/canonic/issues/353)) ([964aa8a](https://github.com/mischuh/canonic/commit/964aa8adcca5782e80b4ce727aaf2b969391cbd5))
+
 ## [0.30.0](https://github.com/mischuh/canonic/compare/v0.29.0...v0.30.0) (2026-10-02)
 
 
