@@ -151,3 +151,48 @@ def test_masking_leaves_unrelated_expr_dimension_alone(charges, masked_resolver)
         principal=Principal(tenant=None, roles=("masked_viewer",)),
     )
     assert not isinstance(_projection(_select(result.sql), "charge_date"), exp.Null)
+
+
+def test_filter_on_expr_dimension_name_inlines_the_expression(charges, resolver) -> None:
+    """A time window over a derived time dimension filters on the expression, not a column."""
+    result = compile(
+        SemanticQuery(
+            metrics=["gross_revenue"],
+            dimensions=["email_domain"],
+            filters=["charge_date >= '2025-01-01'"],
+        ),
+        resolver,
+        [charges],
+    )
+    where = _select(result.sql).args["where"].sql(dialect="postgres").upper()
+    assert "TO_TIMESTAMP" in where
+    assert '"CHARGES"."CREATED"' in where
+    assert "DATE_TRUNC" not in where
+
+
+def test_filter_on_denied_expr_dimension_is_refused(charges) -> None:
+    from canonic.exc import Unreachable
+
+    binding = MetricBinding(
+        metric="gross_revenue",
+        canonical=CanonicalRef(source="charges", measure="gross_amount"),
+    )
+    policy = RolePolicy(
+        schema_="roles/v1",
+        claim="roles",
+        default_role="restricted",
+        roles={
+            "restricted": RoleDef(
+                metrics=AllowDenyPolicy(allow=["*"]),
+                dimensions=AllowDenyPolicy(allow=["*"], deny=["charge_date"]),
+            )
+        },
+    )
+    resolver = ContractResolver(bindings=[binding], guardrails=[], roles=policy)
+    with pytest.raises(Unreachable):
+        compile(
+            SemanticQuery(metrics=["gross_revenue"], filters=["charge_date >= '2025-01-01'"]),
+            resolver,
+            [charges],
+            principal=Principal(tenant=None, roles=("restricted",)),
+        )
