@@ -40,9 +40,13 @@ start, so the 30 day window always has data.
 | table | live | excluded on purpose |
 | --- | --- | --- |
 | `charges` | 6 succeeded USD charges | a failed charge, a test mode charge, a EUR charge |
-| `refunds` | 3 succeeded USD refunds | a failed refund, a refund of the test mode charge, a EUR refund |
+| `refunds` | 4 succeeded USD refunds, one of them without a charge | a failed refund, a refund of the test mode charge, a EUR refund |
 | `customers` | 4 | 1 test mode customer |
 | `subscriptions` | 6 (3 active, 1 past due, 1 trialing, 1 canceled) | 1 test mode subscription |
+
+`re_7` is a refund linked only to a payment intent, so it has no charge and cannot be classified
+as live or test. It is kept in `refunds_issued`, but `refunded_amount` never sees it, which is why
+`refunds_issued` (130.00) is higher than `refunded_amount` (115.00).
 
 `ch_6` was charged 40 days ago and refunded 2 days ago. It shows the difference between refunds by
 charge date (`refunded_amount`) and by refund date (`refunds_issued`).
@@ -59,7 +63,7 @@ All amounts in USD. Compare these with what `canonic query` returns.
 | `net_revenue`, first answer (last 30 days) | 395.00 | the 30 and 40 day old charges drop out, 470 - 75 |
 | `refund_rate` | 0.2130 | 115 / 540 |
 | `successful_payments` | 6 | |
-| `refunds_issued` | 115.00 | 25 on day 15, 50 on day 8, 40 on day 2 before today |
+| `refunds_issued` | 130.00 | 25 + 50 + 40 + 15, see below |
 | `new_customers` | 4 | |
 | `new_subscriptions` | 6 | |
 | `active_subscriptions` | 4 | 3 active and 1 past due |
