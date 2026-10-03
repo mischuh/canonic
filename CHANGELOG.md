@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.32.0](https://github.com/mischuh/canonic/compare/v0.31.0...v0.32.0) (2026-10-03)
+
+
+### Features
+
+* **packs:** add min_canonic_version to the pack manifest ([#359](https://github.com/mischuh/canonic/issues/359)) ([c0f33dd](https://github.com/mischuh/canonic/commit/c0f33dd13f00329434e9fc4e3c8b25e9e7837a22))
+* **semantic:** add json_path to dimensions ([#357](https://github.com/mischuh/canonic/issues/357)) ([de48035](https://github.com/mischuh/canonic/commit/de4803567126a168c42894de30070283b507b3c8))
+
+
+### Bug Fixes
+
+* **compiler:** parse authored expressions in the connection dialect ([#356](https://github.com/mischuh/canonic/issues/356)) ([210ac33](https://github.com/mischuh/canonic/commit/210ac3338c096c9f44ce79e936be2d41ec0db112))
+* **semantic:** reject unknown fields in semantic source files ([#358](https://github.com/mischuh/canonic/issues/358)) ([eb96b84](https://github.com/mischuh/canonic/commit/eb96b8425435aa1c8845468bb0331588b83662df))
+
 ## [0.31.0](https://github.com/mischuh/canonic/compare/v0.30.0...v0.31.0) (2026-10-03)
 
 
