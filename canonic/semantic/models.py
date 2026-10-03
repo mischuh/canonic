@@ -115,7 +115,7 @@ class PackSourceMeta(BaseModel):
 class Column(BaseModel):
     """A physical column exposed by the source."""
 
-    model_config = ConfigDict(frozen=True)
+    model_config = ConfigDict(frozen=True, extra="forbid")
 
     name: str
     type: NormalizedType
@@ -125,7 +125,7 @@ class Column(BaseModel):
 class Measure(BaseModel):
     """An aggregation over the source (e.g. sum(amount))."""
 
-    model_config = ConfigDict(frozen=True)
+    model_config = ConfigDict(frozen=True, extra="forbid")
 
     name: str
     expr: str
@@ -201,7 +201,7 @@ class Dimension(BaseModel):
     The last two have no column to infer a type from, so ``type`` is required there.
     """
 
-    model_config = ConfigDict(frozen=True)
+    model_config = ConfigDict(frozen=True, extra="forbid")
 
     name: str
     column: str | None = None
@@ -268,7 +268,7 @@ class Dimension(BaseModel):
 class Join(BaseModel):
     """A declared join path to another semantic source."""
 
-    model_config = ConfigDict(frozen=True)
+    model_config = ConfigDict(frozen=True, extra="forbid")
 
     to: str
     on: str
@@ -284,7 +284,7 @@ class Join(BaseModel):
 class Filter(BaseModel):
     """A named reusable predicate."""  # [P1]
 
-    model_config = ConfigDict(frozen=True)
+    model_config = ConfigDict(frozen=True, extra="forbid")
 
     name: str
     expr: str
@@ -293,7 +293,7 @@ class Filter(BaseModel):
 class FinalityMeta(BaseModel):
     """Finality watermark for provisional/final result tagging."""  # [P1]
 
-    model_config = ConfigDict(frozen=True)
+    model_config = ConfigDict(frozen=True, extra="forbid")
 
     watermark: str | None = None  # null = always-final source
 
@@ -331,7 +331,7 @@ def _columns_in_expr(expr: str) -> set[str]:
 class SemanticSource(BaseModel):
     """One queryable relation described for agent reasoning (SPEC-E5 §2.1)."""
 
-    model_config = ConfigDict(frozen=True)
+    model_config = ConfigDict(frozen=True, extra="forbid")
 
     name: str  # [P0] unique across the whole project (enforced by list_semantic_sources)
     connection: str  # [P0]

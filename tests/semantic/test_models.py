@@ -275,6 +275,36 @@ class TestDimensionFingerprint:
         )
 
 
+def test_misspelled_dimension_field_is_rejected() -> None:
+    """A typo such as ``jsno_path`` must fail loudly, not silently become a plain column dimension."""
+    raw = _minimal(
+        "  - { name: properties, type: json }",
+        dimensions='  - { name: u, column: properties, jsno_path: ["a"], type: string }',
+    )
+    with pytest.raises(ValidationError, match="Extra inputs are not permitted"):
+        SemanticSource.model_validate(raw)
+
+
+def test_unknown_measure_column_and_top_level_fields_are_rejected() -> None:
+    column = _minimal("  - { name: id, type: string, nulable: true }")
+    measure = _minimal(
+        "  - { name: amount, type: decimal }",
+        measures="  - { name: rev, expr: 'sum(amount)', aditivity: additive }",
+    )
+    top_level = _minimal("  - { name: id, type: string }")
+    top_level["descripton"] = "typo"
+    for raw in (column, measure, top_level):
+        with pytest.raises(ValidationError, match="Extra inputs are not permitted"):
+            SemanticSource.model_validate(raw)
+
+
+def test_unknown_keys_under_meta_are_still_tolerated() -> None:
+    """``meta`` is system-managed and ingestion writes draft keys the model does not declare."""
+    raw = _minimal("  - { name: id, type: string }")
+    raw["meta"] = {"provenance": "inferred", "grain_draft": {"columns": ["id"]}}
+    assert SemanticSource.model_validate(raw).meta.provenance.value == "inferred"
+
+
 class TestIsP0Compilable:
     def test_additive_sum_is_compilable(self) -> None:
         assert Measure(name="r", expr="sum(amount)").is_p0_compilable is True
