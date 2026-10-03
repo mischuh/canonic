@@ -11,7 +11,12 @@ import contextlib
 import logging
 from typing import TYPE_CHECKING, Any
 
-from canonic.compiler._helpers import _block_or_warn, _find_dimension, _query_references_dimension
+from canonic.compiler._helpers import (
+    _block_or_warn,
+    _find_dimension,
+    _query_references_dimension,
+    parse_dialect,
+)
 from canonic.compiler.compose import MetricLeaves, MetricPlan, compose
 from canonic.compiler.dialect import adapter_for
 from canonic.compiler.joins import build_alias_tree, reachable_dimension_names
@@ -342,41 +347,42 @@ def compile(  # noqa: A001 — the public verb for this capability is "compile"
     # collapse and a plain sum are the same thing to the compose step.
     dialect = _dialect_for_bindings(raw_bindings, sources_by_name, connection_dialects)
     logger.debug("stages 2-6: planning leaves for %d metric(s)", len(raw_bindings))
-    planned = [
-        _plan_metric(
-            name,
-            binding,
-            query,
-            resolver,
-            sources_by_name,
-            dialect,
-            bound_principal,
-            effective_policy,
+    with parse_dialect(dialect):
+        planned = [
+            _plan_metric(
+                name,
+                binding,
+                query,
+                resolver,
+                sources_by_name,
+                dialect,
+                bound_principal,
+                effective_policy,
+            )
+            for name, binding in raw_bindings
+        ]
+
+        leaves: list[LeafPlan] = []
+        metric_plans: list[MetricPlan] = []
+        for metric_leaves in planned:
+            metric_plans.append(metric_leaves.offset(len(leaves)))
+            leaves.extend(metric_leaves.leaves)
+
+        # Stage 5b — restrict_source, for the metrics that resolve to a single source/measure.
+        single_kind = [
+            _bind_metric(name, b, sources_by_name)
+            for name, b in raw_bindings
+            if b.kind is BindingKind.SINGLE
+        ]
+        restrict_warnings = (
+            _enforce_restrict_source(query, single_kind, resolver, None, sources_by_name)
+            if single_kind
+            else []
         )
-        for name, binding in raw_bindings
-    ]
 
-    leaves: list[LeafPlan] = []
-    metric_plans: list[MetricPlan] = []
-    for metric_leaves in planned:
-        metric_plans.append(metric_leaves.offset(len(leaves)))
-        leaves.extend(metric_leaves.leaves)
-
-    # Stage 5b — restrict_source, for the metrics that resolve to a single source/measure.
-    single_kind = [
-        _bind_metric(name, b, sources_by_name)
-        for name, b in raw_bindings
-        if b.kind is BindingKind.SINGLE
-    ]
-    restrict_warnings = (
-        _enforce_restrict_source(query, single_kind, resolver, None, sources_by_name)
-        if single_kind
-        else []
-    )
-
-    # Stages 6b-7 — fuse identical leaves, join them over a shared grain, emit one statement.
-    logger.debug("stage 6b: composing %d leaves", len(leaves))
-    composed = compose(leaves, metric_plans, sources_by_name, dedup=_dedup_leaves)
+        # Stages 6b-7 — fuse identical leaves, join them over a shared grain, emit one statement.
+        logger.debug("stage 6b: composing %d leaves", len(leaves))
+        composed = compose(leaves, metric_plans, sources_by_name, dedup=_dedup_leaves)
     adapter = adapter_for(dialect)
     sql = adapter.emit(composed.ast, limit=query.limit)
 
