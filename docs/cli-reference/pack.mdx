@@ -7,6 +7,8 @@ description: "Install a curated context pack: templated semantics/contracts/know
 
 Packs live in a **pack repo**: a git repository (or local directory) of `packs/<name>/pack.yaml` manifests. `--repo` accepts either a git URL or a local path; when omitted it falls back to `$CANONIC_PACKS_REPO`, then a built-in default.
 
+A pack can declare `min_canonic_version` in its `pack.yaml` when it relies on a newer canonic feature. `pack add`, `canonic setup` and `pack validate` then stop with an error naming both versions if the installed canonic is older, before anything is written. Unknown fields in `pack.yaml` are rejected, so a misspelled key fails instead of being ignored.
+
 ## `pack list`
 
 List packs available from the configured pack repo.

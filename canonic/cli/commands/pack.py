@@ -136,6 +136,7 @@ def add(
     repo_dir = _resolved_repo(repo, root)
     pack_dir = find_pack_dir(repo_dir, name)
     manifest = load_pack_manifest(pack_dir)
+    manifest.check_compatible()
     variant = _pick_variant(manifest, variant_id)
 
     non_interactive = params_file is not None

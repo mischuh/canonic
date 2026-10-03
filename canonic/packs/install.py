@@ -199,6 +199,7 @@ def install_pack(
     deleted: an installed file is indistinguishable from a hand-written one the moment it
     lands, so a broken one is fixed the same way any other broken committed file is.
     """
+    manifest.check_compatible()
     result = InstallResult(
         pack=manifest.pack, version=manifest.version, variant=variant.id, params=dict(params)
     )

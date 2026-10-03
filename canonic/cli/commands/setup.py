@@ -991,6 +991,7 @@ def _run_pack_setup(root: Path, project_name: str, repo_dir: Path, manifest: Pac
     from canonic.packs.install import install_pack
     from canonic.packs.loader import find_pack_dir
 
+    manifest.check_compatible()
     variant = (
         manifest.variants[0] if len(manifest.variants) == 1 else _prompt_pack_variant(manifest)
     )
@@ -1053,6 +1054,7 @@ def _add_pack_to_existing(root: Path) -> None:
         _console.print("[dim]no packs available.[/dim]")
         return
     repo_dir, manifest = offer
+    manifest.check_compatible()
 
     config = load_config(root / "canonic.yaml")
     variant = (
