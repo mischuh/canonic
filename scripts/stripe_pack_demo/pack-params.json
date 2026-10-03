@@ -1,0 +1,9 @@
+{
+  "schema": "stripe",
+  "charges_table": "charges",
+  "customers_table": "customers",
+  "subscriptions_table": "subscriptions",
+  "refunds_table": "refunds",
+  "currency": "usd",
+  "minor_unit_divisor": "100"
+}
