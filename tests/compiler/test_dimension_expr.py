@@ -196,3 +196,91 @@ def test_filter_on_denied_expr_dimension_is_refused(charges) -> None:
             [charges],
             principal=Principal(tenant=None, roles=("restricted",)),
         )
+
+
+@pytest.fixture
+def events() -> SemanticSource:
+    return SemanticSource(
+        name="events",
+        connection="warehouse_pg",
+        table="analytics.events",
+        grain=["id"],
+        columns=[
+            Column(name="id", type="string", nullable=False),
+            Column(name="amount", type="int", nullable=False),
+            Column(name="properties", type="json", nullable=True),
+        ],
+        measures=[Measure(name="total_amount", expr="sum(amount)")],
+        dimensions=[
+            Dimension(name="url", expr="properties->>'$current_url'", type="string"),
+            Dimension(name="plan", expr="properties->>'plan'", type="string"),
+            Dimension(name="city", expr="properties->'address'->>'city'", type="string"),
+            Dimension(name="seats", expr="(properties->>'seats')::numeric", type="decimal"),
+        ],
+    )
+
+
+@pytest.fixture
+def events_resolver() -> ContractResolver:
+    binding = MetricBinding(
+        metric="total_amount",
+        canonical=CanonicalRef(source="events", measure="total_amount"),
+    )
+    return ContractResolver(bindings=[binding], guardrails=[])
+
+
+@pytest.mark.parametrize(
+    ("dimension", "expected"),
+    [
+        ("url", '"events"."properties" ->> \'$current_url\''),
+        ("plan", '"events"."properties" ->> \'plan\''),
+        ("city", "\"events\".\"properties\" -> 'address' ->> 'city'"),
+        ("seats", 'CAST(("events"."properties" ->> \'seats\') AS DECIMAL)'),
+    ],
+)
+def test_postgres_json_operators_survive_the_round_trip(
+    events, events_resolver, dimension, expected
+) -> None:
+    """Authored SQL is read in the connection dialect, so a ``$``-prefixed key is not rewritten.
+
+    The default sqlglot dialect turned ``->>'$current_url'`` into
+    ``JSON_EXTRACT_PATH_TEXT(.., 'current_url')``, silently pointing at a missing key.
+    """
+    result = compile(
+        SemanticQuery(metrics=["total_amount"], dimensions=[dimension]),
+        events_resolver,
+        [events],
+        connection_dialects={"warehouse_pg": "postgres"},
+    )
+    assert expected in result.sql
+    assert "JSON_EXTRACT_PATH" not in result.sql.upper()
+
+
+def test_json_key_in_a_filter_keeps_its_dollar_prefix(events, events_resolver) -> None:
+    result = compile(
+        SemanticQuery(
+            metrics=["total_amount"],
+            filters=["properties->>'$current_url' = '/pricing'"],
+        ),
+        events_resolver,
+        [events],
+        connection_dialects={"warehouse_pg": "postgres"},
+    )
+    assert "->> '$current_url' = '/pricing'" in result.sql
+
+
+def test_duckdb_json_path_is_read_as_duckdb(events, events_resolver) -> None:
+    duck_events = events.model_copy(
+        update={
+            "dimensions": [
+                Dimension(name="url", expr="properties->>'$.current_url'", type="string"),
+            ]
+        }
+    )
+    result = compile(
+        SemanticQuery(metrics=["total_amount"], dimensions=["url"]),
+        events_resolver,
+        [duck_events],
+        connection_dialects={"warehouse_pg": "duckdb"},
+    )
+    assert "->> '$.current_url'" in result.sql

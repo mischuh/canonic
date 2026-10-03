@@ -7,12 +7,15 @@ both the router in :mod:`canonic.compiler.pipeline` and every per-kind strategy.
 from __future__ import annotations
 
 import re
+from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, cast
 
 import sqlglot
 from sqlglot import exp
 
+from canonic.compiler.dialect import DIALECT_ADAPTERS, TYPE_TO_DIALECT
 from canonic.compiler.joins import JoinEdge, build_alias_tree, plan_joins
 from canonic.compiler.result import (
     FiredGuardrail,
@@ -31,7 +34,7 @@ from canonic.exc import Unreachable as UnreachableError
 from canonic.semantic.models import Additivity, Measure, NormalizedType, Relationship
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Iterator, Sequence
     from datetime import datetime
 
     from canonic.compiler.query import SemanticQuery
@@ -97,8 +100,29 @@ def _rewrite_sqlite_date_modifiers(node: exp.Expression) -> exp.Expression:
 # sqlglot builds many node classes dynamically, so mypy cannot see their inheritance
 # from ``exp.Expression``. These thin wrappers cast at the boundary so the rest of the
 # module stays strictly typed.
+_PARSE_DIALECT: ContextVar[str | None] = ContextVar("canonic_parse_dialect", default=None)
+
+
+@contextmanager
+def parse_dialect(dialect: str) -> Iterator[None]:
+    """Read authored ``expr``/filter SQL in *dialect* for the duration of the block.
+
+    Authors write expressions in their connection's native syntax, so reading them with
+    the same dialect they are rendered in round-trips them faithfully. sqlglot's default
+    dialect rewrites JSON access, e.g. it drops the ``$`` from ``props->>'$current_url'``.
+    A name no adapter knows is left to :func:`adapter_for` to reject, so the error order
+    of an unsupported dialect does not change.
+    """
+    normalised = TYPE_TO_DIALECT.get(dialect, dialect)
+    token = _PARSE_DIALECT.set(normalised if normalised in DIALECT_ADAPTERS else None)
+    try:
+        yield
+    finally:
+        _PARSE_DIALECT.reset(token)
+
+
 def _parse(sql: str) -> exp.Expression:
-    parsed = cast("exp.Expression", sqlglot.parse_one(sql))
+    parsed = cast("exp.Expression", sqlglot.parse_one(sql, read=_PARSE_DIALECT.get()))
     return parsed.transform(_rewrite_sqlite_date_modifiers)
 
 
