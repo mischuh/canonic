@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from datetime import datetime  # noqa: TC003 — Pydantic resolves annotations at runtime
 from enum import StrEnum
 from typing import Any
@@ -49,6 +50,11 @@ class SemanticValidationError(ValueError):
 # outside this set (or non-additive) are valid in YAML but flagged
 # UNSUPPORTED_MEASURE by the compiler (SPEC-E5 §4 step 4), never at load time.
 _P0_AGG_FUNCTIONS: frozenset[type[exp.AggFunc]] = frozenset({exp.Sum, exp.Count, exp.Min, exp.Max})
+
+
+#: Characters a ``json_path`` key may not contain. Keys are rendered into dialect-specific
+#: path literals and not every sqlglot generator escapes quotes, so they are refused up front.
+_JSON_KEY_FORBIDDEN = re.compile(r"[\x00-\x1f\x7f'\"\\]")
 
 
 class NormalizedType(StrEnum):
@@ -164,25 +170,35 @@ def compute_measure_fingerprint(measure: Measure) -> str:
 def compute_dimension_fingerprint(dimension: Dimension) -> str | None:
     """Stable sha256 over a derived dimension's definition, for drift detection (SPEC-E6 §7).
 
-    Covers ``(expr, type, description)`` as AMENDMENT-dimension-expr §5 specifies. A
-    column-based dimension has no expression to drift, so it has no fingerprint.
+    Covers ``(expr, type, description)`` as AMENDMENT-dimension-expr §5 specifies, plus
+    ``(column, json_path)`` for a JSON-path dimension (AMENDMENT-json-path-dimension). A
+    plain column dimension has no expression to drift, so it has no fingerprint.
     """
-    if dimension.expr is None:
+    if not dimension.is_derived:
         return None
-    payload = {
+    payload: dict[str, Any] = {
         "expr": dimension.expr,
         "type": dimension.type.value if dimension.type else None,
         "description": dimension.description,
     }
+    if dimension.json_path is not None:
+        # Added only when set, so the fingerprint of an existing ``expr`` dimension is unchanged.
+        payload["column"] = dimension.column
+        payload["json_path"] = dimension.json_path
     digest = hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()
     return f"sha256:{digest}"
 
 
 class Dimension(BaseModel):
-    """A column or derived expression exposed for grouping/filtering, optionally time-bucketed.
+    """A column or derived value exposed for grouping/filtering, optionally time-bucketed.
 
-    Exactly one of ``column`` and ``expr`` is set (AMENDMENT-dimension-expr). An ``expr``
-    dimension has no source column to infer a type from, so ``type`` is required there.
+    Three shapes (AMENDMENT-dimension-expr, AMENDMENT-json-path-dimension):
+
+    * ``column``: a physical column as is.
+    * ``expr``: a SQL expression over same-source columns.
+    * ``column`` + ``json_path``: one key of a JSON column, given as key segments.
+
+    The last two have no column to infer a type from, so ``type`` is required there.
     """
 
     model_config = ConfigDict(frozen=True)
@@ -190,7 +206,8 @@ class Dimension(BaseModel):
     name: str
     column: str | None = None
     expr: str | None = None  # [P1] derived dimension, same-source columns only
-    type: NormalizedType | None = None  # required with ``expr``, ignored for ``column``
+    json_path: list[str] | None = None  # [P1] key segments into the JSON ``column``
+    type: NormalizedType | None = None  # required with ``expr``/``json_path``, else ignored
     granularity: str | None = None  # [P1] time granularity, e.g. "day"
     label: str | None = None  # human-readable display name, e.g. "Product Type"
     description: str | None = None  # freetext explanation
@@ -200,18 +217,39 @@ class Dimension(BaseModel):
     def _validate_column_xor_expr(self) -> Dimension:
         if (self.column is None) == (self.expr is None):
             raise ValueError(f"dimension {self.name!r} must set exactly one of 'column' and 'expr'")
-        if self.expr is not None and self.type is None:
-            raise ValueError(f"dimension {self.name!r} sets 'expr' and therefore requires 'type'")
+        if self.json_path is not None:
+            self._validate_json_path()
+        if self.is_derived and self.type is None:
+            raise ValueError(
+                f"dimension {self.name!r} sets 'expr' or 'json_path' and therefore requires 'type'"
+            )
         if (
-            self.expr is not None
+            self.is_derived
             and self.granularity is not None
             and self.type not in {NormalizedType.DATE, NormalizedType.TIMESTAMP}
         ):
             raise ValueError(
-                f"dimension {self.name!r} sets 'granularity' on an expression of type "
+                f"dimension {self.name!r} sets 'granularity' on a derived value of type "
                 f"{self.type.value if self.type else None!r}; it must be date or timestamp"
             )
         return self
+
+    def _validate_json_path(self) -> None:
+        if self.expr is not None:
+            raise ValueError(f"dimension {self.name!r} sets 'json_path' and cannot also set 'expr'")
+        if not self.json_path:
+            raise ValueError(f"dimension {self.name!r} sets an empty 'json_path'")
+        for segment in self.json_path:
+            if not segment or _JSON_KEY_FORBIDDEN.search(segment):
+                raise ValueError(
+                    f"dimension {self.name!r} has an invalid 'json_path' key {segment!r}: keys "
+                    "must be non-empty and contain no quotes, backslashes or control characters"
+                )
+
+    @property
+    def is_derived(self) -> bool:
+        """Whether the value is computed (``expr`` or ``json_path``) rather than a bare column."""
+        return self.expr is not None or self.json_path is not None
 
     def backing_columns(self) -> set[str]:
         """Physical column names this dimension reads (the one column, or the expr's columns)."""
@@ -221,8 +259,8 @@ class Dimension(BaseModel):
         return _columns_in_expr(self.expr)
 
     def value_type(self, columns: list[Column]) -> NormalizedType | None:
-        """The dimension's type: declared for ``expr``, else the backing column's."""
-        if self.expr is not None:
+        """The dimension's type: declared for a derived value, else the backing column's."""
+        if self.is_derived:
             return self.type
         return next((c.type for c in columns if c.name == self.column), None)
 
@@ -333,6 +371,13 @@ class SemanticSource(BaseModel):
                     raise SemanticValidationError(
                         ("dimensions", i, "column"),
                         f"dimension {dim.name!r} references undeclared column {dim.column!r}",
+                    )
+                column_type = next(c.type for c in self.columns if c.name == dim.column)
+                if dim.json_path is not None and column_type is not NormalizedType.JSON:
+                    raise SemanticValidationError(
+                        ("dimensions", i, "json_path"),
+                        f"dimension {dim.name!r} sets 'json_path' on column {dim.column!r} "
+                        f"of type {column_type.value!r}; it must be a json column",
                     )
                 continue
             try:

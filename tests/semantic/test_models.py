@@ -8,10 +8,12 @@ from ruamel.yaml import YAML
 
 from canonic.semantic.models import (
     Additivity,
+    Dimension,
     Measure,
     NormalizedType,
     Relationship,
     SemanticSource,
+    compute_dimension_fingerprint,
     compute_measure_fingerprint,
 )
 
@@ -165,6 +167,112 @@ def test_expr_dimension_with_declared_columns_parses() -> None:
     )
     src = SemanticSource.model_validate(raw)
     assert src.dimensions[0].backing_columns() == {"created"}
+
+
+def test_json_path_dimension_parses() -> None:
+    raw = _minimal(
+        "  - { name: properties, type: json }",
+        dimensions=(
+            '  - { name: url, column: properties, json_path: ["$current_url"], type: string }'
+        ),
+    )
+    dim = SemanticSource.model_validate(raw).dimensions[0]
+    assert dim.json_path == ["$current_url"]
+    assert dim.is_derived
+    assert dim.backing_columns() == {"properties"}
+    assert dim.value_type([]) is NormalizedType.STRING
+
+
+def test_json_path_dimension_requires_type() -> None:
+    raw = _minimal(
+        "  - { name: properties, type: json }",
+        dimensions='  - { name: url, column: properties, json_path: ["u"] }',
+    )
+    with pytest.raises(ValidationError, match="requires 'type'"):
+        SemanticSource.model_validate(raw)
+
+
+def test_json_path_dimension_requires_a_json_column() -> None:
+    raw = _minimal(
+        "  - { name: properties, type: string }",
+        dimensions='  - { name: url, column: properties, json_path: ["u"], type: string }',
+    )
+    with pytest.raises(ValidationError, match="must be a json column"):
+        SemanticSource.model_validate(raw)
+
+
+def test_json_path_dimension_with_expr_rejected() -> None:
+    raw = _minimal(
+        "  - { name: properties, type: json }",
+        dimensions=('  - { name: url, expr: "properties", json_path: ["u"], type: string }'),
+    )
+    with pytest.raises(ValidationError, match="cannot also set 'expr'"):
+        SemanticSource.model_validate(raw)
+
+
+def test_json_path_dimension_without_column_rejected() -> None:
+    raw = _minimal(
+        "  - { name: properties, type: json }",
+        dimensions='  - { name: url, json_path: ["u"], type: string }',
+    )
+    with pytest.raises(ValidationError, match="exactly one of 'column' and 'expr'"):
+        SemanticSource.model_validate(raw)
+
+
+@pytest.mark.parametrize("path", ["[]", '[""]', '["it\'s"]', "['say \"hi\"']", "['a\\\\b']"])
+def test_json_path_dimension_rejects_empty_and_unsafe_keys(path: str) -> None:
+    raw = _minimal(
+        "  - { name: properties, type: json }",
+        dimensions=f"  - {{ name: url, column: properties, json_path: {path}, type: string }}",
+    )
+    with pytest.raises(ValidationError, match="json_path"):
+        SemanticSource.model_validate(raw)
+
+
+def test_granularity_on_non_time_json_path_rejected() -> None:
+    raw = _minimal(
+        "  - { name: properties, type: json }",
+        dimensions=(
+            '  - { name: d, column: properties, json_path: ["d"], type: string, granularity: day }'
+        ),
+    )
+    with pytest.raises(ValidationError, match="must be date or timestamp"):
+        SemanticSource.model_validate(raw)
+
+
+class TestDimensionFingerprint:
+    def _dim(self, **kwargs: object) -> Dimension:
+        base: dict[str, object] = {
+            "name": "d",
+            "column": "properties",
+            "json_path": ["a"],
+            "type": "string",
+        }
+        return Dimension.model_validate({**base, **kwargs})
+
+    def test_plain_column_dimension_has_none(self) -> None:
+        assert compute_dimension_fingerprint(Dimension(name="d", column="id")) is None
+
+    def test_json_path_dimension_has_a_stable_fingerprint(self) -> None:
+        assert compute_dimension_fingerprint(self._dim()) == compute_dimension_fingerprint(
+            self._dim()
+        )
+
+    @pytest.mark.parametrize(
+        "change", [{"json_path": ["b"]}, {"json_path": ["a", "b"]}, {"column": "other"}]
+    )
+    def test_changing_the_path_or_column_changes_it(self, change: dict[str, object]) -> None:
+        assert compute_dimension_fingerprint(self._dim()) != compute_dimension_fingerprint(
+            self._dim(**change)
+        )
+
+    def test_expr_dimension_fingerprint_is_unchanged(self) -> None:
+        """Pinned: adding ``json_path`` must not drift every existing derived dimension."""
+        dim = Dimension(name="d", expr="upper(id)", type=NormalizedType.STRING)
+        assert (
+            compute_dimension_fingerprint(dim)
+            == "sha256:b3baecb0dccbd6eac5a46b6f21f5feb3035141e40028145bb73f6dba467fb476"
+        )
 
 
 class TestIsP0Compilable:
