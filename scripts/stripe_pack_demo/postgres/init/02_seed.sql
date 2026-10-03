@@ -28,14 +28,16 @@ INSERT INTO stripe.charges
 
 -- Refunds. ch_6 was charged 40 days ago and refunded 2 days ago, so by refund date it falls
 -- in the 30-day window while by charge date it does not. The last three rows are excluded:
--- a failed refund, a refund of the test mode charge and a EUR refund.
-INSERT INTO stripe.refunds (id, _account_id, amount, charge, created, currency, reason, status) VALUES
-  ('re_1', 'acct_demo', 5000, 'ch_2', :now_s -  8*86400, 'usd', 'requested_by_customer', 'succeeded'),
-  ('re_2', 'acct_demo', 2500, 'ch_3', :now_s - 15*86400, 'usd', 'duplicate',             'succeeded'),
-  ('re_3', 'acct_demo', 4000, 'ch_6', :now_s -  2*86400, 'usd', 'requested_by_customer', 'succeeded'),
-  ('re_4', 'acct_demo', 1000, 'ch_1', :now_s -  4*86400, 'usd', NULL,                    'failed'),
-  ('re_5', 'acct_demo', 9900, 'ch_7', :now_s -  1*86400, 'usd', NULL,                    'succeeded'),
-  ('re_6', 'acct_demo', 2000, 'ch_8', :now_s -  3*86400, 'eur', NULL,                    'succeeded');
+-- a failed refund, a refund of the test mode charge and a EUR refund. re_7 has no charge
+-- (linked only to a payment intent), so it cannot be classified as live or test and is kept.
+INSERT INTO stripe.refunds (id, _account_id, amount, charge, created, currency, payment_intent, reason, status) VALUES
+  ('re_1', 'acct_demo', 5000, 'ch_2', :now_s -  8*86400, 'usd', NULL, 'requested_by_customer', 'succeeded'),
+  ('re_2', 'acct_demo', 2500, 'ch_3', :now_s - 15*86400, 'usd', NULL, 'duplicate',             'succeeded'),
+  ('re_3', 'acct_demo', 4000, 'ch_6', :now_s -  2*86400, 'usd', NULL, 'requested_by_customer', 'succeeded'),
+  ('re_4', 'acct_demo', 1000, 'ch_1', :now_s -  4*86400, 'usd', NULL, NULL,                    'failed'),
+  ('re_5', 'acct_demo', 9900, 'ch_7', :now_s -  1*86400, 'usd', NULL, NULL,                    'succeeded'),
+  ('re_6', 'acct_demo', 2000, 'ch_8', :now_s -  3*86400, 'eur', NULL, NULL,                    'succeeded'),
+  ('re_7', 'acct_demo', 1500, NULL,   :now_s -  5*86400, 'usd', 'pi_demo', NULL,               'succeeded');
 
 -- Subscriptions. items follows the Stripe API subscription object: a list whose items embed
 -- their price (unit_amount in the smallest unit, recurring.interval and interval_count).

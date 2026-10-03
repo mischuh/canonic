@@ -45,6 +45,7 @@ CREATE TABLE stripe.refunds (
     charge       text,
     created      bigint,
     currency     text,
+    payment_intent text,
     reason       text,
     status       text,
     metadata     jsonb,
