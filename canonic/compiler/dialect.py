@@ -9,13 +9,16 @@ PostgreSQL; further dialects plug in behind the same interface.
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from typing import cast
+from typing import TYPE_CHECKING, cast
 
 import sqlglot
 from sqlglot import exp
 
 from canonic.exc import ReadOnlyViolation, UnsupportedDialectError
 from canonic.semantic.models import NormalizedType
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
 
 __all__ = [
     "DIALECT_ADAPTERS",
@@ -25,6 +28,7 @@ __all__ = [
     "MySQLDialectAdapter",
     "PostgresDialectAdapter",
     "SQLiteDialectAdapter",
+    "SnowflakeDialectAdapter",
     "TYPE_TO_DIALECT",
     "adapter_for",
 ]
@@ -138,6 +142,29 @@ class DialectAdapter(ABC):
     def map_type(self, normalized: NormalizedType) -> str:
         """Map a normalized internal type to its dialect type name."""
 
+    def json_extract_text(self, column: exp.Expression, segments: Sequence[str]) -> exp.Expression:
+        """Extract the key at ``segments`` from a JSON ``column`` as text (AMENDMENT-json-path-dimension).
+
+        The default builds sqlglot's neutral JSON-path node and lets the dialect's generator
+        render it. Segments are key names, never a path string, so ``$current_url`` or ``a.b``
+        stay one key. Dialects whose rendering is wrong for their JSON column type override this.
+        """
+        path = exp.JSONPath(
+            expressions=[exp.JSONPathRoot(), *(exp.JSONPathKey(this=s) for s in segments)]
+        )
+        return exp.JSONExtractScalar(this=column, expression=path)
+
+    def json_value(
+        self, column: exp.Expression, segments: Sequence[str], value_type: NormalizedType
+    ) -> exp.Expression:
+        """The key at ``segments`` of a JSON ``column``, cast to ``value_type`` unless it is text."""
+        text = self.json_extract_text(column, segments)
+        if value_type is NormalizedType.STRING:
+            return text
+        return exp.Cast(
+            this=text, to=exp.DataType.build(self.map_type(value_type), dialect=self.dialect)
+        )
+
     def supports_percentile_cont(self) -> bool:
         """Whether the dialect has a native ordered-set aggregate for percentile queries.
 
@@ -190,11 +217,40 @@ class _GenericDialectAdapter(DialectAdapter):
         return self._type_map.get(normalized, _POSTGRES_TYPE_MAP[normalized])
 
 
+def _json_key_path(key: str) -> exp.JSONPath:
+    return exp.JSONPath(expressions=[exp.JSONPathRoot(), exp.JSONPathKey(this=key)])
+
+
 class PostgresDialectAdapter(_GenericDialectAdapter):
     """PostgreSQL renderer (the Phase 0 dialect)."""
 
     def __init__(self) -> None:
         super().__init__("postgres", _POSTGRES_TYPE_MAP)
+
+    def json_extract_text(self, column: exp.Expression, segments: Sequence[str]) -> exp.Expression:
+        """Chain ``->`` and a final ``->>``, which work on both ``json`` and ``jsonb``.
+
+        sqlglot's own rendering is ``JSON_EXTRACT_PATH_TEXT``, which has no ``jsonb``
+        overload and fails outright on the usual ``jsonb`` column.
+        """
+        node = column
+        for key in segments[:-1]:
+            node = exp.JSONExtract(this=node, expression=_json_key_path(key), only_json_types=True)
+        return exp.JSONExtractScalar(
+            this=node, expression=_json_key_path(segments[-1]), only_json_types=True
+        )
+
+
+class SnowflakeDialectAdapter(_GenericDialectAdapter):
+    """Snowflake renderer, reading JSON through ``GET_PATH``, the native ``VARIANT`` accessor."""
+
+    def __init__(self) -> None:
+        super().__init__("snowflake", _SNOWFLAKE_TYPE_MAP)
+
+    def json_extract_text(self, column: exp.Expression, segments: Sequence[str]) -> exp.Expression:
+        path = "".join(f'["{key}"]' for key in segments)
+        get_path = exp.Anonymous(this="GET_PATH", expressions=[column, exp.Literal.string(path)])
+        return exp.Cast(this=get_path, to=exp.DataType.build("VARCHAR", dialect="snowflake"))
 
 
 _SQLITE_TRUNC_MODIFIERS: dict[str, str] = {
@@ -284,6 +340,11 @@ class SQLiteDialectAdapter(_GenericDialectAdapter):
 
     def supports_percentile_cont(self) -> bool:
         return False
+
+    def json_extract_text(self, column: exp.Expression, segments: Sequence[str]) -> exp.Expression:
+        """``JSON_EXTRACT`` works on every SQLite with JSON1, while the ``->>`` operator needs 3.38."""
+        path = "$" + "".join(f'."{key}"' for key in segments)
+        return exp.Anonymous(this="JSON_EXTRACT", expressions=[column, exp.Literal.string(path)])
 
 
 def _keep_exact_percentile_for_databricks(node: exp.Expression) -> exp.Expression:
@@ -496,7 +557,7 @@ DIALECT_ADAPTERS: dict[str, DialectAdapter] = {
     "postgres": PostgresDialectAdapter(),
     "redshift": _GenericDialectAdapter("redshift", _POSTGRES_TYPE_MAP),
     "duckdb": _GenericDialectAdapter("duckdb", _DUCKDB_TYPE_MAP),
-    "snowflake": _GenericDialectAdapter("snowflake", _SNOWFLAKE_TYPE_MAP),
+    "snowflake": SnowflakeDialectAdapter(),
     "databricks": DatabricksDialectAdapter(),
     "mysql": MySQLDialectAdapter(),
     "clickhouse": ClickHouseDialectAdapter(),

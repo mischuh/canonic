@@ -15,7 +15,7 @@ from typing import TYPE_CHECKING, cast
 import sqlglot
 from sqlglot import exp
 
-from canonic.compiler.dialect import DIALECT_ADAPTERS, TYPE_TO_DIALECT
+from canonic.compiler.dialect import DIALECT_ADAPTERS, TYPE_TO_DIALECT, DialectAdapter
 from canonic.compiler.joins import JoinEdge, build_alias_tree, plan_joins
 from canonic.compiler.result import (
     FiredGuardrail,
@@ -119,6 +119,11 @@ def parse_dialect(dialect: str) -> Iterator[None]:
         yield
     finally:
         _PARSE_DIALECT.reset(token)
+
+
+def _active_adapter() -> DialectAdapter:
+    """The adapter for the dialect being compiled (Postgres outside a :func:`parse_dialect` block)."""
+    return DIALECT_ADAPTERS[_PARSE_DIALECT.get() or "postgres"]
 
 
 def _parse(sql: str) -> exp.Expression:
@@ -455,15 +460,20 @@ def _guardrail_join_sources(
 
 
 def _dimension_base_expr(source: str, dim: Dimension) -> exp.Expression:
-    """The dimension's value before time bucketing: its column, or its parsed ``expr``.
+    """The dimension's value before time bucketing: its column, its parsed ``expr``, or a JSON key.
 
     An ``expr`` is parsed and qualified to *source* the same way a measure expression is,
-    so it renders per dialect and never splices caller text into the SQL.
+    so it renders per dialect and never splices caller text into the SQL. A ``json_path``
+    is built from sqlglot nodes by the dialect adapter, from key segments rather than text.
     """
     if dim.expr is not None:
         return _qualify_to(_parse(dim.expr), source)
     assert dim.column is not None  # noqa: S101 — Dimension guarantees column xor expr
-    return exp.column(dim.column, table=source)
+    column = exp.column(dim.column, table=source)
+    if dim.json_path is not None:
+        assert dim.type is not None  # noqa: S101
+        return _active_adapter().json_value(column, dim.json_path, dim.type)
+    return column
 
 
 def _dimension_expr(
@@ -833,7 +843,7 @@ def _bind_name(
     a distinct_on column should resolve to the metric's owning source if present.
     """
     dim = _find_dimension(name, sources_by_name, owner, alias_to_source)
-    if dim is not None and dim[1].column is not None:
+    if dim is not None and dim[1].column is not None and dim[1].json_path is None:
         return dim[0], dim[1].column
 
     # Priority 1: check the owner source first (if provided).
@@ -866,7 +876,7 @@ def _qualify_columns(
                 used.add(node.table)
                 return node
             derived = _find_dimension(node.name, sources_by_name, owner, alias_to_source)
-            if derived is not None and derived[1].expr is not None:
+            if derived is not None and derived[1].is_derived:
                 # A derived dimension has no column to bind to, so a filter on its name
                 # inlines the expression itself (without time bucketing, like a column dim).
                 alias, dim = derived
