@@ -1,0 +1,43 @@
+# Docker-only project config for this demo (mounted at /data/stripe-demo/canonic.yaml).
+# Nothing under semantics/, contracts/ or knowledge/ is checked in here. entrypoint.sh
+# writes all of it on container start via `canonic pack add stripe`. See README.md.
+
+version: 1
+
+project:
+  name: stripe-pack-demo
+  default_connection: stripe_db
+
+connections:
+  - id: stripe_db
+    type: postgres
+    params:
+      host: postgres   # the compose service name
+      port: 5432
+      dbname: stripe
+      user: stripe
+    credentials_ref: env:CANONIC_POSTGRES_PASSWORD
+    # Deliberately false: this demo database has no warehouse-native row-level-security
+    # layer. Irrelevant here (no tenancy policy is installed).
+    rls_enforced: false
+
+mcp:
+  auth:
+    # --transport http refuses to start with no auth mechanism configured. A single static
+    # demo token is enough since this project has no tenancy or role policy installed.
+    tokens:
+      - client_id: demo
+        token_ref: env:CANONIC_MCP_TOKEN
+
+embeddings:
+  model: all-MiniLM-L6-v2
+
+telemetry:
+  enabled: false
+
+runtime:
+  air_gapped: false
+
+logging:
+  level: INFO
+  format: json

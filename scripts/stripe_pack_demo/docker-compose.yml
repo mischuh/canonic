@@ -1,0 +1,45 @@
+# Dockerized Stripe context-pack demo. See README.md for the full walkthrough.
+#
+# Brings up:
+#   - postgres: a real Postgres database, seeded (postgres/init/*.sql) with tables shaped
+#     like Stripe's real-time sync to Postgres.
+#   - canonic:  the MCP http daemon, built from the repo's root Dockerfile. On start,
+#     entrypoint.sh installs the "stripe" context pack from a local canonic-packs checkout
+#     against the seeded database, then serves the resulting project over MCP.
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: stripe
+      POSTGRES_USER: stripe
+      # Local-demo-only value, never a real secret. Matches CANONIC_POSTGRES_PASSWORD
+      # below, which canonic.docker.yaml's connections[].credentials_ref points at.
+      POSTGRES_PASSWORD: stripe-local-dev
+    volumes:
+      - ./postgres/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U stripe -d stripe"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  canonic:
+    build:
+      context: ../..
+      dockerfile: Dockerfile
+    depends_on:
+      postgres:
+        condition: service_healthy
+    entrypoint: ["/bin/sh", "/entrypoint.sh"]
+    environment:
+      CANONIC_POSTGRES_PASSWORD: stripe-local-dev
+      # Local-demo-only bearer token, see canonic.docker.yaml's mcp.auth.tokens.
+      CANONIC_MCP_TOKEN: stripe-demo-local-dev
+    ports:
+      - "7474:7474"
+    volumes:
+      - ./canonic.docker.yaml:/data/stripe-demo/canonic.yaml:ro
+      - ./pack-params.json:/data/stripe-demo/pack-params.json:ro
+      - ./entrypoint.sh:/entrypoint.sh:ro
+      # The canonic-packs checkout to install from. Override with CANONIC_PACKS_DIR.
+      - ${CANONIC_PACKS_DIR:-../../../canonic-packs}:/packs:ro
