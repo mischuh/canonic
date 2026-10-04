@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.34.0](https://github.com/mischuh/canonic/compare/v0.33.1...v0.34.0) (2026-10-04)
+
+
+### Features
+
+* **packs:** skip unreadable pack manifests when listing packs ([#365](https://github.com/mischuh/canonic/issues/365)) ([24ab854](https://github.com/mischuh/canonic/commit/24ab8545f36ebd30279aeec8a499fdfd0f0c783c))
+
 ## [0.33.1](https://github.com/mischuh/canonic/compare/v0.33.0...v0.33.1) (2026-10-04)
 
 
