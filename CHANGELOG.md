@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.33.1](https://github.com/mischuh/canonic/compare/v0.33.0...v0.33.1) (2026-10-04)
+
+
+### Bug Fixes
+
+* **packs:** pick pack validate placeholders that satisfy the param pattern ([#363](https://github.com/mischuh/canonic/issues/363)) ([3020ab3](https://github.com/mischuh/canonic/commit/3020ab3a04f474f89080af1f98798d9d3d57a56e))
+
 ## [0.33.0](https://github.com/mischuh/canonic/compare/v0.32.0...v0.33.0) (2026-10-04)
 
 
