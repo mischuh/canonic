@@ -49,6 +49,7 @@ def validate_pack(pack_dir: Path, manifest: PackManifest, variant: Variant) -> I
     """Install ``manifest``/``variant`` into a discarded scratch directory with
     synthesized params, and return the resulting :class:`~canonic.packs.install.InstallResult`
     (``validation_errors`` empty means the pack validated cleanly)."""
+    manifest = manifest.for_variant(variant.id)
     params = synthesize_params(manifest)
     template_errors = _check_templates(manifest, params)
 

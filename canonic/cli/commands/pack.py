@@ -138,6 +138,7 @@ def add(
     manifest = load_pack_manifest(pack_dir)
     manifest.check_compatible()
     variant = _pick_variant(manifest, variant_id)
+    manifest = manifest.for_variant(variant.id)
 
     non_interactive = params_file is not None
     explicit = _explicit_params(param, params_file)

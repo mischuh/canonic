@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import re
+from collections import Counter
+from pathlib import PurePosixPath
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
@@ -77,17 +79,6 @@ class Param(BaseModel):
     validate_: ParamValidate | None = Field(default=None, alias="validate")
 
 
-class Variant(BaseModel):
-    """One installable variant of a pack (a physical mapping onto a connector type)."""
-
-    model_config = ConfigDict(frozen=True, extra="forbid")
-
-    id: str
-    label: str
-    mapping: str
-    connector: str | None = None
-
-
 class ProvidesContracts(BaseModel):
     """The ``contracts`` sub-list of ``provides``: metric and guardrail file paths."""
 
@@ -106,6 +97,45 @@ class Provides(BaseModel):
     contracts: ProvidesContracts = ProvidesContracts()
     knowledge: list[str] = []
 
+    def merged_with(self, other: Provides) -> Provides:
+        """These paths followed by ``other``'s, per surface."""
+        return Provides(
+            semantics=[*self.semantics, *other.semantics],
+            contracts=ProvidesContracts(
+                metrics=[*self.contracts.metrics, *other.contracts.metrics],
+                guardrails=[*self.contracts.guardrails, *other.contracts.guardrails],
+            ),
+            knowledge=[*self.knowledge, *other.knowledge],
+        )
+
+    def all_paths(self) -> list[str]:
+        """Every listed path, surface by surface, in install order."""
+        return [
+            *self.semantics,
+            *self.contracts.metrics,
+            *self.contracts.guardrails,
+            *self.knowledge,
+        ]
+
+
+class Variant(BaseModel):
+    """One installable variant of a pack (a physical mapping onto a connector type).
+
+    ``provides``, ``required_tables`` and ``params`` are the variant's own content
+    (AMENDMENT-pack-variant-content §2.1). Read them through
+    :meth:`PackManifest.for_variant`, which merges them into the pack-wide values.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    id: str
+    label: str
+    mapping: str
+    connector: str | None = None
+    provides: Provides | None = None
+    required_tables: list[str] | None = None
+    params: list[Param] = []
+
 
 class FirstAnswer(BaseModel):
     """§5.6: the demo query the setup flow runs right after install."""
@@ -114,6 +144,46 @@ class FirstAnswer(BaseModel):
 
     metric: str
     window: str | None = None
+
+
+def _check_param_names(params: list[Param], *, where: str) -> None:
+    names = [p.name for p in params]
+    if len(names) != len(set(names)):
+        raise ValueError(f"{where}duplicate param name in 'params'")
+
+
+def _check_params(params: list[Param], *, where: str) -> None:
+    """Unique names, and every ``same_as``/``derive.from`` names a param in the same list."""
+    _check_param_names(params, where=where)
+    names = {p.name for p in params}
+    for p in params:
+        if p.choose_from is not None and p.choose_from.same_as is not None:
+            target = p.choose_from.same_as
+            if target not in names:
+                raise ValueError(
+                    f"{where}param {p.name!r} choose_from.same_as references unknown param "
+                    f"{target!r}"
+                )
+        if p.derive is not None and p.derive.from_ not in names:
+            raise ValueError(
+                f"{where}param {p.name!r} derive.from references unknown param {p.derive.from_!r}"
+            )
+
+
+def _check_provides(provides: Provides, *, where: str) -> None:
+    """No path listed twice, and no two knowledge files sharing a name.
+
+    Knowledge pages are written flat into ``knowledge/global/``, so the file name decides
+    the target. The target of a semantic source or contract comes from the name inside the
+    file, which only the installer can see.
+    """
+    for path, count in Counter(provides.all_paths()).items():
+        if count > 1:
+            raise ValueError(f"{where}path {path!r} is listed more than once in 'provides'")
+    knowledge_names = Counter(PurePosixPath(path).name for path in provides.knowledge)
+    for name, count in knowledge_names.items():
+        if count > 1:
+            raise ValueError(f"{where}knowledge files share the file name {name!r}")
 
 
 class PackManifest(BaseModel):
@@ -149,21 +219,16 @@ class PackManifest(BaseModel):
         if len(variant_ids) != len(set(variant_ids)):
             raise ValueError("duplicate variant id in 'variants'")
 
-        param_names = {p.name for p in self.params}
-        if len(param_names) != len(self.params):
-            raise ValueError("duplicate param name in 'params'")
-
-        for p in self.params:
-            if p.choose_from is not None and p.choose_from.same_as is not None:
-                target = p.choose_from.same_as
-                if target not in param_names:
-                    raise ValueError(
-                        f"param {p.name!r} choose_from.same_as references unknown param {target!r}"
-                    )
-            if p.derive is not None and p.derive.from_ not in param_names:
-                raise ValueError(
-                    f"param {p.name!r} derive.from references unknown param {p.derive.from_!r}"
-                )
+        _check_params(self.params, where="")
+        _check_provides(self.provides, where="")
+        for v in self.variants:
+            if v.provides is None and v.required_tables is None and not v.params:
+                continue
+            where = f"variant {v.id!r}: "
+            _check_param_names(v.params, where=where)
+            resolved = self.for_variant(v.id)
+            _check_params(resolved.params, where=where)
+            _check_provides(resolved.provides, where=where)
         return self
 
     def check_compatible(self, canonic_version: str | None = None) -> None:
@@ -196,6 +261,42 @@ class PackManifest(BaseModel):
                 return v
         known = ", ".join(v.id for v in self.variants)
         raise PackError(f"unknown variant {variant_id!r} for pack {self.pack!r}; known: {known}")
+
+    def for_variant(self, variant_id: str) -> PackManifest:
+        """The manifest that applies when ``variant_id`` is installed.
+
+        ``provides`` is the pack-wide paths followed by the variant's. ``required_tables``
+        is the variant's list when it sets one, else the pack-wide list. ``params`` are the
+        pack-wide params, each replaced by the variant's param of the same name, followed by
+        the variant's other params (AMENDMENT-pack-variant-content §2.4).
+
+        The result declares only the chosen variant, with its own content cleared, so
+        resolving it again returns it unchanged.
+        """
+        variant = self.variant(variant_id)
+        overrides = {p.name: p for p in variant.params}
+        params = [overrides.pop(p.name, p) for p in self.params]
+        params.extend(overrides.values())
+        return self.model_copy(
+            update={
+                "variants": [
+                    variant.model_copy(
+                        update={"provides": None, "required_tables": None, "params": []}
+                    )
+                ],
+                "provides": (
+                    self.provides
+                    if variant.provides is None
+                    else self.provides.merged_with(variant.provides)
+                ),
+                "required_tables": (
+                    self.required_tables
+                    if variant.required_tables is None
+                    else variant.required_tables
+                ),
+                "params": params,
+            }
+        )
 
     def param(self, name: str) -> Param | None:
         """The declared param with this name, or None."""

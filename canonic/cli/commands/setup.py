@@ -995,6 +995,7 @@ def _run_pack_setup(root: Path, project_name: str, repo_dir: Path, manifest: Pac
     variant = (
         manifest.variants[0] if len(manifest.variants) == 1 else _prompt_pack_variant(manifest)
     )
+    manifest = manifest.for_variant(variant.id)
     pack_dir = find_pack_dir(repo_dir, manifest.pack)
     connection = _prompt_pack_connection(root, variant)
 
@@ -1060,6 +1061,7 @@ def _add_pack_to_existing(root: Path) -> None:
     variant = (
         manifest.variants[0] if len(manifest.variants) == 1 else _prompt_pack_variant(manifest)
     )
+    manifest = manifest.for_variant(variant.id)
     pack_dir = find_pack_dir(repo_dir, manifest.pack)
 
     candidates = [
