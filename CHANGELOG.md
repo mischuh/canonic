@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.33.0](https://github.com/mischuh/canonic/compare/v0.32.0...v0.33.0) (2026-10-04)
+
+
+### Features
+
+* **packs:** let variants carry their own files, params and required tables ([#361](https://github.com/mischuh/canonic/issues/361)) ([1bd1deb](https://github.com/mischuh/canonic/commit/1bd1debd148a4e810a2527d4b6c2fa94967dfbd7))
+
 ## [0.32.0](https://github.com/mischuh/canonic/compare/v0.31.0...v0.32.0) (2026-10-03)
 
 
