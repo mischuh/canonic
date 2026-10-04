@@ -9,6 +9,43 @@ Packs live in a **pack repo**: a git repository (or local directory) of `packs/<
 
 A pack can declare `min_canonic_version` in its `pack.yaml` when it relies on a newer canonic feature. `pack add`, `canonic setup` and `pack validate` then stop with an error naming both versions if the installed canonic is older, before anything is written. Unknown fields in `pack.yaml` are rejected, so a misspelled key fails instead of being ignored.
 
+## Variants with their own files
+
+A pack can declare several **variants**, each bound to one connector type. A variant describes where the data physically lives. By default every variant installs the same files, the ones listed in the pack's `provides`. When the files differ per variant, for example because the SQL dialect differs, a variant lists its own:
+
+```yaml
+variants:
+  - id: postgres
+    label: "Stripe real-time sync to Postgres"
+    mapping: mappings/postgres.yaml
+    connector: postgres
+    provides:
+      semantics: [models/postgres/charges.yaml]
+  - id: snowflake
+    label: "Stripe Data Pipeline for Snowflake"
+    mapping: mappings/snowflake.yaml
+    connector: snowflake
+    provides:
+      semantics: [models/snowflake/charges.yaml]
+    required_tables: ["{{schema}}.{{charges_table}}"]
+
+provides:
+  contracts:
+    metrics: [metrics/gross_revenue.yaml]
+```
+
+| Variant field | Effect |
+| --- | --- |
+| `provides` | Added to the pack-wide `provides`, per surface. The pack-wide list then holds only files that every variant installs. |
+| `required_tables` | Replaces the pack-wide list. An empty list means the variant requires no tables. |
+| `params` | A param with the name of a pack-wide param replaces it. Params with new names are appended. Use this for a `choose_from` query or a `derive` template that contains dialect-specific SQL. |
+
+Model files of different variants can declare the same source `name`, so metrics and guardrails that refer to the source stay shared. Listing the same path twice, at pack level and in a variant or twice in one variant, is a validation error. So are two files that would be written to the same target in one install. `pack add` and `pack validate` both report them as a `PackError`.
+
+`pack add`, the `canonic setup` pack branch and `pack validate` use the content of the chosen variant for every step: the params that are asked, the `required_tables` check, the file preview and the install. `pack validate` checks each variant on its own.
+
+A manifest that uses these fields needs a canonic release that supports them. An older release rejects the manifest with a validation error about an unexpected field, and `pack list` fails for the whole repo, because it reads every manifest.
+
 ## `pack list`
 
 List packs available from the configured pack repo.

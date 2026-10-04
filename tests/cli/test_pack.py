@@ -17,7 +17,7 @@ from canonic.config import (
     dump_config,
     scaffold_project,
 )
-from tests.packs.conftest import write_fixture_pack
+from tests.packs.conftest import write_fixture_pack, write_variant_pack
 
 
 def _seed_widgets_db(db_path) -> None:
@@ -56,6 +56,13 @@ def pack_project(tmp_path, monkeypatch):
 def pack_repo(tmp_path):
     repo_dir = tmp_path / "repo"
     write_fixture_pack(repo_dir)
+    return repo_dir
+
+
+@pytest.fixture
+def variant_pack_repo(tmp_path):
+    repo_dir = tmp_path / "variant_repo"
+    write_variant_pack(repo_dir)
     return repo_dir
 
 
@@ -124,6 +131,51 @@ def test_pack_list_shows_fixture_pack(runner, pack_project, pack_repo):
     result = runner.invoke(app, ["pack", "list", "--repo", str(pack_repo)])
     assert result.exit_code == 0, result.output
     assert "widgets" in result.output
+
+
+def test_pack_list_shows_every_variant(runner, pack_project, variant_pack_repo):
+    from canonic.cli.app import app
+
+    result = runner.invoke(app, ["--json", "pack", "list", "--repo", str(variant_pack_repo)])
+
+    assert result.exit_code == 0, result.output
+    (entry,) = json.loads(result.output)["packs"]
+    assert entry["variants"] == ["a", "b"]
+
+
+@pytest.mark.parametrize(
+    ("variant", "expect_extra"),
+    [("a", False), ("b", True)],
+)
+def test_pack_add_installs_the_files_of_the_chosen_variant(
+    runner, pack_project, variant_pack_repo, tmp_path, variant, expect_extra
+):
+    from canonic.cli.app import app
+
+    params_file = tmp_path / "params.json"
+    params_file.write_text(json.dumps({}))
+
+    result = runner.invoke(
+        app,
+        [
+            "pack",
+            "add",
+            "widgets_variants",
+            "--repo",
+            str(variant_pack_repo),
+            "--variant",
+            variant,
+            "--params-file",
+            str(params_file),
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    semantics = pack_project / "semantics" / "widgets_db"
+    assert (semantics / "widgets.yaml").exists()
+    assert (semantics / "widgets_extra.yaml").exists() is expect_extra
+    assert (pack_project / "contracts" / "metrics" / "widget_count.yaml").exists()
+    assert ("models/b/widgets_extra.yaml" in result.output) is expect_extra
 
 
 # --- pack validate: no project, no connection, no DB needed at all -----------
@@ -201,3 +253,40 @@ def test_pack_validate_unknown_path_errors(runner, tmp_path, monkeypatch):
     # in CI than a local dev terminal) — collapse whitespace so wrapping can't split the
     # phrase being asserted on across lines.
     assert "not a pack directory" in " ".join(result.output.split())
+
+
+def test_pack_validate_reports_each_variant_with_its_own_file_count(
+    runner, variant_pack_repo, monkeypatch
+):
+    from canonic.cli.app import app
+
+    monkeypatch.chdir(variant_pack_repo)
+
+    result = runner.invoke(app, ["--json", "pack", "validate", str(variant_pack_repo)])
+
+    assert result.exit_code == 0, result.output
+    reports = {r["variant"]: r for r in json.loads(result.output)["results"]}
+    assert reports["a"]["files"] == 3
+    assert reports["b"]["files"] == 4
+    assert reports["a"]["ok"] and reports["b"]["ok"]
+
+
+def test_pack_validate_fails_a_variant_without_failing_the_others(
+    runner, variant_pack_repo, monkeypatch
+):
+    """A defect in a variant's own file fails that variant. The shared files and the other
+    variant are validated on their own."""
+    from canonic.cli.app import app
+
+    pack_dir = variant_pack_repo / "packs" / "widgets_variants"
+    extra = pack_dir / "models" / "b" / "widgets_extra.yaml"
+    extra.write_text(extra.read_text().replace("{{table}}", "{{undeclared_param}}"))
+    monkeypatch.chdir(variant_pack_repo)
+
+    result = runner.invoke(app, ["pack", "validate", str(pack_dir), "--variant", "a"])
+    assert result.exit_code == 0, result.output
+    assert "widgets_variants / a" in result.output
+
+    result = runner.invoke(app, ["pack", "validate", str(pack_dir), "--variant", "b"])
+    assert result.exit_code != 0
+    assert "undeclared_param" in result.output

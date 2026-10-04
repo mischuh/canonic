@@ -8,7 +8,7 @@ import duckdb
 
 from canonic.cli.app import app
 from canonic.config import load_config
-from tests.packs.conftest import write_fixture_pack
+from tests.packs.conftest import write_fixture_pack, write_variant_pack
 
 
 def _seed_widgets_db(db_path) -> None:
@@ -138,3 +138,37 @@ def test_existing_project_menu_installs_pack(runner, tmp_path, monkeypatch):
     config = load_config(project_dir / "canonic.yaml")
     assert [c.id for c in config.connections] == ["widgets_db"]
     assert (project_dir / "semantics" / "widgets_db" / "widgets.yaml").exists()
+
+
+def test_pack_branch_previews_and_installs_the_chosen_variants_files(runner, tmp_path, monkeypatch):
+    repo_dir = tmp_path / "repo"
+    write_variant_pack(repo_dir)
+    project_dir = tmp_path / "project"
+    project_dir.mkdir()
+    monkeypatch.chdir(project_dir)
+    monkeypatch.setenv("CANONIC_PACKS_REPO", str(repo_dir))
+
+    db_path = tmp_path / "widgets.duckdb"
+    _seed_widgets_db(db_path)
+
+    wizard_input = "\n".join(
+        [
+            "",  # project name
+            "1",  # pack picker: widgets_variants
+            "2",  # variant picker: b
+            "widgets_db",  # duckdb connection id
+            str(db_path),  # duckdb file path
+            "",  # table param (variant b's own, default "widgets")
+            "",  # note param (only variant b declares it)
+            "",  # confirm write (default yes)
+        ]
+    )
+    result = runner.invoke(app, ["setup"], input=wizard_input + "\n")
+
+    assert result.exit_code == 0, result.output
+    assert "models/b/widgets_extra.yaml" in result.output
+    assert "models/a/widgets.yaml" not in result.output
+    assert "installed widgets_variants" in result.output
+    semantics = project_dir / "semantics" / "widgets_db"
+    assert (semantics / "widgets.yaml").exists()
+    assert (semantics / "widgets_extra.yaml").exists()

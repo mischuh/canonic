@@ -145,6 +145,87 @@ def write_fixture_pack(pack_root: Path) -> Path:
     return pack_dir
 
 
+_VARIANT_PACK_YAML = """\
+pack: widgets_variants
+version: 0.1.0
+description: "Fixture pack whose variants install different files."
+
+variants:
+  - id: a
+    label: "Variant A"
+    mapping: mappings/a.yaml
+    connector: duckdb
+    provides:
+      semantics: [models/a/widgets.yaml]
+  - id: b
+    label: "Variant B"
+    mapping: mappings/b.yaml
+    connector: duckdb
+    provides:
+      semantics: [models/b/widgets.yaml, models/b/widgets_extra.yaml]
+    required_tables: []
+    params:
+      - name: table
+        description: "Table, as variant B names it."
+        default: widgets
+      - name: note
+        default: "only in b"
+
+params:
+  - name: connection_id
+    required: true
+  - name: table
+    description: "Table, as the pack names it."
+    default: widgets
+
+required_tables:
+  - "main.{{table}}"
+
+provides:
+  contracts:
+    metrics: [metrics/widget_count.yaml]
+  knowledge: [knowledge/widget-notes.md]
+"""
+
+
+def write_variant_pack(pack_root: Path) -> Path:
+    """Write the "widgets_variants" fixture pack under ``pack_root/packs/widgets_variants``.
+
+    Both variants bind to DuckDB and name the same source ``widgets``, with different
+    descriptions. Variant ``b`` also installs a second source, ``widgets_extra``.
+    """
+    pack_dir = pack_root / "packs" / "widgets_variants"
+    for sub in ("mappings", "models/a", "models/b", "metrics", "knowledge"):
+        (pack_dir / sub).mkdir(parents=True, exist_ok=True)
+
+    (pack_dir / "pack.yaml").write_text(_VARIANT_PACK_YAML)
+    (pack_dir / "mappings" / "a.yaml").write_text("source: test\n")
+    (pack_dir / "mappings" / "b.yaml").write_text("source: test\n")
+    (pack_dir / "models" / "a" / "widgets.yaml").write_text(_MODEL_YAML)
+    (pack_dir / "models" / "b" / "widgets.yaml").write_text(
+        _MODEL_YAML.replace("Test widgets model.", "Variant b widgets model.")
+    )
+    (pack_dir / "models" / "b" / "widgets_extra.yaml").write_text(
+        _MODEL_YAML.replace("name: widgets\n", "name: widgets_extra\n", 1)
+    )
+    (pack_dir / "metrics" / "widget_count.yaml").write_text(_METRIC_YAML)
+    (pack_dir / "knowledge" / "widget-notes.md").write_text(_KNOWLEDGE_MD)
+    return pack_dir
+
+
+@pytest.fixture
+def variant_repo(tmp_path: Path) -> Path:
+    """A pack repo (plain directory) containing the "widgets_variants" fixture pack."""
+    repo_dir = tmp_path / "repo"
+    write_variant_pack(repo_dir)
+    return repo_dir
+
+
+@pytest.fixture
+def variant_pack_dir(variant_repo: Path) -> Path:
+    return variant_repo / "packs" / "widgets_variants"
+
+
 @pytest.fixture
 def fixture_repo(tmp_path: Path) -> Path:
     """A pack repo (plain directory) containing the "widgets" fixture pack."""

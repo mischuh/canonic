@@ -200,33 +200,51 @@ def install_pack(
     lands, so a broken one is fixed the same way any other broken committed file is.
     """
     manifest.check_compatible()
+    manifest = manifest.for_variant(variant.id)
     result = InstallResult(
         pack=manifest.pack, version=manifest.version, variant=variant.id, params=dict(params)
     )
+    claimed: dict[Path, str] = {}
 
     for rel in manifest.provides.semantics:
         result.written.append(
-            _write_semantic_file(project_root, pack_dir, rel, params, manifest, variant)
+            _write_semantic_file(project_root, pack_dir, rel, params, manifest, variant, claimed)
         )
     for rel in manifest.provides.contracts.metrics:
         result.written.append(
             _write_contract_file(
-                project_root, pack_dir, rel, params, manifest, variant, kind="metric"
+                project_root, pack_dir, rel, params, manifest, variant, claimed, kind="metric"
             )
         )
     for rel in manifest.provides.contracts.guardrails:
         result.written.append(
             _write_contract_file(
-                project_root, pack_dir, rel, params, manifest, variant, kind="guardrail"
+                project_root, pack_dir, rel, params, manifest, variant, claimed, kind="guardrail"
             )
         )
     for rel in manifest.provides.knowledge:
         result.written.append(
-            _write_knowledge_file(project_root, pack_dir, rel, params, manifest, variant)
+            _write_knowledge_file(project_root, pack_dir, rel, params, manifest, variant, claimed)
         )
 
     result.validation_errors = _validate_project(project_root)
     return result
+
+
+def _claim(claimed: dict[Path, str], target: Path, rel: str, project_root: Path) -> None:
+    """Remember that ``rel`` writes ``target``, or raise if another file of this install does.
+
+    The target of a semantic source or contract comes from the name inside the file, so two
+    differently named pack files can still land on one path. Writing the second would silently
+    replace the first.
+    """
+    other = claimed.get(target)
+    if other is not None:
+        raise PackError(
+            f"{rel} and {other} both write {target.relative_to(project_root)}. "
+            "Two files of one pack variant must not declare the same name."
+        )
+    claimed[target] = rel
 
 
 def _read_yaml_field(text: str, field_name: str, *, source: str) -> str:
@@ -244,6 +262,7 @@ def _write_semantic_file(
     params: dict[str, str],
     manifest: PackManifest,
     variant: Variant,
+    claimed: dict[Path, str],
 ) -> Path:
     text = substitute((pack_dir / rel).read_text(), params, source=rel)
     text = stamp_semantic_yaml(
@@ -251,6 +270,7 @@ def _write_semantic_file(
     )
     name = _read_yaml_field(text, "name", source=rel)
     target = project_root / _SEMANTICS_DIR / params["connection_id"] / f"{name}.yaml"
+    _claim(claimed, target, rel, project_root)
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_text(text)
     return target
@@ -263,6 +283,7 @@ def _write_contract_file(
     params: dict[str, str],
     manifest: PackManifest,
     variant: Variant,
+    claimed: dict[Path, str],
     *,
     kind: str,
 ) -> Path:
@@ -274,6 +295,7 @@ def _write_contract_file(
     subdir = _METRICS_DIR if kind == "metric" else _GUARDRAILS_DIR
     name = _read_yaml_field(text, field_name, source=rel)
     target = project_root / subdir / f"{name}.yaml"
+    _claim(claimed, target, rel, project_root)
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_text(text)
     return target
@@ -286,12 +308,14 @@ def _write_knowledge_file(
     params: dict[str, str],
     manifest: PackManifest,
     variant: Variant,
+    claimed: dict[Path, str],
 ) -> Path:
     text = substitute((pack_dir / rel).read_text(), params, source=rel)
     text = stamp_knowledge_markdown(
         text, pack=manifest.pack, version=manifest.version, variant=variant.id
     )
     target = project_root / _KNOWLEDGE_GLOBAL_DIR / Path(rel).name
+    _claim(claimed, target, rel, project_root)
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_text(text)
     return target
