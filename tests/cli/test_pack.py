@@ -17,7 +17,7 @@ from canonic.config import (
     dump_config,
     scaffold_project,
 )
-from tests.packs.conftest import write_fixture_pack, write_variant_pack
+from tests.packs.conftest import write_fixture_pack, write_unreadable_pack, write_variant_pack
 
 
 def _seed_widgets_db(db_path) -> None:
@@ -131,6 +131,68 @@ def test_pack_list_shows_fixture_pack(runner, pack_project, pack_repo):
     result = runner.invoke(app, ["pack", "list", "--repo", str(pack_repo)])
     assert result.exit_code == 0, result.output
     assert "widgets" in result.output
+
+
+def test_pack_list_skips_an_unreadable_pack_and_says_so(runner, pack_project, pack_repo):
+    from canonic.cli.app import app
+
+    write_unreadable_pack(pack_repo)
+
+    result = runner.invoke(app, ["pack", "list", "--repo", str(pack_repo)])
+
+    assert result.exit_code == 0, result.output
+    assert "widgets" in result.output
+    assert "skipped future" in result.output
+    assert "Extra inputs are not permitted" in result.output
+
+
+def test_pack_list_json_reports_the_skipped_packs(runner, pack_project, pack_repo):
+    from canonic.cli.app import app
+
+    write_unreadable_pack(pack_repo)
+
+    result = runner.invoke(app, ["--json", "pack", "list", "--repo", str(pack_repo)])
+
+    assert result.exit_code == 0, result.output
+    data = json.loads(result.output)
+    assert [p["pack"] for p in data["packs"]] == ["widgets"]
+    assert [s["pack"] for s in data["skipped"]] == ["future"]
+
+
+def test_pack_list_json_has_an_empty_skipped_list_when_all_packs_load(
+    runner, pack_project, pack_repo
+):
+    from canonic.cli.app import app
+
+    result = runner.invoke(app, ["--json", "pack", "list", "--repo", str(pack_repo)])
+
+    assert json.loads(result.output)["skipped"] == []
+
+
+def test_pack_list_when_no_pack_can_be_read(runner, pack_project, tmp_path):
+    from canonic.cli.app import app
+
+    repo = tmp_path / "only_future"
+    write_unreadable_pack(repo)
+
+    result = runner.invoke(app, ["pack", "list", "--repo", str(repo)])
+
+    assert result.exit_code == 0, result.output
+    assert "no readable packs found" in result.output
+    assert "skipped future" in result.output
+
+
+def test_pack_validate_still_fails_on_an_unreadable_pack(runner, tmp_path, monkeypatch):
+    from canonic.cli.app import app
+
+    write_fixture_pack(tmp_path)
+    write_unreadable_pack(tmp_path)
+    monkeypatch.chdir(tmp_path)
+
+    result = runner.invoke(app, ["pack", "validate", str(tmp_path)])
+
+    assert result.exit_code != 0
+    assert "Extra inputs are not permitted" in result.output
 
 
 def test_pack_list_shows_every_variant(runner, pack_project, variant_pack_repo):

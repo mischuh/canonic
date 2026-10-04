@@ -6,7 +6,14 @@ import pytest
 from pydantic import ValidationError
 
 from canonic.exc import PackError
-from canonic.packs.loader import find_pack_dir, load_pack_manifest
+from canonic.packs.loader import (
+    SkippedPack,
+    find_pack_dir,
+    list_packs,
+    list_readable_packs,
+    load_pack_manifest,
+)
+from tests.packs.conftest import write_unreadable_pack
 
 
 def test_load_fixture_manifest(fixture_pack_dir):
@@ -141,3 +148,33 @@ def test_misspelled_manifest_field_is_rejected():
     """A typo in ``min_canonic_version`` would silently drop the guard, so it must fail."""
     with pytest.raises(ValidationError, match="Extra inputs are not permitted"):
         _manifest(min_canonc_version="0.32.0")
+
+
+def test_list_readable_packs_returns_every_manifest_when_all_can_be_read(fixture_repo):
+    manifests, skipped = list_readable_packs(fixture_repo)
+
+    assert [m.pack for m in manifests] == ["widgets"]
+    assert skipped == []
+
+
+def test_list_readable_packs_skips_a_manifest_that_cannot_be_read(fixture_repo):
+    write_unreadable_pack(fixture_repo)
+
+    manifests, skipped = list_readable_packs(fixture_repo)
+
+    assert [m.pack for m in manifests] == ["widgets"]
+    assert [s.name for s in skipped] == ["future"]
+    assert "Extra inputs are not permitted" in skipped[0].reason
+    assert isinstance(skipped[0], SkippedPack)
+
+
+def test_list_packs_still_fails_on_a_manifest_that_cannot_be_read(fixture_repo):
+    """``canonic pack validate`` relies on this: a broken manifest must fail CI."""
+    write_unreadable_pack(fixture_repo)
+
+    with pytest.raises(PackError, match="Extra inputs are not permitted"):
+        list_packs(fixture_repo)
+
+
+def test_list_readable_packs_without_a_packs_directory_is_empty(tmp_path):
+    assert list_readable_packs(tmp_path) == ([], [])

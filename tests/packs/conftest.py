@@ -213,6 +213,27 @@ def write_variant_pack(pack_root: Path) -> Path:
     return pack_dir
 
 
+def write_unreadable_pack(pack_root: Path) -> Path:
+    """Write a pack under ``pack_root/packs/future`` whose manifest this canonic cannot read.
+
+    It carries a field that no release knows, which is what a manifest written for a newer
+    canonic looks like to an older one.
+    """
+    pack_dir = pack_root / "packs" / "future"
+    pack_dir.mkdir(parents=True, exist_ok=True)
+    (pack_dir / "pack.yaml").write_text(
+        "pack: future\n"
+        "version: 0.1.0\n"
+        "variants:\n"
+        "  - id: duckdb\n"
+        "    label: Future\n"
+        "    mapping: mappings/duckdb.yaml\n"
+        "    from_a_newer_canonic: true\n"
+        "provides: {}\n"
+    )
+    return pack_dir
+
+
 @pytest.fixture
 def variant_repo(tmp_path: Path) -> Path:
     """A pack repo (plain directory) containing the "widgets_variants" fixture pack."""
