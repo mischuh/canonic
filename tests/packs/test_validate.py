@@ -2,8 +2,12 @@
 
 from __future__ import annotations
 
+import pytest
+
+from canonic.exc import PackError
 from canonic.packs.install import synthesize_params
 from canonic.packs.loader import load_pack_manifest
+from canonic.packs.manifest import PackManifest
 from canonic.packs.validate import validate_pack
 
 
@@ -49,6 +53,48 @@ def test_synthesize_params_never_violates_a_stricter_validate_pattern(tmp_path):
 
     assert params["digits"] == ""  # "example" fails ^[0-9]+$ — falls back to the default
     assert params["derived"] == "none"
+
+
+def _manifest_with_param(**param) -> PackManifest:
+    return PackManifest.model_validate(
+        {
+            "pack": "x",
+            "version": "0.1.0",
+            "variants": [{"id": "a", "label": "A", "mapping": "m.yaml"}],
+            "params": [{"name": "connection_id", "required": True}, {"name": "value", **param}],
+            "provides": {},
+        }
+    )
+
+
+@pytest.mark.parametrize(
+    ("pattern", "expected"),
+    [
+        ("^[0-9]+$", "1"),
+        ("^[A-Za-z]+$", "example"),
+        ("^[a-z]+\\.[a-z]+$", "example.com"),
+        ("^[0-9A-Za-z_]+$", "example_value"),
+    ],
+)
+def test_synthesize_params_picks_a_placeholder_that_satisfies_the_pattern(pattern, expected):
+    """A required param with no default and a ``validate.pattern`` must not make
+    ``pack validate`` fail on the generic ``example_<name>`` placeholder."""
+    manifest = _manifest_with_param(required=True, validate={"pattern": pattern})
+
+    assert synthesize_params(manifest)["value"] == expected
+
+
+def test_synthesize_params_still_reports_a_pattern_no_placeholder_can_satisfy():
+    manifest = _manifest_with_param(required=True, validate={"pattern": "^[A-Z]{3}$"})
+
+    with pytest.raises(PackError, match="param 'value' value 'example_value' does not match"):
+        synthesize_params(manifest)
+
+
+def test_synthesize_params_keeps_the_declared_default_over_any_placeholder():
+    manifest = _manifest_with_param(default="42", validate={"pattern": "^[0-9]+$"})
+
+    assert synthesize_params(manifest)["value"] == "42"
 
 
 def test_validate_pack_needs_no_connection_or_db(fixture_pack_dir):
