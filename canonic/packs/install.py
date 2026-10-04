@@ -115,7 +115,8 @@ def synthesize_params(manifest: PackManifest) -> dict[str, str]:
     default (or "") is used instead: never fabricate a value that breaks the pack's own
     declared constraint. Every other param gets its declared default, or a generic
     placeholder (covers ``choose_from`` params, whose query is never executed here, and any
-    plain required param with no default). Routed through :func:`resolve_params` so pattern
+    plain required param with no default) that satisfies the param's own ``validate.pattern``
+    when one of a few simple candidates does. Routed through :func:`resolve_params` so pattern
     validation still runs on the synthesized values.
     """
     derive_sources = {p.derive.from_ for p in manifest.params if p.derive is not None}
@@ -128,7 +129,7 @@ def synthesize_params(manifest: PackManifest) -> dict[str, str]:
         elif p.default is not None:
             explicit[p.name] = p.default
         else:
-            explicit[p.name] = f"example_{p.name}"
+            explicit[p.name] = _placeholder_value(p)
 
     for p in manifest.params:
         if p.derive is None:
@@ -136,6 +137,27 @@ def synthesize_params(manifest: PackManifest) -> dict[str, str]:
         explicit[p.name] = apply_derive(p.derive, explicit.get(p.derive.from_, ""))
 
     return resolve_params(manifest, explicit)
+
+
+#: Tried after ``example_<name>`` when that does not satisfy a param's own ``validate.pattern``:
+#: letters only, digits only, and a domain name.
+_PLACEHOLDER_FALLBACKS = ("example", "1", "example.com", "a")
+
+
+def _placeholder_value(p: Param) -> str:
+    """``example_<name>``, or the first fallback that satisfies ``p``'s own ``validate.pattern``.
+
+    When nothing fits, ``example_<name>`` is returned and :func:`resolve_params` reports the
+    mismatch, so a pattern this cannot satisfy is a clear error and not a silent skip.
+    """
+    preferred = f"example_{p.name}"
+    for candidate in (preferred, *_PLACEHOLDER_FALLBACKS):
+        try:
+            validate_param_value(p.name, candidate, p.validate_)
+        except PackError:
+            continue
+        return candidate
+    return preferred
 
 
 def _safe_derive_source_value(p: Param) -> str:
