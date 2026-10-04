@@ -27,12 +27,18 @@ from canonic.cli.commands._pack_prompts import (
 from canonic.config import find_project_root, load_config
 from canonic.exc import PackError
 from canonic.packs.install import check_required_tables, install_pack, resolve_params
-from canonic.packs.loader import find_pack_dir, list_packs, load_pack_manifest
+from canonic.packs.loader import (
+    find_pack_dir,
+    list_packs,
+    list_readable_packs,
+    load_pack_manifest,
+)
 from canonic.packs.repo import resolve_repo
 from canonic.packs.validate import validate_pack
 
 if TYPE_CHECKING:
     from canonic.config import CanonicConfig
+    from canonic.packs.loader import SkippedPack
     from canonic.packs.manifest import PackManifest, Variant
 
 _console = Console()
@@ -71,7 +77,7 @@ def list_(ctx: typer.Context, repo: _RepoOption = None) -> None:
     """List packs available from the configured pack repo."""
     root = _project_or_exit()
     repo_dir = _resolved_repo(repo, root)
-    manifests = list_packs(repo_dir)
+    manifests, skipped = list_readable_packs(repo_dir)
 
     if get_cli_context(ctx).json_output:
         typer.echo(
@@ -85,14 +91,16 @@ def list_(ctx: typer.Context, repo: _RepoOption = None) -> None:
                             "variants": [v.id for v in m.variants],
                         }
                         for m in manifests
-                    ]
+                    ],
+                    "skipped": [{"pack": s.name, "reason": s.reason} for s in skipped],
                 }
             )
         )
         return
 
     if not manifests:
-        _console.print(f"no packs found under {repo_dir}")
+        _console.print(f"no readable packs found under {repo_dir}")
+        _print_skipped(skipped)
         return
     table = Table(show_header=True, header_style="bold")
     table.add_column("pack")
@@ -102,6 +110,16 @@ def list_(ctx: typer.Context, repo: _RepoOption = None) -> None:
     for m in manifests:
         table.add_row(m.pack, m.version, ", ".join(v.id for v in m.variants), m.description)
     _console.print(table)
+    _print_skipped(skipped)
+
+
+def _print_skipped(skipped: list[SkippedPack]) -> None:
+    for s in skipped:
+        _console.print(f"[yellow]skipped {s.name}:[/yellow] {s.reason}")
+    if skipped:
+        _console.print(
+            "[dim]A pack that needs a newer canonic fails to load. Upgrade canonic.[/dim]"
+        )
 
 
 @app.command("add")

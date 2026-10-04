@@ -804,17 +804,20 @@ def _offer_context_packs(root: Path) -> tuple[Path, PackManifest] | None:
     A network failure never blocks setup: printed once, then the caller falls through to
     the unchanged generic path.
     """
-    from canonic.packs.loader import list_packs
+    from canonic.packs.loader import list_readable_packs
     from canonic.packs.repo import resolve_repo
 
     repo_value = os.environ.get(_DEFAULT_PACKS_REPO_ENV) or _DEFAULT_PACKS_REPO
     try:
         repo_dir = resolve_repo(repo_value, project_root=root)
-        manifests = list_packs(repo_dir)
+        manifests, skipped = list_readable_packs(repo_dir)
     except CanonicError as exc:
         _console.print(f"[yellow]pack repo unreachable, continuing without packs:[/yellow] {exc}")
         logger.info("setup: pack repo unreachable: %s", exc)
         return None
+    for pack in skipped:
+        _console.print(f"[yellow]skipping pack {pack.name}:[/yellow] {pack.reason}")
+        logger.info("setup: pack %s skipped: %s", pack.name, pack.reason)
     if not manifests:
         return None
 

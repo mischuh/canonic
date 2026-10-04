@@ -8,7 +8,7 @@ import duckdb
 
 from canonic.cli.app import app
 from canonic.config import load_config
-from tests.packs.conftest import write_fixture_pack, write_variant_pack
+from tests.packs.conftest import write_fixture_pack, write_unreadable_pack, write_variant_pack
 
 
 def _seed_widgets_db(db_path) -> None:
@@ -172,3 +172,34 @@ def test_pack_branch_previews_and_installs_the_chosen_variants_files(runner, tmp
     semantics = project_dir / "semantics" / "widgets_db"
     assert (semantics / "widgets.yaml").exists()
     assert (semantics / "widgets_extra.yaml").exists()
+
+
+def test_pack_branch_offers_the_readable_packs_and_names_the_skipped_one(
+    runner, tmp_path, monkeypatch
+):
+    repo_dir = tmp_path / "repo"
+    write_unreadable_pack(repo_dir)
+    write_fixture_pack(repo_dir)
+    (tmp_path / "project").mkdir()
+    monkeypatch.chdir(tmp_path / "project")
+    monkeypatch.setenv("CANONIC_PACKS_REPO", str(repo_dir))
+
+    other_idx = "2"  # 1 = widgets pack, 2 = "something else"
+    wizard_input = "\n".join(
+        [
+            "",  # project name
+            other_idx,
+            "n",  # configure a connection now? -> No
+            "",  # configure an llm now? -> default yes
+            "",  # llm provider
+            "",  # base url
+            "m",  # model
+            "",  # api key env
+        ]
+    )
+    result = runner.invoke(app, ["setup"], input=wizard_input + "\n")
+
+    assert result.exit_code == 0, result.output
+    assert "skipping pack future" in result.output
+    assert "widgets" in result.output
+    assert "pack repo unreachable" not in result.output

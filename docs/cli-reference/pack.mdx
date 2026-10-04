@@ -55,7 +55,9 @@ canonic pack list
 canonic pack list --repo /path/to/local/packs-checkout
 ```
 
-Shows each pack's name, version, available variants, and description. With `--json`, returns `{"packs": [...]}`.
+Shows each pack's name, version, available variants, and description. With `--json`, returns `{"packs": [...], "skipped": [...]}`.
+
+A pack whose manifest cannot be read, for example because it uses a field that this canonic release does not know, is skipped. It is named below the table with the reason, and in `skipped` as `{"pack", "reason"}`, and the other packs are still listed. The `canonic setup` pack menu behaves the same way. `pack add` for the skipped pack and `pack validate` still fail with the reason.
 
 ## `pack add`
 

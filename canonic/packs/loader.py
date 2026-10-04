@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from pydantic import ValidationError
@@ -13,7 +14,13 @@ from canonic.packs.manifest import PackManifest
 if TYPE_CHECKING:
     from pathlib import Path
 
-__all__ = ["find_pack_dir", "list_packs", "load_pack_manifest"]
+__all__ = [
+    "SkippedPack",
+    "find_pack_dir",
+    "list_packs",
+    "list_readable_packs",
+    "load_pack_manifest",
+]
 
 _PACKS_DIR = "packs"
 
@@ -42,16 +49,45 @@ def load_pack_manifest(pack_dir: Path) -> PackManifest:
         raise PackError(f"{path}: {message}") from exc
 
 
-def list_packs(repo_dir: Path) -> list[PackManifest]:
-    """Every pack manifest found directly under ``repo_dir/packs/*/pack.yaml``."""
+@dataclass(frozen=True)
+class SkippedPack:
+    """A pack directory whose manifest could not be read, and why."""
+
+    name: str
+    reason: str
+
+
+def _pack_dirs(repo_dir: Path) -> list[Path]:
     packs_dir = repo_dir / _PACKS_DIR
     if not packs_dir.is_dir():
         return []
-    return [
-        load_pack_manifest(entry)
-        for entry in sorted(packs_dir.iterdir())
-        if (entry / "pack.yaml").exists()
-    ]
+    return [entry for entry in sorted(packs_dir.iterdir()) if (entry / "pack.yaml").exists()]
+
+
+def list_packs(repo_dir: Path) -> list[PackManifest]:
+    """Every pack manifest found directly under ``repo_dir/packs/*/pack.yaml``.
+
+    Raises PackError on the first manifest that cannot be read, which is what a CI check
+    such as ``canonic pack validate`` needs. Use :func:`list_readable_packs` to show packs
+    to a user.
+    """
+    return [load_pack_manifest(entry) for entry in _pack_dirs(repo_dir)]
+
+
+def list_readable_packs(repo_dir: Path) -> tuple[list[PackManifest], list[SkippedPack]]:
+    """The manifests that can be read, and the packs that were skipped because they cannot.
+
+    A manifest that uses a field this canonic does not know fails to parse. Listing is for
+    people choosing a pack, so one such pack must not hide the others.
+    """
+    manifests: list[PackManifest] = []
+    skipped: list[SkippedPack] = []
+    for entry in _pack_dirs(repo_dir):
+        try:
+            manifests.append(load_pack_manifest(entry))
+        except PackError as exc:
+            skipped.append(SkippedPack(name=entry.name, reason=str(exc)))
+    return manifests, skipped
 
 
 def find_pack_dir(repo_dir: Path, name: str) -> Path:
