@@ -8,7 +8,14 @@ from enum import StrEnum
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
 
-from pydantic import BaseModel, Field, ValidationError, field_validator, model_validator
+from pydantic import (
+    BaseModel,
+    Field,
+    PrivateAttr,
+    ValidationError,
+    field_validator,
+    model_validator,
+)
 from pydantic_settings import BaseSettings, PydanticBaseSettingsSource, SettingsConfigDict
 from ruamel.yaml import YAML
 
@@ -95,6 +102,18 @@ class Connection(BaseModel):
     #: predicate injection entirely, so it is only served where the warehouse itself
     #: closes the gap.
     rls_enforced: bool = False
+    #: sqlglot dialect of ``params.target_connection``, derived at config load. Not part
+    #: of the file format and never serialized.
+    _target_dialect: str | None = PrivateAttr(default=None)
+
+    @property
+    def target_dialect(self) -> str | None:
+        """The SQL dialect of the connection named by ``params.target_connection``, if known."""
+        return self._target_dialect
+
+    def bind_target_dialect(self, dialect: str | None) -> None:
+        """Record the target connection's dialect (set by :class:`CanonicConfig`)."""
+        self._target_dialect = dialect
 
     @field_validator("credentials_ref")
     @classmethod
@@ -607,7 +626,25 @@ class CanonicConfig(BaseSettings):
                     f"match any configured connection id; configured: {sorted(ids)}"
                 )
         self._validate_ossie_targets()
+        self._bind_target_dialects()
         return self
+
+    def _bind_target_dialects(self) -> None:
+        """Tell each connection with a queryable ``target_connection`` that target's dialect.
+
+        Definition connectors (Ossie) pick and transpile expressions into the dialect the
+        target compiles in, but a connector is built from its own connection alone.
+        """
+        from canonic.compiler.dialect import DIALECT_ADAPTERS, TYPE_TO_DIALECT, adapter_for
+
+        types = {c.id: c.type for c in self.connections}
+        for conn in self.connections:
+            target = conn.params.get("target_connection")
+            if target is None:
+                continue
+            dialect = TYPE_TO_DIALECT.get(types[target], types[target])
+            if dialect in DIALECT_ADAPTERS:
+                conn.bind_target_dialect(adapter_for(dialect).dialect)
 
     def _validate_ossie_targets(self) -> None:
         """An ``ossie`` connection must name a primary, queryable ``target_connection``.

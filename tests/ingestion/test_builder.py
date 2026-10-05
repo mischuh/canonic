@@ -825,3 +825,39 @@ class TestNullLLMDrafter:
         schema = _relation_schema(primary_key=[])
         other = {"dim_customers": _relation_schema()}
         assert await NullLLMDrafter().draft_schema_joins(schema, ["customer_id"], other) == []
+
+
+def _measure_evidence(name: str, additivity: str | None) -> EvidenceItem:
+    return EvidenceItem(
+        source="warehouse_pg",
+        kind=EvidenceKind.DEFINITION,
+        acquisition_tier=AcquisitionTier.MODELING,
+        payload={
+            "source": "warehouse_pg",
+            "entity": name,
+            "entity_type": DefinitionEntityType.MEASURE.value,
+            "expr": f"SUM({name})",
+            "additivity": additivity,
+            "references": ["analytics.fct_orders"],
+            "native_ref": f"test#{name}",
+        },
+        source_fingerprint=f"sha256:{name}",
+        observed_at=_NOW,
+    )
+
+
+async def test_measure_with_unknown_additivity_is_skipped_not_drafted() -> None:
+    """A semantic measure has no "unknown" additivity, so drafting one would fail the
+    validation gate for the whole run. It is recorded as skipped instead."""
+    result = await ContextBuilder().build(
+        [
+            _evidence(_relation_schema()),
+            _measure_evidence("amount", "additive"),
+            _measure_evidence("running_amount", None),
+        ]
+    )
+    (proposal,) = result.proposals
+    assert [m["name"] for m in proposal.content["measures"]] == ["amount"]
+    (skip,) = result.skipped
+    assert skip.kind == EvidenceKind.DEFINITION
+    assert "'running_amount' has unknown additivity" in skip.reason

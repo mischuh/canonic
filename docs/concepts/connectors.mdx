@@ -58,9 +58,27 @@ Implement `extract_definitions`: feed the semantic layer and canonical-binding c
 | Type | Notes |
 | --- | --- |
 | `dbt` | Parses a compiled `manifest.json`: models → typed columns/grain, measures, joins, descriptions. |
-| `ossie` | Parses [Apache Ossie](https://ossie.apache.org/) semantic model files (spec `0.1.x` and `0.2.0.dev0`): datasets → grain and descriptions, `ai_context.instructions` → doc evidence. Fields, metrics and relationships are not mapped yet. Emits no `RelationSchema`, column types always come from the live schema of `target_connection`. |
+| `ossie` | Parses [Apache Ossie](https://ossie.apache.org/) semantic model files (spec `0.1.x` and `0.2.0.dev0`) into datasets, dimensions, measures, joins and `ai_context` doc evidence. See [Ossie mapping](#ossie-mapping). |
 
 A definition connector is its own connection entry (own `id`) but describes tables that live in a *different*, queryable connection. `params.target_connection` names that connection's id, so the evidence is attributed to it rather than to the definition connector's own id: this is what lets its `RelationSchema` proposals land on the same `semantics/<connection>/<name>.yaml` target as that connection's live introspection and reconcile against it (see the [worked example](/concepts/ingestion-and-reconciliation#example-adding-a-definition-connector-after-an-initial-apply)), instead of colliding on the project-wide unique source `name`. Omitting it falls back to the definition connector's own id, fine for a definitions-only project with no paired physical connection, but such sources can never actually be queried (no `run_read_only_sql`). An `ossie` connection has no such fallback. Ossie has no notion of a connection, so `target_connection` is required and must name a queryable connection.
+
+#### Ossie mapping
+
+Ossie is read as an interchange format, never as canonic's own format. Parsing is deterministic, no LLM is involved, and every item enters reconciliation as `inferred` at the `modeling` tier. The connector emits no `RelationSchema`: Ossie types are optional, so column types always come from the live schema of `target_connection`.
+
+| Ossie | Becomes |
+| --- | --- |
+| `datasets[]` | Source description and grain (`primary_key`). A dataset whose `source` is a query is unmappable. |
+| `fields[]` with `dimension` | A dimension. A bare column becomes `column`, anything else `expr`. `is_time` defaults to `true` for a temporal `datatype`. `ai_context.synonyms` become `aliases`. |
+| `metrics[]` | A measure on the one dataset its expression references. `SUM`, `COUNT`, `MIN`, `MAX` are additive. `COUNT(DISTINCT …)` is non-additive plus a `distinct_count` binding candidate. `AVG` is non-additive and flagged for review. `a / b` of two aggregates becomes two component measures plus a `ratio` binding candidate. Anything else keeps an unknown additivity and is flagged. |
+| `relationships[]` | A join with an `on` predicate. `from` is the many side, so the default is `many_to_one`, and keys on both sides make it `one_to_one`. Target columns that match no key of `to` are flagged. |
+| `ai_context.instructions` | Doc evidence bound to that object. |
+
+The expression variant written in the target's own dialect is used first, then `OSSIE_SQL_2026`, then `ANSI_SQL`, then any other SQL dialect sqlglot can read, transpiled to the target. Expressions only in `MDX`, `TABLEAU`, `MAQL`, `DAX`, `SIGMA` or `THOUGHTSPOT`, and expressions that do not parse, are unmappable. Every unmappable object is named in a warning by `canonic connection test` and `canonic ingest`, never dropped silently.
+
+<Note>
+  Binding candidates are proposals only, an import never makes a definition canonical. Today the ingest draft uses the Ossie measures and descriptions. Dimensions, joins, binding candidates and doc evidence are extracted but not yet drafted into `semantics/`, `contracts/` or `knowledge/`. A measure with unknown additivity is skipped with a warning until you declare it by hand.
+</Note>
 
 ### Evidence
 
