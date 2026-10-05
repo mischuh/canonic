@@ -23,6 +23,7 @@ from canonic.connectors.base import (
     UsageEvidence,
     UsageRole,
 )
+from canonic.ingestion.candidates import build_candidate_proposals
 from canonic.ingestion.definitions import DefinitionIndex, RelationDefinitions
 from canonic.ingestion.models import (
     DraftedBy,
@@ -332,6 +333,16 @@ class ContextBuilder:
                         reason="no handler yet (deferred to a later E4 stage)",
                     )
                 )
+
+        candidates, unexpressible = build_candidate_proposals(
+            definitions, confidence=MODELING_REVIEW_CONFIDENCE
+        )
+        proposals.extend(candidates)
+        for source, reason in unexpressible:
+            logger.warning("skipping %s", reason)
+            skipped.append(
+                SkippedEvidence(source=source, kind=EvidenceKind.DEFINITION, reason=reason)
+            )
 
         return BuildResult(proposals=proposals, skipped=skipped)
 
