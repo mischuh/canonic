@@ -309,6 +309,9 @@ class SourceMeta(BaseModel):
 
     provenance: Provenance = Provenance.INFERRED
     source_fingerprint: str | None = None  # sha256 of the introspected/declared schema
+    # sha256 of the modeling definitions (dbt, Ossie) folded into the draft. Compared only
+    # when both the accepted file and the proposal carry one.
+    definition_fingerprint: str | None = None
     last_validated_at: datetime | None = None
     frozen: bool = False
     pack_source: PackSourceMeta | None = None

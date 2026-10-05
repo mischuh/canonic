@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import logging
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING, Any, cast
 
 from pydantic import BaseModel, ConfigDict
 
@@ -34,6 +34,7 @@ from canonic.ingestion.reconciliation import (
     NullReconcileDrafter,
     ReconcileDrafter,
     ReconciliationEngine,
+    proposal_definition_fingerprint,
 )
 from canonic.ingestion.validation import ValidationGate
 from canonic.semantic.loader import dump_semantic_source, load_semantic_source
@@ -290,6 +291,10 @@ class IngestionPipeline:
         The only in-place mutation an unchanged run performs: a no-op proposal touched no
         content, so we bump the freshness stamp on the accepted file and rewrite it. This
         changes neither a proposal nor a decision, so headless determinism holds (S9-AC1).
+
+        An accepted file without a ``definition_fingerprint`` also gets the proposal's one
+        as its baseline, so a later change to its dbt or Ossie definitions is detected
+        without the first run after an upgrade flagging every curated file.
         """
         validated_at = datetime.now(UTC)
         for entry in report.entries:
@@ -299,9 +304,11 @@ class IngestionPipeline:
             if not path.exists():
                 continue
             source = load_semantic_source(path)
-            refreshed = source.model_copy(
-                update={"meta": source.meta.model_copy(update={"last_validated_at": validated_at})}
-            )
+            update: dict[str, Any] = {"last_validated_at": validated_at}
+            baseline = proposal_definition_fingerprint(entry.proposal)
+            if source.meta.definition_fingerprint is None and baseline is not None:
+                update["definition_fingerprint"] = baseline
+            refreshed = source.model_copy(update={"meta": source.meta.model_copy(update=update)})
             path.write_text(dump_semantic_source(refreshed))
 
     def _write_diffs(self, diffs: Iterable[EmittedDiff]) -> None:

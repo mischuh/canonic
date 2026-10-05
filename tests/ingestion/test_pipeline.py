@@ -610,3 +610,110 @@ async def test_no_models_configured_headless_is_deterministic(tmp_path: Path) ->
     second = await pipeline.run(evidence)
 
     assert first.emission.to_json() == second.emission.to_json()
+
+
+def _measure(expr: str = "sum(amount)") -> DefinitionEvidence:
+    return DefinitionEvidence(
+        source=_CONN,
+        entity="revenue",
+        entity_type=DefinitionEntityType.MEASURE,
+        expr=expr,
+        additivity=Additivity.ADDITIVE,
+        references=["analytics.fct_orders"],
+        native_ref="ossie:shop#metric/revenue",
+        acquisition_tier=AcquisitionTier.MODELING,
+    )
+
+
+async def _definition_run(
+    root: Path, *, expr: str | None = "sum(amount)", bootstrap: bool = False
+) -> Any:
+    """One run over the live orders table plus, unless ``expr`` is None, a revenue definition."""
+    connectors: dict[str, ConnectorBase] = {_CONN: FakeConnector([_orders()])}
+    if expr is not None:
+        connectors[_DBT_CONN] = FakeDefinitionConnector([], [_measure(expr)])
+    pipeline = IngestionPipeline(root, connectors, ReconcileConfig())
+    if bootstrap:
+        scaffold_project(root)
+        return await pipeline.bootstrap(_CONN)
+    evidence = await evidence_from_introspection(connectors[_CONN], _CONN)
+    if expr is not None:
+        evidence += await evidence_from_definitions(connectors[_DBT_CONN], _CONN)
+    return await pipeline.run(evidence)
+
+
+def _orders_file(root: Path) -> Path:
+    return root / "semantics" / _CONN / "fct_orders.yaml"
+
+
+def _rewrite_meta(root: Path, **update: Any) -> None:
+    from canonic.semantic.loader import dump_semantic_source
+
+    source = load_semantic_source(_orders_file(root))
+    meta = source.meta.model_copy(update=update)
+    _orders_file(root).write_text(dump_semantic_source(source.model_copy(update={"meta": meta})))
+
+
+async def test_definition_fingerprint_is_written_and_unchanged_rerun_is_a_no_op(
+    tmp_path: Path,
+) -> None:
+    await _definition_run(tmp_path, bootstrap=True)
+    assert load_semantic_source(_orders_file(tmp_path)).meta.definition_fingerprint
+
+    result = await _definition_run(tmp_path)
+    orders = next(e for e in result.report.entries if e.target.endswith("fct_orders.yaml"))
+    assert orders.decision is ReconciliationDecision.NO_OP
+
+
+async def test_changed_definition_on_unchanged_schema_is_an_edit(tmp_path: Path) -> None:
+    await _definition_run(tmp_path, bootstrap=True)
+
+    result = await _definition_run(tmp_path, expr="sum(amount) - 0")
+
+    orders = next(e for e in result.report.entries if e.target.endswith("fct_orders.yaml"))
+    assert orders.decision is ReconciliationDecision.EDIT
+    assert orders.proposal.content["measures"][0]["expr"] == "sum(amount) - 0"
+
+
+async def test_changed_definition_against_a_curated_file_is_a_contradiction(
+    tmp_path: Path,
+) -> None:
+    from canonic.semantic.models import Provenance
+
+    await _definition_run(tmp_path, bootstrap=True)
+    _rewrite_meta(tmp_path, provenance=Provenance.HUMAN_CURATED)
+
+    result = await _definition_run(tmp_path, expr="sum(amount) - 0")
+
+    orders = next(e for e in result.report.entries if e.target.endswith("fct_orders.yaml"))
+    assert orders.decision is ReconciliationDecision.CONTRADICTION
+
+
+async def test_file_without_definition_fingerprint_gets_a_baseline_not_a_change(
+    tmp_path: Path,
+) -> None:
+    """Files accepted before definitions were fingerprinted must not all flag at once."""
+    from canonic.semantic.models import Provenance
+
+    await _definition_run(tmp_path, bootstrap=True)
+    _rewrite_meta(tmp_path, definition_fingerprint=None, provenance=Provenance.HUMAN_CURATED)
+
+    first = await _definition_run(tmp_path, expr="sum(amount) - 0")
+    orders = next(e for e in first.report.entries if e.target.endswith("fct_orders.yaml"))
+    assert orders.decision is ReconciliationDecision.NO_OP
+    assert load_semantic_source(_orders_file(tmp_path)).meta.definition_fingerprint
+
+    second = await _definition_run(tmp_path, expr="sum(amount) - 1")
+    orders = next(e for e in second.report.entries if e.target.endswith("fct_orders.yaml"))
+    assert orders.decision is ReconciliationDecision.CONTRADICTION
+
+
+async def test_run_without_the_definition_connector_is_not_a_change(tmp_path: Path) -> None:
+    await _definition_run(tmp_path, bootstrap=True)
+    stamped = load_semantic_source(_orders_file(tmp_path)).meta.definition_fingerprint
+
+    result = await _definition_run(tmp_path, expr=None)
+
+    orders = next(e for e in result.report.entries if e.target.endswith("fct_orders.yaml"))
+    assert orders.decision is ReconciliationDecision.NO_OP
+    assert load_semantic_source(_orders_file(tmp_path)).meta.definition_fingerprint == stamped
