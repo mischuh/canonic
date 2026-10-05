@@ -32,6 +32,7 @@ from canonic.ingestion.models import (
     Proposal,
     ProposalOp,
 )
+from canonic.ingestion.page_drafts import draft_page
 from canonic.semantic.models import Provenance, Relationship
 
 logger = logging.getLogger(__name__)
@@ -323,6 +324,14 @@ class ContextBuilder:
                 proposals.extend(self._build_usage_evidence(item))
             elif item.kind == EvidenceKind.ANSWER_OUTCOME:
                 proposals.append(self._build_answer_outcome(item))
+            elif item.kind == EvidenceKind.DOC_EVIDENCE:
+                draft = draft_page(item, confidence=MODELING_REVIEW_CONFIDENCE)
+                if isinstance(draft, str):
+                    skipped.append(
+                        SkippedEvidence(source=item.source, kind=item.kind, reason=draft)
+                    )
+                else:
+                    proposals.append(draft)
             elif item.kind == EvidenceKind.DEFINITION:
                 pass  # folded into relation drafts by the DefinitionIndex above
             else:

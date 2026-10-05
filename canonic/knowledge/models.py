@@ -68,6 +68,9 @@ class KnowledgePageMeta(BaseModel):
     #: Which context pack installed this page (AMENDMENT-context-packs §2.3); None for a
     #: hand-written page.
     pack_source: PackSourceMeta | None = None
+    #: sha256 of the doc evidence and resolved references an ingest run drafted this page
+    #: from. Only ingest-drafted pages carry it, and only those are reconciled by ingest.
+    source_fingerprint: str | None = None
 
 
 class KnowledgePage(BaseModel):

@@ -20,6 +20,7 @@ from pydantic import BaseModel, ConfigDict
 from canonic.config import ReconcileConfig
 from canonic.connectors.base import AcquisitionTier
 from canonic.contracts.loader import load_metric_bindings
+from canonic.exc import KnowledgePageError
 from canonic.ingestion.builder import _ANSWER_OUTCOME_SENTINEL, _DA_SENTINEL
 from canonic.ingestion.candidates import CandidateResolver, is_candidate
 from canonic.ingestion.models import (
@@ -30,6 +31,8 @@ from canonic.ingestion.models import (
     ReconciliationEntry,
     ReconciliationReport,
 )
+from canonic.ingestion.page_drafts import is_page_draft, render_page_drafts
+from canonic.knowledge.loader import load_knowledge_page
 from canonic.semantic.loader import list_semantic_sources
 from canonic.semantic.models import Provenance
 
@@ -180,6 +183,8 @@ class DiskAcceptedStore:
                 definition_fingerprint=source.meta.definition_fingerprint,
             )
 
+        self._load_ingested_pages(project_root)
+
         for binding in load_metric_bindings(project_root):
             slug = binding.metric.replace(" ", "_").lower()
             target = f"contracts/metrics/{slug}.yaml"
@@ -189,6 +194,32 @@ class DiskAcceptedStore:
                 provenance=binding.provenance,
                 frozen=False,
                 source_fingerprint=None,
+            )
+
+    def _load_ingested_pages(self, project_root: Path) -> None:
+        """Knowledge pages an ingest run drafted, recognisable by ``meta.source_fingerprint``.
+
+        Hand-written pages and ``canonic knowledge add`` pages carry none. They are not
+        ingest's to reconcile, so they never become a prune or edit proposal. A page that
+        fails to load is left to ``canonic validate`` to report.
+        """
+        knowledge_root = project_root / "knowledge"
+        if not knowledge_root.is_dir():
+            return
+        for path in sorted(knowledge_root.rglob("*.md")):
+            try:
+                page = load_knowledge_page(path)
+            except KnowledgePageError:
+                continue
+            if page.meta.source_fingerprint is None:
+                continue
+            target = path.relative_to(project_root).as_posix()
+            self._facts[target] = ExistingFact(
+                target=target,
+                content={"body": path.read_text()},
+                provenance=page.meta.provenance,
+                frozen=page.meta.frozen,
+                source_fingerprint=page.meta.source_fingerprint,
             )
 
     def get(self, target: str) -> ExistingFact | None:
@@ -300,13 +331,16 @@ class ReconciliationEngine:
         """
         entries: list[ReconciliationEntry] = []
         candidates = [p for p in proposals if is_candidate(p)]
-        groups = self._group_by_target([p for p in proposals if not is_candidate(p)])
+        page_drafts = [p for p in proposals if is_page_draft(p)]
+        groups = self._group_by_target(
+            [p for p in proposals if not is_candidate(p) and not is_page_draft(p)]
+        )
+        entries.extend(self._decide_groups(groups, accepted))
 
-        for target, group in groups.items():
-            if len({_signature(p) for p in group}) > 1:
-                entries.extend(self._resolve_group(target, group, accepted))
-            else:
-                entries.append(self._reconcile_one(group[0], accepted.get(target)))
+        # Knowledge pages resolve their references against the semantic state decided above.
+        page_groups = self._group_by_target(render_page_drafts(page_drafts, accepted, entries))
+        entries.extend(self._decide_groups(page_groups, accepted))
+        groups.update(page_groups)
 
         # Contract candidates go last: whether one can be proposed depends on the measures
         # and bindings the decisions above leave in place.
@@ -318,6 +352,17 @@ class ReconciliationEngine:
         addressed = set(groups) | {p.target for p in candidates}
         entries.extend(self._prune_disappeared(addressed, accepted))
         return ReconciliationReport(entries=entries)
+
+    def _decide_groups(
+        self, groups: dict[str, list[Proposal]], accepted: AcceptedStore
+    ) -> list[ReconciliationEntry]:
+        entries: list[ReconciliationEntry] = []
+        for target, group in groups.items():
+            if len({_signature(p) for p in group}) > 1:
+                entries.extend(self._resolve_group(target, group, accepted))
+            else:
+                entries.append(self._reconcile_one(group[0], accepted.get(target)))
+        return entries
 
     def contradictions_block(self, report: ReconciliationReport) -> bool:
         """Whether strict mode should gate the run on this report's contradictions (§5.4).
