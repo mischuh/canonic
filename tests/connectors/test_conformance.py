@@ -243,8 +243,8 @@ class _FixtureLookerLookSource:
 
 
 @pytest.fixture(
-    params=["postgres", "dbt", "notion", "metabase", "looker", "sqlite"],
-    ids=["postgres", "dbt", "notion", "metabase", "looker", "sqlite"],
+    params=["postgres", "dbt", "notion", "metabase", "looker", "sqlite", "ossie"],
+    ids=["postgres", "dbt", "notion", "metabase", "looker", "sqlite", "ossie"],
 )
 def any_offline_connector(
     request: pytest.FixtureRequest,
@@ -254,6 +254,7 @@ def any_offline_connector(
     notion_pages_path: Path,
     metabase_questions_path: Path,
     looker_looks_path: Path,
+    ossie_model_path: Path,
 ) -> ConnectorBase:
     """Offline instance of each registered connector type."""
     from canonic.config import Connection
@@ -289,6 +290,10 @@ def any_offline_connector(
                 credentials_ref="env:LOOKER_API_TOKEN",
             )
             return LookerConnector(conn, look_source=_FixtureLookerLookSource(looker_looks_path))
+        case "ossie":
+            from canonic.connectors.ossie import OssieConnector
+
+            return OssieConnector([str(ossie_model_path)], source="warehouse")
         case _:
             pytest.fail(f"unknown connector param: {request.param!r}")
 
@@ -511,12 +516,18 @@ def _out_of_range_connector(
                 conn,
                 look_source=_FixtureLookerLookSource(looker_looks_path, version="3.1"),
             )
+        case "ossie":
+            from canonic.connectors.ossie import OssieConnector
+
+            model = tmp_path / "old.ossie.yaml"
+            model.write_text("version: 0.0.9\nname: m\ndatasets: [{name: d, source: t}]\n")
+            return OssieConnector([str(model)], source="warehouse")
         case _:
             pytest.fail(f"unknown connector param: {param!r}")
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("param", ["dbt", "notion", "metabase", "looker"])
+@pytest.mark.parametrize("param", ["dbt", "notion", "metabase", "looker", "ossie"])
 async def test_e3_unsupported_version_ingests_nothing(
     param: str,
     tmp_path: Path,
@@ -596,7 +607,7 @@ def test_require_capability_passes_through_declared_cap(
     assert result is any_offline_connector
 
 
-_EVIDENCE_ONLY_TYPES = {"dbt", "looker", "metabase", "notion", "url"}
+_EVIDENCE_ONLY_TYPES = {"dbt", "looker", "metabase", "notion", "ossie", "url"}
 
 _QUERY_CONNECTIONS: dict[str, dict[str, Any]] = {
     "clickhouse": {"host": "localhost", "user": "u", "database": "db"},

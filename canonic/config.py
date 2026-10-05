@@ -68,6 +68,9 @@ class Connection(BaseModel):
     independent ones; defaults to this connection's own id when omitted, matching a
     standalone dbt-only project with no paired physical connection). Validated against the
     configured connection ids by :meth:`CanonicConfig._validate_target_connections`.
+    An ``ossie`` connection recognizes ``paths`` (a list of Apache Ossie model files or
+    glob patterns, relative to the project root) and requires ``target_connection``, which
+    must name a primary, queryable connection: every imported dataset is bound to it.
     """
 
     id: str
@@ -603,7 +606,34 @@ class CanonicConfig(BaseSettings):
                     f"connections[{conn.id}].params.target_connection={target!r} does not "
                     f"match any configured connection id; configured: {sorted(ids)}"
                 )
+        self._validate_ossie_targets()
         return self
+
+    def _validate_ossie_targets(self) -> None:
+        """An ``ossie`` connection must name a primary, queryable ``target_connection``.
+
+        Ossie has no notion of a connection, so the target decides the ``semantics/``
+        directory, the SQL dialect and the column types (AMENDMENT-ossie-interchange §3.2).
+        "Primary" means the target's type has a query dialect, the same test the service
+        uses to decide which connections can serve compiled SQL.
+        """
+        from canonic.compiler.dialect import DIALECT_ADAPTERS, TYPE_TO_DIALECT
+
+        types = {c.id: c.type for c in self.connections}
+        for conn in self.connections:
+            if conn.type != "ossie":
+                continue
+            target = conn.params.get("target_connection")
+            if not target:
+                raise ValueError(
+                    f"connections[{conn.id}] (type=ossie) requires params.target_connection"
+                )
+            target_type = types[target]
+            if TYPE_TO_DIALECT.get(target_type, target_type) not in DIALECT_ADAPTERS:
+                raise ValueError(
+                    f"connections[{conn.id}].params.target_connection={target!r} must be a "
+                    f"primary, queryable connection; {target!r} has type {target_type!r}"
+                )
 
     @classmethod
     def settings_customise_sources(

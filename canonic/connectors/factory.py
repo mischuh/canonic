@@ -19,6 +19,7 @@ from canonic.connectors.metabase import MetabaseConnector
 from canonic.connectors.mysql import MySQLConnector
 from canonic.connectors.notion import DEFAULT_API_VERSION as _NOTION_DEFAULT_API_VERSION
 from canonic.connectors.notion import make_notion_connector
+from canonic.connectors.ossie import OssieConnector
 from canonic.connectors.postgres import PostgresConnector
 from canonic.connectors.redshift import RedshiftConnector
 from canonic.connectors.snowflake import SnowflakeConnector
@@ -44,6 +45,18 @@ def _make_dbt(conn: Connection) -> DbtConnector:
     # colliding on the global source-name uniqueness check.
     physical_connection = conn.params.get("target_connection", conn.id)
     return DbtConnector(manifest_path, source=physical_connection)
+
+
+def _make_ossie(conn: Connection) -> OssieConnector:
+    # Same stamping rule as dbt: evidence lands on the primary connection the datasets live
+    # on. Unlike dbt there is no fallback to the own id, config validation requires it.
+    raw_paths = conn.params.get("paths")
+    if not raw_paths:
+        raise ConnectionError(
+            f"connection {conn.id!r} (type=ossie) requires params.paths: [<file or glob>, ...]"
+        )
+    paths = [raw_paths] if isinstance(raw_paths, str) else [str(p) for p in raw_paths]
+    return OssieConnector(paths, source=conn.params["target_connection"])
 
 
 def _make_notion(conn: Connection) -> GenericEvidenceConnector:
@@ -140,6 +153,7 @@ def _build_default_factory() -> ConnectorFactory:
     factory.register("metabase", MetabaseConnector)
     factory.register("mysql", MySQLConnector)
     factory.register("notion", _make_notion)
+    factory.register("ossie", _make_ossie)
     factory.register("postgres", PostgresConnector)
     factory.register("redshift", RedshiftConnector)
     factory.register("snowflake", SnowflakeConnector)

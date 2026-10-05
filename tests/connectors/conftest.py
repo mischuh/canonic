@@ -65,6 +65,12 @@ def dbt_manifest_path() -> Path:
 
 
 @pytest.fixture
+def ossie_model_path() -> Path:
+    """Path to the Ossie 0.2.0.dev0 model fixture used by Ossie connector tests."""
+    return Path(__file__).parent / "fixtures" / "ossie_model.yaml"
+
+
+@pytest.fixture
 def notion_pages_path() -> Path:
     """Path to the Notion pages fixture used by Notion connector tests."""
     return Path(__file__).parent / "fixtures" / "notion_pages.json"
