@@ -43,8 +43,8 @@ connections:
 
 | Field | Type | Default | Governs |
 | --- | --- | --- | --- |
-| `id` | `str` | n/a (required) | Unique identifier for this connection. Referenced from `semantics/<connection-id>/`, `project.default_connection`, and a dbt connection's `target_connection`. |
-| `type` | `str` | n/a (required) | Connector type, e.g. `postgres`, `mysql`, `clickhouse`, `redshift`, `snowflake`, `databricks`, `sqlite`, `duckdb`, `dbt`. Must match a registered connector or the connection fails to load with `connection_error`. |
+| `id` | `str` | n/a (required) | Unique identifier for this connection. Referenced from `semantics/<connection-id>/`, `project.default_connection`, and the `target_connection` of a dbt or ossie connection. |
+| `type` | `str` | n/a (required) | Connector type, e.g. `postgres`, `mysql`, `clickhouse`, `redshift`, `snowflake`, `databricks`, `sqlite`, `duckdb`, `dbt`, `ossie`. Must match a registered connector or the connection fails to load with `connection_error`. |
 | `params` | `dict[str, Any]` | `{}` | Connector-specific settings such as `host`, `port`, `database`, or `schema`. What's valid here depends entirely on `type`. |
 | `credentials_ref` | `str \| null` | `null` | Where to resolve this connection's secret from, never the secret itself. See below. |
 | `read_only_role` | `str \| null` | `null` | The session role a `snowflake` connection connects with, which should only hold `SELECT` grants. Accepted and stored for other connectors but not consulted by them. Without it, a `snowflake` connection relies on the SQL parse guard alone and `canonic connection test` warns about that. |
@@ -64,6 +64,14 @@ A connection is how canonic reaches an actual data source. `id` is the name ever
   - id: jaffle_dbt
     type: dbt
     params: { manifest_path: dbt/manifest.json, target_connection: warehouse_pg }
+```
+
+- `ossie` connections require `paths` (a list of [Apache Ossie](https://ossie.apache.org/) model files or glob patterns, relative to the project root, a single string is accepted too) and `target_connection`. Unlike dbt, `target_connection` has no fallback. It must name a declared connection whose type is queryable (`postgres`, `sqlite`, `duckdb` and so on), otherwise config validation fails at load time. Supported spec versions are `0.1.x` (root `semantic_model` array) and `0.2.0.dev0` (one flat model per file). A file with any other version fails `canonic connection test`, and `canonic ingest` ingests nothing from it. URL sources are not supported yet.
+
+```yaml
+  - id: sales_ossie
+    type: ossie
+    params: { paths: ["models/*.ossie.yaml"], target_connection: warehouse_pg }
 ```
 
 ### Dynamic credentials

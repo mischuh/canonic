@@ -1,0 +1,82 @@
+version: 0.2.0.dev0
+name: shop
+description: Small shop model used by the Ossie connector tests
+ai_context:
+  instructions: Use this model for order and revenue questions.
+
+datasets:
+  - name: orders
+    source: main.orders
+    primary_key: [order_id]
+    description: One row per order
+    ai_context:
+      instructions: Cancelled orders are kept with status 'cancelled'.
+      synonyms: [purchases]
+    fields:
+      - name: order_id
+        expression:
+          dialects:
+            - dialect: ANSI_SQL
+              expression: order_id
+      - name: customer_id
+        expression:
+          dialects:
+            - dialect: ANSI_SQL
+              expression: customer_id
+      - name: status
+        expression:
+          dialects:
+            - dialect: ANSI_SQL
+              expression: status
+        dimension:
+          is_time: false
+        ai_context:
+          instructions: Valid values are placed, shipped and cancelled.
+      - name: amount
+        expression:
+          dialects:
+            - dialect: ANSI_SQL
+              expression: amount
+
+  - name: customers
+    source: main.customers
+    primary_key: [customer_id]
+    unique_keys:
+      - [email]
+    fields:
+      - name: customer_id
+        expression:
+          dialects:
+            - dialect: ANSI_SQL
+              expression: customer_id
+      - name: email
+        expression:
+          dialects:
+            - dialect: ANSI_SQL
+              expression: email
+
+  - name: recent_orders
+    source: SELECT * FROM main.orders WHERE order_date > DATE '2026-01-01'
+
+relationships:
+  - name: orders_to_customers
+    from: orders
+    to: customers
+    from_columns: [customer_id]
+    to_columns: [customer_id]
+    ai_context: Every order belongs to exactly one customer.
+
+metrics:
+  - name: revenue
+    expression:
+      dialects:
+        - dialect: ANSI_SQL
+          expression: SUM(orders.amount)
+    description: Total order amount
+    ai_context:
+      instructions: Revenue includes cancelled orders unless filtered by status.
+      synonyms: [sales]
+
+custom_extensions:
+  - vendor_name: COMMON
+    data: '{"owner": "analytics"}'

@@ -58,7 +58,7 @@ def _dialect_for_type(connector_type: str) -> str | None:
     """Map a query connector's type string to a sqlglot dialect name.
 
     Returns ``None`` for a definitions/evidence-only connector type (dbt, looker,
-    metabase, notion, url) — those never serve a compiled query, so they get no entry
+    metabase, notion, ossie, url) — those never serve a compiled query, so they get no entry
     in ``connection_dialects`` at all rather than a meaningless placeholder dialect.
     A project pairing a query connector with, say, a dbt companion connection (see
     examples/dutch-railway, jaffle-shop, ecommerce) is the normal case this must not
@@ -74,6 +74,7 @@ _FILE_PATH_PARAMS: dict[str, str] = {
     "duckdb": "path",
     "sqlite": "path",
     "dbt": "manifest_path",
+    "ossie": "paths",
 }
 
 
@@ -81,15 +82,24 @@ def _resolve_connection_paths(connections: list[Connection], root: Path) -> None
     """Resolve relative file paths in file-based connections against the project root.
 
     Mutates params in-place so callers downstream always receive absolute paths,
-    regardless of the process working directory.
+    regardless of the process working directory. A list-valued param (Ossie ``paths``)
+    has each entry resolved, glob patterns included.
     """
     for conn in connections:
         param_key = _FILE_PATH_PARAMS.get(conn.type)
         if param_key is None:
             continue
         raw = conn.params.get(param_key)
-        if raw and not Path(raw).is_absolute():
-            conn.params[param_key] = str(root / raw)
+        if isinstance(raw, list):
+            conn.params[param_key] = [_resolve_path(str(p), root) for p in raw]
+        elif raw:
+            conn.params[param_key] = _resolve_path(raw, root)
+
+
+def _resolve_path(raw: str, root: Path) -> str:
+    if raw.startswith(("http://", "https://")) or Path(raw).is_absolute():
+        return raw
+    return str(root / raw)
 
 
 class CanonicService:

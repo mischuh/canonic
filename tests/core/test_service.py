@@ -23,6 +23,8 @@ from canonic.exc import Ambiguous, Unresolved
 from canonic.knowledge.results import MatchedOn
 
 if TYPE_CHECKING:
+    from pathlib import Path
+
     from canonic.semantic.models import SemanticSource
 
 
@@ -495,3 +497,23 @@ class TestSearchKnowledge:
 
         result = service_with_pages.search_knowledge("revenue", user="alice")
         assert any(MatchedOn.VECTOR in h.matched_on for h in result.hits)
+
+
+def test_resolve_connection_paths_resolves_each_ossie_path(tmp_path: Path) -> None:
+    from canonic.config import Connection
+    from canonic.core.service import _resolve_connection_paths
+
+    conn = Connection(
+        id="shop_ossie",
+        type="ossie",
+        params={
+            "paths": ["models/*.ossie.yaml", "/abs/m.yaml", "https://example.com/m.yaml"],
+            "target_connection": "warehouse",
+        },
+    )
+    _resolve_connection_paths([conn], tmp_path)
+    assert conn.params["paths"] == [
+        str(tmp_path / "models/*.ossie.yaml"),
+        "/abs/m.yaml",
+        "https://example.com/m.yaml",
+    ]
