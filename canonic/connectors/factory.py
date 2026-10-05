@@ -56,7 +56,9 @@ def _make_ossie(conn: Connection) -> OssieConnector:
             f"connection {conn.id!r} (type=ossie) requires params.paths: [<file or glob>, ...]"
         )
     paths = [raw_paths] if isinstance(raw_paths, str) else [str(p) for p in raw_paths]
-    return OssieConnector(paths, source=conn.params["target_connection"])
+    return OssieConnector(
+        paths, source=conn.params["target_connection"], target_dialect=conn.target_dialect
+    )
 
 
 def _make_notion(conn: Connection) -> GenericEvidenceConnector:

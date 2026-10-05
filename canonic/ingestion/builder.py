@@ -10,6 +10,7 @@ behind an injected ``LLMDrafter``; the default is a deterministic null stub.
 
 from __future__ import annotations
 
+import logging
 import re
 from typing import Any, Protocol
 
@@ -32,6 +33,8 @@ from canonic.ingestion.models import (
     ProposalOp,
 )
 from canonic.semantic.models import Provenance, Relationship
+
+logger = logging.getLogger(__name__)
 
 __all__ = [
     "BuildResult",
@@ -279,6 +282,7 @@ class ContextBuilder:
         named_grains: dict[str, list[str]] = {}
         named_descriptions: dict[str, str] = {}
         all_relations: dict[str, RelationSchema] = {}
+        skipped: list[SkippedEvidence] = []
         for item in evidence:
             if item.kind == EvidenceKind.RELATION_SCHEMA:
                 relation_schema = RelationSchema.model_validate(item.payload)
@@ -291,10 +295,22 @@ class ContextBuilder:
             payload = item.payload
             entity_type = payload.get("entity_type")
             if entity_type == DefinitionEntityType.MEASURE:
+                if payload.get("additivity") is None:
+                    # A semantic measure has no "unknown" additivity, so drafting one would
+                    # fail the validation gate for the whole run. Record it for review instead.
+                    reason = (
+                        f"measure {payload['entity']!r} has unknown additivity; "
+                        "declare it by hand to use it"
+                    )
+                    logger.warning("skipping %s (%s)", reason, payload.get("native_ref"))
+                    skipped.append(
+                        SkippedEvidence(source=item.source, kind=item.kind, reason=reason)
+                    )
+                    continue
                 entry: dict[str, Any] = {
                     "name": payload["entity"],
                     "expr": payload.get("expr") or payload["entity"],
-                    "additivity": payload.get("additivity") or "unknown",
+                    "additivity": payload["additivity"],
                 }
                 for ref in payload.get("references", []):
                     named_measures.setdefault(ref.split(".")[-1], []).append(entry)
@@ -309,7 +325,6 @@ class ContextBuilder:
                     named_descriptions[payload["entity"].split(".")[-1]] = description
 
         proposals: list[Proposal] = []
-        skipped: list[SkippedEvidence] = []
 
         for item in evidence:
             if not item.is_known():

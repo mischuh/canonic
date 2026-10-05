@@ -27,16 +27,38 @@ datasets:
         expression:
           dialects:
             - dialect: ANSI_SQL
-              expression: status
+              expression: orders.status
         dimension:
           is_time: false
+        description: Order status
         ai_context:
           instructions: Valid values are placed, shipped and cancelled.
+          synonyms: [order state, state]
+      - name: order_date
+        expression:
+          dialects:
+            - dialect: ANSI_SQL
+              expression: order_date
+        datatype: Date
+        dimension: {}
+      - name: status_upper
+        expression:
+          dialects:
+            - dialect: ANSI_SQL
+              expression: UPPER(status)
+        dimension:
+          is_time: false
       - name: amount
         expression:
           dialects:
             - dialect: ANSI_SQL
               expression: amount
+      - name: pivot_status
+        expression:
+          dialects:
+            - dialect: TABLEAU
+              expression: "[status]"
+        dimension: {}
 
   - name: customers
     source: main.customers
@@ -54,6 +76,17 @@ datasets:
           dialects:
             - dialect: ANSI_SQL
               expression: email
+      - name: country
+        expression:
+          dialects:
+            - dialect: ANSI_SQL
+              expression: country
+        dimension:
+          is_time: false
+
+  - name: customer_profiles
+    source: main.customer_profiles
+    primary_key: [customer_id]
 
   - name: recent_orders
     source: SELECT * FROM main.orders WHERE order_date > DATE '2026-01-01'
@@ -65,6 +98,21 @@ relationships:
     from_columns: [customer_id]
     to_columns: [customer_id]
     ai_context: Every order belongs to exactly one customer.
+  - name: profiles_to_customers
+    from: customer_profiles
+    to: customers
+    from_columns: [customer_id]
+    to_columns: [customer_id]
+  - name: customers_by_country
+    from: orders
+    to: customers
+    from_columns: [status]
+    to_columns: [country]
+  - name: orders_to_recent
+    from: orders
+    to: recent_orders
+    from_columns: [order_id]
+    to_columns: [order_id]
 
 metrics:
   - name: revenue
@@ -76,6 +124,43 @@ metrics:
     ai_context:
       instructions: Revenue includes cancelled orders unless filtered by status.
       synonyms: [sales]
+  - name: order_count
+    expression:
+      dialects:
+        - dialect: ANSI_SQL
+          expression: COUNT(orders.order_id)
+        - dialect: SNOWFLAKE
+          expression: COUNT(TRY_TO_NUMBER(orders.order_id))
+  - name: customer_count
+    expression:
+      dialects:
+        - dialect: ANSI_SQL
+          expression: COUNT(DISTINCT orders.customer_id)
+  - name: average_order_value
+    expression:
+      dialects:
+        - dialect: ANSI_SQL
+          expression: AVG(orders.amount)
+  - name: revenue_per_customer
+    expression:
+      dialects:
+        - dialect: ANSI_SQL
+          expression: SUM(orders.amount) / NULLIF(COUNT(DISTINCT customers.customer_id), 0)
+  - name: running_revenue
+    expression:
+      dialects:
+        - dialect: ANSI_SQL
+          expression: SUM(orders.amount) OVER (ORDER BY orders.order_date)
+  - name: revenue_mdx
+    expression:
+      dialects:
+        - dialect: MDX
+          expression: "[Measures].[Revenue]"
+  - name: broken
+    expression:
+      dialects:
+        - dialect: ANSI_SQL
+          expression: "SUM(orders.amount"
 
 custom_extensions:
   - vendor_name: COMMON

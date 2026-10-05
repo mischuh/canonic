@@ -228,16 +228,57 @@ class DefinitionEntityType(StrEnum):
     MODEL = "model"
     JOIN = "join"
     ENTITY = "entity"
+    #: A metric that spans more than one measure and only becomes a canonical binding
+    #: through review. Carries a :class:`ContractCandidate`.
+    METRIC = "metric"
 
 
 class JoinSpec(BaseModel):
-    """One side of a join relationship within a DefinitionEvidence record."""
+    """One side of a join relationship within a DefinitionEvidence record.
+
+    ``on`` is the join predicate over short relation names (``orders.customer_id =
+    customers.id``, composite keys AND-joined) when the source states it explicitly.
+    """
 
     model_config = ConfigDict(frozen=True)
 
     left: str
     right: str
     relationship: Relationship
+    on: str | None = None
+
+
+class ReviewFlag(StrEnum):
+    """Why a definition was derived with less than full certainty and needs a human look."""
+
+    #: ``AVG(col)`` is not additive. A ``ratio`` of ``SUM`` over ``COUNT`` usually is the
+    #: better binding.
+    AVG_SUGGESTS_RATIO = "avg_suggests_ratio"
+    #: The aggregate could not be classified, so additivity is unknown.
+    UNCLASSIFIED_AGGREGATION = "unclassified_aggregation"
+    #: A join's target columns match no declared key of the target, so the stated
+    #: cardinality is unverified.
+    JOIN_COLUMNS_NOT_A_KEY = "join_columns_not_a_key"
+
+
+class CandidateKind(StrEnum):
+    """The contract binding kind a :class:`ContractCandidate` proposes."""
+
+    RATIO = "ratio"
+    DISTINCT_COUNT = "distinct_count"
+
+
+class ContractCandidate(BaseModel):
+    """A proposed metric binding, never canonical until accepted through review (FR-13).
+
+    ``measures`` names the component measures: one for ``distinct_count``, numerator then
+    denominator for ``ratio``.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    kind: CandidateKind
+    measures: list[str]
 
 
 class DefinitionEvidence(BaseModel):
@@ -247,6 +288,10 @@ class DefinitionEvidence(BaseModel):
     in Canonic's normalized shape so no vendor-specific structure reaches E4.
     ``native_ref`` is the vendor back-pointer (e.g. dbt ``unique_id``) for provenance.
     ``additivity=None`` encodes the spec's ``unknown`` value for unrecognized aggregations.
+
+    A dimension is either a bare ``column`` or an ``expr``, mirroring the semantic
+    ``Dimension``. ``review_flags`` mark definitions derived with less than full
+    certainty, and ``contract_candidate`` carries a proposed binding on a ``METRIC``.
     """
 
     model_config = ConfigDict(frozen=True)
@@ -255,11 +300,16 @@ class DefinitionEvidence(BaseModel):
     entity: str
     entity_type: DefinitionEntityType
     expr: str | None = None
+    column: str | None = None
+    is_time: bool = False
     additivity: Additivity | None = None
     references: list[str] = []
     grain: list[str] = []
     joins: list[JoinSpec] = []
     description: str | None = None
+    aliases: list[str] = []
+    review_flags: list[ReviewFlag] = []
+    contract_candidate: ContractCandidate | None = None
     native_ref: str
     acquisition_tier: AcquisitionTier
     source_fingerprint: str | None = None
