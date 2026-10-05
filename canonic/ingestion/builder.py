@@ -17,14 +17,13 @@ from typing import Any, Protocol
 from pydantic import BaseModel, ConfigDict
 
 from canonic.connectors.base import (
-    AcquisitionTier,
     ColumnInfo,
-    DefinitionEntityType,
     ForeignKey,
     RelationSchema,
     UsageEvidence,
     UsageRole,
 )
+from canonic.ingestion.definitions import DefinitionIndex, RelationDefinitions
 from canonic.ingestion.models import (
     DraftedBy,
     EvidenceItem,
@@ -79,6 +78,11 @@ LLM_JOIN_CONFIDENCE_CEILING = 0.85
 # duty excludes a bare "id" too (never summable); the dimension/join duty only excludes the
 # suffix form (a bare "id" is normally this table's own key, not a pointer elsewhere, so it
 # can still be a useful dimension — existing behavior, preserved as-is).
+# A draft carrying a modeling definition flagged for review (an AVG measure, a join whose
+# target columns are not a key, conflicting definitions) is capped here so it never passes
+# first_run_auto_acceptable and always reaches a human.
+MODELING_REVIEW_CONFIDENCE = 0.5
+
 _SURROGATE_KEY_RE = re.compile(r"(^id$|_(id|fk|key)$)", re.IGNORECASE)
 _ID_SUFFIX_RE = re.compile(r"_(id|fk|key)$", re.IGNORECASE)
 
@@ -278,51 +282,23 @@ class ContextBuilder:
         task expansion) — no ordering dependency on another relation's own drafted grain,
         since only its declared columns are needed, not its resolved grain.
         """
-        named_measures: dict[str, list[dict[str, Any]]] = {}
-        named_grains: dict[str, list[str]] = {}
-        named_descriptions: dict[str, str] = {}
         all_relations: dict[str, RelationSchema] = {}
-        skipped: list[SkippedEvidence] = []
+        definitions = DefinitionIndex()
         for item in evidence:
             if item.kind == EvidenceKind.RELATION_SCHEMA:
                 relation_schema = RelationSchema.model_validate(item.payload)
                 all_relations[relation_schema.relation.split(".")[-1]] = relation_schema
-                continue
-            if item.kind != EvidenceKind.DEFINITION:
-                continue
-            if item.acquisition_tier != AcquisitionTier.MODELING:
-                continue
-            payload = item.payload
-            entity_type = payload.get("entity_type")
-            if entity_type == DefinitionEntityType.MEASURE:
-                if payload.get("additivity") is None:
-                    # A semantic measure has no "unknown" additivity, so drafting one would
-                    # fail the validation gate for the whole run. Record it for review instead.
-                    reason = (
-                        f"measure {payload['entity']!r} has unknown additivity; "
-                        "declare it by hand to use it"
-                    )
-                    logger.warning("skipping %s (%s)", reason, payload.get("native_ref"))
-                    skipped.append(
-                        SkippedEvidence(source=item.source, kind=item.kind, reason=reason)
-                    )
-                    continue
-                entry: dict[str, Any] = {
-                    "name": payload["entity"],
-                    "expr": payload.get("expr") or payload["entity"],
-                    "additivity": payload["additivity"],
-                }
-                for ref in payload.get("references", []):
-                    named_measures.setdefault(ref.split(".")[-1], []).append(entry)
-            elif entity_type == DefinitionEntityType.ENTITY:
-                grain = payload.get("grain") or []
-                if grain:
-                    for ref in payload.get("references", []):
-                        named_grains.setdefault(ref.split(".")[-1], grain)
-            elif entity_type == DefinitionEntityType.MODEL:
-                description = payload.get("description")
-                if description:
-                    named_descriptions[payload["entity"].split(".")[-1]] = description
+            else:
+                definitions.add(item)
+
+        skipped: list[SkippedEvidence] = []
+        for unplaced in definitions.resolve(all_relations):
+            logger.warning("skipping modeling definition: %s", unplaced.reason)
+            skipped.append(
+                SkippedEvidence(
+                    source=unplaced.source, kind=EvidenceKind.DEFINITION, reason=unplaced.reason
+                )
+            )
 
         proposals: list[Proposal] = []
 
@@ -339,11 +315,7 @@ class ContextBuilder:
                 rel_key = schema.relation.split(".")[-1]
                 proposals.append(
                     await self._build_relation_schema(
-                        item,
-                        named_measures.get(rel_key),
-                        named_grains.get(rel_key),
-                        all_relations,
-                        named_descriptions.get(rel_key),
+                        item, all_relations, definitions.for_relation(rel_key)
                     )
                 )
             elif item.kind == EvidenceKind.USAGE_EVIDENCE:
@@ -351,7 +323,7 @@ class ContextBuilder:
             elif item.kind == EvidenceKind.ANSWER_OUTCOME:
                 proposals.append(self._build_answer_outcome(item))
             elif item.kind == EvidenceKind.DEFINITION:
-                pass  # consumed by the pre-collection pass above
+                pass  # folded into relation drafts by the DefinitionIndex above
             else:
                 skipped.append(
                     SkippedEvidence(
@@ -366,10 +338,8 @@ class ContextBuilder:
     async def _build_relation_schema(
         self,
         item: EvidenceItem,
-        named_measures: list[dict[str, Any]] | None = None,
-        named_grain: list[str] | None = None,
         all_relations: dict[str, RelationSchema] | None = None,
-        named_description: str | None = None,
+        definitions: RelationDefinitions | None = None,
     ) -> Proposal:
         """Map one ``RelationSchema`` to a ``semantics/<conn>/<name>.yaml`` draft proposal.
 
@@ -380,15 +350,15 @@ class ContextBuilder:
         carrying reduced confidence, with the grain marked as a draft in ``meta`` rather
         than silently asserted (SPEC-E4 §4, S1-AC2).
 
-        When ``named_measures`` is supplied (pre-collected from modeling-tier MEASURE
-        DefinitionEvidence), those measures replace the generic column-inferred ones so
-        the emitted semantic source carries business-meaningful names from a dbt semantic
-        model rather than ``total_amount`` / ``row_count`` fallbacks.
-
-        When ``named_description`` is supplied (pre-collected from modeling-tier MODEL
-        DefinitionEvidence, e.g. a dbt model's manifest description), it's carried onto
-        the proposal's ``description`` field instead of being left blank.
+        ``definitions`` carries the modeling-tier definitions placed on this relation (dbt,
+        Ossie). Their measures replace the generic column-inferred ones, so the draft
+        carries business names rather than ``total_amount`` / ``row_count`` fallbacks.
+        Their dimensions replace inferred dimensions of the same name or column, their
+        joins replace FK joins with the same predicate and suppress LLM join guesses for
+        the columns they cover, and their description fills the draft's. Any definition
+        flagged for review caps the draft's confidence so it never auto-applies.
         """
+        definitions = definitions or RelationDefinitions()
         schema = RelationSchema.model_validate(item.payload)
         name = schema.relation.split(".")[-1]
 
@@ -398,8 +368,8 @@ class ContextBuilder:
             grain = list(schema.primary_key)
             drafted_by = DraftedBy.DETERMINISTIC
             confidence = DETERMINISTIC_CONFIDENCE
-        elif named_grain:
-            grain = list(named_grain)
+        elif definitions.grain:
+            grain = list(definitions.grain)
             drafted_by = DraftedBy.DETERMINISTIC
             confidence = DETERMINISTIC_CONFIDENCE
         else:
@@ -411,15 +381,23 @@ class ContextBuilder:
             drafted_by = DraftedBy.LLM
             confidence = draft.confidence
 
-        if named_measures is not None:
-            measures: list[dict[str, Any]] = named_measures
+        if definitions.measures:
+            measures: list[dict[str, Any]] = [dict(m) for m in definitions.measures]
         else:
             measures = ContextBuilder._infer_measures(schema.columns)
 
-        dimensions = ContextBuilder._infer_dimensions(schema.columns)
+        dimensions = [
+            d
+            for d in ContextBuilder._infer_dimensions(schema.columns)
+            if d["name"] not in definitions.dimension_names
+            and d["column"] not in definitions.dimension_columns
+        ]
+        dimensions.extend(dict(d) for d in definitions.dimensions)
         await self._enrich_dimensions(schema, dimensions)
 
-        candidate_columns = self._join_candidate_columns(schema)
+        candidate_columns = [
+            c for c in self._join_candidate_columns(schema) if c not in definitions.join_columns
+        ]
         other_relations = {
             rel_name: rel_schema
             for rel_name, rel_schema in (all_relations or {}).items()
@@ -443,6 +421,9 @@ class ContextBuilder:
             # so it is always routed through the same review path as an uncertain grain.
             confidence = min(confidence, min(d.confidence for d in join_drafts))
             drafted_by = DraftedBy.LLM
+        if definitions.review_notes:
+            meta["review_flags"] = sorted(set(definitions.review_notes))
+            confidence = min(confidence, MODELING_REVIEW_CONFIDENCE)
 
         content: dict[str, Any] = {
             "name": name,
@@ -454,11 +435,11 @@ class ContextBuilder:
             ],
             "measures": measures,
             "dimensions": dimensions,
-            "joins": self._build_joins(name, schema.foreign_keys, join_drafts),
+            "joins": self._build_joins(name, schema.foreign_keys, join_drafts, definitions.joins),
             "meta": meta,
         }
-        if named_description:
-            content["description"] = named_description
+        if definitions.description:
+            content["description"] = definitions.description
 
         return Proposal(
             target=f"semantics/{schema.connection}/{name}.yaml",
@@ -476,6 +457,7 @@ class ContextBuilder:
         this_name: str,
         foreign_keys: list[ForeignKey],
         drafted: list[JoinDraft] | None = None,
+        modeled: list[dict[str, Any]] | None = None,
     ) -> list[dict[str, Any]]:
         """Build join fragments, adding a disambiguating ``name`` when two joins share a target.
 
@@ -483,24 +465,53 @@ class ContextBuilder:
         and return_location_id both → locations) — whether both FK-declared, both LLM-drafted,
         or one of each — the default alias would collide. In that case a unique alias is
         derived from the join column by stripping common id/fk/key suffixes.
+
+        ``modeled`` joins come from modeling-tier definitions (dbt, Ossie) and already carry
+        their ``on`` and cardinality. An FK join with the same target and predicate is
+        dropped in their favour.
         """
         from collections import Counter
 
         drafted = drafted or []
+        modeled = modeled or []
+        modeled_keys = {(j["to"], j["on"]) for j in modeled}
+        fk_joins = [
+            fk
+            for fk in foreign_keys
+            if (fk.references.relation.split(".")[-1], ContextBuilder._fk_on(this_name, fk))
+            not in modeled_keys
+        ]
         target_counts = Counter(
-            [fk.references.relation.split(".")[-1] for fk in foreign_keys] + [d.to for d in drafted]
+            [fk.references.relation.split(".")[-1] for fk in fk_joins]
+            + [d.to for d in drafted]
+            + [j["to"] for j in modeled]
         )
         joins = [
             ContextBuilder._fk_to_join(
                 this_name, fk, needs_alias=target_counts[fk.references.relation.split(".")[-1]] > 1
             )
-            for fk in foreign_keys
+            for fk in fk_joins
         ]
         joins.extend(
             ContextBuilder._draft_to_join(this_name, d, needs_alias=target_counts[d.to] > 1)
             for d in drafted
         )
+        for join in modeled:
+            fragment = dict(join)
+            if target_counts[join["to"]] > 1:
+                local = re.match(rf"{re.escape(this_name)}\.(\w+)", join["on"])
+                column = local.group(1) if local else join["to"]
+                fragment["name"] = re.sub(r"_(id|fk|key)$", "", column, flags=re.IGNORECASE)
+            joins.append(fragment)
         return joins
+
+    @staticmethod
+    def _fk_on(this_name: str, fk: ForeignKey) -> str:
+        to = fk.references.relation.split(".")[-1]
+        return " AND ".join(
+            f"{this_name}.{col} = {to}.{ref}"
+            for col, ref in zip(fk.columns, fk.references.columns, strict=False)
+        )
 
     @staticmethod
     def _fk_to_join(this_name: str, fk: ForeignKey, *, needs_alias: bool = False) -> dict[str, Any]:
@@ -511,10 +522,7 @@ class ContextBuilder:
         composite keys) in declaration order, keeping the output deterministic.
         """
         to = fk.references.relation.split(".")[-1]
-        on = " AND ".join(
-            f"{this_name}.{col} = {to}.{ref}"
-            for col, ref in zip(fk.columns, fk.references.columns, strict=False)
-        )
+        on = ContextBuilder._fk_on(this_name, fk)
         result: dict[str, Any] = {
             "to": to,
             "on": on,
@@ -669,10 +677,11 @@ class ContextBuilder:
             draft = drafts.get(dim["name"])
             if draft is None:
                 continue
+            # Modeling-tier labels and aliases are stated, an LLM guess never replaces them.
             if draft.label and draft.confidence >= LLM_LABEL_CONFIDENCE_THRESHOLD:
-                dim["label"] = draft.label
+                dim.setdefault("label", draft.label)
             if draft.aliases and draft.confidence >= LLM_ALIAS_CONFIDENCE_THRESHOLD:
-                dim["aliases"] = list(draft.aliases)
+                dim.setdefault("aliases", list(draft.aliases))
 
     def _build_usage_evidence(self, item: EvidenceItem) -> list[Proposal]:
         """Map one ``UsageEvidence`` to a proposal against the contracts surface (SPEC-E3 §3.3).

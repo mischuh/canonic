@@ -20,6 +20,7 @@ pytest tests/ -x --tb=short
 - Subject in lowercase, imperative, no trailing period, header max 100 characters
 - Add a short body only when useful: blank line after the header, a bullet list of the main changes, lines max 100 characters
 - Do NOT append `Co-Authored-By` (or any other attribution) lines to commit messages
+- Commit messages and PR titles/descriptions must not reference the specs (no `SPEC-*`/`AMENDMENT-*` file names, section numbers like `§3.5`, or acceptance criteria ids like `O2 AC4`): the spec repo is private, so describe the change on its own terms
 - Only `feat`/`fix`/`perf` trigger a release, so use `chore`/`docs` for dev tooling under `scripts/`
 
 ## Project structure

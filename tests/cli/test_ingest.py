@@ -697,3 +697,28 @@ def test_wire_extraction_skills_ignores_non_evidence_connectors() -> None:
 
     # Must not raise even though _FakeConnector has no extraction_skill concept at all.
     _wire_extraction_skills({"warehouse_pg": _FakeConnector()}, _config_with_llm(), headless=False)
+
+
+def test_render_skipped_groups_reasons(capsys: pytest.CaptureFixture[str]) -> None:
+    """Skipped evidence reaches the user, grouped by reason, with markup escaped."""
+    from canonic.cli.commands.ingest import _render_skipped
+    from canonic.ingestion.builder import SkippedEvidence
+    from canonic.ingestion.emitter import EmissionResult
+    from canonic.ingestion.models import ReconciliationReport
+    from canonic.ingestion.pipeline import PipelineResult
+
+    result = PipelineResult(
+        emission=EmissionResult(report=ReconciliationReport()),
+        skipped=[
+            SkippedEvidence(
+                source="w", kind="definition", reason="measure [x] has unknown additivity"
+            ),
+            SkippedEvidence(source="w", kind="doc_evidence", reason="no handler yet"),
+            SkippedEvidence(source="w", kind="doc_evidence", reason="no handler yet"),
+        ],
+    )
+    _render_skipped(result)
+    out = capsys.readouterr().out
+    assert "skipped 3 evidence item(s)" in out
+    assert "measure [x] has unknown additivity" in out
+    assert "no handler yet (2x)" in out

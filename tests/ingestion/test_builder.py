@@ -840,6 +840,7 @@ def _measure_evidence(name: str, additivity: str | None) -> EvidenceItem:
             "additivity": additivity,
             "references": ["analytics.fct_orders"],
             "native_ref": f"test#{name}",
+            "acquisition_tier": AcquisitionTier.MODELING.value,
         },
         source_fingerprint=f"sha256:{name}",
         observed_at=_NOW,
@@ -860,4 +861,4 @@ async def test_measure_with_unknown_additivity_is_skipped_not_drafted() -> None:
     assert [m["name"] for m in proposal.content["measures"]] == ["amount"]
     (skip,) = result.skipped
     assert skip.kind == EvidenceKind.DEFINITION
-    assert "'running_amount' has unknown additivity" in skip.reason
+    assert "measure 'running_amount' (test#running_amount) has unknown additivity" in skip.reason
