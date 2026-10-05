@@ -71,12 +71,18 @@ def _normalize_ddl_type(kind: exp.DataType | None, relation: str, column: str) -
     return mapped
 
 
+def normalized_type_of(kind: exp.DType) -> str | None:
+    """The normalized type for a sqlglot type enum, ``None`` when it has no mapping."""
+    return _DDL_TYPE_MAP.get(kind)
+
+
 __all__ = [
     "AcquisitionLadder",
     "AcquisitionResult",
     "GapReport",
     "ProbeResult",
     "TypeConflict",
+    "normalized_type_of",
     "probe_schema",
     "relations_from_ddl",
     "relations_from_schema_yaml",

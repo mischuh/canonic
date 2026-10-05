@@ -155,6 +155,7 @@ def _run_and_report(
         typer.echo(result.emission.to_json())
     else:
         typer.echo(result.emission.render_markdown())
+        _render_skipped(result)
 
     if bootstrap and not result.first_run and not get_cli_context(ctx).json_output:
         _console.print(
@@ -306,6 +307,25 @@ def _persist_tables_filter(config_path: Path, connection_id: str, tables: list[s
             entry["params"]["tables"] = tables
             break
     write_raw_config(config_path, raw)
+
+
+def _render_skipped(result: PipelineResult) -> None:
+    """List evidence the builder did not turn into a proposal, grouped by reason.
+
+    Without this a definition that could not be placed (an unknown additivity, a column
+    missing from the live table) would only reach the log and silently be absent.
+    """
+    from collections import Counter
+
+    from rich.markup import escape
+
+    if not result.skipped:
+        return
+    reasons = Counter(s.reason for s in result.skipped)
+    _console.print(f"[yellow]skipped {len(result.skipped)} evidence item(s):[/yellow]")
+    for reason, count in sorted(reasons.items()):
+        suffix = f" ({count}x)" if count > 1 else ""
+        _console.print(f"  - {escape(reason)}{suffix}")
 
 
 def _is_headless(flag: bool) -> bool:
