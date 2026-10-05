@@ -134,6 +134,8 @@ class DefinitionIndex:
         self._pending: list[_Pending] = []
         self._invalid: list[UnplacedDefinition] = []
         self._resolved: dict[str, RelationDefinitions] = {}
+        self._candidates: list[_Pending] = []
+        self._measure_aliases: dict[str, list[str]] = {}
 
     def add(self, item: EvidenceItem) -> None:
         """Remember a modeling-tier ``definition`` item; ignore everything else."""
@@ -158,6 +160,9 @@ class DefinitionIndex:
         """
         unplaced: list[UnplacedDefinition] = list(self._invalid)
         for pending in self._pending:
+            if pending.definition.contract_candidate is not None:
+                self._candidates.append(pending)
+                continue
             reason = self._place(pending.definition, relations)
             if reason is not None:
                 unplaced.append(UnplacedDefinition(source=pending.item.source, reason=reason))
@@ -165,6 +170,22 @@ class DefinitionIndex:
 
     def for_relation(self, name: str) -> RelationDefinitions:
         return self._resolved.get(name, RelationDefinitions())
+
+    def candidates(self) -> list[tuple[str, DefinitionEvidence]]:
+        """Metrics carrying a contract candidate, as ``(evidence source, definition)``."""
+        return [(p.item.source, p.definition) for p in self._candidates]
+
+    def placed_measure(self, name: str) -> tuple[str, dict[str, Any]] | None:
+        """The relation a measure was placed on and its draft fragment, if it was placed."""
+        for relation, bucket in self._resolved.items():
+            for measure in bucket.measures:
+                if measure["name"] == name:
+                    return relation, measure
+        return None
+
+    def measure_aliases(self, name: str) -> list[str]:
+        """Aliases the source stated for a measure (Ossie metric synonyms)."""
+        return list(self._measure_aliases.get(name, []))
 
     def _bucket(self, name: str) -> RelationDefinitions:
         return self._resolved.setdefault(name, RelationDefinitions())
@@ -232,6 +253,8 @@ class DefinitionIndex:
             bucket.review_notes.append(f"measure {definition.entity}: conflicting definitions")
             return f"{label} conflicts with an earlier definition of the same measure on {name!r}"
         bucket.measures.append(entry)
+        if definition.aliases:
+            self._measure_aliases.setdefault(definition.entity, list(definition.aliases))
         bucket.review_notes.extend(
             f"measure {definition.entity}: {f.value}" for f in definition.review_flags
         )

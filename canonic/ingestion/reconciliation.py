@@ -21,6 +21,7 @@ from canonic.config import ReconcileConfig
 from canonic.connectors.base import AcquisitionTier
 from canonic.contracts.loader import load_metric_bindings
 from canonic.ingestion.builder import _ANSWER_OUTCOME_SENTINEL, _DA_SENTINEL
+from canonic.ingestion.candidates import CandidateResolver, is_candidate
 from canonic.ingestion.models import (
     DraftedBy,
     Proposal,
@@ -298,7 +299,8 @@ class ReconciliationEngine:
         proposed for prune (§5.2 last row / S10).
         """
         entries: list[ReconciliationEntry] = []
-        groups = self._group_by_target(proposals)
+        candidates = [p for p in proposals if is_candidate(p)]
+        groups = self._group_by_target([p for p in proposals if not is_candidate(p)])
 
         for target, group in groups.items():
             if len({_signature(p) for p in group}) > 1:
@@ -306,7 +308,15 @@ class ReconciliationEngine:
             else:
                 entries.append(self._reconcile_one(group[0], accepted.get(target)))
 
-        entries.extend(self._prune_disappeared(set(groups), accepted))
+        # Contract candidates go last: whether one can be proposed depends on the measures
+        # and bindings the decisions above leave in place.
+        resolver = CandidateResolver(
+            accepted, entries, lambda proposal: self._reconcile_one(proposal, None)
+        )
+        entries.extend(resolver.resolve(candidates))
+
+        addressed = set(groups) | {p.target for p in candidates}
+        entries.extend(self._prune_disappeared(addressed, accepted))
         return ReconciliationReport(entries=entries)
 
     def contradictions_block(self, report: ReconciliationReport) -> bool:
