@@ -288,3 +288,25 @@ async def test_pipeline_validates_and_emits_candidates_for_review(tmp_path: Path
     }
     assert not any(d.auto_apply for d in result.emission.diffs if d.target in contract_diffs)
     assert not (tmp_path / "contracts" / "metrics" / "revenue.yaml").exists()
+
+
+async def test_pipeline_run_with_an_existing_binding_does_not_fail(tmp_path: Path) -> None:
+    """A candidate over an existing binding is a no-op, and the no-op refresh must skip it
+    instead of loading the contract file as a semantic source."""
+    scaffold_project(tmp_path)
+    existing = tmp_path / "contracts" / "metrics" / "revenue.yaml"
+    existing.parent.mkdir(parents=True, exist_ok=True)
+    existing.write_text(
+        "metric: revenue\ncanonical:\n  kind: single\n  source: orders\n  measure: revenue\n"
+    )
+    before = existing.read_text()
+    connectors: dict[str, ConnectorBase] = {_CONN: _Live(), "shop_ossie": _Ossie()}
+    pipeline = IngestionPipeline(tmp_path, connectors, ReconcileConfig())
+    evidence = await evidence_from_introspection(connectors[_CONN], _CONN)
+    evidence += await evidence_from_definitions(connectors["shop_ossie"], _CONN)
+
+    result = await pipeline.run(evidence)
+
+    revenue = next(e for e in result.report.entries if e.target == "contracts/metrics/revenue.yaml")
+    assert revenue.decision is ReconciliationDecision.NO_OP
+    assert existing.read_text() == before

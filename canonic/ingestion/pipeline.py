@@ -300,6 +300,10 @@ class IngestionPipeline:
         for entry in report.entries:
             if entry.decision is not ReconciliationDecision.NO_OP:
                 continue
+            # Only semantic sources carry a freshness stamp. A no-op on a contract (an
+            # existing binding a candidate leaves alone) has nothing to refresh.
+            if not entry.target.startswith("semantics/"):
+                continue
             path = self._project_root / entry.target
             if not path.exists():
                 continue
