@@ -96,6 +96,8 @@ Headless mode (explicit `--headless`, or auto-detected via `CI=true`) pins the d
 
 Re-running `canonic ingest` refreshes from all configured sources, but a source whose `source_fingerprint` hasn't changed is a no-op: only `last_validated_at` refreshes. A run with no upstream change proposes no diffs at all. Drift is detected purely as a fingerprint change, which becomes a normal `edit`/`prune` proposal through reconciliation.
 
+Definitions from a definition connector (dbt, Ossie) have their own `definition_fingerprint`. A changed measure, dimension or join on an unchanged table is therefore a change too, and against a `human_curated` source it is a contradiction that `--strict` fails on. The definition fingerprint is only compared when both the accepted file and the new proposal carry one. A run without the definition connector is not a change, and a file accepted before definitions were fingerprinted gets the current one as its baseline on the next unchanged run instead of being flagged.
+
 ## After a run
 
 Diffs land under `.canonic/pending-diffs/<run-id>/`. Walk through them interactively with [`canonic review`](/cli-reference/review-apply), accept, reject, skip, freeze, or curate each one, or batch-apply everything still pending with [`canonic apply`](/cli-reference/review-apply).

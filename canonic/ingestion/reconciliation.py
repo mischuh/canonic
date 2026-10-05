@@ -122,6 +122,7 @@ class ExistingFact(BaseModel):
     provenance: Provenance = Provenance.INFERRED
     frozen: bool = False
     source_fingerprint: str | None = None
+    definition_fingerprint: str | None = None
 
 
 class AcceptedStore(Protocol):
@@ -175,6 +176,7 @@ class DiskAcceptedStore:
                 provenance=source.meta.provenance,
                 frozen=source.meta.frozen,
                 source_fingerprint=source.meta.source_fingerprint,
+                definition_fingerprint=source.meta.definition_fingerprint,
             )
 
         for binding in load_metric_bindings(project_root):
@@ -207,6 +209,14 @@ def _proposal_fingerprint(proposal: Proposal) -> str | None:
     return proposal.anchored_to[0] if proposal.anchored_to else None
 
 
+def proposal_definition_fingerprint(proposal: Proposal) -> str | None:
+    """The fingerprint of the modeling definitions folded into a proposal, if any."""
+    meta = proposal.content.get("meta")
+    if isinstance(meta, dict) and meta.get("definition_fingerprint"):
+        return str(meta["definition_fingerprint"])
+    return None
+
+
 def _signature(proposal: Proposal) -> str:
     """A stable distinctness key for grouping proposals at one target (SPEC-E4 §5.4).
 
@@ -215,7 +225,7 @@ def _signature(proposal: Proposal) -> str:
     """
     fp = _proposal_fingerprint(proposal)
     if fp is not None:
-        return f"fp:{fp}"
+        return f"fp:{fp}|def:{proposal_definition_fingerprint(proposal)}"
     return "content:" + json.dumps(proposal.content, sort_keys=True, default=str)
 
 
@@ -612,9 +622,19 @@ class ReconciliationEngine:
 
     @staticmethod
     def _fingerprints_match(existing: ExistingFact, proposal: Proposal) -> bool:
-        """True iff the accepted fact and proposal share a known source fingerprint (§5.2)."""
+        """True iff the accepted fact and proposal share a known source fingerprint (§5.2).
+
+        The definition fingerprint is compared only when both sides carry one. An accepted
+        file written before definitions were fingerprinted keeps matching on its schema, and
+        a run without the definition connector never reads as a change to its definitions.
+        """
         fp = _proposal_fingerprint(proposal)
-        return fp is not None and fp == existing.source_fingerprint
+        if fp is None or fp != existing.source_fingerprint:
+            return False
+        proposed = proposal_definition_fingerprint(proposal)
+        if proposed is None or existing.definition_fingerprint is None:
+            return True
+        return proposed == existing.definition_fingerprint
 
     def _auto_apply_eligible(
         self,

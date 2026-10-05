@@ -12,6 +12,8 @@ draft's confidence so it never auto-applies.
 
 from __future__ import annotations
 
+import hashlib
+import json
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
@@ -81,6 +83,24 @@ class RelationDefinitions:
     @property
     def dimension_columns(self) -> set[str]:
         return {d["column"] for d in self.dimensions if "column" in d}
+
+    def fingerprint(self) -> str | None:
+        """Stable sha256 over everything these definitions contribute to a draft.
+
+        ``None`` when no modeling definition reached the relation, so a run without the
+        definition connector never looks like a change.
+        """
+        payload = {
+            "measures": self.measures,
+            "dimensions": self.dimensions,
+            "joins": self.joins,
+            "grain": self.grain,
+            "description": self.description,
+        }
+        if not any(payload.values()):
+            return None
+        digest = hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()
+        return f"sha256:{digest}"
 
     @property
     def join_columns(self) -> set[str]:

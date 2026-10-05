@@ -363,6 +363,9 @@ class ContextBuilder:
         name = schema.relation.split(".")[-1]
 
         meta: dict[str, Any] = {"source_fingerprint": schema.source_fingerprint}
+        definition_fingerprint = definitions.fingerprint()
+        if definition_fingerprint is not None:
+            meta["definition_fingerprint"] = definition_fingerprint
 
         if schema.primary_key:
             grain = list(schema.primary_key)
