@@ -82,3 +82,23 @@ def test_no_measure_aliases_supported() -> None:
     resolved, unresolved = resolve_topic_refs(["monthly_recurring_revenue"], [_orders()])
     assert resolved == []
     assert unresolved == ["monthly_recurring_revenue"]
+
+
+def test_fully_qualified_names_are_kept_as_is() -> None:
+    """A definition connector states refs fully qualified, for a source or any member."""
+    refs = [
+        "warehouse_pg.orders",
+        "warehouse_pg.orders.amount",
+        "warehouse_pg.orders.mrr",
+        "warehouse_pg.orders.region",
+        "warehouse_pg.customers.mrr",
+    ]
+    resolved, unresolved = resolve_topic_refs(refs, [_orders(), _customers()])
+    assert resolved == refs
+    assert unresolved == []
+
+
+def test_qualified_name_of_a_missing_entity_stays_unresolved() -> None:
+    resolved, unresolved = resolve_topic_refs(["warehouse_pg.orders.churn"], [_orders()])
+    assert resolved == []
+    assert unresolved == ["warehouse_pg.orders.churn"]

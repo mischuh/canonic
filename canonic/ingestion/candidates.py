@@ -46,6 +46,7 @@ __all__ = [
     "CANDIDATE_SENTINEL",
     "CandidateResolver",
     "build_candidate_proposals",
+    "final_sources",
     "is_candidate",
 ]
 
@@ -157,6 +158,21 @@ def build_candidate_proposals(
     return list(proposals.values()), unexpressible
 
 
+def final_sources(
+    accepted: AcceptedStore, entries: list[ReconciliationEntry]
+) -> dict[str, dict[str, Any]]:
+    """Semantic source name → content after this run: proposed if it lands, else accepted."""
+    sources: dict[str, dict[str, Any]] = {}
+    for target in accepted.targets():
+        fact = accepted.get(target)
+        if target.startswith("semantics/") and fact is not None:
+            sources[str(fact.content.get("name"))] = fact.content
+    for entry in entries:
+        if entry.target.startswith("semantics/") and entry.decision in _ADDING:
+            sources[str(entry.proposal.content.get("name"))] = entry.proposal.content
+    return sources
+
+
 def _strip(proposal: Proposal) -> Proposal:
     content = {k: v for k, v in proposal.content.items() if k != CANDIDATE_SENTINEL}
     return proposal.model_copy(update={"content": content})
@@ -180,28 +196,13 @@ class CandidateResolver:
     ) -> None:
         self._accepted = accepted
         self._reconcile_new = reconcile_new
-        self._sources = self._final_sources(accepted, entries)
+        self._sources = final_sources(accepted, entries)
         self._bound: set[str] = {
             str(fact.content.get("metric"))
             for target in accepted.targets()
             if target.startswith("contracts/metrics/")
             and (fact := accepted.get(target)) is not None
         }
-
-    @staticmethod
-    def _final_sources(
-        accepted: AcceptedStore, entries: list[ReconciliationEntry]
-    ) -> dict[str, dict[str, Any]]:
-        """Semantic source name → content after this run: proposed if it lands, else accepted."""
-        sources: dict[str, dict[str, Any]] = {}
-        for target in accepted.targets():
-            fact = accepted.get(target)
-            if target.startswith("semantics/") and fact is not None:
-                sources[str(fact.content.get("name"))] = fact.content
-        for entry in entries:
-            if entry.target.startswith("semantics/") and entry.decision in _ADDING:
-                sources[str(entry.proposal.content.get("name"))] = entry.proposal.content
-        return sources
 
     def resolve(self, candidates: list[Proposal]) -> list[ReconciliationEntry]:
         """Decide every candidate, components before the ratios that reference them."""

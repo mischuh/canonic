@@ -20,7 +20,12 @@ __all__ = ["resolve_topic_refs"]
 def resolve_topic_refs(
     topic_refs: list[str], sources: list[SemanticSource]
 ) -> tuple[list[str], list[str]]:
-    """Case-insensitive exact match against each source's measure/dimension names+aliases.
+    """Resolve candidates to fully-qualified entity names.
+
+    A candidate that already is a fully-qualified name of a source, column, measure or
+    dimension (``{connection}.{source}[.{member}]``, as a definition connector states it)
+    is kept as is. Any other candidate is matched case-insensitively and exactly against
+    each source's measure/dimension names and dimension aliases.
 
     Returns ``(resolved, unresolved)``, both in ``topic_refs`` order. A resolved entry is
     a fully-qualified ``{connection}.{source}.{member}`` name using the entity's declared
@@ -33,9 +38,14 @@ def resolve_topic_refs(
     required unique project-wide) resolves to the first match in ``sources`` order —
     deterministic, not "last source wins".
     """
+    qualified: set[str] = set()
     index: dict[str, str] = {}
     for source in sources:
         base = f"{source.connection}.{source.name}"
+        qualified.add(base)
+        qualified.update(f"{base}.{c.name}" for c in source.columns)
+        qualified.update(f"{base}.{m.name}" for m in source.measures)
+        qualified.update(f"{base}.{d.name}" for d in source.dimensions)
         for measure in source.measures:
             index.setdefault(measure.name.lower(), f"{base}.{measure.name}")
         for dimension in source.dimensions:
@@ -46,6 +56,9 @@ def resolve_topic_refs(
     resolved: list[str] = []
     unresolved: list[str] = []
     for candidate in topic_refs:
+        if candidate.strip() in qualified:
+            resolved.append(candidate.strip())
+            continue
         fq_name = index.get(candidate.strip().lower())
         if fq_name is not None:
             resolved.append(fq_name)
