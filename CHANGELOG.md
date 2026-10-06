@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.35.1](https://github.com/mischuh/canonic/compare/v0.35.0...v0.35.1) (2026-10-06)
+
+
+### Bug Fixes
+
+* **connectors:** reject data-modifying statements in raw sql guard ([#380](https://github.com/mischuh/canonic/issues/380)) ([da22b9d](https://github.com/mischuh/canonic/commit/da22b9dadd41d0d6f0ba0eea70cab3e7d4b36367))
+
 ## [0.35.0](https://github.com/mischuh/canonic/compare/v0.34.0...v0.35.0) (2026-10-06)
 
 
