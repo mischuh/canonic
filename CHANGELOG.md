@@ -1,5 +1,27 @@
 # Changelog
 
+## [0.35.0](https://github.com/mischuh/canonic/compare/v0.34.0...v0.35.0) (2026-10-06)
+
+
+### Features
+
+* **connectors:** add ossie connector for apache ossie semantic models ([#367](https://github.com/mischuh/canonic/issues/367)) ([fab7289](https://github.com/mischuh/canonic/commit/fab7289f09c28f441cd9251ea2974e282892bd0f))
+* **connectors:** map ossie fields, metrics and relationships to definitions ([#369](https://github.com/mischuh/canonic/issues/369)) ([ded8305](https://github.com/mischuh/canonic/commit/ded8305d4ae12b74e19c2bab6b6c1edacd630024))
+* **ingestion:** detect changed modeling definitions on unchanged tables ([#371](https://github.com/mischuh/canonic/issues/371)) ([ec48200](https://github.com/mischuh/canonic/commit/ec482007e051367ea7f7eb2c73f717809a31de59))
+* **ingestion:** draft knowledge pages from doc evidence ([#374](https://github.com/mischuh/canonic/issues/374)) ([3622968](https://github.com/mischuh/canonic/commit/362296878e995ffa77b2d8b0c437c03bdfa77c16))
+* **ingestion:** fold modeling dimensions and joins into relation drafts ([#370](https://github.com/mischuh/canonic/issues/370)) ([749fc07](https://github.com/mischuh/canonic/commit/749fc079a7007e275db7f4c16b5653103f84d572))
+* **ingestion:** propose metric bindings from ossie contract candidates ([#372](https://github.com/mischuh/canonic/issues/372)) ([e7500c6](https://github.com/mischuh/canonic/commit/e7500c66042f56bbcfbf4a1a189fc7b996be9db5))
+
+
+### Bug Fixes
+
+* **ingestion:** refresh only semantic sources on no-op decisions ([#373](https://github.com/mischuh/canonic/issues/373)) ([6c1e4e6](https://github.com/mischuh/canonic/commit/6c1e4e685a068dc56c9dbe8153666f9d60e7b583))
+
+
+### Documentation
+
+* **examples:** add ossie retail example built from an apache ossie model ([#375](https://github.com/mischuh/canonic/issues/375)) ([a90a560](https://github.com/mischuh/canonic/commit/a90a5604361d2a9955c2ff43f0ae93888b7f4304))
+
 ## [0.34.0](https://github.com/mischuh/canonic/compare/v0.33.1...v0.34.0) (2026-10-04)
 
 
