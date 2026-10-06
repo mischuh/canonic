@@ -45,6 +45,38 @@ class TestAssertReadOnly:
             assert_read_only(sql)
         assert ei.value.code is ErrorCode.READ_ONLY_VIOLATION
 
+    @pytest.mark.parametrize(
+        "sql",
+        [
+            "SELECT * INTO new_t FROM t",
+            "WITH d AS (DELETE FROM t RETURNING *) SELECT * FROM d",
+            "WITH i AS (INSERT INTO t VALUES (1) RETURNING *) SELECT * FROM i",
+            "WITH u AS (UPDATE t SET a = 1 RETURNING *) SELECT * FROM u",
+            "SELECT 1 UNION SELECT * FROM (WITH d AS (DELETE FROM t RETURNING a) SELECT a FROM d) x",
+            "SELECT * FROM (SELECT * INTO new_t FROM t) x",
+            "SELECT * FROM t FOR UPDATE",
+            "SELECT * FROM t FOR SHARE",
+            "SELECT * FROM (SELECT * FROM t FOR UPDATE) x",
+            "SELECT 1 UNION SELECT a FROM t FOR UPDATE",
+        ],
+    )
+    def test_select_that_writes_or_locks_rejected(self, sql: str) -> None:
+        with pytest.raises(ReadOnlyViolation) as ei:
+            assert_read_only(sql)
+        assert ei.value.code is ErrorCode.READ_ONLY_VIOLATION
+
+    @pytest.mark.parametrize(
+        "sql",
+        [
+            "SELECT a FROM (SELECT a FROM t) x",
+            "WITH x AS (SELECT 1 AS a), y AS (SELECT a FROM x) SELECT a FROM y",
+            "SELECT a FROM t WHERE a IN (SELECT a FROM u)",
+            "SELECT 1 UNION ALL SELECT 2",
+        ],
+    )
+    def test_nested_selects_still_allowed(self, sql: str) -> None:
+        assert_read_only(sql)  # must not raise
+
 
 class TestSnowflakeDialect:
     _VARIANT_PATH = "SELECT payload:user.id::string AS uid FROM events"
