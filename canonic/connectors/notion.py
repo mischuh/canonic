@@ -25,6 +25,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from typing import Any, Protocol, runtime_checkable
 
+from canonic.connectors._http import default_timeout
 from canonic.connectors.base import DocEvidence, UsageHint
 from canonic.connectors.evidence import (
     GenericEvidenceConnector,
@@ -134,7 +135,7 @@ class HttpNotionPageSource:
         pages: list[dict[str, Any]] = []
         start_cursor: str | None = None
 
-        async with httpx.AsyncClient(headers=headers) as client:
+        async with httpx.AsyncClient(headers=headers, timeout=default_timeout()) as client:
             while True:
                 body: dict[str, Any] = {"filter": {"value": "page", "property": "object"}}
                 if start_cursor:

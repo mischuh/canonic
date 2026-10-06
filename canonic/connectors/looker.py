@@ -26,6 +26,7 @@ import logging
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
+from canonic.connectors._http import default_timeout
 from canonic.connectors.base import (
     Capability,
     ConnectorBase,
@@ -145,7 +146,7 @@ class HttpLookerLookSource:
                 "add httpx>=0.27 to your project dependencies"
             ) from exc
 
-        async with httpx.AsyncClient(headers=self._headers()) as client:
+        async with httpx.AsyncClient(headers=self._headers(), timeout=default_timeout()) as client:
             resp = await client.get(
                 f"{self._base_url}/api/4.0/looks",
                 params={"fields": "id,title,query,view_count,public,updated_at,created_at"},
@@ -162,7 +163,7 @@ class HttpLookerLookSource:
                 "add httpx>=0.27 to your project dependencies"
             ) from exc
 
-        async with httpx.AsyncClient(headers=self._headers()) as client:
+        async with httpx.AsyncClient(headers=self._headers(), timeout=default_timeout()) as client:
             resp = await client.get(f"{self._base_url}/api/4.0/versions")
             resp.raise_for_status()
             data = resp.json()

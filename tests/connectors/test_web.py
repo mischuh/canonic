@@ -8,7 +8,8 @@ from __future__ import annotations
 
 import pytest
 
-from canonic.connectors.web import UrlFetchAdapter
+from canonic.connectors.web import HttpUrlPageSource, UrlFetchAdapter
+from canonic.exc import ConnectionError
 
 
 class FixtureUrlPageSource:
@@ -89,3 +90,13 @@ class TestUrlFetchAdapter:
 
         with pytest.raises(RuntimeError, match="connection refused"):
             await adapter.fetch()
+
+
+class TestHttpUrlPageSource:
+    @pytest.mark.parametrize(
+        "url",
+        ["file:///etc/passwd", "ftp://example.com/a", "gopher://example.com", "example.com/a"],
+    )
+    async def test_non_http_scheme_is_refused_before_any_request(self, url: str) -> None:
+        with pytest.raises(ConnectionError, match="only http and https"):
+            await HttpUrlPageSource().fetch(url)

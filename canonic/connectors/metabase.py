@@ -24,6 +24,7 @@ import re
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
+from canonic.connectors._http import default_timeout
 from canonic.connectors.base import (
     Capability,
     ConnectorBase,
@@ -176,7 +177,7 @@ class HttpMetabaseQuestionSource:
                 "add httpx>=0.27 to your project dependencies"
             ) from exc
 
-        async with httpx.AsyncClient(headers=self._headers()) as client:
+        async with httpx.AsyncClient(headers=self._headers(), timeout=default_timeout()) as client:
             resp = await client.get(f"{self._base_url}/api/card")
             resp.raise_for_status()
             return list(resp.json())
@@ -190,7 +191,7 @@ class HttpMetabaseQuestionSource:
                 "add httpx>=0.27 to your project dependencies"
             ) from exc
 
-        async with httpx.AsyncClient(headers=self._headers()) as client:
+        async with httpx.AsyncClient(headers=self._headers(), timeout=default_timeout()) as client:
             resp = await client.get(f"{self._base_url}/api/session/properties")
             resp.raise_for_status()
             data = resp.json()
