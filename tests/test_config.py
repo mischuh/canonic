@@ -6,13 +6,12 @@ import pytest
 
 from canonic.config import (
     CanonicConfig,
-    ConfigError,
     McpOAuthMode,
     McpTasksBackend,
     find_project_root,
     load_config,
 )
-from canonic.exc import AirGappedViolation
+from canonic.exc import AirGappedViolation, ConfigError
 
 _VALID = """\
 version: 1

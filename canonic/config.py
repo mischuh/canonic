@@ -20,6 +20,7 @@ from pydantic_settings import BaseSettings, PydanticBaseSettingsSource, Settings
 from ruamel.yaml import YAML
 
 from canonic.airgap import EgressPolicy, guard_telemetry
+from canonic.exc import ConfigError
 from canonic.llm_providers import PROVIDERS, CredentialMode
 from canonic.semantic.models import Provenance
 
@@ -44,10 +45,6 @@ _ENV_PREFIX = "env:"
 CONTEXT_DIRS: tuple[str, ...] = ("semantics", "knowledge", "contracts", "reports", "raw-sources")
 #: Git-ignored local state/secret directory (SPEC E1 §7).
 LOCAL_STATE_DIR = ".canonic"
-
-
-class ConfigError(Exception):
-    """Raised when canonic.yaml is invalid, missing, or uses an unknown version."""
 
 
 class ProjectConfig(BaseModel):

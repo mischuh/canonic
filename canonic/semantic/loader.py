@@ -8,8 +8,8 @@ from typing import TYPE_CHECKING, Any
 from pydantic import ValidationError
 from ruamel.yaml import YAML
 
-from canonic.exc import SemanticSourceError
-from canonic.semantic.models import SemanticSource, SemanticValidationError
+from canonic.exc import SemanticSourceError, SemanticValidationError
+from canonic.semantic.models import SemanticSource
 
 if TYPE_CHECKING:
     from collections.abc import Iterable

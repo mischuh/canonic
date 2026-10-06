@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from canonic.exc import KnowledgeValidationError
 from canonic.knowledge.drift import DriftDetector, StalenessSignal
 from canonic.knowledge.embeddings import Embedder, VectorStore
 from canonic.knowledge.index import KnowledgeIndex
@@ -15,7 +16,6 @@ from canonic.knowledge.models import (
     KnowledgePage,
     KnowledgePageMeta,
     KnowledgeScope,
-    KnowledgeValidationError,
     UsageMode,
 )
 from canonic.knowledge.rendering import DefinitionRenderer

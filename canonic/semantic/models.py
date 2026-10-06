@@ -13,6 +13,8 @@ import sqlglot
 from pydantic import BaseModel, ConfigDict, model_validator
 from sqlglot import exp
 
+from canonic.exc import SemanticValidationError
+
 __all__ = [
     "Additivity",
     "Column",
@@ -26,24 +28,10 @@ __all__ = [
     "Provenance",
     "Relationship",
     "SemanticSource",
-    "SemanticValidationError",
     "SourceMeta",
     "compute_dimension_fingerprint",
     "compute_measure_fingerprint",
 ]
-
-
-class SemanticValidationError(ValueError):
-    """A cross-field validation failure that carries the YAML path it concerns.
-
-    Subclasses ValueError so Pydantic wraps it into a ValidationError on direct
-    construction; the loader recovers ``path`` (via the error's ctx) to resolve a
-    precise file+line for the message.
-    """
-
-    def __init__(self, path: tuple[str | int, ...], message: str) -> None:
-        self.path = path
-        super().__init__(message)
 
 
 # Aggregate functions a P0 measure may use and still be compilable. Measures

@@ -13,8 +13,8 @@ from typing import TYPE_CHECKING, Any
 from pydantic import ValidationError
 from ruamel.yaml import YAML
 
-from canonic.exc import KnowledgePageError
-from canonic.knowledge.models import KnowledgePage, KnowledgeScope, KnowledgeValidationError
+from canonic.exc import KnowledgePageError, KnowledgeValidationError
+from canonic.knowledge.models import KnowledgePage, KnowledgeScope
 
 if TYPE_CHECKING:
     from collections.abc import Iterable

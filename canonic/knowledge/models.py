@@ -18,22 +18,8 @@ __all__ = [
     "KnowledgePage",
     "KnowledgePageMeta",
     "KnowledgeScope",
-    "KnowledgeValidationError",
     "UsageMode",
 ]
-
-
-class KnowledgeValidationError(ValueError):
-    """A cross-field validation failure that carries the frontmatter path it concerns.
-
-    Subclasses ValueError so Pydantic wraps it into a ValidationError on direct
-    construction; the loader recovers ``path`` (via the error's ctx) to resolve a
-    precise file+line for the message. Mirrors ``SemanticValidationError``.
-    """
-
-    def __init__(self, path: tuple[str | int, ...], message: str) -> None:
-        self.path = path
-        super().__init__(message)
 
 
 class UsageMode(StrEnum):

@@ -48,7 +48,6 @@ from canonic.cli.setup_state import (
 )
 from canonic.config import (
     CanonicConfig,
-    ConfigError,
     Connection,
     LLMConfig,
     ProjectConfig,
@@ -62,7 +61,7 @@ from canonic.contracts.bootstrap import write_inferred_contracts as _write_boots
 from canonic.contracts.models import CanonicalRef, MetricBinding, Status
 from canonic.contracts.resolver import ContractResolver
 from canonic.core.service import CanonicService
-from canonic.exc import CanonicError, ConnectionError, CredentialError, PackError
+from canonic.exc import CanonicError, ConfigError, ConnectionError, CredentialError, PackError
 from canonic.ingestion.models import DraftedBy
 from canonic.instrumentation.events import DiskAnswerEventLog, emit_milestone
 from canonic.instrumentation.models import FunnelMilestone
