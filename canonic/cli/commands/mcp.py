@@ -11,7 +11,8 @@ from rich.console import Console
 
 from canonic.cli._errors import get_cli_context
 from canonic.cli._tenant import TenantOption, cli_tenant_principal
-from canonic.config import ConfigError, find_project_root, load_config
+from canonic.config import find_project_root, load_config
+from canonic.exc import ConfigError
 
 app = typer.Typer(name="mcp", help="Control the local MCP daemon.")
 _console = Console(soft_wrap=True)

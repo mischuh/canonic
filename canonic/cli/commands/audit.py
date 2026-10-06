@@ -18,10 +18,10 @@ if TYPE_CHECKING:
 
 from canonic.airgap import guard_telemetry_send
 from canonic.cli._errors import get_cli_context, handle_errors
-from canonic.config import ConfigError, FeedbackConfig, find_project_root, load_config
+from canonic.config import FeedbackConfig, find_project_root, load_config
 from canonic.core.service import CanonicService
 from canonic.credentials import resolve_credential
-from canonic.exc import ContractError
+from canonic.exc import ConfigError, ContractError
 from canonic.feedback.history import BindingOutcomeHistory
 from canonic.feedback.report import FeedbackReport, build_feedback_report
 from canonic.instrumentation.bundle import build_diagnostic_bundle

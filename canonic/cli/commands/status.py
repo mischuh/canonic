@@ -6,8 +6,9 @@ import typer
 from rich.console import Console
 
 from canonic.cli._errors import get_cli_context
-from canonic.config import ConfigError, find_project_root, load_config
+from canonic.config import find_project_root, load_config
 from canonic.contract import CONTRACT_SCHEMA
+from canonic.exc import ConfigError
 from canonic.instrumentation.report import build_report, read_events
 
 _console = Console(soft_wrap=True)

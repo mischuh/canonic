@@ -12,8 +12,9 @@ from rich.table import Table
 
 from canonic.cli._errors import get_cli_context, handle_errors
 from canonic.cli.commands import load_raw_config, write_raw_config
-from canonic.config import ConfigError, find_project_root, load_config
+from canonic.config import find_project_root, load_config
 from canonic.connectors.factory import default_factory
+from canonic.exc import ConfigError
 
 _console = Console()
 

@@ -480,3 +480,46 @@ class KnowledgeReferenceError(CanonicError):
         self.ref = ref
         self.kind = kind
         super().__init__(message)
+
+
+class ConfigError(Exception):
+    """Raised when canonic.yaml is invalid, missing, or uses an unknown version."""
+
+
+class ContractValidationError(ValueError):
+    """A cross-field validation failure that carries the YAML path it concerns.
+
+    Subclasses ValueError so Pydantic wraps it into a ValidationError on direct
+    construction; the loader recovers ``path`` (via the error's ctx) to resolve a
+    precise file+line for the message.
+    """
+
+    def __init__(self, path: tuple[str | int, ...], message: str) -> None:
+        self.path = path
+        super().__init__(message)
+
+
+class KnowledgeValidationError(ValueError):
+    """A cross-field validation failure that carries the frontmatter path it concerns.
+
+    Subclasses ValueError so Pydantic wraps it into a ValidationError on direct
+    construction; the loader recovers ``path`` (via the error's ctx) to resolve a
+    precise file+line for the message. Mirrors ``SemanticValidationError``.
+    """
+
+    def __init__(self, path: tuple[str | int, ...], message: str) -> None:
+        self.path = path
+        super().__init__(message)
+
+
+class SemanticValidationError(ValueError):
+    """A cross-field validation failure that carries the YAML path it concerns.
+
+    Subclasses ValueError so Pydantic wraps it into a ValidationError on direct
+    construction; the loader recovers ``path`` (via the error's ctx) to resolve a
+    precise file+line for the message.
+    """
+
+    def __init__(self, path: tuple[str | int, ...], message: str) -> None:
+        self.path = path
+        super().__init__(message)

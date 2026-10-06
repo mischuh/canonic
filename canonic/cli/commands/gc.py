@@ -10,7 +10,8 @@ import typer
 from rich.console import Console
 
 from canonic.cli._errors import get_cli_context, handle_errors
-from canonic.config import ConfigError, EventLogConfig, find_project_root, load_config
+from canonic.config import EventLogConfig, find_project_root, load_config
+from canonic.exc import ConfigError
 from canonic.ingestion.pending import expired_pending_runs
 from canonic.instrumentation.events import expired_event_segments
 

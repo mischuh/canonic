@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from canonic.exc import SemanticValidationError
 from canonic.semantic.loader import (
     dump_semantic_source,
     list_semantic_sources,
@@ -19,7 +20,6 @@ from canonic.semantic.models import (
     Provenance,
     Relationship,
     SemanticSource,
-    SemanticValidationError,
     SourceMeta,
 )
 

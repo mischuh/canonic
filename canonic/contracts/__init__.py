@@ -25,7 +25,6 @@ from canonic.contracts.models import (
     Assertion,
     AssertionExpect,
     CanonicalRef,
-    ContractValidationError,
     DeprecatedAlternative,
     FinalityRule,
     Guardrail,
@@ -57,6 +56,7 @@ from canonic.contracts.resolver import (
     Unresolved,
 )
 from canonic.contracts.validate import validate_contracts
+from canonic.exc import ContractValidationError
 
 __all__ = [
     "AllowDenyPolicy",

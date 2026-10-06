@@ -10,7 +10,6 @@ from ruamel.yaml import YAML
 
 from canonic.contracts.models import (
     Assertion,
-    ContractValidationError,
     FinalityRule,
     Guardrail,
     MetricBinding,
@@ -18,7 +17,7 @@ from canonic.contracts.models import (
     Status,
     TenancyPolicy,
 )
-from canonic.exc import ContractError
+from canonic.exc import ContractError, ContractValidationError
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
