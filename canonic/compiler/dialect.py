@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING, cast
 import sqlglot
 from sqlglot import exp
 
+from canonic.connectors.readonly import assert_no_writes
 from canonic.exc import ReadOnlyViolation, UnsupportedDialectError
 from canonic.semantic.models import NormalizedType
 
@@ -32,20 +33,6 @@ __all__ = [
     "TYPE_TO_DIALECT",
     "adapter_for",
 ]
-
-# DML/DDL nodes that may never appear anywhere in the AST — including inside a CTE
-# (Postgres permits data-modifying statements in ``WITH``). Catching them by class
-# covers ``WITH t AS (DELETE … RETURNING *) SELECT …`` and friends.
-_WRITE_NODES: tuple[type[exp.Expression], ...] = (
-    exp.Insert,
-    exp.Update,
-    exp.Delete,
-    exp.Merge,
-    exp.Create,
-    exp.Drop,
-    exp.Alter,
-    exp.TruncateTable,
-)
 
 _POSTGRES_TYPE_MAP: dict[NormalizedType, str] = {
     NormalizedType.STRING: "TEXT",
@@ -191,14 +178,7 @@ class _GenericDialectAdapter(DialectAdapter):
         """
         if not isinstance(ast, (exp.Select, exp.Union)):
             raise ReadOnlyViolation(f"refusing to emit non-SELECT statement: {type(ast).__name__}")
-        if (write := ast.find(*_WRITE_NODES)) is not None:
-            raise ReadOnlyViolation(
-                f"refusing to emit data-modifying statement: {type(write).__name__}"
-            )
-        if ast.find(exp.Into) is not None:
-            raise ReadOnlyViolation("refusing to emit SELECT ... INTO (writes a new relation)")
-        if isinstance(ast, exp.Select) and ast.args.get("locks"):
-            raise ReadOnlyViolation("refusing to emit locking SELECT (FOR UPDATE / FOR SHARE)")
+        assert_no_writes(ast)
         if limit is not None:
             if isinstance(ast, exp.Union):
                 from sqlglot import exp as _exp
