@@ -468,7 +468,7 @@ requires-dist = [
     { name = "sentence-transformers", marker = "extra == 'embeddings'", specifier = ">=3.0" },
     { name = "snowflake-connector-python", marker = "extra == 'snowflake'", specifier = ">=3.12" },
     { name = "sqlalchemy", extras = ["asyncio"], specifier = ">=2.0.50,<3" },
-    { name = "sqlglot", specifier = ">=25.0" },
+    { name = "sqlglot", specifier = ">=30.12,<31" },
     { name = "tantivy", specifier = ">=0.22" },
     { name = "typer", specifier = "~=0.15" },
     { name = "uvicorn", specifier = ">=0.32" },
