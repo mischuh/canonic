@@ -1,0 +1,67 @@
+name: customers
+connection: retail_db
+table: main.customers
+grain:
+- customer_id
+columns:
+- name: customer_id
+  type: int
+  nullable: true
+- name: email
+  type: string
+  nullable: false
+- name: country
+  type: string
+  nullable: false
+- name: segment
+  type: string
+  nullable: false
+measures:
+- name: row_count
+  expr: count(*)
+  additivity: additive
+  semi_additive_over: []
+dimensions:
+- name: email
+  column: email
+  expr:
+  json_path:
+  type:
+  granularity:
+  label:
+  description:
+  aliases: []
+- name: country
+  column: country
+  expr:
+  json_path:
+  type:
+  granularity:
+  label:
+  description:
+  aliases: []
+- name: segment
+  column: segment
+  expr:
+  json_path:
+  type:
+  granularity:
+  label:
+  description: consumer or business
+  aliases:
+  - customer segment
+joins: []
+filters: []
+segments: []
+finality:
+  watermark:
+meta:
+  provenance: inferred
+  source_fingerprint: 
+    sha256:6fd6f3077b092cff4d81e67f2651b3521f7762123605941ef444c1d9bc3338c5
+  definition_fingerprint: 
+    sha256:834c643838086207a544b1be23fd8b09c99d380efb91c90ef0a4c14beed21b2b
+  last_validated_at: '2026-10-06T07:01:31.588148Z'
+  frozen: false
+  pack_source:
+description:

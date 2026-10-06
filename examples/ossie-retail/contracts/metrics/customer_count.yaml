@@ -1,0 +1,6 @@
+metric: customer_count
+canonical:
+  kind: distinct_count
+  source: orders
+  distinct_on: customer_id
+provenance: inferred

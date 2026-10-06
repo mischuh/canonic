@@ -1,0 +1,62 @@
+name: products
+connection: retail_db
+table: main.products
+grain:
+- product_id
+columns:
+- name: product_id
+  type: int
+  nullable: true
+- name: name
+  type: string
+  nullable: false
+- name: category
+  type: string
+  nullable: false
+- name: unit_price
+  type: decimal
+  nullable: false
+measures:
+- name: row_count
+  expr: count(*)
+  additivity: additive
+  semi_additive_over: []
+- name: total_unit_price
+  expr: sum(unit_price)
+  additivity: additive
+  semi_additive_over: []
+dimensions:
+- name: name
+  column: name
+  expr:
+  json_path:
+  type:
+  granularity:
+  label:
+  description:
+  aliases: []
+- name: category
+  column: category
+  expr:
+  json_path:
+  type:
+  granularity:
+  label:
+  description:
+  aliases:
+  - product category
+joins: []
+filters: []
+segments: []
+finality:
+  watermark:
+meta:
+  provenance: inferred
+  source_fingerprint: 
+    sha256:e862a255a9437b490fe4b155a29a911cf902f4091b4ca44710e89fb33f91633a
+  definition_fingerprint: 
+    sha256:12140c2034d5a7f7588e2b69a6e12a66fc32f500e09d2c9de6f441d55807c022
+  last_validated_at: '2026-10-06T07:01:31.588148Z'
+  frozen: false
+  pack_source:
+description:

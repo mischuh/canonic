@@ -1,0 +1,26 @@
+{
+  "case": "ossie_retail_customer_count",
+  "columns": [
+    {
+      "name": "customer_count",
+      "type": "int"
+    }
+  ],
+  "dialect": "sqlite",
+  "finality": null,
+  "guardrails_fired": [],
+  "project": "ossie-retail",
+  "resolved": {
+    "metrics": {
+      "customer_count": "recompute_at_grain(orders.customer_id)"
+    }
+  },
+  "row_count": 1,
+  "rows": [
+    [
+      4
+    ]
+  ],
+  "trust_tier": "provisional",
+  "warnings": []
+}

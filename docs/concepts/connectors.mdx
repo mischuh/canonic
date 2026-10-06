@@ -64,6 +64,8 @@ A definition connector is its own connection entry (own `id`) but describes tabl
 
 #### Ossie mapping
 
+A runnable project built entirely from an Ossie model is in the [Ossie retail guide](/guides/ossie-retail).
+
 Ossie is read as an interchange format, never as canonic's own format. Parsing is deterministic, no LLM is involved, and every item enters reconciliation as `inferred` at the `modeling` tier. The connector emits no `RelationSchema`: Ossie types are optional, so column types always come from the live schema of `target_connection`.
 
 | Ossie | Becomes |

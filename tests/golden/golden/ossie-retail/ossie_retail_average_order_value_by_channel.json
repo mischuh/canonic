@@ -1,0 +1,37 @@
+{
+  "case": "ossie_retail_average_order_value_by_channel",
+  "columns": [
+    {
+      "name": "channel",
+      "type": "string"
+    },
+    {
+      "name": "average_order_value",
+      "type": "float"
+    }
+  ],
+  "dialect": "sqlite",
+  "finality": null,
+  "guardrails_fired": [],
+  "project": "ossie-retail",
+  "resolved": {
+    "metrics": {
+      "average_order_value": "ratio(revenue, order_count)"
+    }
+  },
+  "row_count": 2,
+  "rows": [
+    [
+      "online",
+      36.5
+    ],
+    [
+      "store",
+      69.0
+    ]
+  ],
+  "trust_tier": "provisional",
+  "warnings": [
+    "zero denominator for metric 'average_order_value' yields NULL (on_zero_denominator=null)"
+  ]
+}

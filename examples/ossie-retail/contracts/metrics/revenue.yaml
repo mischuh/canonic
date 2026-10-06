@@ -1,0 +1,9 @@
+metric: revenue
+canonical:
+  kind: single
+  source: order_items
+  measure: revenue
+provenance: inferred
+aliases:
+- sales
+- turnover

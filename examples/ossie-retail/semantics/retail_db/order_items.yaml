@@ -1,0 +1,48 @@
+name: order_items
+connection: retail_db
+table: main.order_items
+grain:
+- order_id
+- line_number
+columns:
+- name: order_id
+  type: int
+  nullable: false
+- name: line_number
+  type: int
+  nullable: false
+- name: product_id
+  type: int
+  nullable: false
+- name: quantity
+  type: int
+  nullable: false
+- name: amount
+  type: decimal
+  nullable: false
+measures:
+- name: revenue
+  expr: SUM(amount)
+  additivity: additive
+- name: units_sold
+  expr: SUM(quantity)
+  additivity: additive
+- name: average_line_amount
+  expr: AVG(amount)
+  additivity: non_additive
+dimensions: []
+joins:
+- to: orders
+  on: order_items.order_id = orders.order_id
+  relationship: many_to_one
+- to: products
+  on: order_items.product_id = products.product_id
+  relationship: many_to_one
+meta:
+  source_fingerprint: 
+    sha256:2db4b631a232977a539993aaa25f20ed9e67e11d50fdfdca753857339c004599
+  definition_fingerprint: 
+    sha256:6b7908698b4078d781b6aec5f7d56c7b3de0415b4b95d48b8d320b5c9f9dfd77
+  review_flags:
+  - 'measure average_line_amount: avg_suggests_ratio'
+description: One row per order line

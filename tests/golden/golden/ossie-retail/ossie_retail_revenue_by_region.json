@@ -1,0 +1,35 @@
+{
+  "case": "ossie_retail_revenue_by_region",
+  "columns": [
+    {
+      "name": "region",
+      "type": "string"
+    },
+    {
+      "name": "revenue",
+      "type": "float"
+    }
+  ],
+  "dialect": "sqlite",
+  "finality": null,
+  "guardrails_fired": [],
+  "project": "ossie-retail",
+  "resolved": {
+    "metrics": {
+      "revenue": "order_items.revenue"
+    }
+  },
+  "row_count": 2,
+  "rows": [
+    [
+      "north",
+      133.5
+    ],
+    [
+      "south",
+      150.5
+    ]
+  ],
+  "trust_tier": "provisional",
+  "warnings": []
+}

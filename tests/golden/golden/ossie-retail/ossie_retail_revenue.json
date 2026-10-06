@@ -1,0 +1,26 @@
+{
+  "case": "ossie_retail_revenue",
+  "columns": [
+    {
+      "name": "revenue",
+      "type": "float"
+    }
+  ],
+  "dialect": "sqlite",
+  "finality": null,
+  "guardrails_fired": [],
+  "project": "ossie-retail",
+  "resolved": {
+    "metrics": {
+      "revenue": "order_items.revenue"
+    }
+  },
+  "row_count": 1,
+  "rows": [
+    [
+      284.0
+    ]
+  ],
+  "trust_tier": "provisional",
+  "warnings": []
+}
