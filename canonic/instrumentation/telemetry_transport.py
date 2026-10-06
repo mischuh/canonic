@@ -22,6 +22,10 @@ from canonic.exc import TelemetrySendError
 
 __all__ = ["HttpTelemetrySender", "TelemetrySender", "send_telemetry"]
 
+#: Seconds for every phase of the single send attempt. A failed send is retried by re-running
+#: the command, so this stays short.
+_SEND_TIMEOUT_S = 10.0
+
 
 @runtime_checkable
 class TelemetrySender(Protocol):
@@ -51,7 +55,7 @@ class HttpTelemetrySender:
             ) from exc
 
         headers = {"Authorization": f"Bearer {auth_token}"} if auth_token else {}
-        async with httpx.AsyncClient() as client:
+        async with httpx.AsyncClient(timeout=_SEND_TIMEOUT_S) as client:
             try:
                 resp = await client.post(endpoint, json=payload, headers=headers)
                 resp.raise_for_status()

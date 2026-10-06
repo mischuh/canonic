@@ -17,13 +17,18 @@ from __future__ import annotations
 
 from html.parser import HTMLParser
 from typing import TYPE_CHECKING, Protocol, runtime_checkable
+from urllib.parse import urlparse
 
+from canonic.connectors._http import default_timeout
 from canonic.connectors.evidence import RawDoc
+from canonic.exc import ConnectionError
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
 __all__ = ["HttpUrlPageSource", "UrlFetchAdapter", "UrlPageSource"]
+
+_ALLOWED_SCHEMES = frozenset({"http", "https"})
 
 
 class _TextExtractor(HTMLParser):
@@ -90,6 +95,10 @@ class HttpUrlPageSource:
     """
 
     async def fetch(self, url: str) -> str:
+        if urlparse(url).scheme.lower() not in _ALLOWED_SCHEMES:
+            raise ConnectionError(
+                f"refusing to fetch {url!r}: only http and https URLs are allowed"
+            )
         try:
             import httpx
         except ImportError as exc:
@@ -97,7 +106,7 @@ class HttpUrlPageSource:
                 "httpx is required for URL fetching; add httpx>=0.27 to project dependencies"
             ) from exc
 
-        async with httpx.AsyncClient(follow_redirects=True) as client:
+        async with httpx.AsyncClient(follow_redirects=True, timeout=default_timeout()) as client:
             resp = await client.get(url)
             resp.raise_for_status()
             return resp.text
