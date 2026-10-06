@@ -1,0 +1,113 @@
+---
+title: "Guide: Apache Ossie Import (SQLite)"
+description: "Bootstrap semantics, metric bindings and knowledge pages from an Apache Ossie semantic model."
+---
+
+A canonic project whose context comes entirely from an [Apache Ossie](https://ossie.apache.org/) semantic model. One SQLite connection holds the data of a small coffee retailer. One `ossie` connection reads the model and binds every dataset to that SQLite connection. Every file under `semantics/`, `contracts/` and `knowledge/` was drafted by `canonic ingest` and accepted with `canonic apply`.
+
+<Info>Full source: [`examples/ossie-retail/`](https://github.com/mischuh/canonic/tree/main/examples/ossie-retail)</Info>
+
+## Schema
+
+```
+DIMENSIONS
+  stores              store_id · name · region
+  customers           customer_id · email (unique) · country · segment
+  customer_profiles   customer_id · loyalty_tier
+  products            product_id · name · category · unit_price
+
+FACTS
+  orders              order_id · customer_id · store_id · order_date · status · channel
+  order_items         (order_id, line_number) · product_id · quantity · amount
+```
+
+Seed data: 6 orders (4 shipped, 1 placed, 1 cancelled) with 9 order lines, 4 customers, 3 stores, 3 products. Revenue is 284.00 in total, small enough to check every number by hand.
+
+## Setup
+
+```bash
+cd examples/ossie-retail          # canonic commands must run from here
+sqlite3 retail.db < setup.sql     # create the database (one-time)
+canonic connection test
+# retail_db: ok
+# retail_ossie: ok  1 file(s), 1 model(s), Ossie 0.2.0.dev0
+#   warning: Ossie retail: dataset recent_orders is query-sourced; recorded as unmappable
+#   warning: Ossie retail: metric revenue_cube: no SQL dialect among the expression variants (MDX); recorded as unmappable
+```
+
+The two warnings are intentional. The model contains objects the connector cannot import, and it names each one instead of dropping it.
+
+## Configuration
+
+```yaml
+connections:
+  - id: retail_db
+    type: sqlite
+    params: { path: retail.db }
+  - id: retail_ossie
+    type: ossie
+    params:
+      paths: ["ossie/*.ossie.yaml"]
+      target_connection: retail_db
+```
+
+Ossie has no notion of a connection, so `target_connection` is required. It decides the `semantics/<connection>/` directory, the SQL dialect expressions are transpiled to, and the live schema column types come from.
+
+## What the model became
+
+| Ossie object | Drafted as |
+| --- | --- |
+| 7 datasets | 6 semantic sources with grain and description. `recent_orders` is a query and stays unmappable. |
+| `status`, `channel`, `region`, `category`, … | Column dimensions with their synonyms as `aliases` |
+| `order_month` (`SUBSTRING(order_date, 1, 7)`) | Derived dimension, type `string` inferred from the live columns |
+| `revenue`, `units_sold` (`SUM`) | Additive measures on `order_items` |
+| `order_count` (`COUNT`) | Additive measure on `orders` |
+| `customer_count` (`COUNT(DISTINCT)`) | Non-additive measure plus a `distinct_count` binding |
+| `average_order_value` (`SUM / NULLIF(COUNT, 0)`) | A `ratio` binding over `revenue` and `order_count`, with alias `aov` |
+| `average_line_amount` (`AVG`) | Non-additive measure, flagged `avg_suggests_ratio` for review |
+| `running_revenue` (window function) | Skipped: unknown additivity, declare it by hand to use it |
+| `revenue_cube` (MDX only) | Unmappable |
+| 5 relationships | Joins with predicate and cardinality. `profiles_to_customers` is `one_to_one` because both sides are keys. |
+| `ai_context.instructions` | 6 knowledge pages bound to the entities they describe |
+
+Bindings and knowledge pages enter at `inferred` and never auto-apply. They become part of the project only through review.
+
+## Queries
+
+```bash
+canonic query --metrics revenue --dimensions region
+# north  133.5
+# south  150.5
+
+canonic query --metrics average_order_value --dimensions channel
+# online  36.5   (146 / 4 orders)
+# store   69.0   (138 / 2 orders)
+
+canonic query --metrics revenue --dimensions order_month
+# 2026-01  121.5
+# 2026-02  162.5
+```
+
+`revenue` lives on `order_items`, while `region` lives on `stores`. The query reaches it through the Ossie relationships `order_items_to_orders` and `orders_to_stores`, both `many_to_one`, so no row is counted twice.
+
+## Rebuild from the model
+
+```bash
+rm -rf semantics contracts knowledge raw-sources .canonic
+canonic ingest --bootstrap --headless   # writes the 5 unambiguous sources
+canonic ingest --headless               # proposes order_items, bindings and pages
+canonic review                          # or: canonic apply .canonic/pending-diffs/<run>
+```
+
+Bootstrap writes only what is deterministic and unflagged. `order_items` waits for review because of the `AVG` measure, and so does everything under `contracts/` and `knowledge/`. A further `canonic ingest` over the result is a no-op for all 16 files.
+
+## Gate Ossie changes in CI
+
+Once a source or binding is curated, a changed Ossie model that contradicts it fails a strict run:
+
+```bash
+canonic ingest --headless --strict
+# exit 14 when a changed Ossie metric contradicts a human_curated measure
+```
+
+Change detection covers the measures, dimensions and joins Ossie contributed, through `meta.definition_fingerprint` on each semantic source. An existing binding is never changed by an import, so a curated binding stays as it is.

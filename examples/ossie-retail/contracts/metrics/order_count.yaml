@@ -1,0 +1,8 @@
+metric: order_count
+canonical:
+  kind: single
+  source: orders
+  measure: order_count
+provenance: inferred
+aliases:
+- number of orders

@@ -1,0 +1,26 @@
+version: 1
+
+project:
+  name: ossie-retail-demo
+  default_connection: retail_db
+
+connections:
+  - id: retail_db
+    type: sqlite
+    params:
+      path: retail.db   # created by: sqlite3 retail.db < setup.sql
+
+  # Apache Ossie semantic model: definitions (dimensions, measures, joins), binding
+  # candidates and ai_context, all at the modeling tier. Ossie has no notion of a
+  # connection, so target_connection binds every dataset to retail_db.
+  - id: retail_ossie
+    type: ossie
+    params:
+      paths: ["ossie/*.ossie.yaml"]   # relative to this canonic.yaml
+      target_connection: retail_db
+
+reconcile:
+  strict_contradictions: false
+
+telemetry:
+  enabled: false   # local event log only, nothing leaves the machine

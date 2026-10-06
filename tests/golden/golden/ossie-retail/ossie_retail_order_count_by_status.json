@@ -1,0 +1,39 @@
+{
+  "case": "ossie_retail_order_count_by_status",
+  "columns": [
+    {
+      "name": "status",
+      "type": "string"
+    },
+    {
+      "name": "order_count",
+      "type": "int"
+    }
+  ],
+  "dialect": "sqlite",
+  "finality": null,
+  "guardrails_fired": [],
+  "project": "ossie-retail",
+  "resolved": {
+    "metrics": {
+      "order_count": "orders.order_count"
+    }
+  },
+  "row_count": 3,
+  "rows": [
+    [
+      "cancelled",
+      1
+    ],
+    [
+      "placed",
+      1
+    ],
+    [
+      "shipped",
+      4
+    ]
+  ],
+  "trust_tier": "provisional",
+  "warnings": []
+}

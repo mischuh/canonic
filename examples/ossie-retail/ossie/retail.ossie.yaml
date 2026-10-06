@@ -1,0 +1,189 @@
+# Apache Ossie semantic model for the retail demo (spec 0.2.0.dev0).
+# Every mapping path of the canonic ossie connector appears here at least once, including
+# the ones it reports as unmappable: a query-sourced dataset, an MDX-only metric and a
+# window function.
+version: 0.2.0.dev0
+name: retail
+description: Orders, line items, customers and stores of a small coffee retailer
+ai_context:
+  instructions: >-
+    Use this model for sales questions. Revenue is the sum of line item amounts, including
+    cancelled orders unless they are filtered out by status.
+
+datasets:
+  - name: orders
+    source: orders
+    primary_key: [order_id]
+    description: One row per order
+    ai_context:
+      instructions: >-
+        Cancelled orders stay in the table with status 'cancelled'. Filter on status when
+        a question is about fulfilled business.
+      synonyms: [purchases]
+    fields:
+      - name: order_id
+        expression: {dialects: [{dialect: ANSI_SQL, expression: order_id}]}
+      - name: customer_id
+        expression: {dialects: [{dialect: ANSI_SQL, expression: customer_id}]}
+      - name: store_id
+        expression: {dialects: [{dialect: ANSI_SQL, expression: store_id}]}
+      - name: status
+        expression: {dialects: [{dialect: ANSI_SQL, expression: orders.status}]}
+        description: Fulfilment status of the order
+        dimension: {is_time: false}
+        ai_context:
+          instructions: Valid values are placed, shipped and cancelled.
+          synonyms: [order status, fulfilment status]
+      - name: channel
+        expression: {dialects: [{dialect: ANSI_SQL, expression: channel}]}
+        description: Where the order was placed, online or in a store
+        dimension: {is_time: false}
+        ai_context:
+          synonyms: [sales channel]
+      - name: order_date
+        expression: {dialects: [{dialect: ANSI_SQL, expression: order_date}]}
+        datatype: Date
+        dimension: {}
+      - name: order_month
+        expression:
+          dialects:
+            - dialect: ANSI_SQL
+              expression: SUBSTRING(order_date, 1, 7)
+        description: Calendar month of the order as YYYY-MM
+        dimension: {is_time: true}
+
+  - name: order_items
+    source: order_items
+    primary_key: [order_id, line_number]
+    description: One row per order line
+    fields:
+      - name: order_id
+        expression: {dialects: [{dialect: ANSI_SQL, expression: order_id}]}
+      - name: product_id
+        expression: {dialects: [{dialect: ANSI_SQL, expression: product_id}]}
+      - name: quantity
+        expression: {dialects: [{dialect: ANSI_SQL, expression: quantity}]}
+      - name: amount
+        expression: {dialects: [{dialect: ANSI_SQL, expression: amount}]}
+
+  - name: customers
+    source: customers
+    primary_key: [customer_id]
+    unique_keys:
+      - [email]
+    fields:
+      - name: country
+        expression: {dialects: [{dialect: ANSI_SQL, expression: country}]}
+        dimension: {is_time: false}
+      - name: segment
+        expression: {dialects: [{dialect: ANSI_SQL, expression: segment}]}
+        description: consumer or business
+        dimension: {is_time: false}
+        ai_context:
+          synonyms: [customer segment]
+
+  - name: customer_profiles
+    source: customer_profiles
+    primary_key: [customer_id]
+    fields:
+      - name: loyalty_tier
+        expression: {dialects: [{dialect: ANSI_SQL, expression: loyalty_tier}]}
+        dimension: {is_time: false}
+
+  - name: stores
+    source: stores
+    primary_key: [store_id]
+    fields:
+      - name: region
+        expression: {dialects: [{dialect: ANSI_SQL, expression: region}]}
+        dimension: {is_time: false}
+        ai_context:
+          synonyms: [area]
+
+  - name: products
+    source: products
+    primary_key: [product_id]
+    fields:
+      - name: category
+        expression: {dialects: [{dialect: ANSI_SQL, expression: category}]}
+        dimension: {is_time: false}
+        ai_context:
+          synonyms: [product category]
+
+  # Query-sourced: has no relation to bind to, so the connector reports it as unmappable.
+  - name: recent_orders
+    source: SELECT * FROM orders WHERE order_date >= '2026-02-01'
+
+relationships:
+  - name: orders_to_customers
+    from: orders
+    to: customers
+    from_columns: [customer_id]
+    to_columns: [customer_id]
+  - name: orders_to_stores
+    from: orders
+    to: stores
+    from_columns: [store_id]
+    to_columns: [store_id]
+  - name: order_items_to_orders
+    from: order_items
+    to: orders
+    from_columns: [order_id]
+    to_columns: [order_id]
+  - name: order_items_to_products
+    from: order_items
+    to: products
+    from_columns: [product_id]
+    to_columns: [product_id]
+  - name: profiles_to_customers
+    from: customer_profiles
+    to: customers
+    from_columns: [customer_id]
+    to_columns: [customer_id]
+    ai_context: Every customer has at most one loyalty profile.
+
+metrics:
+  - name: revenue
+    expression: {dialects: [{dialect: ANSI_SQL, expression: SUM(order_items.amount)}]}
+    description: Sum of line item amounts
+    ai_context:
+      instructions: Revenue includes cancelled orders unless filtered by status.
+      synonyms: [sales, turnover]
+  - name: units_sold
+    expression: {dialects: [{dialect: ANSI_SQL, expression: SUM(order_items.quantity)}]}
+    description: Number of product units on all order lines
+  - name: order_count
+    expression: {dialects: [{dialect: ANSI_SQL, expression: COUNT(orders.order_id)}]}
+    description: Number of orders
+    ai_context:
+      synonyms: [number of orders]
+  - name: customer_count
+    expression:
+      dialects:
+        - dialect: ANSI_SQL
+          expression: COUNT(DISTINCT orders.customer_id)
+    description: Number of distinct customers who placed an order
+  - name: average_order_value
+    expression:
+      dialects:
+        - dialect: ANSI_SQL
+          expression: SUM(order_items.amount) / NULLIF(COUNT(orders.order_id), 0)
+    description: Revenue per order
+    ai_context:
+      instructions: Average order value is revenue divided by the number of orders.
+      synonyms: [aov]
+  - name: average_line_amount
+    expression: {dialects: [{dialect: ANSI_SQL, expression: AVG(order_items.amount)}]}
+    description: Mean amount of one order line
+  # A window function has no derivable additivity: skipped until declared by hand.
+  - name: running_revenue
+    expression:
+      dialects:
+        - dialect: ANSI_SQL
+          expression: SUM(order_items.amount) OVER (ORDER BY order_items.order_id)
+  # Only an MDX expression: not SQL, reported as unmappable.
+  - name: revenue_cube
+    expression:
+      dialects:
+        - dialect: MDX
+          expression: "[Measures].[Revenue]"

@@ -1,0 +1,55 @@
+name: stores
+connection: retail_db
+table: main.stores
+grain:
+- store_id
+columns:
+- name: store_id
+  type: int
+  nullable: true
+- name: name
+  type: string
+  nullable: false
+- name: region
+  type: string
+  nullable: false
+measures:
+- name: row_count
+  expr: count(*)
+  additivity: additive
+  semi_additive_over: []
+dimensions:
+- name: name
+  column: name
+  expr:
+  json_path:
+  type:
+  granularity:
+  label:
+  description:
+  aliases: []
+- name: region
+  column: region
+  expr:
+  json_path:
+  type:
+  granularity:
+  label:
+  description:
+  aliases:
+  - area
+joins: []
+filters: []
+segments: []
+finality:
+  watermark:
+meta:
+  provenance: inferred
+  source_fingerprint: 
+    sha256:73f3d841dec7d86cf0b21b09d9bd1f6ae7491f864247ac85c0092a87d0d745cd
+  definition_fingerprint: 
+    sha256:56c4dcab1b1797caa0a14dda00a9efa4c8186b6153a1e0ee7a06aeffae801472
+  last_validated_at: '2026-10-06T07:01:31.588148Z'
+  frozen: false
+  pack_source:
+description:

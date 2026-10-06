@@ -1,0 +1,10 @@
+# Apache Ossie import: semantics, bindings and knowledge drafted by `canonic ingest` from
+# examples/ossie-retail/ossie/retail.ossie.yaml. Expected numbers are checked by hand
+# against setup.sql (6 orders, 9 lines, revenue 284.00).
+{"id": "ossie_retail_revenue", "project": "ossie-retail", "why": "smoke test -- a single-binding measure the Ossie connector placed on order_items", "query": {"metrics": ["revenue"]}}
+{"id": "ossie_retail_revenue_by_region", "project": "ossie-retail", "why": "two-hop join order_items -> orders -> stores drafted from Ossie relationships, both many_to_one so no fanout (north 133.5, south 150.5)", "query": {"metrics": ["revenue"], "dimensions": ["region"]}}
+{"id": "ossie_retail_revenue_by_category", "project": "ossie-retail", "why": "join order_items -> products drafted from an Ossie relationship (coffee 100, accessories 24, equipment 160)", "query": {"metrics": ["revenue"], "dimensions": ["category"]}}
+{"id": "ossie_retail_revenue_by_order_month", "project": "ossie-retail", "why": "derived Ossie dimension with an inferred type, reached through order_items -> orders (2026-01 121.5, 2026-02 162.5)", "query": {"metrics": ["revenue"], "dimensions": ["order_month"]}}
+{"id": "ossie_retail_order_count_by_status", "project": "ossie-retail", "why": "Ossie column dimension with aliases (shipped 4, placed 1, cancelled 1)", "query": {"metrics": ["order_count"], "dimensions": ["status"]}}
+{"id": "ossie_retail_customer_count", "project": "ossie-retail", "why": "distinct_count binding from an Ossie COUNT(DISTINCT) candidate (4)", "query": {"metrics": ["customer_count"]}}
+{"id": "ossie_retail_average_order_value_by_channel", "project": "ossie-retail", "why": "ratio binding from an Ossie cross-dataset metric, components on order_items and orders (online 146/4 = 36.5, store 138/2 = 69)", "query": {"metrics": ["average_order_value"], "dimensions": ["channel"]}}

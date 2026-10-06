@@ -73,6 +73,7 @@
           "guides/marketplace",
           "guides/marketplace-keycloak",
           "guides/mysql",
+          "guides/ossie-retail",
           "guides/posthog-context-pack",
           "guides/rental",
           "guides/saas-analytics",

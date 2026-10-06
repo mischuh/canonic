@@ -1,0 +1,46 @@
+name: customer_profiles
+connection: retail_db
+table: main.customer_profiles
+grain:
+- customer_id
+columns:
+- name: customer_id
+  type: int
+  nullable: true
+- name: loyalty_tier
+  type: string
+  nullable: false
+measures:
+- name: row_count
+  expr: count(*)
+  additivity: additive
+  semi_additive_over: []
+dimensions:
+- name: loyalty_tier
+  column: loyalty_tier
+  expr:
+  json_path:
+  type:
+  granularity:
+  label:
+  description:
+  aliases: []
+joins:
+- to: customers
+  on: customer_profiles.customer_id = customers.customer_id
+  relationship: one_to_one
+  name:
+filters: []
+segments: []
+finality:
+  watermark:
+meta:
+  provenance: inferred
+  source_fingerprint: 
+    sha256:55ec7d3d81d77c3b5beec0fd87f16bda224b419a11e46af72a0fb2da88e839c8
+  definition_fingerprint: 
+    sha256:3651d7609e6cbea92144a56618b7a8aacda6e75935fdeb51cd6ed1aabdb07a35
+  last_validated_at: '2026-10-06T07:01:31.588148Z'
+  frozen: false
+  pack_source:
+description:

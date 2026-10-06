@@ -1,0 +1,8 @@
+metric: average_order_value
+canonical:
+  kind: ratio
+  numerator: revenue
+  denominator: order_count
+provenance: inferred
+aliases:
+- aov

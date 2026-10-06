@@ -1,0 +1,35 @@
+{
+  "case": "ossie_retail_revenue_by_order_month",
+  "columns": [
+    {
+      "name": "order_month",
+      "type": "string"
+    },
+    {
+      "name": "revenue",
+      "type": "float"
+    }
+  ],
+  "dialect": "sqlite",
+  "finality": null,
+  "guardrails_fired": [],
+  "project": "ossie-retail",
+  "resolved": {
+    "metrics": {
+      "revenue": "order_items.revenue"
+    }
+  },
+  "row_count": 2,
+  "rows": [
+    [
+      "2026-01",
+      121.5
+    ],
+    [
+      "2026-02",
+      162.5
+    ]
+  ],
+  "trust_tier": "provisional",
+  "warnings": []
+}

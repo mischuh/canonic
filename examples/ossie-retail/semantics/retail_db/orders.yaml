@@ -1,0 +1,96 @@
+name: orders
+connection: retail_db
+table: main.orders
+grain:
+- order_id
+columns:
+- name: order_id
+  type: int
+  nullable: true
+- name: customer_id
+  type: int
+  nullable: false
+- name: store_id
+  type: int
+  nullable: false
+- name: order_date
+  type: date
+  nullable: false
+- name: status
+  type: string
+  nullable: false
+- name: channel
+  type: string
+  nullable: false
+measures:
+- name: order_count
+  expr: COUNT(order_id)
+  additivity: additive
+  semi_additive_over: []
+- name: customer_count
+  expr: COUNT(DISTINCT customer_id)
+  additivity: non_additive
+  semi_additive_over: []
+dimensions:
+- name: status
+  column: status
+  expr:
+  json_path:
+  type:
+  granularity:
+  label:
+  description: Fulfilment status of the order
+  aliases:
+  - order status
+  - fulfilment status
+- name: channel
+  column: channel
+  expr:
+  json_path:
+  type:
+  granularity:
+  label:
+  description: Where the order was placed, online or in a store
+  aliases:
+  - sales channel
+- name: order_date
+  column: order_date
+  expr:
+  json_path:
+  type:
+  granularity:
+  label:
+  description:
+  aliases: []
+- name: order_month
+  column:
+  expr: SUBSTRING(order_date, 1, 7)
+  json_path:
+  type: string
+  granularity:
+  label:
+  description: Calendar month of the order as YYYY-MM
+  aliases: []
+joins:
+- to: customers
+  on: orders.customer_id = customers.customer_id
+  relationship: many_to_one
+  name:
+- to: stores
+  on: orders.store_id = stores.store_id
+  relationship: many_to_one
+  name:
+filters: []
+segments: []
+finality:
+  watermark:
+meta:
+  provenance: inferred
+  source_fingerprint: 
+    sha256:26bcb4b0088f3e5e2059d1bb4f10463a2aa5854b687f9a5260906f027cb923f8
+  definition_fingerprint: 
+    sha256:28ae2d8c31f3875f597aabcb57cb45085919123c32f85f3a6e9e92c770805640
+  last_validated_at: '2026-10-06T07:01:31.588148Z'
+  frozen: false
+  pack_source:
+description: One row per order
