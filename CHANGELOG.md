@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.36.0](https://github.com/mischuh/canonic/compare/v0.35.1...v0.36.0) (2026-10-07)
+
+
+### Features
+
+* wire knowledge upkeep, add trust staleness, validate warnings and secret refs ([#386](https://github.com/mischuh/canonic/issues/386)) ([6f9dc43](https://github.com/mischuh/canonic/commit/6f9dc43ce047ca3ffedc0018ea6edda5219afff7))
+
+
+### Bug Fixes
+
+* **deps:** require sqlglot 30.12 and cap below the next major ([#385](https://github.com/mischuh/canonic/issues/385)) ([fc4b607](https://github.com/mischuh/canonic/commit/fc4b6078e730e5c841cbc5b1dc221080359cc386))
+
+
+### Documentation
+
+* restructure the readme around what canonic does ([#388](https://github.com/mischuh/canonic/issues/388)) ([2d92a71](https://github.com/mischuh/canonic/commit/2d92a7149799104ac366f07d020de54cf8ef3c74))
+
 ## [0.35.1](https://github.com/mischuh/canonic/compare/v0.35.0...v0.35.1) (2026-10-06)
 
 
