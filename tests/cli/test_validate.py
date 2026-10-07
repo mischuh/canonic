@@ -147,3 +147,34 @@ def test_validate_report_passes_alongside_contracts(runner: CliRunner, project_d
 
     result = runner.invoke(app, ["validate"])
     assert result.exit_code == 0, result.output
+
+
+def _project_with_named_filter(project_dir: Path) -> None:
+    (project_dir / "semantics" / "db").mkdir(parents=True)
+    (project_dir / "semantics" / "db" / "src.yaml").write_text(
+        "name: src\nconnection: db\ntable: src\n"
+        "grain: [id]\n"
+        "columns:\n"
+        "  - {name: id, type: string, nullable: false}\n"
+        "filters:\n"
+        "  - {name: positive, expr: 'id > 0'}\n"
+    )
+
+
+def test_validate_warns_about_declarations_without_effect(
+    runner: CliRunner, project_dir: Path
+) -> None:
+    _project_with_named_filter(project_dir)
+    result = runner.invoke(app, ["validate"])
+    assert result.exit_code == 0
+    assert "warning" in result.output
+    assert "positive" in result.output
+
+
+def test_validate_json_lists_warnings_only_when_there_are_some(
+    runner: CliRunner, project_dir: Path
+) -> None:
+    _project_with_named_filter(project_dir)
+    payload = json.loads(runner.invoke(app, ["--json", "validate"]).output)
+    assert payload["status"] == "ok"
+    assert len(payload["warnings"]) == 1

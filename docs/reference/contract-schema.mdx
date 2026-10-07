@@ -144,9 +144,9 @@ board_only_final: true
 | --- | --- | --- | --- |
 | `metric` | `str` | n/a (required) | The metric these realizations apply to. |
 | `realizations` | `list[Realization]` | `[]` | Physical sources along the freshness axis, see below. |
-| `coalescing` | `str \| null` | `null` | Expression selecting which realization backs a given time window. |
+| `coalescing` | `str \| null` | `null` | Documents which realization backs a time window. It is not evaluated, the source is chosen by the `final` realization's watermark alone. Only `window <= watermark ? final : provisional` states what the compiler does, any other expression is reported by `canonic validate`. |
 | `result_flag` | `str \| null` | `null` | How the `final`/`provisional` tag is attached to results (e.g. `per_row`). |
-| `board_only_final` | `bool` | `false` | Pairs with a `restrict_source` guardrail so a restricted context sees only the `final` source. |
+| `board_only_final` | `bool` | `false` | Has no effect on its own. Final-only is enforced by a `restrict_source` guardrail for the metric, and `canonic validate` warns when the flag is set without one. |
 
 ### `realizations[]` (`Realization`)
 

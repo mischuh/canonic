@@ -10,6 +10,7 @@ from rich.console import Console
 from canonic.cli._errors import get_cli_context, handle_errors
 from canonic.cli.commands import load_service
 from canonic.config import find_project_root
+from canonic.contracts.inert import inert_declaration_warnings
 from canonic.contracts.validate import validate_contracts
 
 _console = Console(soft_wrap=True)
@@ -31,6 +32,10 @@ def validate(ctx: typer.Context) -> None:
     compile against the current semantic layer and each ``narrative_from`` must
     resolve to an existing knowledge page (AMENDMENT-curated-reports S18) -- so
     renaming a metric a report depends on is caught in the same run, the same PR.
+
+    Declarations the compiler accepts but does not act on (named ``filters``, ``segments``,
+    an unevaluated finality ``coalescing``, ``board_only_final`` without a ``restrict_source``
+    guardrail) are reported as warnings and do not fail the run.
     """
     json_output = get_cli_context(ctx).json_output
     root = find_project_root()
@@ -44,8 +49,14 @@ def validate(ctx: typer.Context) -> None:
 
     validate_contracts(root)
     load_service(ctx).validate_reports()
+    warnings = inert_declaration_warnings(root)
 
     if json_output:
-        typer.echo(json.dumps({"status": "ok", "project_root": str(root)}))
+        payload: dict[str, object] = {"status": "ok", "project_root": str(root)}
+        if warnings:
+            payload["warnings"] = warnings
+        typer.echo(json.dumps(payload))
     else:
         _console.print(f"[green]ok[/green]: contracts are valid for {root}")
+        for warning in warnings:
+            _console.print(f"[yellow]warning:[/yellow] {warning}")
