@@ -30,6 +30,14 @@ CI (`.github/workflows/contract-schema-guard.yml`,
 
 ## History
 
+## 2.12 (2026-10-06) - MINOR
+
+- ADR/PR: this PR (feat(knowledge): wire ingest-time reference pruning and the staleness signal)
+- Summary: `read_knowledge_page` returns `meta.staleness`, `null` while the page's references
+  were validated within `knowledge.staleness_window_days` (default 90) and otherwise
+  `{"age_days", "message"}`. Additive field on an existing response, no existing field changes.
+  Classified MINOR under §4.1.
+
 ## 2.11 (2026-10-01) - MINOR
 
 - ADR/PR: this PR (feat(compiler): allow distinct_count components in ratio metrics,

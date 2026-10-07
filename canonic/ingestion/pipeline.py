@@ -28,6 +28,7 @@ from canonic.ingestion.models import (
     ReconciliationDecision,
     ReconciliationReport,
 )
+from canonic.ingestion.page_refs import PageReferenceChecker
 from canonic.ingestion.pending import PendingDiffStore, generate_run_id
 from canonic.ingestion.reconciliation import (
     DiskAcceptedStore,
@@ -259,6 +260,11 @@ class IngestionPipeline:
         logger.debug("stage 4: enriching examples")
         report = ExampleEnricher(self._project_root, evidence).enrich(report)
 
+        logger.debug("stage 4b: pruning dangling knowledge-page references")
+        page_check = PageReferenceChecker(self._project_root).check(report, store)
+        if page_check.entries:
+            report = ReconciliationReport(entries=[*report.entries, *page_check.entries])
+
         logger.debug("stage 5: validating %d proposal(s)", len(build.proposals))
         gate = ValidationGate(self._project_root, self._connectors, evidence)
         await gate.validate(build.proposals)  # raises before emit (S8)
@@ -280,6 +286,7 @@ class IngestionPipeline:
         AuditTrailWriter.for_project(self._project_root).write(evidence, emission.report, run_id)
         PendingDiffStore(self._project_root).write(run_id, emission)
         self._refresh_no_ops(emission.report)
+        self._refresh_pages(emission.report)
         auto_apply = [d for d in emission.diffs if d.auto_apply]
         if auto_apply:
             logger.info("auto-applying %d diff(s)", len(auto_apply))
@@ -314,6 +321,15 @@ class IngestionPipeline:
                 update["definition_fingerprint"] = baseline
             refreshed = source.model_copy(update={"meta": source.meta.model_copy(update=update)})
             path.write_text(dump_semantic_source(refreshed))
+
+    def _refresh_pages(self, report: ReconciliationReport) -> None:
+        """Refresh ``last_validated_at`` on knowledge pages whose references all resolve (§8).
+
+        Same carve-out as the source refresh above. Pages with a dangling reference are not
+        stamped, the prune diff proposed for them downgrades their freshness instead.
+        """
+        store = DiskAcceptedStore(self._project_root)
+        PageReferenceChecker(self._project_root).check(report, store).stamp()
 
     def _write_diffs(self, diffs: Iterable[EmittedDiff]) -> None:
         """Apply emitted diffs by writing their rendered ``after`` state to the target file.

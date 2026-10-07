@@ -16,6 +16,7 @@ description: "Every top-level field in the project config file, and what it gove
 | `embeddings` | `EmbeddingConfig` | `model: all-MiniLM-L6-v2` | Local embedding model for knowledge vector search. |
 | `telemetry` | `TelemetryConfig` | `enabled: false` | Opt-in telemetry, see [below](#telemetry) and [Instrumentation & evaluation](/concepts/instrumentation-and-eval#opt-in-telemetry). |
 | `reconcile` | `ReconcileConfig` | propose-only | Auto-apply policy for ingestion, see [Ingestion & reconciliation](/concepts/ingestion-and-reconciliation#propose-only-by-default). |
+| `knowledge` | `KnowledgeConfig` | `staleness_window_days: 90` | Days a knowledge page's references may go unvalidated before `read_knowledge_page` reports a staleness signal, see [below](#knowledge). |
 | `feedback` | `FeedbackConfig` | see [below](#feedback) | Pattern-gate and trust-cap thresholds for the E11 feedback loop, see [Feedback loop (E11)](/concepts/ingestion-and-reconciliation#feedback-loop-e11). |
 | `runtime` | `RuntimeConfig` | `air_gapped: false` | Air-gapped enforcement, see [LLM & embeddings runtime](/concepts/llm-runtime#air-gapped-mode--enforced-not-advisory). |
 | `logging` | `LoggingConfig` | `level: WARNING`, `format: text` | Log level, optional file, text/json format, and size-based rotation, see [below](#logging). |
@@ -149,6 +150,15 @@ reconcile:
 | `strict_contradictions` | `bool` | `false` | When `true`, a run that surfaces any flagged contradiction fails with exit code 14 instead of just recording it. Meant for CI, where you want ingestion to gate on data-model disagreements rather than pass through them. |
 
 `reconcile` only governs how eagerly `canonic ingest` is allowed to write changes back to `semantics/`. It has no effect on what evidence gets collected, only on whether a resulting proposal can be applied without a human looking at it first. See [Ingestion & reconciliation](/concepts/ingestion-and-reconciliation#propose-only-by-default) for how proposals are generated in the first place.
+
+## `knowledge`
+
+```yaml
+knowledge:
+  staleness_window_days: 90
+```
+
+A page's `meta.last_validated_at` is refreshed by `canonic ingest` while all of its references still resolve. When it is older than `staleness_window_days`, or was never set, `read_knowledge_page` returns a `meta.staleness` signal the agent can caveat with.
 
 ## `feedback`
 

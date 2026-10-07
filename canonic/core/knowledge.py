@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import timedelta
 from typing import TYPE_CHECKING, Any
 
 from canonic.config import LOCAL_STATE_DIR
@@ -114,7 +115,7 @@ class KnowledgeService:
         """Retrieve the full content of a knowledge page by page id with live rendering (E6, P1).
 
         Returns rendered body (with {{ sl:entity.expr }} directives resolved to live SQL),
-        drift flag, and staleness metadata. Respects access control.
+        drift flag, and a staleness signal (``None`` while within the validation window). Respects access control.
         Per amendment-knowledge-read-page: body is rendered, meta includes last_validated_at and drift_flag.
 
         ``principal``'s role ``knowledge.allow_tags`` applies on top of the existing
@@ -163,6 +164,13 @@ class KnowledgeService:
         drifted_refs = detector.flagged_for_review(knowledge_page, entity_index)
         has_drift = len(drifted_refs) > 0
 
+        # Staleness: references not validated within the configured window (E6 §8, S8).
+        window = timedelta(days=self._ctx.config.knowledge.staleness_window_days)
+        signal = detector.staleness(knowledge_page, window=window)
+        staleness = (
+            {"age_days": signal.age_days, "message": signal.message} if signal is not None else None
+        )
+
         return {
             "page_id": knowledge_page.id,
             "scope": knowledge_page.scope.value,
@@ -179,5 +187,6 @@ class KnowledgeService:
                     else None
                 ),
                 "drift_flag": has_drift,
+                "staleness": staleness,
             },
         }

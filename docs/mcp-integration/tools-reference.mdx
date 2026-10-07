@@ -27,7 +27,7 @@ A client that supports MCP server extensions (SEP-2133) does not need either too
 
 ```json
 {
-  "app.getcanonic/contract": {"schema": "2.11", "major": 2, "minor": 11}
+  "app.getcanonic/contract": {"schema": "2.12", "major": 2, "minor": 12}
 }
 ```
 
@@ -38,7 +38,7 @@ A client that declares its own `major`/`minor` for a request gets a MAJOR mismat
 Returns the serving contract version this daemon implements. Call at session start to confirm compatibility.
 
 ```json
-{"contract_schema": "2.11"}
+{"contract_schema": "2.12"}
 ```
 
 ### `negotiate_contract(contract_major: int)`
@@ -96,6 +96,8 @@ Each hit's `score` is a rank-fusion value (RRF), not a confidence or relevance p
 ### `read_knowledge_page(page: str, user: str | None = None)`
 
 Retrieves the full content of a knowledge page by its id (page slug). Use after `search_knowledge()` to read the complete definition, caveat, or policy: the rendered body has live `{{ sl:entity.expr }}` definitions substituted, plus metadata, drift review flags, staleness warnings, and linked references.
+
+The `meta` block carries `last_validated_at`, `drift_flag` (a bound measure's `expr` changed, so the prose needs review) and `staleness`. `staleness` is `null` while the page's references were validated within `knowledge.staleness_window_days` (default 90), otherwise `{"age_days": int | null, "message": str}`, with `age_days: null` for a page that was never validated. Relay the message as a caveat.
 
 ## Reports
 

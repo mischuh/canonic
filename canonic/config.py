@@ -196,6 +196,16 @@ class EmbeddingConfig(BaseModel):
     model: str = "all-MiniLM-L6-v2"
 
 
+class KnowledgeConfig(BaseModel):
+    """Knowledge-layer policy block from canonic.yaml (SPEC-E6 §8).
+
+    ``staleness_window_days`` is how long a page's references may go unvalidated before
+    ``read_knowledge_page`` attaches a staleness signal the agent can caveat with.
+    """
+
+    staleness_window_days: int = Field(default=90, ge=1)
+
+
 class TelemetryConfig(BaseModel):
     """Opt-in aggregate telemetry (SPEC-E16 §8/§12).
 
@@ -558,6 +568,7 @@ class CanonicConfig(BaseSettings):
     connections: list[Connection] = []
     llm: LLMConfig | None = None
     embeddings: EmbeddingConfig = EmbeddingConfig()
+    knowledge: KnowledgeConfig = KnowledgeConfig()
     telemetry: TelemetryConfig = TelemetryConfig()
     reconcile: ReconcileConfig = ReconcileConfig()
     feedback: FeedbackConfig = FeedbackConfig()
