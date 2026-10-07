@@ -18,6 +18,7 @@ from canonic.feedback.assertion_history import AssertionHistory
 from canonic.feedback.history import BindingOutcomeHistory
 from canonic.instrumentation.models import AnswerEvent, AnswerEventUser, _age_days, _sha256_json
 from canonic.log import query_id_var
+from canonic.trust.freshness import apply_staleness_policy
 from canonic.trust.scorer import trust_for_compiled
 
 if TYPE_CHECKING:
@@ -69,13 +70,22 @@ class QueryService:
         ``principal`` is bound by the adapter from a verified token/CLI override and flows
         straight into :func:`compile` — never accepted on ``query`` itself (SPEC-E12).
         """
-        return compile(
+        return self._compile(query, principal)
+
+    def _compile(self, query: SemanticQuery, principal: Principal | None) -> CompileResult:
+        """Compile, then apply the project's staleness policy to the freshness metadata.
+
+        The compiler never reads the clock, so staleness is decided here, in the serving layer
+        (``trust.stale_after_days``, off by default).
+        """
+        compiled = compile(
             query,
             self._ctx.resolver,
             self._ctx.sources,
             connection_dialects=self._ctx.connection_dialects,
             principal=principal,
         )
+        return apply_staleness_policy(compiled, self._ctx.config.trust.stale_after_days)
 
     async def query(
         self,
@@ -118,13 +128,7 @@ class QueryService:
             len(query.dimensions),
         )
         try:
-            compiled = compile(
-                query,
-                self._ctx.resolver,
-                self._ctx.sources,
-                connection_dialects=self._ctx.connection_dialects,
-                principal=principal,
-            )
+            compiled = self._compile(query, principal)
             connection_id = self._ctx.connection_for_sql(compiled)
             if connection_id is not None:
                 logger.info("connection selected: id=%s", connection_id)

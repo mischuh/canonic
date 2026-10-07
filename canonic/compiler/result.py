@@ -187,7 +187,8 @@ class CompileResult:
     """The compiled query and its result attributes (SPEC-E5-E15 §4).
 
     ``resolved`` maps each requested metric name to ``"source.measure"``. ``stale`` in
-    every :class:`SourceFreshness` is ``False`` in P0 — no staleness policy is defined yet.
+    every :class:`SourceFreshness` is ``False`` here, the compiler never reads the clock. The
+    serving layer applies the staleness policy (:mod:`canonic.trust.freshness`).
     ``finality`` is ``None`` when no finality rule applies; all rows are implicitly final.
     """
 

@@ -109,8 +109,8 @@ def finality_signal(final_rows: int | None, provisional_rows: int | None) -> Sig
 def freshness_signal(freshness: list[SourceFreshness]) -> SignalVerdict:
     """Source freshness (SPEC-E14 §3 table row "Freshness").
 
-    ``stale`` is always ``False`` in P0 (no staleness policy defined yet — SPEC-E5-E15),
-    so this signal is inactive today; it activates automatically once P0 gains one.
+    ``stale`` is set by the serving layer from ``trust.stale_after_days``
+    (:mod:`canonic.trust.freshness`), so with no policy configured this signal stays inactive.
     """
     stale = sorted(f.source for f in freshness if f.stale)
     if stale:

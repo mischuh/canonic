@@ -74,7 +74,7 @@ Scoring is **worst-signal-dominates**. The tier starts at `trusted` and drops to
 | Provenance | `provisional` | The binding's provenance is `inferred`. |
 | Assertion coverage | `provisional` | No assertion covers the binding (or one does, but pass/fail isn't wired to scoring yet). |
 | Finality | `provisional` | Served rows include `provisional` (non-final) rows. |
-| Freshness | `provisional` | A source is stale (not yet enforced, no staleness policy defined). |
+| Freshness | `provisional` | A source's `last_validated_at` is older than `trust.stale_after_days`. Off until you set it, see [config](/reference/config-schema#trust). A source that was never validated is not stale. |
 | Outcome (E11, dynamic) | `caution` | A binding has a recent confirmed `wrong_definition` outcome within the feedback loop's trust-cap window. See [Feedback loop](/concepts/ingestion-and-reconciliation#feedback-loop-e11). |
 
 A `min_trust` guardrail enforces a floor on the served tier for a given `context`:

@@ -20,6 +20,7 @@ from canonic.core.models import (
 )
 from canonic.core.overview import questions_for_group
 from canonic.exc import CanonicError, Unresolved, UnsupportedMeasure
+from canonic.trust.freshness import is_stale
 from canonic.trust.scorer import TrustScorer
 from canonic.trust.signals import static_signals_for
 
@@ -226,7 +227,10 @@ class DiscoveryService:
             freshness = SourceFreshnessOut(
                 source=source.name,
                 last_validated_at=source.meta.last_validated_at.isoformat(),
-                stale=False,
+                stale=is_stale(
+                    source.meta.last_validated_at.isoformat(),
+                    self._ctx.config.trust.stale_after_days,
+                ),
             )
         return MetricDetail(
             metric=binding.metric,
