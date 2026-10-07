@@ -16,13 +16,16 @@ from rich.table import Table
 
 from canonic.core.service import CanonicService
 from canonic.exc import CanonicError
+from canonic.instrumentation.events import emit_milestone_once
+from canonic.instrumentation.models import FunnelMilestone
 from canonic.packs.install import resolve_params
 from canonic.packs.templating import substitute
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Mapping
     from pathlib import Path
 
+    from canonic.packs.first_answer import FirstAnswerOutcome
     from canonic.packs.install import InstallResult
     from canonic.packs.manifest import FirstAnswer, PackManifest, Param
 
@@ -159,11 +162,24 @@ def render_install_result(result: InstallResult) -> None:
             _console.print(f"  {msg}")
 
 
-def run_and_render_first_answer(root: Path, spec: FirstAnswer) -> bool:
+#: The pack param that holds the internal-traffic predicate (the PostHog pack's name). A pack
+#: that declares it and leaves it at a neutral value gets a note under its first answer,
+#: because the number then counts the team's own traffic.
+INTERNAL_TRAFFIC_PARAM = "internal_user_filter"
+_NEUTRAL_PREDICATES = frozenset({"", "TRUE", "1=1"})
+
+
+def run_and_render_first_answer(
+    root: Path, spec: FirstAnswer, params: Mapping[str, str] | None = None
+) -> bool:
     """§5.6: run and render the pack's first-answer query.
 
+    Prints the number, the metric definition, the guardrails and warnings the result
+    carries and, when the pack's ``internal_user_filter`` param is left neutral, a line
+    saying so. Records the ``FIRST_ANSWER_SERVED`` funnel milestone on success.
+
     Returns True on success. On failure the underlying error is printed and installed
-    files are left in place (§5.6) — the caller decides whether to exit non-zero.
+    files are left in place (§5.6), the caller decides whether to exit non-zero.
     """
     from canonic.packs.first_answer import run_first_answer
 
@@ -186,4 +202,24 @@ def run_and_render_first_answer(root: Path, spec: FirstAnswer) -> bool:
     _console.print(table)
     if rs.truncated:
         _console.print("[yellow]note:[/yellow] result truncated at the connection row limit")
+    _render_first_answer_context(outcome, params)
+    emit_milestone_once(root, FunnelMilestone.FIRST_ANSWER_SERVED)
     return True
+
+
+def _render_first_answer_context(
+    outcome: FirstAnswerOutcome, params: Mapping[str, str] | None
+) -> None:
+    """The definition, guardrails, warnings and internal-traffic lines under the table (§5.6)."""
+    meta = outcome.result.metadata
+    _console.print(f"[bold]definition[/bold]  {outcome.definition}")
+    for fired in meta.guardrails_fired:
+        _console.print(f"[bold]guardrail[/bold]   {fired.id} ({fired.kind}, {fired.severity})")
+    for warning in meta.warnings:
+        _console.print(f"[yellow]warning:[/yellow] {warning}")
+    predicate = (params or {}).get(INTERNAL_TRAFFIC_PARAM)
+    if predicate is not None and predicate.strip().upper() in _NEUTRAL_PREDICATES:
+        _console.print(
+            "[yellow]note:[/yellow] Internal traffic is not excluded, "
+            "so this number is likely too high."
+        )
