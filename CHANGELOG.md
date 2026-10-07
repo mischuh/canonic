@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.36.1](https://github.com/mischuh/canonic/compare/v0.36.0...v0.36.1) (2026-10-07)
+
+
+### Documentation
+
+* hold back reports and context packs from the readme and introduction ([#390](https://github.com/mischuh/canonic/issues/390)) ([4673b04](https://github.com/mischuh/canonic/commit/4673b04abafd1b0259ecd2ab43d1ffccfc5d4a30))
+* **website:** show the capabilities and fix the docker tab ([#389](https://github.com/mischuh/canonic/issues/389)) ([5e7c08d](https://github.com/mischuh/canonic/commit/5e7c08d521090c2e4917d35cb6b1d0d91eb962ec))
+
 ## [0.36.0](https://github.com/mischuh/canonic/compare/v0.35.1...v0.36.0) (2026-10-07)
 
 
