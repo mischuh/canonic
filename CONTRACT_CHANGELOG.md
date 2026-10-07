@@ -28,6 +28,25 @@ CI (`.github/workflows/contract-schema-guard.yml`,
 - Summary: <what changed and why>
 ```
 
+## Recorded without a bump
+
+A change listed here was reviewed against the classification rules and did not bump
+`CONTRACT_SCHEMA`. Recording it keeps the decision findable.
+
+### `dimensions[].expr` (0.31.0) and `dimensions[].json_path` (0.32.0)
+
+- ADR/PR: AMENDMENT-dimension-expr §6, AMENDMENT-json-path-dimension §6 (feat(semantic) #357 for
+  `json_path`)
+- Decision: no bump. Both are optional fields on the semantic-source file schema
+  (`semantics/*.yaml`), which feeds the compiler. `contract_schema` freezes the semantic query,
+  the `QueryResult` and compile output, the error registry and the `ContractResolver` hooks,
+  and none of those changed shape. A file that used to fail validation now compiles, which is
+  not a change a client reads off the wire.
+- Why not the MINOR bump both amendments recommend: the releases already shipped, so a bump
+  now would sit on an unrelated change, and a version number that appears only after the fact
+  cannot tell a client whether an older server supports derived dimensions. A client that
+  needs to know reads `canonic_version`.
+
 ## History
 
 ## 2.12 (2026-10-06) - MINOR
