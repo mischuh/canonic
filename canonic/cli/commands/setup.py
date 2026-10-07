@@ -1036,7 +1036,14 @@ def _run_pack_setup(root: Path, project_name: str, repo_dir: Path, manifest: Pac
 
     demo_ok = False
     if manifest.first_answer is not None:
-        demo_ok = run_and_render_first_answer(root, manifest.first_answer)
+        demo_ok = run_and_render_first_answer(root, manifest.first_answer, params)
+        if not demo_ok:
+            logger.warning("setup: pack %s installed but its first answer failed", manifest.pack)
+            _console.print(
+                "[red]setup incomplete:[/red] the first answer failed. The installed files "
+                "stay in place. Fix the error above, then check it with `canonic query`."
+            )
+            raise typer.Exit(1)
 
     logger.info("setup: pack %s installed, first_answer_ok=%s", manifest.pack, demo_ok)
     _render_setup_complete(config, created, demo_ok=demo_ok, withheld_count=0)
@@ -1107,7 +1114,7 @@ def _add_pack_to_existing(root: Path) -> None:
     result = install_pack(root, pack_dir, manifest, variant, params)
     render_install_result(result)
     if manifest.first_answer is not None:
-        run_and_render_first_answer(root, manifest.first_answer)
+        run_and_render_first_answer(root, manifest.first_answer, params)
 
 
 # --- shared prompts --------------------------------------------------------

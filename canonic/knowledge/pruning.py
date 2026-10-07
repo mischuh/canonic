@@ -14,10 +14,9 @@ no file and makes no policy decision — ``frozen``/higher-tier handling belongs
 reconciliation engine (SPEC-E4 §5.3), so the advisor always proposes and lets the engine
 decide whether to flag instead.
 
-Integration seam (not wired here): E4, per affected page during ingest, calls
-:meth:`PruneAdvisor.stale_sl_refs` / :meth:`PruneAdvisor.stale_refs` against the post-ingest
-indexes, then :meth:`PruneAdvisor.propose_prune`, feeding any non-``None`` proposal into the
-standard reconciliation flow.
+The ingest pipeline wires it in through :class:`~canonic.ingestion.page_refs.PageReferenceChecker`,
+which checks every page against the post-ingest indexes and turns the result into a propose-only
+``EDIT`` entry of the standard reconciliation report.
 
 Body ``[[wikilinks]]`` are intentionally out of scope: they live in prose, not frontmatter,
 and §3.2 scopes pruning to ``sl_refs`` and page ``refs``.
@@ -85,6 +84,25 @@ class PruneAdvisor:
             confidence=_PRUNE_CONFIDENCE,
             anchored_to=self._anchored_fingerprints(page, stale_sl),
             drafted_by=DraftedBy.DETERMINISTIC,
+        )
+
+    @staticmethod
+    def pruned_page(
+        page: KnowledgePage, stale_sl: list[str], stale_refs: list[str]
+    ) -> KnowledgePage:
+        """``page`` with the stale references removed and its freshness downgraded.
+
+        The same post-prune state :meth:`propose_prune` describes as frontmatter, as a page
+        that can be dumped to its file form.
+        """
+        stale_sl_set = set(stale_sl)
+        stale_refs_set = set(stale_refs)
+        return page.model_copy(
+            update={
+                "sl_refs": [ref for ref in page.sl_refs if ref not in stale_sl_set],
+                "refs": [ref for ref in page.refs if ref not in stale_refs_set],
+                "meta": page.meta.model_copy(update={"last_validated_at": None}),
+            }
         )
 
     @staticmethod

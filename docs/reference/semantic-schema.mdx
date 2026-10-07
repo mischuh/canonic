@@ -117,7 +117,7 @@ filters:
 | `name` | `str` | n/a (required) | Filter identifier. |
 | `expr` | `str` | n/a (required) | Reusable SQL predicate. |
 
-A filter is a named SQL predicate you can reuse across measures, guardrails, and queries instead of repeating the same `WHERE` clause everywhere. Keeping something like "completed orders only" defined in one place means a change to the definition doesn't require hunting down every place it was inlined.
+A filter is a named SQL predicate, meant to be reused instead of repeating the same `WHERE` clause. **The compiler does not resolve named filters yet.** The file is parsed and validated, so a typo is caught, but a declared filter has no effect on any query, and neither does a non-empty `segments` list. `canonic validate` and `canonic mcp start` report both as warnings. Until they are wired in, put the predicate where it is applied: in a metric's `population_filter`, a measure's expression, or a `mandatory_filter` guardrail.
 
 ## `finality`
 

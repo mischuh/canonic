@@ -23,6 +23,7 @@ from canonic.semantic.models import NormalizedType
 if TYPE_CHECKING:
     from pathlib import Path
 
+    from canonic.contracts.models import MetricBinding
     from canonic.core.models import QueryResult
     from canonic.packs.manifest import FirstAnswer
     from canonic.semantic.models import Dimension, SemanticSource
@@ -34,12 +35,15 @@ _DATE_DIM_TYPES = frozenset({NormalizedType.DATE, NormalizedType.TIMESTAMP})
 
 
 class FirstAnswerOutcome:
-    """The rendered pieces of a first-answer run: rows, the query issued, and its source."""
+    """The rendered pieces of a first-answer run: rows, query, source and one-line definition."""
 
-    def __init__(self, *, result: QueryResult, sq: SemanticQuery, source_name: str) -> None:
+    def __init__(
+        self, *, result: QueryResult, sq: SemanticQuery, source_name: str, definition: str
+    ) -> None:
         self.result = result
         self.sq = sq
         self.source_name = source_name
+        self.definition = definition
 
 
 def run_first_answer(project_root: Path, spec: FirstAnswer) -> FirstAnswerOutcome:
@@ -68,7 +72,36 @@ def run_first_answer(project_root: Path, spec: FirstAnswer) -> FirstAnswerOutcom
     sq = SemanticQuery(metrics=[spec.metric], filters=filters, limit=10)
     service = CanonicService.from_project(project_root)
     result = asyncio.run(service.query(sq))
-    return FirstAnswerOutcome(result=result, sq=sq, source_name=source_name or spec.metric)
+    return FirstAnswerOutcome(
+        result=result,
+        sq=sq,
+        source_name=source_name or spec.metric,
+        definition=_definition_line(binding, sources),
+    )
+
+
+def _definition_line(binding: MetricBinding, sources: list[SemanticSource]) -> str:
+    """The metric's definition in one line, from its canonical binding (§5.6)."""
+    ref = binding.canonical
+    expr: str | None = None
+    if ref.source is not None and ref.measure is not None:
+        source = next((s for s in sources if s.name == ref.source), None)
+        measure = (
+            next((m for m in source.measures if m.name == ref.measure), None) if source else None
+        )
+        expr = measure.expr if measure is not None else ref.measure
+    elif ref.numerator is not None and ref.denominator is not None:
+        expr = f"{ref.numerator} / {ref.denominator}"
+    elif ref.distinct_on is not None:
+        expr = f"count(distinct {ref.distinct_on})"
+    elif ref.column is not None and ref.quantile is not None:
+        expr = f"percentile({ref.quantile:g}) of {ref.column}"
+    definition = f"{binding.metric} = {expr}" if expr else f"{binding.metric} ({ref.kind.value})"
+    if ref.source is not None:
+        definition += f" on {ref.source}"
+    if ref.population_filter:
+        definition += f" where {ref.population_filter}"
+    return definition
 
 
 def _window_since(window: str) -> date | None:

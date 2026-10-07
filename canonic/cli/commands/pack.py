@@ -191,7 +191,7 @@ def add(
     render_install_result(result)
 
     if manifest.first_answer is not None and not run_and_render_first_answer(
-        root, manifest.first_answer
+        root, manifest.first_answer, params
     ):
         raise typer.Exit(1)
 

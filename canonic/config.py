@@ -196,6 +196,29 @@ class EmbeddingConfig(BaseModel):
     model: str = "all-MiniLM-L6-v2"
 
 
+class KnowledgeConfig(BaseModel):
+    """Knowledge-layer policy block from canonic.yaml (SPEC-E6 §8).
+
+    ``staleness_window_days`` is how long a page's references may go unvalidated before
+    ``read_knowledge_page`` attaches a staleness signal the agent can caveat with.
+    """
+
+    staleness_window_days: int = Field(default=90, ge=1)
+
+
+class TrustConfig(BaseModel):
+    """Answer trust policy block from canonic.yaml (SPEC-E14).
+
+    ``stale_after_days`` is the staleness policy for source freshness: a source whose
+    ``meta.last_validated_at`` is older than this reports ``stale: true`` and caps the answer's
+    trust tier at ``provisional``. ``null`` (the default) defines no policy, so nothing is ever
+    stale. It is opt-in because a project that never re-runs ingest would otherwise see its
+    tiers drop, and fail any ``min_trust`` guardrail, on the day the window elapses.
+    """
+
+    stale_after_days: int | None = Field(default=None, ge=1)
+
+
 class TelemetryConfig(BaseModel):
     """Opt-in aggregate telemetry (SPEC-E16 §8/§12).
 
@@ -558,6 +581,8 @@ class CanonicConfig(BaseSettings):
     connections: list[Connection] = []
     llm: LLMConfig | None = None
     embeddings: EmbeddingConfig = EmbeddingConfig()
+    knowledge: KnowledgeConfig = KnowledgeConfig()
+    trust: TrustConfig = TrustConfig()
     telemetry: TelemetryConfig = TelemetryConfig()
     reconcile: ReconcileConfig = ReconcileConfig()
     feedback: FeedbackConfig = FeedbackConfig()

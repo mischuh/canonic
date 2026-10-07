@@ -23,6 +23,7 @@ from canonic.exc import CredentialError, UnknownCredentialProvider
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
+    from pathlib import Path
 
 
 def test_env_ref_resolves(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -57,10 +58,109 @@ def test_malformed_ref_raises() -> None:
         resolve_credential("CANONIC_TEST_SECRET")
 
 
-@pytest.mark.parametrize("scheme", ["file", "keyring"])
-def test_unimplemented_schemes_raise(scheme: str) -> None:
-    with pytest.raises(CredentialError, match="not yet supported"):
-        resolve_credential(f"{scheme}:something")
+def test_file_ref_reads_an_absolute_path_and_strips_one_trailing_newline(tmp_path: Path) -> None:
+    secret = tmp_path / "pg-password"
+    secret.write_text("s3cret\n")
+    assert resolve_credential(f"file:{secret}") == "s3cret"
+
+
+def test_file_ref_relative_path_starts_at_the_project_root(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    (tmp_path / "canonic.yaml").write_text("version: 1\n")
+    (tmp_path / ".canonic" / "secrets").mkdir(parents=True)
+    (tmp_path / ".canonic" / "secrets" / "pg").write_text("from-root")
+    sub = tmp_path / "models"
+    sub.mkdir()
+    monkeypatch.chdir(sub)
+    assert resolve_credential("file:.canonic/secrets/pg") == "from-root"
+
+
+def test_file_ref_keeps_inner_whitespace(tmp_path: Path) -> None:
+    secret = tmp_path / "s"
+    secret.write_text("a b\n\n")
+    assert resolve_credential(f"file:{secret}") == "a b\n"
+
+
+@pytest.mark.parametrize("content", ["", "\n", "   \n"])
+def test_file_ref_empty_file_raises(content: str, tmp_path: Path) -> None:
+    secret = tmp_path / "s"
+    secret.write_text(content)
+    with pytest.raises(CredentialError, match="is empty"):
+        resolve_credential(f"file:{secret}")
+
+
+def test_file_ref_missing_file_raises_without_leaking_anything(tmp_path: Path) -> None:
+    with pytest.raises(CredentialError, match="does not exist"):
+        resolve_credential(f"file:{tmp_path / 'nope'}")
+
+
+def test_file_ref_directory_raises(tmp_path: Path) -> None:
+    with pytest.raises(CredentialError, match="cannot be read"):
+        resolve_credential(f"file:{tmp_path}")
+
+
+def test_file_ref_without_a_path_raises() -> None:
+    with pytest.raises(CredentialError, match="missing a path"):
+        resolve_credential("file:")
+
+
+class _FakeKeyringModule:
+    def __init__(self, entries: dict[tuple[str, str], str]) -> None:
+        self.entries = entries
+
+    def get_password(self, service: str, username: str) -> str | None:
+        return self.entries.get((service, username))
+
+
+def _install_fake_keyring(
+    monkeypatch: pytest.MonkeyPatch, entries: dict[tuple[str, str], str]
+) -> None:
+    import sys
+    import types
+
+    errors = types.ModuleType("keyring.errors")
+    errors.KeyringError = type("KeyringError", (Exception,), {})  # type: ignore[attr-defined]
+    fake = types.ModuleType("keyring")
+    fake.get_password = _FakeKeyringModule(entries).get_password  # type: ignore[attr-defined]
+    fake.errors = errors  # type: ignore[attr-defined]
+    monkeypatch.setitem(sys.modules, "keyring", fake)
+    monkeypatch.setitem(sys.modules, "keyring.errors", errors)
+
+
+def test_keyring_ref_reads_service_and_username(monkeypatch: pytest.MonkeyPatch) -> None:
+    _install_fake_keyring(monkeypatch, {("canonic", "warehouse"): "kr-secret"})
+    assert resolve_credential("keyring:canonic/warehouse") == "kr-secret"
+
+
+def test_keyring_ref_without_an_entry_raises(monkeypatch: pytest.MonkeyPatch) -> None:
+    _install_fake_keyring(monkeypatch, {})
+    with pytest.raises(CredentialError, match="no keyring entry"):
+        resolve_credential("keyring:canonic/warehouse")
+
+
+@pytest.mark.parametrize("target", ["canonic", "canonic/", "/warehouse", ""])
+def test_keyring_ref_needs_service_and_username(target: str) -> None:
+    with pytest.raises(CredentialError, match="keyring:<service>/<username>"):
+        resolve_credential(f"keyring:{target}")
+
+
+def test_keyring_ref_without_the_package_says_how_to_install(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import sys
+
+    monkeypatch.setitem(sys.modules, "keyring", None)  # makes `import keyring` raise ImportError
+    with pytest.raises(CredentialError, match="pip install keyring"):
+        resolve_credential("keyring:canonic/warehouse")
+
+
+def test_static_source_accepts_a_file_ref(tmp_path: Path) -> None:
+    secret = tmp_path / "s"
+    secret.write_text("abc")
+    source = credential_source(f"file:{secret}")
+    assert source.cached_value().value == "abc"
+    assert not source.is_dynamic
 
 
 def test_unknown_scheme_raises() -> None:

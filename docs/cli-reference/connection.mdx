@@ -45,7 +45,7 @@ canonic connection add --id warehouse --type postgres \
 | `--id` | Unique connection identifier. |
 | `--type` | Connector type (`sqlite`, `postgres`, `mysql`, `clickhouse`, `redshift`, `snowflake`, `databricks`, …). |
 | `--param`, `-p` | Connector param as `KEY=VALUE` (repeatable). |
-| `--credentials-ref` | Credential reference (`env:VAR`, `keyring:service`, `file:path`). |
+| `--credentials-ref` | Credential reference (`env:VAR`, `keyring:service/username`, `file:path`). |
 | `--set-default` | Make this the project default connection. |
 
 A Snowflake connection with key-pair auth needs no `--credentials-ref` unless the private key is encrypted, in which case the reference points at its passphrase:

@@ -125,7 +125,7 @@
           "type": "array"
         },
         "contract_schema": {
-          "default": "2.11",
+          "default": "2.12",
           "title": "Contract Schema",
           "type": "string"
         },

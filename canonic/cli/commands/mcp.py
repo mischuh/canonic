@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from pathlib import Path  # noqa: TC003 — used in function return type (runtime)
 from typing import Annotated, Literal
 
@@ -15,6 +16,7 @@ from canonic.config import find_project_root, load_config
 from canonic.exc import ConfigError
 
 app = typer.Typer(name="mcp", help="Control the local MCP daemon.")
+logger = logging.getLogger(__name__)
 _console = Console(soft_wrap=True)
 
 _LAST_PROJECT_FILE = Path.home() / ".canonic" / "last-project"
@@ -179,6 +181,11 @@ def start(
         raise typer.Exit(1) from exc
 
     _save_last_project(root)
+
+    from canonic.contracts.inert import inert_declaration_warnings
+
+    for warning in inert_declaration_warnings(root):
+        logger.warning("contract has no effect: %s", warning)
 
     if not service.list_metrics():
         from canonic.contracts.bootstrap import write_inferred_contracts
