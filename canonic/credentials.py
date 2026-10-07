@@ -9,8 +9,11 @@ Two shapes of credential live here:
 
 ``env:`` / ``keyring:`` / ``file:``
     Static. Resolved once to a fixed string that stays valid until an operator
-    rotates it by hand. ``keyring:``/``file:`` are not implemented yet and raise a
-    clear :class:`CredentialError`.
+    rotates it by hand. ``env:VAR`` reads an environment variable. ``file:<path>`` reads
+    a file, with a relative path taken from the project root (the directory holding
+    ``canonic.yaml``) and one trailing newline stripped, which suits ``.canonic/secrets/``
+    and Docker or Kubernetes secret mounts. ``keyring:<service>/<username>`` reads the OS
+    keyring through the optional ``keyring`` package.
 
 ``provider:<name>``
     Dynamic. ``<name>`` selects a registered :class:`CredentialProvider` — the same
@@ -34,6 +37,7 @@ import os
 import threading
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, Protocol
 
 from canonic.exc import CredentialError, UnknownCredentialProvider
@@ -267,11 +271,59 @@ def _split_ref(ref: str | None) -> tuple[str, str]:
     return scheme, target
 
 
+def _read_secret_file(target: str) -> str:
+    """Read a ``file:<path>`` secret: relative paths start at the project root."""
+    if not target:
+        raise CredentialError("file: credentials_ref is missing a path")
+    path = Path(target).expanduser()
+    if not path.is_absolute():
+        from canonic.config import find_project_root
+
+        path = (find_project_root() or Path.cwd()) / path
+    try:
+        value = path.read_text(encoding="utf-8")
+    except FileNotFoundError as exc:
+        raise CredentialError(f"secret file {str(path)!r} does not exist") from exc
+    except (OSError, UnicodeDecodeError) as exc:
+        raise CredentialError(
+            f"secret file {str(path)!r} cannot be read: {exc.__class__.__name__}"
+        ) from exc
+    value = value.removesuffix("\n").removesuffix("\r")
+    if not value.strip():
+        raise CredentialError(f"secret file {str(path)!r} is empty")
+    return value
+
+
+def _read_keyring(target: str) -> str:
+    """Read a ``keyring:<service>/<username>`` secret from the OS keyring."""
+    service, sep, username = target.partition("/")
+    if not (service and sep and username):
+        raise CredentialError(
+            f"keyring: credentials_ref {target!r} must have the form 'keyring:<service>/<username>'"
+        )
+    try:
+        import keyring
+        from keyring.errors import KeyringError
+    except ImportError as exc:
+        raise CredentialError(
+            "keyring: credentials_ref needs the 'keyring' package, install it with "
+            "`pip install keyring`"
+        ) from exc
+    try:
+        value = keyring.get_password(service, username)
+    except KeyringError as exc:
+        raise CredentialError(f"OS keyring could not be read: {exc.__class__.__name__}") from exc
+    if value is None or not value.strip():
+        raise CredentialError(f"no keyring entry for service {service!r}, user {username!r}")
+    return value
+
+
 def resolve_credential(ref: str | None) -> str:
     """Resolve a *static* ``credentials_ref`` into its secret value.
 
     Args:
-        ref: A reference of the form ``env:VAR``, ``keyring:…`` or ``file:…``.
+        ref: A reference of the form ``env:VAR``, ``keyring:<service>/<username>`` or
+            ``file:<path>``.
             ``None`` is rejected: ``credentials_ref`` is optional in config (file-based
             connectors like dbt need no secret), but a connector that calls this requires
             one, so a missing ref is a clear configuration error rather than a crash.
@@ -300,10 +352,11 @@ def resolve_credential(ref: str | None) -> str:
             raise CredentialError(f"environment variable {target!r} is set but empty")
         return value
 
-    if scheme in ("file", "keyring"):
-        raise CredentialError(
-            f"{scheme}: credentials_ref is not yet supported (GH-4 scope: env: only)"
-        )
+    if scheme == "file":
+        return _read_secret_file(target)
+
+    if scheme == "keyring":
+        return _read_keyring(target)
 
     if scheme == "provider":
         raise CredentialError(
