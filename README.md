@@ -54,7 +54,6 @@ canonic is not a BI tool and not a chat interface: it's the layer that feeds the
 - **The context builds itself.** Ingest drafts semantics from your live schema, a dbt manifest or an [Apache Ossie](https://ossie.apache.org/) model, and learns from Looker and Metabase usage, Notion pages and web docs. Every change is a reviewable diff (`canonic review`, `canonic apply`), drift is flagged, and references to things that disappeared are proposed for removal. [Ingestion](https://docs.getcanonic.app/concepts/ingestion-and-reconciliation)
 - **Business knowledge for agents.** Definitions, policies and caveats live as Markdown pages. Agents search them, read them with live-rendered definitions, and get the relevant caveats attached to an answer. [Knowledge layer](https://docs.getcanonic.app/concepts/knowledge-layer)
 - **Governance built in.** Tenant scoping, role-based access, column masking, and OAuth 2.1 / OIDC for the MCP server, including identity assertion for agents acting on behalf of a user. [Tenancy and access control](https://docs.getcanonic.app/concepts/tenancy-and-access-control)
-- **Curated reports and context packs.** Commit a report once and run it by name. Install a pack for a known system (PostHog is the first) and get working metrics, guardrails and a first answer. [Reports](https://docs.getcanonic.app/cli-reference/report), [packs](https://docs.getcanonic.app/cli-reference/pack)
 - **Your warehouse, read-only.** Postgres, Redshift, MySQL, Snowflake, Databricks, ClickHouse, SQLite and DuckDB (including CSV and Parquet files). [Connectors](https://docs.getcanonic.app/concepts/connectors)
 - **Measurable.** A local event log feeds `canonic audit` and `canonic status`, and an accuracy harness (`canonic assert`, `canonic eval baseline`) turns "trustworthy" into something you can check. [Instrumentation](https://docs.getcanonic.app/concepts/instrumentation-and-eval)
 
@@ -63,8 +62,8 @@ canonic is not a BI tool and not a chat interface: it's the layer that feeds the
 ```
  your sources                 canonic                          consumers
  ────────────                 ───────                          ─────────
- warehouse schema ┐   ingest  ┌──────────────────────────┐     CLI (query, sql, report)
- dbt / Ossie      ├─────────▶ │ semantics/  knowledge/   │ ──▶ MCP server (13 tools)
+ warehouse schema ┐   ingest  ┌──────────────────────────┐     CLI (query, sql, review)
+ dbt / Ossie      ├─────────▶ │ semantics/  knowledge/   │ ──▶ MCP server
  Looker, Metabase │  propose  │ contracts/  (files in git)│     Claude Code, Cursor, Codex,
  Notion, web docs ┘  → review └──────────────────────────┘     any MCP client
 ```
@@ -144,7 +143,7 @@ Air-gapped install and offline wheels: [Installation](https://docs.getcanonic.ap
 
 ## Connect your agent (MCP)
 
-canonic exposes its 13 tools over a local, on-demand MCP server, verified with **Claude Code, Cursor, and Codex**:
+canonic exposes its tools over a local, on-demand MCP server, verified with **Claude Code, Cursor, and Codex**:
 
 ```bash
 canonic mcp start
@@ -196,7 +195,7 @@ uv run mypy canonic/
 ```
 
 - **Layout.** `canonic/` is the package (compiler, connectors, contracts, ingestion, knowledge, MCP server, trust, instrumentation), `tests/` mirrors it, `examples/` holds the sample projects.
-- **Extension points.** Connectors register with the `ConnectorFactory` by capability (`introspect_schema`, `run_read_only_sql`, `extract_definitions`, `extract_evidence`), and short-lived credentials plug in through the `CredentialProviderRegistry`. Context packs live in the separate [canonic-packs](https://github.com/mischuh/canonic-packs) repo.
+- **Extension points.** Connectors register with the `ConnectorFactory` by capability (`introspect_schema`, `run_read_only_sql`, `extract_definitions`, `extract_evidence`), and short-lived credentials plug in through the `CredentialProviderRegistry`.
 - **Stable contract.** The serving contract is versioned (the `contract_info` MCP tool, [`CONTRACT_CHANGELOG.md`](https://github.com/mischuh/canonic/blob/main/CONTRACT_CHANGELOG.md)), and `tests/golden/` locks compiled SQL and executed numbers for the examples.
 - **Contributing.** Conventional Commits, the golden-suite workflow and the contract-change process are in [CONTRIBUTING.md](https://github.com/mischuh/canonic/blob/main/CONTRIBUTING.md).
 
