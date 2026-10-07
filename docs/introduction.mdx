@@ -47,13 +47,63 @@ canonic resolves "revenue" to its canonical definition, compiles the guardrail i
 
 ## What canonic does
 
-canonic sits between your data and your agents as a **context layer**: an auto-built, auto-maintained, version-controlled description of what your data *means* and how to query it *safely*. Agents ask for a metric by name. canonic resolves it to the canonical definition, compiles correct read-only SQL, runs it, and returns the answer **with the caveats that make it trustworthy**: how fresh the data is, which guardrails applied, whether the number is final or provisional.
+canonic sits between your data and your agents as a **context layer**: an auto-built, auto-maintained, version-controlled description of what your data *means* and how to query it *safely*.
 
-When canonic isn't sure, it **refuses and asks** instead of guessing. A confidently-wrong answer is the one outcome it's built to never produce.
+- **Canonical definitions, enforced.** An agent asks for a metric by name. canonic resolves it to the one agreed definition and compiles the SQL. Guardrails such as `mandatory_filter`, `required_dimension`, `restrict_source` and `min_trust` are part of the contract, so a documented caveat can't be silently skipped. [Contracts and guardrails](/concepts/contracts-and-guardrails)
+- **The right aggregation, not just valid SQL.** Semi-additive measures (MRR snapshots), ratios recomputed at the requested grain, distinct counts and percentiles each get their own compilation strategy, and joins that would fan out a fact table are caught. Several valid join paths? You pick one with `via`, canonic doesn't guess. [Compiler](/concepts/compiler)
+- **Answers carry their trust.** Every result ships a metadata band: the resolved definition, guardrails fired, freshness, final vs. provisional rows, and a trust tier (`trusted`, `provisional`, `caution`) with the reasons behind it. Assertions gate CI, and confirmed-wrong outcomes lower a metric's trust. [Trust and assertions](/concepts/contracts-and-guardrails)
+- **Refuse and ask.** Ambiguous or unsafe questions come back as a structured reason (`ambiguous_join_path`, `guardrail_block`, ...) the agent can act on, never as a guess. [Error codes](/reference/error-codes)
+- **The context builds itself.** Ingest drafts semantics from your live schema, a dbt manifest or an [Apache Ossie](https://ossie.apache.org/) model, and learns from Looker and Metabase usage, Notion pages and web docs. Every change is a reviewable diff (`canonic review`, `canonic apply`), drift is flagged, and references to things that disappeared are proposed for removal. [Ingestion](/concepts/ingestion-and-reconciliation)
+- **Business knowledge for agents.** Definitions, policies and caveats live as Markdown pages. Agents search them, read them with live-rendered definitions, and get the relevant caveats attached to an answer. [Knowledge layer](/concepts/knowledge-layer)
+- **Governance built in.** Tenant scoping, role-based access, column masking, and OAuth 2.1 / OIDC for the MCP server, including identity assertion for agents acting on behalf of a user. [Tenancy and access control](/concepts/tenancy-and-access-control)
+- **Curated reports and context packs.** Commit a report once and run it by name. Install a pack for a known system (PostHog is the first) and get working metrics, guardrails and a first answer. [Reports](/cli-reference/report), [packs](/cli-reference/pack)
+- **Your warehouse, read-only.** Postgres, Redshift, MySQL, Snowflake, Databricks, ClickHouse, SQLite and DuckDB (including CSV and Parquet files). [Connectors](/concepts/connectors)
+- **Measurable.** A local event log feeds `canonic audit` and `canonic status`, and an accuracy harness (`canonic assert`, `canonic eval baseline`) turns "trustworthy" into something you can check. [Instrumentation](/concepts/instrumentation-and-eval)
 
 Connect Claude, Cursor, or any [MCP client](/mcp-integration/connecting-your-agent) and your agent resolves metrics through the same context layer, no separate integration to build.
 
 Every output in these docs is real, captured from a live run, not hand-written. See the [end-to-end example](/end-to-end-example) for the full loop with actual commands and diffs.
+
+## How it works
+
+```
+ your sources                 canonic                          consumers
+ ────────────                 ───────                          ─────────
+ warehouse schema ┐   ingest  ┌──────────────────────────┐     CLI (query, sql, report)
+ dbt / Ossie      ├─────────▶ │ semantics/  knowledge/   │ ──▶ MCP server (13 tools)
+ Looker, Metabase │  propose  │ contracts/  (files in git)│     Claude Code, Cursor, Codex,
+ Notion, web docs ┘  → review └──────────────────────────┘     any MCP client
+```
+
+A question takes one deterministic path: resolve the metric, compile SQL against the canonical definition, apply guardrails, run it read-only, attach the metadata band. No LLM is involved at answer time.
+
+## What an agent gets back
+
+Real output, abridged, from `canonic --json query --metrics gross_revenue` in the [saas-analytics example](/guides/saas-analytics):
+
+```json
+{
+  "result": { "columns": [{ "name": "total_amount", "type": "decimal" }], "rows": [["77071.00"]] },
+  "compiled": {
+    "sql": "SELECT SUM(\"fct_invoices\".\"amount\") AS \"total_amount\" FROM \"fct_invoices\" AS \"fct_invoices\" WHERE \"fct_invoices\".\"status\" <> 'refunded' AND \"fct_invoices\".\"is_trial\" = FALSE",
+    "dialect": "duckdb"
+  },
+  "metadata": {
+    "resolved": { "metrics": { "gross_revenue": "fct_invoices.total_amount" } },
+    "guardrails_fired": [
+      { "id": "revenue-excludes-refunds", "kind": "mandatory_filter", "severity": "error" },
+      { "id": "revenue-excludes-trials", "kind": "mandatory_filter", "severity": "error" }
+    ],
+    "freshness": [{ "source": "fct_invoices", "stale": false }],
+    "trust_score": {
+      "tier": "provisional",
+      "reasons": ["gross_revenue: assertion unverified (pass/fail not yet persisted)"]
+    }
+  }
+}
+```
+
+The agent sees which definition answered, which rules shaped the SQL, and why the number is only `provisional`, so it can caveat the answer instead of presenting it as settled.
 
 ## Why canonic, not something else
 
@@ -85,6 +135,20 @@ canonic's context lives in three committed surfaces: plain files in your git rep
 
 The key idea: a knowledge page *explains* why "amount includes refunds unless filtered." A contract *makes the SQL obey* it. Documented caveats become enforced guardrails, so the warning can't be silently ignored.
 
+## Example projects
+
+`examples/` ships seven ready-to-run projects, each with a guide. Source for all of them is in the [repository](https://github.com/mischuh/canonic/tree/main/examples).
+
+| Example | Backend | Shows |
+| --- | --- | --- |
+| [jaffle-shop](/guides/jaffle-shop) | DuckDB | dbt manifest with MetricFlow models as evidence |
+| [ecommerce](/guides/ecommerce) | Postgres | the full loop: guardrails, finality, Notion and dbt evidence, observability |
+| [rental](/guides/rental) | SQLite | cross-fact fanout and a NULL-handling guardrail, no setup needed |
+| [saas-analytics](/guides/saas-analytics) | DuckDB | every metric binding kind, all guardrail kinds, finality, assertions |
+| [dutch-railway](/guides/dutch-railway) | DuckDB | a geography dimension chain and ratio metrics |
+| [marketplace](/guides/marketplace) | SQLite | tenant scoping, role-based access and column masking |
+| [ossie-retail](/guides/ossie-retail) | SQLite | context bootstrapped from an Apache Ossie model |
+
 ## What you can rely on
 
 - **Read-only.** canonic never mutates your warehouse. It reads, it never writes back.
@@ -100,5 +164,14 @@ The key idea: a knowledge page *explains* why "amount includes refunds unless fi
   </Card>
   <Card title="Quickstart" icon="rocket" href="/quickstart">
     Get your first answer in minutes with a local SQLite or DuckDB file.
+  </Card>
+  <Card title="Concepts" icon="book-open" href="/concepts/three-layers">
+    The three layers, the compiler, contracts and tenancy.
+  </Card>
+  <Card title="Connect your agent" icon="plug" href="/mcp-integration/connecting-your-agent">
+    Wire canonic into Claude Code, Cursor, Codex or any MCP client.
+  </Card>
+  <Card title="Guides" icon="map" href="/guides/jaffle-shop">
+    Seven ready-to-run example projects and the warehouse walkthroughs.
   </Card>
 </CardGroup>
