@@ -56,7 +56,6 @@ canonic sits between your data and your agents as a **context layer**: an auto-b
 - **The context builds itself.** Ingest drafts semantics from your live schema, a dbt manifest or an [Apache Ossie](https://ossie.apache.org/) model, and learns from Looker and Metabase usage, Notion pages and web docs. Every change is a reviewable diff (`canonic review`, `canonic apply`), drift is flagged, and references to things that disappeared are proposed for removal. [Ingestion](/concepts/ingestion-and-reconciliation)
 - **Business knowledge for agents.** Definitions, policies and caveats live as Markdown pages. Agents search them, read them with live-rendered definitions, and get the relevant caveats attached to an answer. [Knowledge layer](/concepts/knowledge-layer)
 - **Governance built in.** Tenant scoping, role-based access, column masking, and OAuth 2.1 / OIDC for the MCP server, including identity assertion for agents acting on behalf of a user. [Tenancy and access control](/concepts/tenancy-and-access-control)
-- **Curated reports and context packs.** Commit a report once and run it by name. Install a pack for a known system (PostHog is the first) and get working metrics, guardrails and a first answer. [Reports](/cli-reference/report), [packs](/cli-reference/pack)
 - **Your warehouse, read-only.** Postgres, Redshift, MySQL, Snowflake, Databricks, ClickHouse, SQLite and DuckDB (including CSV and Parquet files). [Connectors](/concepts/connectors)
 - **Measurable.** A local event log feeds `canonic audit` and `canonic status`, and an accuracy harness (`canonic assert`, `canonic eval baseline`) turns "trustworthy" into something you can check. [Instrumentation](/concepts/instrumentation-and-eval)
 
@@ -69,8 +68,8 @@ Every output in these docs is real, captured from a live run, not hand-written. 
 ```
  your sources                 canonic                          consumers
  ────────────                 ───────                          ─────────
- warehouse schema ┐   ingest  ┌──────────────────────────┐     CLI (query, sql, report)
- dbt / Ossie      ├─────────▶ │ semantics/  knowledge/   │ ──▶ MCP server (13 tools)
+ warehouse schema ┐   ingest  ┌──────────────────────────┐     CLI (query, sql, review)
+ dbt / Ossie      ├─────────▶ │ semantics/  knowledge/   │ ──▶ MCP server
  Looker, Metabase │  propose  │ contracts/  (files in git)│     Claude Code, Cursor, Codex,
  Notion, web docs ┘  → review └──────────────────────────┘     any MCP client
 ```
