@@ -1,0 +1,9 @@
+metric: revenue_per_customer
+canonical:
+  kind: ratio
+  numerator: revenue
+  denominator: active_customers
+  on_zero_denominator: null
+provenance: human_curated
+aliases: ["arpc", "average revenue per customer"]
+status: active

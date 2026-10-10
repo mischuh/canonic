@@ -1,0 +1,7 @@
+id: sales-exclude-test-customers
+applies_to:
+  source: order_items
+kind: mandatory_filter
+filter: "customers.is_test = false"
+severity: error
+rationale: "QA test orders are not business. Applies to every measure on order_items."

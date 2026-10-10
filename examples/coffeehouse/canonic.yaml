@@ -1,0 +1,19 @@
+version: 1
+
+project:
+  name: coffeehouse-demo
+  default_connection: coffeehouse_duckdb
+
+connections:
+  - id: coffeehouse_duckdb
+    type: duckdb
+    params:
+      path: coffeehouse.duckdb   # bundled warehouse, rebuild with scripts/build.sh
+
+reconcile:
+  strict_contradictions: false
+  auto_apply:
+    enabled: false   # this example ships hand-curated semantics, review before applying
+
+telemetry:
+  enabled: false   # local event log only, nothing leaves the machine

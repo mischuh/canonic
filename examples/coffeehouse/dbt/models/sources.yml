@@ -1,0 +1,11 @@
+version: 2
+
+sources:
+  - name: shop
+    database: raw
+    schema: main
+    tables:
+      - name: customers
+      - name: products
+      - name: orders
+      - name: order_items

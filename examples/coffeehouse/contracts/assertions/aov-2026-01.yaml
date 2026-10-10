@@ -1,0 +1,14 @@
+id: aov-2026-01
+query:
+  metrics: [average_order_value]
+  filters: ["order_date >= '2026-01-01'", "order_date < '2026-02-01'"]
+expect:
+  rows: 1
+  values:
+    average_order_value: 59.00
+  tolerance: 0.01
+source_of_truth: >
+  Seed data: five completed, non-test orders in January 2026 (orders 1, 2, 3, 6, 7) with
+  totals 20 + 200 + 30 + 25 + 20 = 295.00. 295.00 / 5 = 59.00. Order 4 is refunded and order
+  5 belongs to the QA test customer. Averaging the order total over the nine order lines
+  instead gives 102.22.

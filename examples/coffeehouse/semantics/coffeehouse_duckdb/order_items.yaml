@@ -1,0 +1,41 @@
+name: order_items
+connection: coffeehouse_duckdb
+table: order_items
+grain: [order_id, line_number]
+description: >
+  One row per order line. An order with four products is four rows here, so anything
+  measured per order must be counted over distinct order_id, never over rows.
+  See [[average-order-value]].
+
+columns:
+  - { name: order_id,    type: int,     nullable: false }
+  - { name: line_number, type: int,     nullable: false }
+  - { name: product_id,  type: int,     nullable: false }
+  - { name: quantity,    type: int,     nullable: false }
+  - { name: amount,      type: decimal, nullable: false }
+
+measures:
+  - name: revenue
+    expr: "sum(amount)"
+    additivity: additive
+  - name: units_sold
+    expr: "sum(quantity)"
+    additivity: additive
+  - name: line_count
+    expr: "count(*)"
+    additivity: additive
+
+dimensions:
+  - { name: order_id,    column: order_id,    label: "Order ID" }
+  - { name: line_number, column: line_number, label: "Line Number" }
+
+joins:
+  - to: orders
+    on: "order_items.order_id = orders.order_id"
+    relationship: many_to_one
+  - to: products
+    on: "order_items.product_id = products.product_id"
+    relationship: many_to_one
+
+meta:
+  provenance: human_curated

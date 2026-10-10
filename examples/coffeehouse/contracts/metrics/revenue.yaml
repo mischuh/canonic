@@ -1,0 +1,8 @@
+metric: revenue
+canonical:
+  kind: single
+  source: order_items
+  measure: revenue
+provenance: human_curated
+aliases: ["sales", "net sales", "turnover"]
+status: active

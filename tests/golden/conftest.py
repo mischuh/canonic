@@ -1,7 +1,7 @@
 """Fixtures for the semantic correctness golden suite.
 
-Copies the five zero-infrastructure example projects (jaffle-shop, dutch-railway,
-saas-analytics -- each shipping a committed, read-only-opened DuckDB file -- and
+Copies the six zero-infrastructure example projects (jaffle-shop, dutch-railway,
+saas-analytics, coffeehouse -- each shipping a committed, read-only-opened DuckDB file -- and
 rental and ossie-retail, whose SQLite databases are built here from their tracked
 ``setup.sql``) into
 session-scoped tmp dirs. No Docker, no network, no mutation of the repo's example
@@ -28,15 +28,25 @@ EXAMPLES_ROOT = Path(__file__).parents[2] / "examples"
 #: ``on_missing_principal: deny`` tenancy policy would hard-fail every query here, since
 #: this suite passes no principal. It's covered by tests/e2e/test_marketplace_tenancy.py
 #: instead, which loads it with an explicit Principal per case. Do not add it here.
-PROJECTS = ("jaffle-shop", "dutch-railway", "saas-analytics", "rental", "ossie-retail")
+PROJECTS = (
+    "jaffle-shop",
+    "dutch-railway",
+    "saas-analytics",
+    "rental",
+    "ossie-retail",
+    "coffeehouse",
+)
 
 # Excluding .canonic is load-bearing, not hygiene: BindingOutcomeHistory.from_project
 # reads .canonic/events.jsonl into the trust tier, so a maintainer's local event log
 # (verified: 125 KB on examples/rental) would make trust_score machine-dependent.
 # rental.db and retail.db are excluded too -- they are gitignored and rebuilt fresh from
 # setup.sql below, so a maintainer's local copy (with whatever schema it happens to have)
-# never leaks in.
-_IGNORE = shutil.ignore_patterns(".canonic", "*.wal", ".DS_Store", "rental.db", "retail.db")
+# never leaks in. coffeehouse_dbt.duckdb is the gitignored output of the coffeehouse dbt
+# project, which the suite never reads.
+_IGNORE = shutil.ignore_patterns(
+    ".canonic", "*.wal", ".DS_Store", "rental.db", "retail.db", "coffeehouse_dbt.duckdb"
+)
 
 #: SQLite example projects and the database file each builds from its ``setup.sql``.
 _SQLITE_BUILDS = {"rental": "rental.db", "ossie-retail": "retail.db"}

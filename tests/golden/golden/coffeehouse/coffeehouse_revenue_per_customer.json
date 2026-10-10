@@ -1,0 +1,49 @@
+{
+  "case": "coffeehouse_revenue_per_customer",
+  "columns": [
+    {
+      "name": "revenue_per_customer",
+      "type": "float"
+    }
+  ],
+  "dialect": "duckdb",
+  "finality": null,
+  "guardrails_fired": [
+    {
+      "id": "orders-completed-only",
+      "kind": "mandatory_filter",
+      "severity": "error"
+    },
+    {
+      "id": "orders-exclude-test-customers",
+      "kind": "mandatory_filter",
+      "severity": "error"
+    },
+    {
+      "id": "sales-completed-orders-only",
+      "kind": "mandatory_filter",
+      "severity": "error"
+    },
+    {
+      "id": "sales-exclude-test-customers",
+      "kind": "mandatory_filter",
+      "severity": "error"
+    }
+  ],
+  "project": "coffeehouse",
+  "resolved": {
+    "metrics": {
+      "revenue_per_customer": "ratio(revenue, active_customers)"
+    }
+  },
+  "row_count": 1,
+  "rows": [
+    [
+      156.0
+    ]
+  ],
+  "trust_tier": "provisional",
+  "warnings": [
+    "zero denominator for metric 'revenue_per_customer' yields NULL (on_zero_denominator=null)"
+  ]
+}

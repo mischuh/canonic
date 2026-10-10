@@ -1,0 +1,37 @@
+{
+  "case": "coffeehouse_active_customers_total",
+  "columns": [
+    {
+      "name": "active_customers",
+      "type": "int"
+    }
+  ],
+  "dialect": "duckdb",
+  "finality": null,
+  "guardrails_fired": [
+    {
+      "id": "orders-completed-only",
+      "kind": "mandatory_filter",
+      "severity": "error"
+    },
+    {
+      "id": "orders-exclude-test-customers",
+      "kind": "mandatory_filter",
+      "severity": "error"
+    }
+  ],
+  "project": "coffeehouse",
+  "resolved": {
+    "metrics": {
+      "active_customers": "recompute_at_grain(orders.customer_id)"
+    }
+  },
+  "row_count": 1,
+  "rows": [
+    [
+      5
+    ]
+  ],
+  "trust_tier": "provisional",
+  "warnings": []
+}

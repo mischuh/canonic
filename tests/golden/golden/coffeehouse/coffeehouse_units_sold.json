@@ -1,0 +1,37 @@
+{
+  "case": "coffeehouse_units_sold",
+  "columns": [
+    {
+      "name": "units_sold",
+      "type": "int"
+    }
+  ],
+  "dialect": "duckdb",
+  "finality": null,
+  "guardrails_fired": [
+    {
+      "id": "sales-completed-orders-only",
+      "kind": "mandatory_filter",
+      "severity": "error"
+    },
+    {
+      "id": "sales-exclude-test-customers",
+      "kind": "mandatory_filter",
+      "severity": "error"
+    }
+  ],
+  "project": "coffeehouse",
+  "resolved": {
+    "metrics": {
+      "units_sold": "order_items.units_sold"
+    }
+  },
+  "row_count": 1,
+  "rows": [
+    [
+      69
+    ]
+  ],
+  "trust_tier": "provisional",
+  "warnings": []
+}

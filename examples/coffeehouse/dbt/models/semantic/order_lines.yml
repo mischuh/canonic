@@ -1,0 +1,46 @@
+semantic_models:
+  - name: order_lines
+    description: One row per order line from fct_order_lines.
+    model: ref('fct_order_lines')
+    defaults:
+      agg_time_dimension: order_date
+    entities:
+      - name: order_line
+        type: primary
+        expr: "order_id || '-' || line_number"
+      - name: order
+        type: foreign
+        expr: order_id
+      - name: customer
+        type: foreign
+        expr: customer_id
+    dimensions:
+      - name: order_date
+        type: time
+        type_params:
+          time_granularity: day
+      - name: order_status
+        type: categorical
+      - name: is_test_customer
+        type: categorical
+      - name: channel
+        type: categorical
+      - name: category
+        type: categorical
+    measures:
+      - name: revenue
+        agg: sum
+        expr: amount
+      - name: units_sold
+        agg: sum
+        expr: quantity
+      - name: avg_order_total
+        description: Average order value.
+        agg: average
+        expr: order_total
+      - name: distinct_orders
+        agg: count_distinct
+        expr: order_id
+      - name: distinct_customers
+        agg: count_distinct
+        expr: customer_id

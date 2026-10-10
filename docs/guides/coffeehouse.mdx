@@ -1,0 +1,315 @@
+---
+title: "Guide: Coffeehouse, canonic next to dbt (DuckDB)"
+description: "The same questions answered by dbt MetricFlow and by canonic, why the numbers differ, and what a definition alone cannot guarantee."
+---
+
+A small coffee shop in one bundled DuckDB file, with a dbt project and a canonic project on top of the same tables. Every dbt definition in this example reads as reasonable and runs without error. Three of them are correct for one grain only and return a wrong number for a month or a quarter. canonic answers each one correctly, and its guardrails, knowledge pages and assertions keep it that way.
+
+None of this is a MetricFlow bug. MetricFlow computes exactly what the definitions say, and this guide shows the dbt definition that would have been right wherever one exists. The point is a different one: a definition that is correct for some queries looks exactly like one that is correct for all of them. Nothing in dbt tells the modeler, the reviewer, or the agent asking the question which of the two they have.
+
+<Info>Full source: [`examples/coffeehouse/`](https://github.com/mischuh/canonic/tree/main/examples/coffeehouse)</Info>
+
+## At a glance
+
+| Q1 2026 | dbt MetricFlow | canonic | Root cause on the dbt side |
+| --- | --- | --- | --- |
+| Average order value | 102.50 | **52.00** | `agg: average` over an order-level value on a line-level table |
+| Active customers | 15 | **5** | a daily distinct count summed into a quarter |
+| Revenue per customer | 52.00 | **156.00** | inherits the wrong denominator |
+| Units sold | 84 | **69** | a metric added later without the sales filter |
+| Distinct customers | 5 | 5 | a distinct count on the line table, shown for fairness |
+
+## Schema
+
+```
+DIMENSIONS
+  customers     customer_id · name · country · segment · is_test
+  products      product_id · name · category · unit_price
+
+FACTS
+  orders        order_id · customer_id · order_date · status · channel
+  order_items   (order_id, line_number) · product_id · quantity · amount
+```
+
+Seed data: 19 orders in Q1 2026 with 31 order lines, 5 customers plus one QA test customer, 5 products. 15 orders count as sales: two are refunded, one is cancelled and one belongs to the test customer. Revenue is 780.00, small enough to check every number by hand.
+
+The data carries three traps a real shop has:
+
+- **Multi-line baskets** next to single-line orders. Ben's January order has four lines and a total of 200.00.
+- **Repeat buyers.** Anna orders almost every week.
+- **Orders that are not sales.** Refunds, a cancellation, and a 600.00 grinder order from `QA Test`.
+
+## Setup
+
+```bash
+cd examples/coffeehouse        # canonic commands must run from here
+canonic query --metrics average_order_value --dimensions order_month
+```
+
+No server, no credentials, no LLM. For the dbt side, install dbt with MetricFlow in any virtualenv:
+
+```bash
+pip install "dbt-metricflow[dbt-duckdb]"
+cd examples/coffeehouse/dbt
+export DBT_PROFILES_DIR=.
+dbt build
+mf query --metrics average_order_value --group-by metric_time__month
+```
+
+The dbt profile attaches `coffeehouse.duckdb` read-only and builds its marts into its own file, `dbt/coffeehouse_dbt.duckdb`. `bash scripts/compare.sh` runs both sides for every question below. It needs `canonic`, `dbt` and `mf` on the `PATH`.
+
+## Two different ideas of a metric
+
+The two layers look alike from a distance: both have measures, metrics and dimensions in YAML, and both compile a query into SQL. They differ in what a definition is allowed to mean.
+
+**In dbt, a metric is an aggregation the modeler chose.** A measure is a column plus an aggregate function (`sum`, `average`, `count_distinct`, ...), a metric points at a measure or combines metrics, and filters are part of each metric. MetricFlow compiles that choice faithfully at any grain the caller asks for. It does not ask whether the aggregate is still correct at that grain, because the definition carries no information to answer the question with.
+
+**In canonic, a metric is a contract with a compilation strategy.** The binding `kind` decides how the number is computed at any grain: a `ratio` aggregates numerator and denominator first and divides last, a `distinct_count` is recomputed from base rows for every grain, a `semi_additive` measure collapses its time dimension instead of summing it. Around the metric sit three more things dbt has no place for:
+
+| | dbt MetricFlow | canonic |
+| --- | --- | --- |
+| How a metric rolls up | whatever the aggregate does at that grain | fixed by the binding `kind`, the same at every grain |
+| Business rules (refunds, test data) | a `filter` on each metric | a `mandatory_filter` guardrail on the source, applied to every measure on it |
+| Business meaning, caveats | `description` and `label` on the YAML object | knowledge pages that are searched and attached to answers |
+| Checking a metric's result | not built in, dbt tests check tables and columns | assertions on the served metric, run as a CI gate |
+| What the caller gets back | rows | rows plus the definition used, guardrails fired, freshness and a trust tier |
+| Several definitions of one thing | can coexist under different names | one canonical binding per metric, other names are aliases |
+
+The three cases below show what that difference does to a number.
+
+## Average order value
+
+### The definitions
+
+```yaml
+# dbt: dbt/models/semantic/order_lines.yml
+measures:
+  - name: avg_order_total
+    agg: average
+    expr: order_total
+```
+
+```yaml
+# canonic: contracts/metrics/average-order-value.yaml
+metric: average_order_value
+canonical:
+  kind: ratio
+  numerator: revenue        # sum(amount) on order_items
+  denominator: order_count  # distinct_count of order_id on order_items
+```
+
+### The numbers
+
+| Month | dbt MetricFlow | canonic | By hand |
+| --- | --- | --- | --- |
+| 2026-01 | 102.22 | **59.00** | 295.00 / 5 orders |
+| 2026-02 | 156.50 | **74.00** | 370.00 / 5 orders |
+| 2026-03 | 25.71 | **23.00** | 115.00 / 5 orders |
+| Q1 | 102.50 | **52.00** | 780.00 / 15 orders |
+
+### Why they differ
+
+`fct_order_lines` has one row per order line, and `order_total` is an order-level value repeated on every line. MetricFlow compiles the measure into exactly what it says, `mf query ... --explain` shows it:
+
+```sql
+SELECT DATE_TRUNC('month', order_date) AS metric_time__month,
+       AVG(order_total) AS average_order_value
+FROM fct_order_lines
+WHERE order_status = 'completed' AND is_test_customer = false
+GROUP BY 1
+```
+
+That is an average over **lines**. In January, Ben's 200.00 basket has four lines and is counted four times, Anna's 20.00 order has one line and is counted once: (20 + 4 × 200 + 30 + 2 × 25 + 20) / 9 = 102.22. The definition is right only while every order has exactly one line, which is why it survives a first test on simple data.
+
+canonic plans the two components as independent sub-queries at the requested grain and divides last:
+
+```sql
+WITH "_leaf_0" AS (   -- order_count: COUNT(DISTINCT order_id) per month
+  ...
+), "_leaf_1" AS (     -- revenue: SUM(amount) per month
+  ...
+)
+SELECT "_grain"."order_month",
+       "_leaf_1"."revenue" / NULLIF("_leaf_0"."order_count", 0) AS "average_order_value"
+...
+```
+
+The distinct count is recomputed from base rows for every grain, so the quarter is 780.00 / 15, not an average of the monthly averages and not a sum of monthly counts.
+
+### Could dbt get this right?
+
+Yes. A `ratio` metric of `revenue` and a `count_distinct` measure on `order_id` returns 59, 74, 23 and 52 in MetricFlow, the same as canonic. dbt can express the correct definition.
+
+What dbt cannot do is tell the two apart. `agg: average` is a valid aggregation on any column, and MetricFlow has no notion that `order_total` belongs to a coarser grain than the table it sits in. Both metrics can live side by side in the same project, `average_order_value` and `aov_ratio`, and an agent choosing by name will pick the one that sounds right. The correct answer depends on the modeler having known the trap, and on nobody adding the other version later.
+
+In canonic the ratio is not a pattern someone has to know, it is the kind of binding. There is one canonical `average_order_value`, and `aov`, `average basket` and `basket size` resolve to it as aliases.
+
+## Active customers
+
+### The definitions
+
+```yaml
+# dbt: dbt/models/semantic/daily_active_customers.yml
+measures:
+  - name: active_customers
+    agg: sum
+    expr: active_customers   # already a count(distinct customer_id) per day
+```
+
+```yaml
+# canonic: contracts/metrics/active-customers.yaml
+metric: active_customers
+canonical:
+  kind: distinct_count
+  source: orders
+  distinct_on: customer_id
+```
+
+### The numbers
+
+| Period | dbt MetricFlow | canonic | By hand |
+| --- | --- | --- | --- |
+| 2026-01 | 5 | **3** | Anna, Ben, Clara |
+| 2026-02 | 5 | **4** | Anna, Ben, Dario, Emma |
+| 2026-03 | 5 | **3** | Anna, Clara, Emma |
+| Q1 | 15 | **5** | all five customers |
+
+### Why they differ
+
+`agg_daily_active_customers` is a typical dashboard table: one row per day with the number of distinct buying customers. Each of those daily numbers is correct. MetricFlow rolls the measure up with its aggregate, `SUM(active_customers)`, so a month is the sum of its days and Anna is counted once for every day she bought. The roll-up is wrong at every grain above a day.
+
+`revenue_per_customer`, a `ratio` of `revenue` and `active_customers`, inherits the error. dbt returns 780.00 / 15 = 52.00 for Q1, canonic 780.00 / 5 = **156.00**.
+
+canonic binds `active_customers` to the orders themselves. A `distinct_count` is never derived from partial counts, it is recomputed from base rows at whatever grain the query asks for: a month, a quarter, a channel, or all of them at once.
+
+### Could dbt get this right?
+
+Partly. A `count_distinct` measure directly on the line table is correct at every grain, and the example ships one, `distinct_customers`, which returns 5 for Q1 in MetricFlow, the same as canonic.
+
+The pre-aggregated table itself cannot be repaired from inside the semantic layer. Distinct counts do not add up, so no aggregate over daily distinct counts yields a monthly one. MetricFlow's tool for non-additive measures, `non_additive_dimension`, makes a measure semi-additive: with `window_choice: max` it returns the value of the **last day** in each period, which gives 2, 1 and 1 here. That is the right tool for an account balance, not for a distinct count. And nothing in MetricFlow refuses the `sum` either, it is a valid aggregation, so the dashboard table quietly becomes the source of a monthly KPI.
+
+## Guardrails
+
+### The numbers
+
+| Q1 2026 | dbt MetricFlow | canonic |
+| --- | --- | --- |
+| Units sold | 84 | **69** |
+
+### Why they differ
+
+In dbt the sales rule, completed orders by real customers only, is a `filter` on each metric:
+
+```yaml
+filter: |
+  {{ Dimension('order_line__order_status') }} = 'completed'
+  and {{ Dimension('order_line__is_test_customer') }} = false
+```
+
+Every metric in the example repeats it, except `units_sold`, added later by someone else. MetricFlow compiles it without the filter and counts the units of two refunds, one cancellation and the 600.00 test order.
+
+In canonic the rule belongs to the data, not to a metric. Two `mandatory_filter` guardrails apply to every measure on `order_items`, and two twins to every measure on `orders`:
+
+```yaml
+# contracts/guardrails/sales-completed-orders-only.yaml
+id: sales-completed-orders-only
+applies_to:
+  source: order_items          # no measure: every measure on the source
+kind: mandatory_filter
+filter: "orders.status = 'completed'"
+severity: error
+```
+
+`units_sold` names no filter and still gets both. The compiler joins `orders` and `customers` to reach the predicates, and the answer says so:
+
+```bash
+canonic --json query --metrics units_sold
+```
+
+```json
+"guardrails_fired": [
+  { "id": "sales-completed-orders-only", "kind": "mandatory_filter", "severity": "error" },
+  { "id": "sales-exclude-test-customers", "kind": "mandatory_filter", "severity": "error" }
+]
+```
+
+### Could dbt get this right?
+
+There are two workarounds, and both have a cost.
+
+- **Repeat the filter on every metric.** That is the approach in this example. It holds exactly as long as everyone who adds a metric remembers it, and the reviewer notices when they do not.
+- **Filter in the mart.** A `fct_sales_lines` model without refunds, cancellations and test orders makes every metric on it correct. The refunded orders are then gone from that model, so a refund rate or a cancellation count needs a second model, and the next metric built on the unfiltered `fct_order_lines` is back to square one.
+
+Neither is wrong. What dbt lacks is a rule that is attached to the data and enforced for every query that touches it, including metrics that do not exist yet, and an answer that reports which rules were applied.
+
+## Knowledge
+
+Five pages under `knowledge/global/`: a policy for what counts as a sale, definitions for average order value and active customers, and two caveats. A search for either metric returns its definition, and the caveats bound to the same sources ride along:
+
+```bash
+canonic knowledge search "average order value"
+# average-order-value            usage=definition
+# aov-is-per-order-not-per-line  usage=caveat
+# what-counts-as-a-sale          usage=policy
+```
+
+An agent connected over MCP gets the same pages from `search_knowledge` and is told to relay the caveats with its answer. The pages reference measures by name, and `{{ sl:….expr }}` renders the live definition, so the prose cannot quote a formula that has since changed.
+
+In dbt the closest place for this is the `description` of a model, column or metric. It is documentation for people browsing the catalog, not context that reaches the caller at question time.
+
+## Assertions
+
+Four hand-checked values under `contracts/assertions/` gate every change to the definitions:
+
+```bash
+canonic assert
+# accuracy 100.0% (4/4 assertions passed)
+```
+
+Change `order_count` to count lines instead of distinct orders, a plausible one-line edit:
+
+```yaml
+metric: order_count
+canonical:
+  kind: single
+  source: order_items
+  measure: line_count
+```
+
+and the gate fails with exit code 10:
+
+```text
+accuracy 75.0% (3/4 assertions passed)
+  ✗ aov-2026-01: expected {average_order_value: 59.0}, got {average_order_value: 32.77777777777778}
+error assertion_failed: accuracy 75.0% below target 100.0% (3/4 assertions passed)
+```
+
+Assertions also feed the trust tier every answer carries. A metric without one is reported as `provisional` with the reason `untested (no assertion)`, so an agent knows to caveat it.
+
+dbt tests check tables and columns: uniqueness, not-null, accepted values, or a custom SQL query. A singular test can recompute an AOV in SQL, but that tests the SQL in the test, not the metric as MetricFlow serves it. dbt Core has no built-in way to say "`average_order_value` for January is 59.00" against the semantic layer and fail the build when it is not.
+
+## And Apache Ossie?
+
+[Apache Ossie](https://ossie.apache.org/) is an interchange format for semantic models, not a query engine. A metric is a SQL expression with a description and `ai_context`, and a consumer decides how to execute it. The [ossie-retail example](/guides/ossie-retail) defines average order value the way most people would write it:
+
+```yaml
+- name: average_order_value
+  expression:
+    dialects:
+      - dialect: ANSI_SQL
+        expression: SUM(order_items.amount) / NULLIF(COUNT(orders.order_id), 0)
+```
+
+Run as one statement over `order_items JOIN orders`, `COUNT(orders.order_id)` counts lines, not orders. On the coffeehouse data that is 295.00 / 9 = 32.78 for January instead of 59.00, the same wrong number the broken assertion above catches. The expression carries no additivity, so a consumer cannot know that numerator and denominator have to be aggregated separately.
+
+The other two cases do not have a place in the model either. A rule like "exclude refunds" lives in `ai_context` as prose, an instruction an agent may or may not follow, not a filter anyone enforces. And like dbt, the format has no way to assert a metric's result.
+
+canonic can import an Ossie model. It turns that expression into a `ratio` of two independently planned metrics, and flags plain averages with `avg_suggests_ratio` for review, so the import already avoids the trap.
+
+## What canonic does not do
+
+To keep the comparison fair:
+
+- **A wrong expression still computes.** A semantic measure `avg(order_total)` on a line table that repeats the order total would return the same 102.22 as dbt. canonic makes the right strategy the default building block, flags suspicious imports, and catches regressions with assertions. It does not make a wrong definition impossible.
+- **Raw SQL is raw.** Guardrails apply to every query compiled from metrics. `canonic sql` runs the statement it is given, and that includes the refunds.
+- **The model still has to be written.** Somebody has to decide that AOV is a ratio and that test customers are not customers. canonic's job is to make sure that decision, once made, is applied to every answer and visible in it.

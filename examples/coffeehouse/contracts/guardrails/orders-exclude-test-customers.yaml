@@ -1,0 +1,7 @@
+id: orders-exclude-test-customers
+applies_to:
+  source: orders
+kind: mandatory_filter
+filter: "customers.is_test = false"
+severity: error
+rationale: "QA test accounts are never customers."

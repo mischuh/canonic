@@ -1,0 +1,62 @@
+# Every definition below reads as reasonable, and each is correct for some query. The
+# comments say for which one.
+metrics:
+  - name: revenue
+    label: Revenue
+    type: simple
+    type_params:
+      measure: revenue
+    filter: |
+      {{ Dimension('order_line__order_status') }} = 'completed'
+      and {{ Dimension('order_line__is_test_customer') }} = false
+
+  # Correct only while every order has exactly one line: the average runs over lines.
+  - name: average_order_value
+    label: Average order value
+    type: simple
+    type_params:
+      measure: avg_order_total
+    filter: |
+      {{ Dimension('order_line__order_status') }} = 'completed'
+      and {{ Dimension('order_line__is_test_customer') }} = false
+
+  - name: order_count
+    label: Orders
+    type: simple
+    type_params:
+      measure: distinct_orders
+    filter: |
+      {{ Dimension('order_line__order_status') }} = 'completed'
+      and {{ Dimension('order_line__is_test_customer') }} = false
+
+  # Correct only by day: a month or quarter sums the daily distinct counts.
+  - name: active_customers
+    label: Active customers
+    type: simple
+    type_params:
+      measure: active_customers
+
+  # Inherits the roll-up error of its denominator.
+  - name: revenue_per_customer
+    label: Revenue per customer
+    type: ratio
+    type_params:
+      numerator: revenue
+      denominator: active_customers
+
+  # Correct: a distinct count straight from the line table. Shown for fairness.
+  - name: distinct_customers
+    label: Distinct customers
+    type: simple
+    type_params:
+      measure: distinct_customers
+    filter: |
+      {{ Dimension('order_line__order_status') }} = 'completed'
+      and {{ Dimension('order_line__is_test_customer') }} = false
+
+  # Added later by someone else, without repeating the sales filter.
+  - name: units_sold
+    label: Units sold
+    type: simple
+    type_params:
+      measure: units_sold

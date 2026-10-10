@@ -1,0 +1,10 @@
+# Coffeehouse: the metric semantics a line-grain mart or a pre-aggregated daily table gets
+# wrong. Expected numbers are checked by hand against examples/coffeehouse/setup.sql
+# (15 completed, non-test orders in Q1 2026, revenue 780.00, 5 active customers).
+{"id": "coffeehouse_aov_by_order_month", "project": "coffeehouse", "why": "ratio over a distinct_count denominator on the line table: AOV per order, not per line (Jan 295/5 = 59, Feb 370/5 = 74, Mar 115/5 = 23; averaging the order total over lines gives 102.22, 156.50, 25.71)", "query": {"metrics": ["average_order_value"], "dimensions": ["order_month"]}}
+{"id": "coffeehouse_aov_total", "project": "coffeehouse", "why": "ratio recomputed at the coarser grain, not averaged from monthly ratios (780/15 = 52)", "query": {"metrics": ["average_order_value"]}}
+{"id": "coffeehouse_active_customers_by_order_month", "project": "coffeehouse", "why": "distinct_count recomputed per month (3, 4, 3), not summed from daily distinct counts (5, 5, 5)", "query": {"metrics": ["active_customers"], "dimensions": ["order_month"]}}
+{"id": "coffeehouse_active_customers_total", "project": "coffeehouse", "why": "distinct_count over the whole quarter is 5, not the sum of months (10) or days (15)", "query": {"metrics": ["active_customers"]}}
+{"id": "coffeehouse_revenue_per_customer", "project": "coffeehouse", "why": "ratio with components on two sources (order_items, orders), both under their own mandatory filters (780/5 = 156)", "query": {"metrics": ["revenue_per_customer"]}}
+{"id": "coffeehouse_units_sold", "project": "coffeehouse", "why": "source-wide mandatory_filter guardrails reach a metric that names no filter itself, through a two-hop join to customers (69, not 84 with refunds, cancellations and test orders)", "query": {"metrics": ["units_sold"]}}
+{"id": "coffeehouse_aov_by_category", "project": "coffeehouse", "why": "ratio grouped by a dimension on products, reached from order_items by many_to_one: category revenue per order containing the category (coffee 28, accessories 30, equipment 90)", "query": {"metrics": ["average_order_value"], "dimensions": ["category"]}}

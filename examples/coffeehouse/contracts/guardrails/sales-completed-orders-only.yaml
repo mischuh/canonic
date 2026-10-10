@@ -1,0 +1,9 @@
+id: sales-completed-orders-only
+applies_to:
+  source: order_items
+kind: mandatory_filter
+filter: "orders.status = 'completed'"
+severity: error
+rationale: >
+  Refunded and cancelled orders are not sales. The filter applies to every measure on
+  order_items, so a metric added later inherits it without anyone remembering to.

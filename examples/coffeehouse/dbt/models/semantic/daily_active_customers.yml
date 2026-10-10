@@ -1,0 +1,16 @@
+semantic_models:
+  - name: daily_active_customers
+    description: Distinct buying customers per day.
+    model: ref('agg_daily_active_customers')
+    defaults:
+      agg_time_dimension: activity_date
+    primary_entity: daily_activity
+    dimensions:
+      - name: activity_date
+        type: time
+        type_params:
+          time_granularity: day
+    measures:
+      - name: active_customers
+        agg: sum
+        expr: active_customers

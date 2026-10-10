@@ -1,0 +1,11 @@
+# Revenue per order, not the mean of an order total repeated on every line. Both parts are
+# aggregated at the requested grain first, the division happens last.
+metric: average_order_value
+canonical:
+  kind: ratio
+  numerator: revenue
+  denominator: order_count
+  on_zero_denominator: null
+provenance: human_curated
+aliases: ["aov", "average basket", "basket size"]
+status: active

@@ -1,0 +1,11 @@
+id: active-customers-2026-q1
+query:
+  metrics: [active_customers]
+  filters: ["order_date >= '2026-01-01'", "order_date < '2026-04-01'"]
+expect:
+  rows: 1
+  values:
+    active_customers: 5
+source_of_truth: >
+  Seed data: Anna, Ben, Clara, Dario and Emma each have at least one completed order in
+  Q1 2026. Summing daily distinct customers gives 15, summing monthly ones gives 10.

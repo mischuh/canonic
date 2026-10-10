@@ -1,0 +1,8 @@
+metric: units_sold
+canonical:
+  kind: single
+  source: order_items
+  measure: units_sold
+provenance: human_curated
+aliases: ["units", "items sold"]
+status: active
