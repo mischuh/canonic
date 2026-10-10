@@ -67,7 +67,7 @@ WITH "_leaf_0__visible" AS (
         ORDER BY CASE WHEN "_grain"."payment_date" IS NULL THEN 1 ELSE 0 END ASC, "_grain"."payment_date" ASC
         ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
       )
-    END AS "cumulative_rental_revenue"
+    END AS "_m0"
   FROM "_grain"
   LEFT JOIN "_leaf_0"
     ON (
@@ -106,7 +106,7 @@ WITH "_leaf_0__visible" AS (
 SELECT
   "_accumulated"."payment_date" AS "payment_date",
   "_accumulated"."method" AS "method",
-  "_accumulated"."cumulative_rental_revenue" AS "cumulative_rental_revenue"
+  "_accumulated"."_m0" AS "cumulative_rental_revenue"
 FROM "_accumulated"
 INNER JOIN "_visible_grain"
   ON (
