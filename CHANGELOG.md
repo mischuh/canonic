@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.36.2](https://github.com/mischuh/canonic/compare/v0.36.1...v0.36.2) (2026-10-10)
+
+
+### Bug Fixes
+
+* **connectors:** treat dbt count_distinct as non-additive and flag average for review ([#392](https://github.com/mischuh/canonic/issues/392)) ([0e55d93](https://github.com/mischuh/canonic/commit/0e55d93d6614904b716236ad4f7ea6b341d34b17))
+
 ## [0.36.1](https://github.com/mischuh/canonic/compare/v0.36.0...v0.36.1) (2026-10-07)
 
 

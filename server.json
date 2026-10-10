@@ -6,13 +6,13 @@
     "url": "https://github.com/mischuh/canonic",
     "source": "github"
   },
-  "version": "0.36.1",
+  "version": "0.36.2",
   "packages": [
     {
       "registryType": "pypi",
       "registryBaseUrl": "https://pypi.org",
       "identifier": "canonic",
-      "version": "0.36.1",
+      "version": "0.36.2",
       "runtimeHint": "uvx",
       "transport": {
         "type": "stdio"
