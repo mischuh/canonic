@@ -18,7 +18,7 @@ WITH "_leaf_0__visible" AS (
     "_leaf_0"."payment_date" AS "payment_date",
     "_leaf_0"."method" AS "method",
     DENSE_RANK() OVER (
-      ORDER BY CASE WHEN "_leaf_0"."payment_date" IS NULL THEN 1 ELSE 0 END ASC NULLS LAST, "_leaf_0"."payment_date" ASC NULLS LAST
+      ORDER BY CASE WHEN "_leaf_0"."payment_date" IS NULL THEN 1 ELSE 0 END ASC, "_leaf_0"."payment_date" ASC
     ) AS "_order_rank"
   FROM "_leaf_0"
 ), "_leaf_0__fill" AS (
@@ -58,13 +58,13 @@ WITH "_leaf_0__visible" AS (
     CASE
       WHEN COUNT("_leaf_0"."total_paid") OVER (
         PARTITION BY "_grain"."method"
-        ORDER BY CASE WHEN "_grain"."payment_date" IS NULL THEN 1 ELSE 0 END ASC NULLS LAST, "_grain"."payment_date" ASC NULLS LAST
+        ORDER BY CASE WHEN "_grain"."payment_date" IS NULL THEN 1 ELSE 0 END ASC, "_grain"."payment_date" ASC
         ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
       ) = 0
       THEN NULL
       ELSE SUM(COALESCE("_leaf_0"."total_paid", 0)) OVER (
         PARTITION BY "_grain"."method"
-        ORDER BY CASE WHEN "_grain"."payment_date" IS NULL THEN 1 ELSE 0 END ASC NULLS LAST, "_grain"."payment_date" ASC NULLS LAST
+        ORDER BY CASE WHEN "_grain"."payment_date" IS NULL THEN 1 ELSE 0 END ASC, "_grain"."payment_date" ASC
         ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
       )
     END AS "cumulative_rental_revenue"

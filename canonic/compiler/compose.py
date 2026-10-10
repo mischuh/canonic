@@ -37,8 +37,9 @@ from enum import StrEnum
 from typing import TYPE_CHECKING, cast
 
 from sqlglot import exp
+from sqlglot.dialects.dialect import Dialect
 
-from canonic.compiler._helpers import _alias, _freshness
+from canonic.compiler._helpers import _active_adapter, _alias, _freshness
 from canonic.compiler.result import FinalityMetadata
 from canonic.exc import UnsupportedMeasure
 
@@ -528,7 +529,13 @@ def _order_keys(table: str, order_by: Sequence[str]) -> list[exp.Expression]:
     Dialects disagree on where NULLs sort by default, and sqlglot drops ``NULLS LAST``
     where it believes the target already sorts that way, and cannot express it at all
     inside a MySQL window. The indicator reads the same everywhere.
+
+    Behind the indicator every NULL of a dimension is a peer, so where that key puts NULLs
+    does not matter. It is set to the target dialect's own default, so sqlglot emits no
+    ``NULLS FIRST``/``NULLS LAST`` and has nothing to emulate.
     """
+    null_ordering = Dialect.get_or_raise(_active_adapter().dialect).NULL_ORDERING
+    nulls_first = null_ordering == "nulls_are_small"
     keys: list[exp.Expression] = []
     for name in order_by:
         column = cast("exp.Expression", exp.column(name, table=table))
@@ -541,8 +548,12 @@ def _order_keys(table: str, order_by: Sequence[str]) -> list[exp.Expression]:
             ],
             default=exp.Literal.number(0),
         )
-        keys.append(cast("exp.Expression", exp.Ordered(this=is_null, desc=False)))
-        keys.append(cast("exp.Expression", exp.Ordered(this=column, desc=False)))
+        keys.append(
+            cast("exp.Expression", exp.Ordered(this=is_null, desc=False, nulls_first=nulls_first))
+        )
+        keys.append(
+            cast("exp.Expression", exp.Ordered(this=column, desc=False, nulls_first=nulls_first))
+        )
     return keys
 
 

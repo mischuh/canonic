@@ -14,12 +14,12 @@ SELECT
   "_grain"."payment_date" AS "payment_date",
   CASE
     WHEN COUNT("_leaf_0"."total_paid") OVER (
-      ORDER BY CASE WHEN "_grain"."payment_date" IS NULL THEN 1 ELSE 0 END ASC NULLS LAST, "_grain"."payment_date" ASC NULLS LAST
+      ORDER BY CASE WHEN "_grain"."payment_date" IS NULL THEN 1 ELSE 0 END ASC, "_grain"."payment_date" ASC
       ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
     ) = 0
     THEN NULL
     ELSE SUM(COALESCE("_leaf_0"."total_paid", 0)) OVER (
-      ORDER BY CASE WHEN "_grain"."payment_date" IS NULL THEN 1 ELSE 0 END ASC NULLS LAST, "_grain"."payment_date" ASC NULLS LAST
+      ORDER BY CASE WHEN "_grain"."payment_date" IS NULL THEN 1 ELSE 0 END ASC, "_grain"."payment_date" ASC
       ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
     )
   END AS "cumulative_rental_revenue"
