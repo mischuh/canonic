@@ -48,7 +48,7 @@ A metric binding is what turns a name like `revenue` into something the compiler
 
 ### `canonical` (`CanonicalRef`): one shape per `kind`
 
-`kind` selects a compilation strategy, and each kind needs a different subset of the fields below. Missing a required field for the chosen `kind` raises a located error at load time rather than failing later at query time. Most metrics are `single`, a direct pointer at one measure on one source. The other kinds exist for shapes a plain source-and-measure pair can't express on its own: `ratio` and `weighted_avg` combine two other metrics after they're each aggregated independently, `semi_additive` handles point-in-time values like balances that can't just be summed across every dimension, `distinct_count` and `percentile` recompute their value at whatever grain the query asks for instead of pre-aggregating, and `opaque` is the escape hatch for a measure that's only trustworthy at the exact grain it was computed at.
+`kind` selects a compilation strategy, and each kind needs a different subset of the fields below. Missing a required field for the chosen `kind` raises a located error at load time rather than failing later at query time. Most metrics are `single`, a direct pointer at one measure on one source. The other kinds exist for shapes a plain source-and-measure pair can't express on its own: `ratio` and `weighted_avg` combine two other metrics after they're each aggregated independently, `semi_additive` handles point-in-time values like balances that can't just be summed across every dimension, `distinct_count` and `percentile` recompute their value at whatever grain the query asks for instead of pre-aggregating, `cumulative` turns an additive measure into a running total, and `opaque` is the escape hatch for a measure that's only trustworthy at the exact grain it was computed at.
 
 | `kind` | Required fields | Compiles as |
 | --- | --- | --- |
@@ -59,14 +59,15 @@ A metric binding is what turns a name like `revenue` into something the compiler
 | `distinct_count` | `source`, `distinct_on` (column name) | Recompute `count(distinct …)` at the requested grain. |
 | `percentile` | `source`, `column`, `quantile` ∈ (0, 1) | Recompute the quantile at the requested grain from base rows. |
 | `opaque` | `source`, `measure`, `native_grain` (non-empty list of dimension columns) | Serve only at its declared native grain. Any other grain returns `UNSUPPORTED_MEASURE`. |
+| `cumulative` | `source`, `measure` (additive), `order_by` (non-empty list of dimensions) | Aggregate the measure to the requested grain, then sum it up along `order_by`, per partition of every other requested dimension. See [Cumulative metrics](#cumulative-metrics). |
 
 Full field list on `CanonicalRef`:
 
 | Field | Type | Default | Used by |
 | --- | --- | --- | --- |
 | `kind` | `BindingKind` | `single` | All. |
-| `source` | `str \| null` | `null` | `single`, `semi_additive`, `distinct_count`, `percentile`, `opaque`. |
-| `measure` | `str \| null` | `null` | `single`, `semi_additive`, `opaque`. |
+| `source` | `str \| null` | `null` | `single`, `semi_additive`, `distinct_count`, `percentile`, `opaque`, `cumulative`. |
+| `measure` | `str \| null` | `null` | `single`, `semi_additive`, `opaque`, `cumulative`. |
 | `numerator` / `denominator` | `str \| null` | `null` | `ratio` (both are metric names). |
 | `weighted_sum` / `weight` | `str \| null` | `null` | `weighted_avg` (both are metric names). |
 | `on_zero_denominator` | `OnZeroDenominator` | `null` (coerced) | `ratio`/`weighted_avg`: `null` \| `zero` \| `error` when the denominator is zero. |
@@ -76,7 +77,54 @@ Full field list on `CanonicalRef`:
 | `column` | `str \| null` | `null` | `percentile`: column the quantile is computed over. |
 | `quantile` | `float \| null` | `null` | `percentile`: value in (0, 1). |
 | `native_grain` | `list[str] \| null` | `null` | `opaque`: dimension columns the metric is pre-aggregated to. |
+| `order_by` | `list[str] \| null` | `null` | `cumulative`: dimensions to accumulate along, sorted lexicographically in list order. |
+| `on_gap` | `OnGap` | `skip` | `cumulative`: `skip` \| `fill_observed`, see [Cumulative metrics](#cumulative-metrics). |
 | `population_filter` | `str \| null` | `null` | All `kind`s: SQL predicate AND-ed into every leaf query's `WHERE` before aggregation, defining the population the metric is *about* (e.g. excluding test accounts). |
+
+### Cumulative metrics
+
+A `cumulative` binding is a running total: "revenue to date", "sign-ups so far". It names one additive measure and the dimensions to accumulate along.
+
+```yaml
+metric: revenue_to_date
+canonical:
+  kind: cumulative
+  source: order_items
+  measure: revenue
+  order_by: [order_month]   # one or more dimensions, lexicographic in this order
+  on_gap: skip              # skip | fill_observed, default skip
+```
+
+**Partition.** The partition is not declared. It is every requested dimension that is not in `order_by`, so the same metric answers "running total overall" and "running total per channel":
+
+| Query dimensions | `order_by` | Accumulates |
+| --- | --- | --- |
+| `order_month` | `[order_month]` | One series over all rows. |
+| `order_month, channel` | `[order_month]` | One series per channel. |
+| `channel` | `[order_month]` | Rejected with `UNSUPPORTED_MEASURE`: every order dimension must be requested. |
+
+**Aggregate first, accumulate last.** The measure is aggregated to the requested dimensions like a `single` metric, so joins, fanout handling, tenancy, `population_filter` and guardrails apply unchanged. The running total is a window over the aggregated rows, from the first order tuple to the current one. Order dimensions sort ascending with `NULL` last on every dialect.
+
+**Filters.** Each query filter is classified by the physical columns it reads:
+
+- A filter that reads **no order column** (e.g. `channel = 'online'`) narrows the rows before aggregation, as for any metric.
+- A filter that reads **only order columns** (e.g. `order_date >= '2026-03-01'`) is a visibility filter. It picks which order tuples are shown, and the total still runs from the first row of data: the March row carries everything since the first order, not just March's own revenue. A coarse bucket is shown when at least one of its rows matches.
+- A filter that reads **both** is rejected with `UNSUPPORTED_MEASURE`. Split it into one filter per kind.
+
+`population_filter` is never a visibility filter. It defines the population and always applies before accumulation.
+
+#### Gaps (`on_gap`)
+
+A gap is an order tuple one partition has data for and another does not.
+
+- `skip` (default): only tuples with data produce a row. The running total stays correct across the gap, it is just not shown.
+- `fill_observed`: every partition gets a row for every order tuple observed in the data, carrying its total forward. A partition starts at its own first observed tuple, never earlier, since a zero before the first record would be a fabricated number. A tuple with no data in any partition is still absent. The compiler adds a warning, because the row count can grow to observed tuples times partitions.
+
+Requested together with another metric, a cumulative metric shows its carried-forward total on any row the other metric has, and `NULL` before its partition's first row.
+
+**Validation.** At write time, `measure` must be additive and use `sum`, `count`, `min` or `max`. Every `order_by` entry must resolve to a dimension reachable from `source`, of type `date`, `timestamp`, `int`, `decimal` or `float`. Strings are rejected, since their order depends on the engine's collation. Two order dimensions over the same column (`order_day` and `order_month` over `order_date`) are rejected too, since the finer one already decides the order. A `cumulative` metric cannot be a `ratio` or `weighted_avg` component.
+
+**Out of scope for now:** trailing windows (last 7 days), resets such as year-to-date, a complete calendar series (`fill_calendar`), and [finality](/concepts/contracts-and-guardrails#finality) on a cumulative metric. A query that combines a cumulative metric with a metric under a finality rule is rejected with `UNSUPPORTED_MEASURE`.
 
 ### `deprecated_alternatives[]` (`DeprecatedAlternative`)
 

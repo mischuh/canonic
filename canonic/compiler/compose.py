@@ -22,6 +22,12 @@ dialect canonic ships.
 *Missing rows are NULL.* A dimension value in one leaf and not another yields NULL for the
 absent metric, never 0. Absence of rows is not a measured zero, and quietly substituting
 one for the other is the class of confidently-wrong-number this project exists to prevent.
+
+*Running totals accumulate last.* A cumulative metric's leaf is an ordinary aggregate to the
+requested dimensions. The running total is a window over the spine in the outer SELECT, so
+a spine row the leaf has no row for still carries the total forward, without a fill-forward
+function SQLite lacks. Filters that only pick which order tuples are shown are applied after
+that window, never inside the leaf, or the total would restart at the first visible row.
 """
 
 from __future__ import annotations
@@ -34,10 +40,12 @@ from sqlglot import exp
 
 from canonic.compiler._helpers import _alias, _freshness
 from canonic.compiler.result import FinalityMetadata
+from canonic.exc import UnsupportedMeasure
 
 if TYPE_CHECKING:
     from canonic.compiler.result import (
         CompositionMetadata,
+        CumulativeMetadata,
         OpaqueMetadata,
         PartialAdditiveMetadata,
         RecomputeAtGrainMetadata,
@@ -51,6 +59,8 @@ if TYPE_CHECKING:
     from canonic.semantic.models import SemanticSource
 
 __all__ = [
+    "VISIBLE_CTE",
+    "Accumulate",
     "Combine",
     "ComposeResult",
     "LeafRef",
@@ -65,6 +75,15 @@ __all__ = [
 _GRAIN = "_grain"
 _LEAF = "_leaf_"
 _IS_FINAL = "is_final"
+
+#: Suffix of the CTE a cumulative leaf hoists with the order tuples its visibility filters
+#: keep. Compose declares it under the leaf's own prefix, so the full name is
+#: ``_leaf_<i>__visible``.
+VISIBLE_CTE = "visible"
+_ACCUMULATED = "_accumulated"
+_VISIBLE_GRAIN = "_visible_grain"
+_ORDER_RANK = "_order_rank"
+_FIRST_RANK = "_first_rank"
 
 
 class Combine(StrEnum):
@@ -85,12 +104,30 @@ class LeafRef:
 
 
 @dataclass(frozen=True, slots=True)
+class Accumulate:
+    """How a cumulative metric's per-tuple values become a running total over the spine.
+
+    ``order_by`` and ``partition_by`` are output column names of the requested dimensions.
+    Together they are every requested dimension, so each order tuple occurs once per
+    partition and the ``ROWS`` frame is deterministic. ``fill_observed`` densifies every
+    partition to the order tuples observed in the leaf. ``visibility`` is set when the leaf
+    hoists a :data:`VISIBLE_CTE` that decides which order tuples are shown.
+    """
+
+    order_by: tuple[str, ...]
+    partition_by: tuple[str, ...]
+    fill_observed: bool = False
+    visibility: bool = False
+
+
+@dataclass(frozen=True, slots=True)
 class MetricPlan:
     """One requested metric: where its value comes from, and how it is combined."""
 
     name: str
     refs: tuple[LeafRef, ...]
     combine: Combine = Combine.DIRECT
+    accumulate: Accumulate | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -110,6 +147,7 @@ class MetricLeaves:
     partial_additive: PartialAdditiveMetadata | None = None
     recompute_at_grain: RecomputeAtGrainMetadata | None = None
     opaque: OpaqueMetadata | None = None
+    cumulative: CumulativeMetadata | None = None
     warnings: tuple[str, ...] = ()
 
     def offset(self, by: int) -> MetricPlan:
@@ -118,6 +156,7 @@ class MetricLeaves:
             name=self.metric.name,
             refs=tuple(LeafRef(leaf=r.leaf + by, column=r.column) for r in self.metric.refs),
             combine=self.metric.combine,
+            accumulate=self.metric.accumulate,
         )
 
 
@@ -260,13 +299,21 @@ def _null_safe_join_on(spine: str, leaf: str, columns: Sequence[str]) -> exp.Exp
 
 
 def _build_spine(
-    names: list[str], physical: list[_Physical], dim_names: list[str], *, with_is_final: bool
+    names: list[str],
+    physical: list[_Physical],
+    dim_names: list[str],
+    *,
+    with_is_final: bool,
+    extra: Sequence[str] = (),
 ) -> exp.Expression:
     """UNION every leaf's dimension tuples into the spine every metric is served over.
 
     A leaf with no finality rule contributes ``TRUE`` for ``is_final``: all of its rows
     are final by definition, so pairing them with both branches of a finality leaf would
     claim a provisional reading the leaf never made.
+
+    ``extra`` names further CTEs projecting exactly ``dim_names``, the rows a cumulative
+    metric's ``fill_observed`` adds. They are never combined with finality.
     """
     branches: list[exp.Select] = []
     for name, leaf in zip(names, physical, strict=True):
@@ -281,6 +328,7 @@ def _build_spine(
             )
             projections.append(_alias(marker, _IS_FINAL))
         branches.append(exp.Select().select(*projections).from_(exp.to_table(name)))
+    branches.extend(_dims_from(name, dim_names) for name in extra)
 
     spine: exp.Select | exp.Union = branches[0]
     for branch in branches[1:]:
@@ -329,6 +377,12 @@ def compose(
 
     dim_names = list(leaves[0].dim_names)
     with_is_final = any(p.projects_is_final for p in physical)
+    accumulating = [m for m in metrics if m.accumulate is not None]
+    if accumulating and with_is_final:
+        raise UnsupportedMeasure(
+            f"cumulative metric {accumulating[0].name!r} cannot be combined with a metric "
+            f"under a finality rule in one query; request them separately"
+        )
 
     # Degenerate case: one CTE whose own projection already *is* the requested output.
     # Emitting it bare rather than wrapping it in a pointless `WITH x AS (...) SELECT *
@@ -336,7 +390,11 @@ def compose(
     # multi-metric query whose metrics all fused onto one plan, compiling to exactly the
     # SQL it compiled to before compose existed. It also preserves the top-level UNION ALL
     # shape of a finality leaf, which a CTE wrapper would bury.
-    if len(physical) == 1 and _projection_is_already_the_output(metrics, physical[0]):
+    if (
+        not accumulating
+        and len(physical) == 1
+        and _projection_is_already_the_output(metrics, physical[0])
+    ):
         only = physical[0]
         lone_select, lone_aux = only.key_leaf.rebuild(only.metrics, "")
         return _result(physical, sources_by_name, _attach(lone_select, lone_aux), 0)
@@ -344,7 +402,9 @@ def compose(
     # Output columns: dimensions in request order, then metrics in request order. This is
     # the one place request order beats sort order, because the caller's column order is
     # part of what it asked for.
-    single_cte = len(physical) == 1
+    # A running total is a window over the spine, so a cumulative metric always goes
+    # through it, even when it is the only leaf.
+    single_cte = len(physical) == 1 and not accumulating
     dim_source = names[0] if single_cte else _GRAIN
     projections: list[exp.Expression] = [
         _alias(cast("exp.Expression", exp.column(dim, table=dim_source)), dim) for dim in dim_names
@@ -354,7 +414,10 @@ def compose(
             cast("exp.Expression", exp.column(ref.column, table=names_by_index[owner_of[ref.leaf]]))
             for ref in metric.refs
         ]
-        projections.append(_alias(_combine_expr(metric, columns), metric.name))
+        value = _combine_expr(metric, columns)
+        if metric.accumulate is not None:
+            value = _accumulate_expr(metric.accumulate, value)
+        projections.append(_alias(value, metric.name))
     if with_is_final:
         projections.append(
             _alias(cast("exp.Expression", exp.column(_IS_FINAL, table=dim_source)), _IS_FINAL)
@@ -389,9 +452,35 @@ def compose(
         for name in names[1:]:
             outer = outer.join(exp.to_table(name), join_type="CROSS")
 
+    # Which leaves a cumulative metric densifies, and which ones decide visibility. Keyed by
+    # CTE name, since two metrics fused onto one leaf share both.
+    fills: dict[str, Accumulate] = {}
+    visible: dict[str, Accumulate] = {}
+    for metric in accumulating:
+        acc = cast("Accumulate", metric.accumulate)
+        leaf_name = names_by_index[owner_of[metric.refs[0].leaf]]
+        if acc.fill_observed and acc.partition_by:
+            fills.setdefault(leaf_name, acc)
+        if acc.visibility:
+            visible.setdefault(leaf_name, acc)
+
+    final: exp.Select = outer
+    if visible:
+        final = exp.Select().select(
+            *(
+                _alias(cast("exp.Expression", exp.column(column, table=_ACCUMULATED)), column)
+                for column in [*dim_names, *(m.name for m in metrics)]
+            )
+        )
+        final = final.from_(exp.to_table(_ACCUMULATED)).join(
+            exp.to_table(_VISIBLE_GRAIN),
+            on=_null_safe_join_on(_ACCUMULATED, _VISIBLE_GRAIN, dim_names),
+            join_type="INNER",
+        )
+
     # Leaves are declared before the spine that reads them, and the spine before the outer
     # SELECT that joins onto it.
-    ast: exp.Expression = outer
+    ast: exp.Expression = final
     for name, leaf in zip(names, sorted_physical, strict=True):
         # Each leaf's own inner CTEs are declared immediately before it, under a name
         # scoped to that leaf so two leaves of the same kind cannot collide.
@@ -399,12 +488,205 @@ def compose(
         for cte in aux:
             ast = cast("exp.Select", ast).with_(cte.name, as_=cte.body)
         ast = cast("exp.Select", ast).with_(name, as_=select)
+    fill_names: list[str] = []
+    for name, acc in sorted(fills.items()):
+        rank_name, fill_name = f"{name}__order_rank", f"{name}__fill"
+        rank, fill = _fill_observed(name, rank_name, acc, dim_names)
+        ast = cast("exp.Select", ast).with_(rank_name, as_=rank).with_(fill_name, as_=fill)
+        fill_names.append(fill_name)
     if not single_cte and dim_names:
         ast = cast("exp.Select", ast).with_(
-            _GRAIN, as_=_build_spine(names, sorted_physical, dim_names, with_is_final=with_is_final)
+            _GRAIN,
+            as_=_build_spine(
+                names,
+                sorted_physical,
+                dim_names,
+                with_is_final=with_is_final,
+                extra=fill_names,
+            ),
         )
+    if visible:
+        ast = cast("exp.Select", ast).with_(_ACCUMULATED, as_=outer)
+        ast = ast.with_(_VISIBLE_GRAIN, as_=_build_visible_spine(names, visible, fills, dim_names))
 
     return _result(sorted_physical, sources_by_name, ast, len(physical))
+
+
+def _dims_from(table: str, dim_names: Sequence[str]) -> exp.Select:
+    """``SELECT <dims> FROM table``, the shape of every spine branch."""
+    return (
+        exp.Select()
+        .select(*(_alias(cast("exp.Expression", exp.column(d, table=table)), d) for d in dim_names))
+        .from_(exp.to_table(table))
+    )
+
+
+def _order_keys(table: str, order_by: Sequence[str]) -> list[exp.Expression]:
+    """Ascending sort keys over the order dimensions, with NULLs last on every dialect.
+
+    Each dimension sorts behind an ``IS NULL`` indicator rather than through ``NULLS LAST``.
+    Dialects disagree on where NULLs sort by default, and sqlglot drops ``NULLS LAST``
+    where it believes the target already sorts that way, and cannot express it at all
+    inside a MySQL window. The indicator reads the same everywhere.
+    """
+    keys: list[exp.Expression] = []
+    for name in order_by:
+        column = cast("exp.Expression", exp.column(name, table=table))
+        is_null = exp.Case(
+            ifs=[
+                exp.If(
+                    this=exp.Is(this=column.copy(), expression=exp.null()),
+                    true=exp.Literal.number(1),
+                )
+            ],
+            default=exp.Literal.number(0),
+        )
+        keys.append(cast("exp.Expression", exp.Ordered(this=is_null, desc=False)))
+        keys.append(cast("exp.Expression", exp.Ordered(this=column, desc=False)))
+    return keys
+
+
+def _running(func: exp.Expression, acc: Accumulate) -> exp.Expression:
+    """``func`` over the partition from its first order tuple up to the current row."""
+    return cast(
+        "exp.Expression",
+        exp.Window(
+            this=func,
+            partition_by=[exp.column(p, table=_GRAIN) for p in acc.partition_by] or None,
+            order=exp.Order(expressions=_order_keys(_GRAIN, acc.order_by)),
+            spec=exp.WindowSpec(
+                kind="ROWS", start="UNBOUNDED", start_side="PRECEDING", end="CURRENT ROW"
+            ),
+        ),
+    )
+
+
+def _accumulate_expr(acc: Accumulate, value: exp.Expression) -> exp.Expression:
+    """Running total of ``value`` over the spine, NULL before the partition's first row.
+
+    ``COALESCE`` carries the total across spine rows the leaf has no row for (another
+    metric's rows, or rows ``fill_observed`` added). ``COUNT`` tells a row before the
+    partition's first observed tuple from one after it: before it nothing was measured, and
+    a zero there would be a fabricated number.
+    """
+    count = _running(exp.Count(this=value.copy()), acc)
+    total = _running(
+        exp.Sum(this=exp.Coalesce(this=value.copy(), expressions=[exp.Literal.number(0)])), acc
+    )
+    return cast(
+        "exp.Expression",
+        exp.Case(
+            ifs=[
+                exp.If(this=exp.EQ(this=count, expression=exp.Literal.number(0)), true=exp.null())
+            ],
+            default=total,
+        ),
+    )
+
+
+def _fill_observed(
+    leaf: str, rank_name: str, acc: Accumulate, dim_names: Sequence[str]
+) -> tuple[exp.Expression, exp.Expression]:
+    """The rows ``fill_observed`` adds: observed order tuples crossed with observed partitions.
+
+    A partition is filled only from its own first observed tuple on, never before it, and
+    up to the leaf's last tuple, which is where the observed tuples end. Tuples are compared
+    through a ``DENSE_RANK`` over the order dimensions rather than a row-value comparison,
+    which not every dialect has. Only whole observed tuples are used, so densifying
+    ``(year, month)`` cannot invent a month that never occurred.
+    """
+    rank = exp.Select().select(
+        *(_alias(cast("exp.Expression", exp.column(d, table=leaf)), d) for d in dim_names),
+        _alias(
+            cast(
+                "exp.Expression",
+                exp.Window(
+                    this=exp.Anonymous(this="DENSE_RANK"),
+                    order=exp.Order(expressions=_order_keys(leaf, acc.order_by)),
+                ),
+            ),
+            _ORDER_RANK,
+        ),
+    )
+    rank = rank.from_(exp.to_table(leaf))
+
+    tuples = (
+        exp.Select()
+        .select(*(exp.column(o, table=rank_name) for o in acc.order_by))
+        .select(exp.column(_ORDER_RANK, table=rank_name))
+        .distinct()
+        .from_(exp.to_table(rank_name))
+    )
+    partitions = (
+        exp.Select()
+        .select(*(exp.column(p, table=rank_name) for p in acc.partition_by))
+        .select(
+            _alias(
+                _min(cast("exp.Expression", exp.column(_ORDER_RANK, table=rank_name))), _FIRST_RANK
+            )
+        )
+        .from_(exp.to_table(rank_name))
+        .group_by(*(exp.column(p, table=rank_name) for p in acc.partition_by))
+    )
+    order_set = set(acc.order_by)
+    fill = (
+        exp.Select()
+        .select(
+            *(
+                _alias(
+                    cast("exp.Expression", exp.column(d, table="t" if d in order_set else "p")), d
+                )
+                for d in dim_names
+            )
+        )
+        .from_(tuples.subquery("t"))
+        .join(partitions.subquery("p"), join_type="CROSS")
+        .where(
+            exp.GTE(
+                this=exp.column(_ORDER_RANK, table="t"),
+                expression=exp.column(_FIRST_RANK, table="p"),
+            )
+        )
+    )
+    return rank, fill
+
+
+def _min(column: exp.Expression) -> exp.Expression:
+    return cast("exp.Expression", exp.Min(this=column))
+
+
+def _build_visible_spine(
+    names: Sequence[str],
+    visible: dict[str, Accumulate],
+    fills: dict[str, Accumulate],
+    dim_names: Sequence[str],
+) -> exp.Expression:
+    """The dimension tuples a query with visibility filters shows.
+
+    Every leaf other than a cumulative one with visibility filters already applied every
+    query filter, so all of its rows are shown. A cumulative leaf with visibility filters
+    shows only the rows, and the filled rows, whose order tuple its ``visible`` CTE kept. A
+    row stays when any metric shows it, which is the same union the spine itself is built
+    by.
+    """
+    branches: list[exp.Select] = []
+    for name in names:
+        sources = [name, *([f"{name}__fill"] if name in fills else [])]
+        for source in sources:
+            branch = _dims_from(source, dim_names)
+            acc = visible.get(name)
+            if acc is not None:
+                visible_name = f"{name}__{VISIBLE_CTE}"
+                branch = branch.join(
+                    exp.to_table(visible_name),
+                    on=_null_safe_join_on(source, visible_name, acc.order_by),
+                    join_type="INNER",
+                )
+            branches.append(branch)
+    spine: exp.Select | exp.Union = branches[0]
+    for branch in branches[1:]:
+        spine = spine.union(branch, distinct=True)
+    return spine
 
 
 def _attach(select: exp.Expression, aux: Sequence[AuxCte]) -> exp.Expression:

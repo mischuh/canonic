@@ -406,3 +406,119 @@ class TestEvidenceFromDefinitionsSeam:
             assert not set(item.payload.keys()) & dbt_keys, (
                 f"dbt-specific keys in {item.kind} payload: {set(item.payload.keys()) & dbt_keys}"
             )
+
+
+def _cumulative_manifest(path: Path, *metrics: dict[str, object]) -> Path:
+    """A v11 manifest with one semantic model and the given metrics."""
+    import json
+
+    path.write_text(
+        json.dumps(
+            {
+                "metadata": {
+                    "dbt_schema_version": "https://schemas.getdbt.com/dbt/manifest/v11.json",
+                    "dbt_version": "1.7.0",
+                },
+                "nodes": {},
+                "semantic_models": {
+                    "semantic_model.shop.orders": {
+                        "unique_id": "semantic_model.shop.orders",
+                        "name": "orders",
+                        "model": {"ref_name": "fct_orders"},
+                        "defaults": {"agg_time_dimension": "order_date"},
+                        "entities": [{"name": "order_id", "type": "primary"}],
+                        "measures": [
+                            {"name": "revenue", "agg": "sum", "expr": "amount"},
+                            {
+                                "name": "shipped",
+                                "agg": "sum",
+                                "expr": "quantity",
+                                "agg_time_dimension": "ship_date",
+                            },
+                        ],
+                        "dimensions": [
+                            {"name": "order_date", "type": "time"},
+                            {"name": "ship_date", "type": "time"},
+                        ],
+                    }
+                },
+                "metrics": {
+                    f"metric.shop.{m['name']}": {"unique_id": f"metric.shop.{m['name']}", **m}
+                    for m in metrics
+                },
+            }
+        )
+    )
+    return path
+
+
+class TestCumulativeMetrics:
+    """MetricFlow running totals map to a ``cumulative`` candidate when they can."""
+
+    async def _candidates(self, path: Path) -> dict[str, ContractCandidate | None]:
+        extract = await DbtConnector(path).extract_definitions()
+        return {
+            d.entity: d.contract_candidate
+            for d in extract.definitions
+            if d.entity_type == DefinitionEntityType.METRIC
+        }
+
+    async def test_unbounded_cumulative_becomes_a_candidate(self, tmp_path: Path) -> None:
+        manifest = _cumulative_manifest(
+            tmp_path / "m.json",
+            {
+                "name": "revenue_to_date",
+                "type": "cumulative",
+                "type_params": {"measure": "revenue"},
+            },
+        )
+        assert await self._candidates(manifest) == {
+            "revenue_to_date": ContractCandidate(
+                kind=CandidateKind.CUMULATIVE, measures=["revenue"], order_by=["order_date"]
+            )
+        }
+
+    async def test_measure_agg_time_dimension_wins(self, tmp_path: Path) -> None:
+        manifest = _cumulative_manifest(
+            tmp_path / "m.json",
+            {
+                "name": "shipped_to_date",
+                "type": "cumulative",
+                "type_params": {"measure": {"name": "shipped"}},
+            },
+        )
+        candidate = (await self._candidates(manifest))["shipped_to_date"]
+        assert candidate is not None
+        assert candidate.order_by == ["ship_date"]
+
+    @pytest.mark.parametrize(
+        "type_params",
+        [
+            {"measure": "revenue", "window": {"count": 7, "granularity": "day"}},
+            {"measure": "revenue", "grain_to_date": "month"},
+            {"measure": "revenue", "cumulative_type_params": {"window": "7 days"}},
+            {"measure": "revenue", "cumulative_type_params": {"grain_to_date": "month"}},
+            {"measure": {"name": "revenue", "filter": "{{ Dimension('x') }} = 1"}},
+            {"measure": "unknown_measure"},
+        ],
+    )
+    async def test_variants_without_an_equivalent_are_skipped(
+        self, tmp_path: Path, type_params: dict[str, object]
+    ) -> None:
+        manifest = _cumulative_manifest(
+            tmp_path / "m.json",
+            {"name": "revenue_to_date", "type": "cumulative", "type_params": type_params},
+        )
+        assert await self._candidates(manifest) == {}
+
+    async def test_metric_filter_is_skipped(self, tmp_path: Path) -> None:
+        manifest = _cumulative_manifest(
+            tmp_path / "m.json",
+            {
+                "name": "revenue_to_date",
+                "type": "cumulative",
+                "type_params": {"measure": "revenue"},
+                "filter": "{{ Dimension('order__status') }} = 'completed'",
+            },
+        )
+        assert await self._candidates(manifest) == {}

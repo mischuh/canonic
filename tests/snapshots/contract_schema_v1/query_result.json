@@ -19,6 +19,49 @@
       "title": "Compiled",
       "type": "object"
     },
+    "CumulativeOut": {
+      "description": "How a cumulative metric's running total was formed for this query.\n\n``partition_by`` is every requested dimension that is not an order dimension, so it\ndiffers per query. ``visibility_filters`` only chose which order tuples are shown. The\ntotal still runs from the first row of data.",
+      "properties": {
+        "metric": {
+          "title": "Metric",
+          "type": "string"
+        },
+        "order_by": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Order By",
+          "type": "array"
+        },
+        "partition_by": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Partition By",
+          "type": "array"
+        },
+        "on_gap": {
+          "title": "On Gap",
+          "type": "string"
+        },
+        "visibility_filters": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Visibility Filters",
+          "type": "array"
+        }
+      },
+      "required": [
+        "metric",
+        "order_by",
+        "on_gap"
+      ],
+      "title": "CumulativeOut",
+      "type": "object"
+    },
     "FinalityOut": {
       "description": "Finality metadata block in a query response (SPEC-E5-E15 stage 8).",
       "properties": {
@@ -125,7 +168,7 @@
           "type": "array"
         },
         "contract_schema": {
-          "default": "2.12",
+          "default": "2.13",
           "title": "Contract Schema",
           "type": "string"
         },
@@ -162,6 +205,17 @@
           "anyOf": [
             {
               "$ref": "#/$defs/ScopeOut"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "cumulative": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CumulativeOut"
             },
             {
               "type": "null"

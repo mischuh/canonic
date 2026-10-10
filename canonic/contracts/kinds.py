@@ -150,6 +150,17 @@ register(
 )
 register(
     BindingKindSpec(
+        BindingKind.CUMULATIVE,
+        is_source_bound=True,
+        is_composite=False,
+        is_recompute=False,
+        is_describable=True,
+        column_attr="measure",
+        component_attrs=None,
+    )
+)
+register(
+    BindingKindSpec(
         BindingKind.RATIO,
         is_source_bound=False,
         is_composite=True,

@@ -38,6 +38,7 @@ Not every metric is one measure on one table. The binding's `kind` selects a com
 | `distinct_count` | Recompute `count(distinct …)` at the requested grain, never summed from partial counts. | `active_customers` |
 | `percentile` | Recompute the quantile at the requested grain from base rows. | `median_order_value` |
 | `opaque` | Serve only at its declared native grain. Any other grain is rejected. | a pre-computed external score |
+| `cumulative` | Running total of an additive measure along fixed `order_by` dimensions, per partition of every other requested dimension. A filter on the order dimension only picks the rows shown. | `revenue_to_date` along `order_month` |
 
 Because `ratio`/`weighted_avg` components reference *other metric names*, each component keeps its own guardrails and provenance. A numerator's guardrails fire automatically wherever it's used. Every `kind` also accepts an optional `population_filter`, applied before aggregation on every leaf, for metrics that are only defined over a restricted population (e.g. excluding test accounts from `active_customers`). See [the compiler](/concepts/compiler#fanout--additivity) for how each strategy actually compiles to SQL.
 

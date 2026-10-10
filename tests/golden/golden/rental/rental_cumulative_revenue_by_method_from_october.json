@@ -1,0 +1,133 @@
+{
+  "case": "rental_cumulative_revenue_by_method_from_october",
+  "columns": [
+    {
+      "name": "payment_date",
+      "type": "string"
+    },
+    {
+      "name": "method",
+      "type": "string"
+    },
+    {
+      "name": "cumulative_rental_revenue",
+      "type": "float"
+    }
+  ],
+  "dialect": "sqlite",
+  "finality": null,
+  "guardrails_fired": [],
+  "project": "rental",
+  "resolved": {
+    "metrics": {
+      "cumulative_rental_revenue": "cumulative(payments.total_paid)"
+    }
+  },
+  "row_count": 20,
+  "rows": [
+    [
+      "2024-10-08",
+      "cash",
+      149.97
+    ],
+    [
+      "2024-10-08",
+      "corporate",
+      6999.44
+    ],
+    [
+      "2024-10-08",
+      "credit_card",
+      6169.23
+    ],
+    [
+      "2024-10-08",
+      "debit_card",
+      2089.75
+    ],
+    [
+      "2024-10-17",
+      "cash",
+      149.97
+    ],
+    [
+      "2024-10-17",
+      "corporate",
+      6999.44
+    ],
+    [
+      "2024-10-17",
+      "credit_card",
+      6169.23
+    ],
+    [
+      "2024-10-17",
+      "debit_card",
+      2719.68
+    ],
+    [
+      "2024-10-22",
+      "cash",
+      249.95
+    ],
+    [
+      "2024-10-22",
+      "corporate",
+      6999.44
+    ],
+    [
+      "2024-10-22",
+      "credit_card",
+      6169.23
+    ],
+    [
+      "2024-10-22",
+      "debit_card",
+      2719.68
+    ],
+    [
+      "2024-11-08",
+      "cash",
+      249.95
+    ],
+    [
+      "2024-11-08",
+      "corporate",
+      8049.37
+    ],
+    [
+      "2024-11-08",
+      "credit_card",
+      6169.23
+    ],
+    [
+      "2024-11-08",
+      "debit_card",
+      2719.68
+    ],
+    [
+      "2024-11-14",
+      "cash",
+      249.95
+    ],
+    [
+      "2024-11-14",
+      "corporate",
+      8049.37
+    ],
+    [
+      "2024-11-14",
+      "credit_card",
+      6449.19
+    ],
+    [
+      "2024-11-14",
+      "debit_card",
+      2719.68
+    ]
+  ],
+  "trust_tier": "provisional",
+  "warnings": [
+    "cumulative metric 'cumulative_rental_revenue' uses on_gap: fill_observed; the result contains filled rows that carry the running total forward, up to observed order tuples times partitions"
+  ]
+}

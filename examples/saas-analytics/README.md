@@ -2,7 +2,7 @@
 
 The broadest example in the set: a SaaS subscription business modeled Kimball-style as a Business Vault + Data Mart, all in a single bundled DuckDB file. Exercises every metric binding kind canonic supports, all four guardrail kinds, finality/restrict-source, and query-based assertions. Ships fully hand-curated — there's no bootstrap step.
 
-Full walkthrough, the all-7-binding-kinds metric catalogue, and guardrail breakdown: **[`docs/guides/saas-analytics.mdx`](../../docs/guides/saas-analytics.mdx)**.
+Full walkthrough, the all-8-binding-kinds metric catalogue, and guardrail breakdown: **[`docs/guides/saas-analytics.mdx`](../../docs/guides/saas-analytics.mdx)**.
 
 ## Prerequisites
 

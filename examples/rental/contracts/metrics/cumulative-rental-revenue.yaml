@@ -1,0 +1,11 @@
+metric: cumulative_rental_revenue
+canonical:
+  kind: cumulative
+  source: payments
+  measure: total_paid
+  order_by: [payment_date]
+  on_gap: fill_observed
+provenance: human_curated
+label: "Cumulative Rental Revenue"
+aliases: ["revenue to date", "running revenue"]
+status: active

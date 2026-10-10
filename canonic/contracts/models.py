@@ -30,6 +30,7 @@ __all__ = [
     "MaskingRule",
     "MaskStrategy",
     "MetricBinding",
+    "OnGap",
     "OnMissingPrincipal",
     "OnZeroDenominator",
     "Realization",
@@ -77,6 +78,7 @@ class BindingKind(StrEnum):
     DISTINCT_COUNT = "distinct_count"
     PERCENTILE = "percentile"
     OPAQUE = "opaque"
+    CUMULATIVE = "cumulative"
 
 
 class CollapseAgg(StrEnum):
@@ -97,6 +99,18 @@ class OnZeroDenominator(StrEnum):
     ERROR = "error"
 
 
+class OnGap(StrEnum):
+    """How a cumulative metric treats an order tuple a partition has no row for.
+
+    ``SKIP`` emits rows only where the partition has data. ``FILL_OBSERVED`` densifies every
+    partition to the order tuples observed anywhere in the leaf, from the partition's own
+    first tuple on, carrying the running total forward.
+    """
+
+    SKIP = "skip"
+    FILL_OBSERVED = "fill_observed"
+
+
 class CanonicalRef(BaseModel):
     """The canonical binding for a metric — either a single source+measure or a composite (§3).
 
@@ -110,6 +124,10 @@ class CanonicalRef(BaseModel):
     For ``kind=opaque``, ``source``, ``measure``, and ``native_grain`` (non-empty list of
     dimension column names) are required. Served only at its declared native grain; any
     other grain returns UNSUPPORTED_MEASURE (§4.4).
+    For ``kind=cumulative``, ``source``, ``measure`` and a non-empty ``order_by`` (dimension
+    names, accumulated lexicographically in list order) are required. ``on_gap`` defaults to
+    ``skip``. The partition is not declared: it is every requested dimension that is not an
+    order dimension.
 
     ``population_filter`` is an optional SQL predicate (§4.5) valid for every ``kind``. It defines
     the population the metric is *about* and is AND-ed into the WHERE of every leaf query before
@@ -132,6 +150,8 @@ class CanonicalRef(BaseModel):
     column: str | None = None
     quantile: float | None = None
     native_grain: list[str] | None = None
+    order_by: list[str] | None = None
+    on_gap: OnGap = OnGap.SKIP
     population_filter: str | None = None
 
     @field_validator("on_zero_denominator", mode="before")
@@ -139,6 +159,13 @@ class CanonicalRef(BaseModel):
     def _coerce_on_zero(cls, v: object) -> object:
         if v is None:
             return OnZeroDenominator.NULL
+        return v
+
+    @field_validator("on_gap", mode="before")
+    @classmethod
+    def _coerce_on_gap(cls, v: object) -> object:
+        if v is None:
+            return OnGap.SKIP
         return v
 
     @model_validator(mode="after")
@@ -206,6 +233,20 @@ class CanonicalRef(BaseModel):
             if not self.native_grain:
                 raise ContractValidationError(
                     ("native_grain",), "opaque binding requires non-empty 'native_grain'"
+                )
+        elif self.kind is BindingKind.CUMULATIVE:
+            if self.source is None:
+                raise ContractValidationError(("source",), "cumulative binding requires 'source'")
+            if self.measure is None:
+                raise ContractValidationError(("measure",), "cumulative binding requires 'measure'")
+            if not self.order_by:
+                raise ContractValidationError(
+                    ("order_by",), "cumulative binding requires non-empty 'order_by'"
+                )
+            duplicates = sorted({d for d in self.order_by if self.order_by.count(d) > 1})
+            if duplicates:
+                raise ContractValidationError(
+                    ("order_by",), f"cumulative binding lists {duplicates} more than once"
                 )
         return self
 

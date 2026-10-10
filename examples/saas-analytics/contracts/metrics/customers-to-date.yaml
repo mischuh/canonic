@@ -1,0 +1,11 @@
+# Running total of new logos along the event date. Grouped by plan as well, each plan
+# accumulates on its own. A date filter only picks the days shown.
+metric: customers_to_date
+canonical:
+  kind: cumulative
+  source: fct_subscription_events
+  measure: new_customer_count
+  order_by: [event_date]
+provenance: human_curated
+aliases: ["cumulative new customers", "customers acquired to date"]
+status: active
