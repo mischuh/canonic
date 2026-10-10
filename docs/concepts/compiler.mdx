@@ -100,6 +100,7 @@ A join can multiply rows relative to a measure's grain (one-to-many, many-to-man
 | `semi_additive` | Sums normally over dimensions the query groups by, and collapses the non-additive dimension (e.g. `snapshot_date`) via a window function (`last`/`first`/`avg`/`min`/`max`) when the query doesn't group by it. |
 | `distinct_count` / `percentile` | Recomputed directly from base rows at the requested grain, never derived from a partial `count(distinct …)` or a combined quantile. |
 | `opaque` | Served only at its declared native grain. Any other grain is rejected outright. |
+| `cumulative` | Aggregated like `single` (so fanout is deduplicated the same way), then accumulated by a window over the grain spine with a `ROWS` frame. Filters on order columns are applied after the window, so they never restart the total. |
 
 The unifying rule behind the composable strategies is **aggregate first, combine last**: division, weighting, and ratios happen on the aggregated result, never on raw rows. Where no strategy can guarantee correctness, the compiler refuses with `UNSUPPORTED_MEASURE` or `FANOUT_UNSAFE` and a rationale, rather than emit a silently wrong number.
 

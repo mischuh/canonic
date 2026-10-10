@@ -169,6 +169,21 @@ def _additivity_for(agg_type: str | None, relation: str, measure: str) -> Additi
     return None
 
 
+def _agg_time_dimensions(semantic_models: list[dict[str, Any]]) -> dict[str, str]:
+    """Measure name to the time dimension MetricFlow aggregates it along.
+
+    A measure's own ``agg_time_dimension`` wins over its semantic model's default.
+    """
+    result: dict[str, str] = {}
+    for sm in semantic_models:
+        default = (sm.get("defaults") or {}).get("agg_time_dimension")
+        for measure in sm.get("measures", []):
+            dimension = measure.get("agg_time_dimension") or default
+            if dimension:
+                result[measure.get("name", "")] = dimension
+    return result
+
+
 def _definition_fingerprint(payload: dict[str, Any]) -> str:
     """Stable sha256 over a definition's semantic fields (mirrors compute_fingerprint format)."""
     digest = hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()
@@ -265,8 +280,9 @@ class DbtConnector(ConnectorBase):
             self._extract_semantic_model(sm, definitions)
 
         # --- metrics → MEASURE evidence ---
+        agg_time_dimensions = _agg_time_dimensions(semantic_models)
         for metric in metrics.values():
-            self._extract_metric(metric, definitions)
+            self._extract_metric(metric, definitions, agg_time_dimensions)
 
         return DefinitionExtract(relations=relations, definitions=definitions)
 
@@ -489,9 +505,16 @@ class DbtConnector(ConnectorBase):
             )
 
     def _extract_metric(
-        self, metric: dict[str, Any], definitions: list[DefinitionEvidence]
+        self,
+        metric: dict[str, Any],
+        definitions: list[DefinitionEvidence],
+        agg_time_dimensions: dict[str, str] | None = None,
     ) -> None:
-        """Emit a MEASURE DefinitionEvidence for one dbt metric."""
+        """Emit a MEASURE DefinitionEvidence for one dbt metric.
+
+        ``agg_time_dimensions`` maps a measure name to the time dimension MetricFlow
+        aggregates it along, which is what a ``cumulative`` metric accumulates over.
+        """
         unique_id: str = metric.get("unique_id", "")
         name: str = metric.get("name", "")
         description = metric.get("description") or None
@@ -532,10 +555,64 @@ class DbtConnector(ConnectorBase):
                     source_fingerprint=fp,
                 )
             )
-        elif metric_type in ("simple", "ratio", "derived", "conversion", "cumulative"):
+        elif metric_type == "cumulative":
+            self._extract_cumulative(metric, measure_ref, definitions, agg_time_dimensions or {})
+        elif metric_type in ("simple", "ratio", "derived", "conversion"):
             # Known MetricFlow composite/reference types — not yet implemented; skip silently.
             logger.debug(
                 "skipping unimplemented MetricFlow metric type %r for %r", metric_type, name
             )
         else:
             logger.warning("unknown dbt metric type %r for metric %r; skipping", metric_type, name)
+
+    def _extract_cumulative(
+        self,
+        metric: dict[str, Any],
+        measure_ref: str,
+        definitions: list[DefinitionEvidence],
+        agg_time_dimensions: dict[str, str],
+    ) -> None:
+        """Propose a ``cumulative`` binding for a MetricFlow running total.
+
+        Only the unbounded form maps: a ``window`` (trailing N days) or ``grain_to_date``
+        (resets each period) has no ``cumulative`` equivalent yet, and neither has a metric
+        or measure ``filter``, which is Jinja over MetricFlow dimensions. Those are skipped
+        rather than proposed as a binding that would return a different number.
+        """
+        name: str = metric.get("name", "")
+        type_params: dict[str, Any] = metric.get("type_params", {})
+        nested = type_params.get("cumulative_type_params") or {}
+        window = type_params.get("window") or nested.get("window")
+        grain_to_date = type_params.get("grain_to_date") or nested.get("grain_to_date")
+        measure = type_params.get("measure")
+        measure_filter = measure.get("filter") if isinstance(measure, dict) else None
+        reason: str | None = None
+        if window or grain_to_date:
+            reason = "a window or grain_to_date has no cumulative equivalent yet"
+        elif metric.get("filter") or measure_filter:
+            reason = "its filter cannot be carried over"
+        elif not measure_ref:
+            reason = "it names no measure"
+        elif measure_ref not in agg_time_dimensions:
+            reason = f"measure {measure_ref!r} has no agg_time_dimension"
+        if reason is not None:
+            logger.info("skipping cumulative dbt metric %r: %s", name, reason)
+            return
+        definitions.append(
+            DefinitionEvidence(
+                source=self._source,
+                entity=name,
+                entity_type=DefinitionEntityType.METRIC,
+                description=metric.get("description") or None,
+                contract_candidate=ContractCandidate(
+                    kind=CandidateKind.CUMULATIVE,
+                    measures=[measure_ref],
+                    order_by=[agg_time_dimensions[measure_ref]],
+                ),
+                native_ref=metric.get("unique_id", ""),
+                acquisition_tier=AcquisitionTier.MODELING,
+                source_fingerprint=_definition_fingerprint(
+                    {"entity": name, "entity_type": "metric", "cumulative": measure_ref}
+                ),
+            )
+        )

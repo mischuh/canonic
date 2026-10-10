@@ -106,9 +106,14 @@ class ServiceContext:
             await connector.aclose()
 
     def connection_for_sql(self, compiled: CompileResult) -> str | None:
-        """Pick the connection id from the first resolved metric's owning source."""
+        """Pick the connection id from the first resolved metric's owning source.
+
+        A resolved key is ``source.measure``, or wraps it in its kind, such as
+        ``cumulative(source.measure)``. The wrapper is stripped before the source is read.
+        """
         for source_measure in compiled.resolved.values():
-            source_name = source_measure.split(".")[0]
+            _, _, inner = source_measure.rpartition("(")
+            source_name = inner.split(".")[0]
             source = self.source_by_name.get(source_name)
             if source is not None:
                 return source.connection

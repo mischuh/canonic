@@ -78,12 +78,16 @@ def _measure(
 
 
 def _candidate(
-    name: str, kind: CandidateKind, measures: list[str], **kw: Any
+    name: str,
+    kind: CandidateKind,
+    measures: list[str],
+    order_by: list[str] | None = None,
+    **kw: Any,
 ) -> DefinitionEvidence:
     return _definition(
         entity=name,
         entity_type=DefinitionEntityType.METRIC,
-        contract_candidate=ContractCandidate(kind=kind, measures=measures),
+        contract_candidate=ContractCandidate(kind=kind, measures=measures, order_by=order_by or []),
         **kw,
     )
 
@@ -194,6 +198,35 @@ class TestBuild:
                 {k: v for k, v in proposal.content.items() if k != CANDIDATE_SENTINEL}
             )
 
+    async def test_cumulative_becomes_a_cumulative_binding(self) -> None:
+        definitions = [
+            *_shop_definitions(),
+            _candidate(
+                "revenue_to_date", CandidateKind.CUMULATIVE, ["revenue"], order_by=["order_day"]
+            ),
+        ]
+        contracts = _contracts(await _proposals(definitions))
+        assert contracts["contracts/metrics/revenue_to_date.yaml"]["canonical"] == {
+            "kind": "cumulative",
+            "source": "orders",
+            "measure": "revenue",
+            "order_by": ["order_day"],
+        }
+
+    async def test_cumulative_over_a_non_additive_measure_is_skipped(self) -> None:
+        definitions = [
+            *_shop_definitions(),
+            _candidate(
+                "customers_to_date",
+                CandidateKind.CUMULATIVE,
+                ["customer_count"],
+                order_by=["order_day"],
+            ),
+        ]
+        result = await _proposals(definitions)
+        assert "contracts/metrics/customers_to_date.yaml" not in _contracts(result)
+        assert any("customers_to_date" in s.reason for s in result.skipped)
+
     async def test_candidate_on_an_unplaced_measure_is_skipped(self) -> None:
         result = await _proposals([_candidate("ghosts", CandidateKind.DISTINCT_COUNT, ["ghosts"])])
         assert _contracts(result) == {}
@@ -258,6 +291,20 @@ class TestResolve:
         ratio = entries["contracts/metrics/revenue_per_customer.yaml"]
         assert ratio.decision is ReconciliationDecision.NO_OP
         assert "numerator 'revenue' has no binding" in (ratio.recommended_action or "")
+
+
+async def test_cumulative_whose_order_dimension_will_not_exist_is_not_proposed() -> None:
+    definitions = [
+        *_shop_definitions(),
+        _candidate(
+            "revenue_to_date", CandidateKind.CUMULATIVE, ["revenue"], order_by=["order_day"]
+        ),
+    ]
+    result = await _proposals(definitions)
+    report = ReconciliationEngine().reconcile(result.proposals, InMemoryAcceptedStore(()))
+    entry = next(e for e in report.entries if e.target == "contracts/metrics/revenue_to_date.yaml")
+    assert entry.decision is ReconciliationDecision.NO_OP
+    assert "dimension 'order_day' will not exist on 'orders'" in (entry.recommended_action or "")
 
 
 class _Live(ConnectorBase):

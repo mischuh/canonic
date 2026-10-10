@@ -266,19 +266,23 @@ class CandidateKind(StrEnum):
 
     RATIO = "ratio"
     DISTINCT_COUNT = "distinct_count"
+    CUMULATIVE = "cumulative"
 
 
 class ContractCandidate(BaseModel):
     """A proposed metric binding, never canonical until accepted through review (FR-13).
 
-    ``measures`` names the component measures: one for ``distinct_count``, numerator then
-    denominator for ``ratio``.
+    ``measures`` names the component measures: one for ``distinct_count`` and
+    ``cumulative``, numerator then denominator for ``ratio``. ``order_by`` names the
+    dimensions a ``cumulative`` candidate accumulates along, and is empty for every other
+    kind.
     """
 
     model_config = ConfigDict(frozen=True)
 
     kind: CandidateKind
     measures: list[str]
+    order_by: list[str] = []
 
 
 class DefinitionEvidence(BaseModel):

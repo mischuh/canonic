@@ -11,6 +11,7 @@ from dataclasses import dataclass, field
 __all__ = [
     "CompileResult",
     "CompositionMetadata",
+    "CumulativeMetadata",
     "FinalityMetadata",
     "FiredGuardrail",
     "OpaqueMetadata",
@@ -100,6 +101,23 @@ class PartialAdditiveMetadata:
     collapse_dimension: str
     collapse_agg: str
     collapsed: bool
+
+
+@dataclass(frozen=True, slots=True)
+class CumulativeMetadata:
+    """Records how a cumulative metric was accumulated for this query.
+
+    ``partition_by`` is resolved per query: every requested dimension that is not an order
+    dimension, in request order. ``visibility_filters`` are the query filters that read only
+    order columns. They pick which order tuples are shown and never restrict what is
+    accumulated, so a filtered result still carries the total since the first row of data.
+    """
+
+    metric: str
+    order_by: list[str]
+    partition_by: list[str]
+    on_gap: str
+    visibility_filters: list[str] = field(default_factory=list)
 
 
 @dataclass(frozen=True, slots=True)
@@ -204,5 +222,6 @@ class CompileResult:
     partial_additive: PartialAdditiveMetadata | None = None
     recompute_at_grain: RecomputeAtGrainMetadata | None = None
     opaque: OpaqueMetadata | None = None
+    cumulative: CumulativeMetadata | None = None
     trust_inputs: list[TrustInput] = field(default_factory=list)
     scope: ScopeMetadata | None = None

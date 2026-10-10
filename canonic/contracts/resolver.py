@@ -33,6 +33,7 @@ from canonic.contracts.models import (
     GuardrailKind,
     MaskingRule,
     MetricBinding,
+    OnGap,
     OnZeroDenominator,
     RoleDef,
     RolePolicy,
@@ -57,6 +58,7 @@ __all__ = [
     "Binding",
     "ComponentBindings",
     "ContractResolver",
+    "CumulativeBinding",
     "MetricResolution",
     "OpaqueBinding",
     "RecomputeAtGrainBinding",
@@ -95,6 +97,14 @@ class OpaqueBinding:
 
 
 @dataclass(frozen=True, slots=True)
+class CumulativeBinding:
+    """Resolved parameters for a cumulative (running total) metric."""
+
+    order_by: tuple[str, ...]
+    on_gap: OnGap
+
+
+@dataclass(frozen=True, slots=True)
 class Binding:
     """A metric name resolved to its canonical definition.
 
@@ -103,6 +113,8 @@ class Binding:
     ``components`` carries the resolved numerator/denominator bindings.
     For ``kind=semi_additive``, ``source`` and ``measure`` are non-None (single-leaf);
     ``semi_additive`` carries the collapse parameters.
+    For ``kind=cumulative``, ``source`` and ``measure`` are non-None (single-leaf), and
+    ``cumulative`` carries the order dimensions and the gap policy.
     """
 
     metric: str
@@ -114,6 +126,7 @@ class Binding:
     semi_additive: SemiAdditiveBinding | None = None
     recompute_at_grain: RecomputeAtGrainBinding | None = None
     opaque: OpaqueBinding | None = None
+    cumulative: CumulativeBinding | None = None
 
     @property
     def resolved_key(self) -> str | None:
@@ -134,6 +147,8 @@ class Binding:
             return None
         if self.kind is BindingKind.OPAQUE:
             return f"opaque({self.source}.{self.measure})"
+        if self.kind is BindingKind.CUMULATIVE:
+            return f"cumulative({self.source}.{self.measure})"
         return f"{self.source}.{self.measure}"
 
 
@@ -237,7 +252,7 @@ class ContractResolver:
 
         # name/alias -> active bindings; multiple entries for a name means ambiguity
         name_index: dict[str, list[MetricBinding]] = {}
-        # active single/semi_additive metric name -> canonical for metric-targeted guardrails
+        # active source-bound metric name -> canonical for metric-targeted guardrails
         # composite bindings (ratio/weighted_avg) have no single (source, measure), so excluded
         metric_to_canonical: dict[str, CanonicalRef] = {}
         # source name -> sorted list of active metric names bound to that source
@@ -401,6 +416,23 @@ class ContractResolver:
                 semi_additive=SemiAdditiveBinding(
                     collapse_dimension=canonical.collapse_dimension,
                     collapse_agg=canonical.collapse_agg,
+                ),
+            )
+
+        if canonical.kind is BindingKind.CUMULATIVE:
+            assert (  # noqa: S101 — enforced by model_validator
+                canonical.source is not None
+                and canonical.measure is not None
+                and canonical.order_by
+            )
+            return Binding(
+                metric=binding.metric,
+                source=canonical.source,
+                measure=canonical.measure,
+                binding=binding,
+                kind=BindingKind.CUMULATIVE,
+                cumulative=CumulativeBinding(
+                    order_by=tuple(canonical.order_by), on_gap=canonical.on_gap
                 ),
             )
 

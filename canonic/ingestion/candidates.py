@@ -1,7 +1,7 @@
 """Contract candidates from definition connectors: proposed metric bindings, never canonical.
 
-A definition connector (Ossie) can state a metric that only a binding expresses: a
-``COUNT(DISTINCT …)`` or a ratio of two aggregates. The builder turns each such candidate
+A definition connector (Ossie, dbt) can state a metric that only a binding expresses: a
+``COUNT(DISTINCT …)``, a ratio of two aggregates, or a running total. The builder turns each such candidate
 into proposed ``contracts/metrics/<slug>.yaml`` files, marked with :data:`CANDIDATE_SENTINEL`.
 
 Reconciliation resolves them after every other proposal, so it knows which measures and
@@ -132,6 +132,20 @@ def build_candidate_proposals(
         assert candidate is not None  # noqa: S101 — index only returns candidates
         label = f"contract candidate {definition.entity!r} ({definition.native_ref})"
         anchor = definition.source_fingerprint
+        if candidate.kind is CandidateKind.CUMULATIVE:
+            base = measure_binding(candidate.measures[0])
+            if isinstance(base, str) or base["kind"] != "single":
+                reason = base if isinstance(base, str) else "the measure is not additive"
+                unexpressible.append((source, f"{label}: {reason}"))
+                continue
+            running_total = {
+                "kind": "cumulative",
+                "source": base["source"],
+                "measure": base["measure"],
+                "order_by": list(candidate.order_by),
+            }
+            propose(definition.entity, running_total, list(definition.aliases), anchor)
+            continue
         if candidate.kind is CandidateKind.DISTINCT_COUNT:
             canonical = measure_binding(candidate.measures[0])
             if isinstance(canonical, str):
@@ -246,10 +260,14 @@ class CandidateResolver:
         source = self._sources.get(canonical["source"])
         if source is None:
             return f"source {canonical['source']!r} will not exist"
-        if kind == "single":
+        if kind in ("single", "cumulative"):
             measures = {m.get("name") for m in source.get("measures", [])}
             if canonical["measure"] not in measures:
                 return f"measure {canonical['measure']!r} will not exist on {canonical['source']!r}"
+            dimensions = {d.get("name") for d in source.get("dimensions", [])}
+            for name in canonical.get("order_by", []):
+                if name not in dimensions:
+                    return f"dimension {name!r} will not exist on {canonical['source']!r}"
             return None
         columns = {c.get("name") for c in source.get("columns", [])} | {
             d.get("name") for d in source.get("dimensions", [])

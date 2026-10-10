@@ -29,6 +29,7 @@ if TYPE_CHECKING:
 __all__ = [
     "Compiled",
     "CompileOutput",
+    "CumulativeOut",
     "DimensionInfo",
     "DomainGroup",
     "FinalityOut",
@@ -81,6 +82,23 @@ class FinalityOut(BaseModel):
     sources_used: list[str]
     final_rows: int | None = None
     provisional_rows: int | None = None
+
+
+class CumulativeOut(BaseModel):
+    """How a cumulative metric's running total was formed for this query.
+
+    ``partition_by`` is every requested dimension that is not an order dimension, so it
+    differs per query. ``visibility_filters`` only chose which order tuples are shown. The
+    total still runs from the first row of data.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    metric: str
+    order_by: list[str]
+    partition_by: list[str] = []
+    on_gap: str
+    visibility_filters: list[str] = []
 
 
 class TrustScoreOut(BaseModel):
@@ -234,6 +252,7 @@ class QueryMetadata(BaseModel):
     related: RelatedOut = RelatedOut()
     trust_score: TrustScoreOut | None = None
     scope: ScopeOut | None = None
+    cumulative: CumulativeOut | None = None
 
     @classmethod
     def from_compile_result(
@@ -314,6 +333,17 @@ class QueryMetadata(BaseModel):
                     tenancy_exempt=compiled.scope.tenancy_exempt,
                 )
                 if compiled.scope is not None
+                else None
+            ),
+            cumulative=(
+                CumulativeOut(
+                    metric=compiled.cumulative.metric,
+                    order_by=list(compiled.cumulative.order_by),
+                    partition_by=list(compiled.cumulative.partition_by),
+                    on_gap=compiled.cumulative.on_gap,
+                    visibility_filters=list(compiled.cumulative.visibility_filters),
+                )
+                if compiled.cumulative is not None
                 else None
             ),
         )

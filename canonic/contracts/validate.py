@@ -30,13 +30,15 @@ from canonic.contracts.models import (
     TenancyPolicy,
     UndeclaredSource,
 )
-from canonic.exc import ContractError
+from canonic.exc import Ambiguous, ContractError
 from canonic.semantic.loader import list_semantic_sources
-from canonic.semantic.models import Additivity
+from canonic.semantic.models import Additivity, NormalizedType
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
     from pathlib import Path
+
+    from canonic.semantic.models import Dimension, SemanticSource
 
 __all__ = ["validate_contracts"]
 
@@ -77,6 +79,11 @@ def _validate_composite_binding(
                 f"metric {binding.metric!r}: {label} {name!r} has kind opaque; "
                 f"opaque metrics are grain-locked and cannot be used as components "
                 f"in a composite metric (§4.1, S7 AC1)"
+            )
+        if active_by_name[name].canonical.kind is BindingKind.CUMULATIVE:
+            raise ContractError(
+                f"metric {binding.metric!r}: {label} {name!r} has kind cumulative; "
+                f"a running total cannot be used as a component in a composite metric"
             )
 
     _check_composite_cycle(binding.metric, active_by_name, path=[binding.metric])
@@ -162,6 +169,93 @@ def _validate_semi_additive_binding(
             )
 
 
+#: Order dimension types whose sort order is the same on every supported dialect. ``string``
+#: is left out because its order follows the engine's collation.
+_ORDERABLE_TYPES = frozenset(
+    {
+        NormalizedType.DATE,
+        NormalizedType.TIMESTAMP,
+        NormalizedType.INT,
+        NormalizedType.DECIMAL,
+        NormalizedType.FLOAT,
+    }
+)
+
+
+def _validate_cumulative_binding(
+    binding: MetricBinding,
+    sources_by_name: dict[str, SemanticSource],
+) -> None:
+    """Validate a cumulative binding at write time.
+
+    Checks: the source exists. The base measure exists, is additive and uses a P0
+    aggregate. Every ``order_by`` entry resolves to one dimension reachable from the source,
+    of an orderable type. No two order dimensions bucket the same column, since the finer
+    one already decides the order. Dimensions are resolved by the compiler's own lookup, so a binding that passes
+    here binds the same way at query time.
+    """
+    from canonic.compiler._helpers import _find_dimension
+    from canonic.compiler.joins import build_alias_tree
+
+    ref = binding.canonical
+    assert ref.source is not None and ref.measure is not None  # noqa: S101 — model_validator
+    assert ref.order_by  # noqa: S101 — enforced by model_validator
+
+    source = sources_by_name.get(ref.source)
+    if source is None:
+        raise ContractError(
+            f"metric {binding.metric!r}: canonical.source {ref.source!r} "
+            f"does not match any semantic source"
+        )
+    measure = next((m for m in source.measures if m.name == ref.measure), None)
+    if measure is None:
+        raise ContractError(
+            f"metric {binding.metric!r}: canonical.measure {ref.measure!r} "
+            f"is not declared on source {ref.source!r}"
+        )
+    if measure.additivity is not Additivity.ADDITIVE or not measure.is_p0_compilable:
+        raise ContractError(
+            f"metric {binding.metric!r}: base measure {ref.source}.{ref.measure!r} must be "
+            f"additive and use sum, count, min or max for a cumulative binding"
+        )
+
+    alias_to_source = build_alias_tree(ref.source, sources_by_name)
+    resolved: list[tuple[str, str, Dimension]] = []
+    for name in ref.order_by:
+        try:
+            found = _find_dimension(name, sources_by_name, ref.source, alias_to_source)
+        except Ambiguous as exc:
+            raise ContractError(
+                f"metric {binding.metric!r}: order_by dimension {name!r} is ambiguous: {exc}"
+            ) from exc
+        if found is None:
+            raise ContractError(
+                f"metric {binding.metric!r}: order_by dimension {name!r} is not reachable "
+                f"from source {ref.source!r}"
+            )
+        alias, dim = found
+        owner = sources_by_name[alias_to_source.get(alias, alias)]
+        value_type = dim.value_type(owner.columns)
+        if value_type not in _ORDERABLE_TYPES:
+            shown = value_type.value if value_type is not None else None
+            raise ContractError(
+                f"metric {binding.metric!r}: order_by dimension {name!r} has type {shown!r}; "
+                f"order dimensions must be date, timestamp, int, decimal or float"
+            )
+        resolved.append((name, alias, dim))
+
+    seen: dict[tuple[str, str], str] = {}
+    for name, alias, dim in resolved:
+        if dim.is_derived or dim.column is None:
+            continue
+        other = seen.setdefault((alias, dim.column), name)
+        if other != name:
+            raise ContractError(
+                f"metric {binding.metric!r}: order_by dimensions {other!r} and {name!r} are "
+                f"both backed by column {dim.column!r}; keep only the finer one"
+            )
+
+
 def _validate_recompute_at_grain_binding(
     binding: MetricBinding,
     source_measures: dict[str, set[str]],
@@ -241,7 +335,8 @@ def _leaf_sources(
 ) -> set[str]:
     """Return the physical source name(s) that a binding ultimately reads.
 
-    For single-leaf kinds (single, semi_additive, distinct_count, percentile, opaque)
+    For single-leaf kinds (single, semi_additive, distinct_count, percentile, opaque,
+    cumulative)
     this is the binding's own source. For composite kinds (ratio, weighted_avg) the leaf
     sources are the union of the components' leaf sources, resolved recursively.
     Returns empty set if a component is missing — the component-resolution checks in
@@ -436,6 +531,7 @@ def validate_contracts(project_root: Path) -> None:
         s.name: {m.name: m.additivity for m in s.measures} for s in sources
     }
     source_grain: dict[str, list[str]] = {s.name: list(s.grain) for s in sources}
+    sources_by_name: dict[str, SemanticSource] = {s.name: s for s in sources}
     source_names = set(source_measures)
 
     tenancy = load_tenancy_policy(project_root)
@@ -476,6 +572,8 @@ def validate_contracts(project_root: Path) -> None:
             )
         elif ref.kind is BindingKind.OPAQUE:
             _validate_opaque_binding(binding, source_measures, source_dims)
+        elif ref.kind is BindingKind.CUMULATIVE:
+            _validate_cumulative_binding(binding, sources_by_name)
         else:
             _validate_composite_binding(binding, bindings, source_measures)
         _validate_population_filter(binding, active_by_name, source_columns, source_dims)

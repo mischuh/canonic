@@ -1,5 +1,5 @@
 ---
-title: "Guide: SaaS Analytics (all 7 binding kinds)"
+title: "Guide: SaaS Analytics (all 8 binding kinds)"
 description: "The broadest example: every metric binding kind, all four guardrail kinds, finality, and assertions."
 ---
 
@@ -53,7 +53,7 @@ canonic mcp start
 
 No LLM is required for any of these commands: this example ships hand-curated semantics and contracts, so canonic never needs to draft anything.
 
-## Metric catalogue: all 7 binding kinds
+## Metric catalogue: all 8 binding kinds
 
 | Kind | Metric(s) | Binding highlight |
 | --- | --- | --- |
@@ -64,6 +64,7 @@ No LLM is required for any of these commands: this example ships hand-curated se
 | `distinct_count` | `active_subscribers`, `active_features` | `distinct_on` + `population_filter` |
 | `percentile` | `median_contract_value`, `p90_resolution_time`, `median_deal_size` | `column` + `quantile` |
 | `opaque` | `customer_ltv` | `native_grain: [customer_id]`, served at customer grain only |
+| `cumulative` | `customers_to_date` | `order_by: [event_date]`, a running total of new logos, per plan when grouped by `plan_name` |
 
 Ratio and weighted-avg components must themselves be `single`-kind metrics, so a set of small helper metrics (`mrr_total`, `active_accounts`, `churned_customers`, `new_customers`, `won_opportunities`, `total_opportunities`, `campaign_spend`, `discount_value_sum`, `total_contract_value`, `nps_net`, `nps_responses`) provide those building blocks. See [The semantic compiler](/concepts/compiler#fanout--additivity) for how each kind actually compiles.
 

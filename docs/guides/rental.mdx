@@ -3,7 +3,7 @@ title: "Guide: Vehicle Rental (SQLite)"
 description: "A SQLite-only project with cross-fact fanout and a NULL-handling guardrail."
 ---
 
-An end-to-end canonic project on a vehicle rental service: one SQLite connection, five dimensions, three fact tables, nine metric contracts (three canonical), and one enforced guardrail. No external database required. The entire dataset lives in a single `rental.db` file.
+An end-to-end canonic project on a vehicle rental service: one SQLite connection, five dimensions, three fact tables, ten metric contracts (three canonical), and one enforced guardrail. No external database required. The entire dataset lives in a single `rental.db` file.
 
 <Info>Full source: [`examples/rental/`](https://github.com/mischuh/canonic/tree/main/examples/rental)</Info>
 
@@ -51,7 +51,7 @@ canonic eval baseline \                    # (optional) grain-inference accuracy
 
 ## Metrics
 
-`contracts/metrics/` ships **9** metric contracts. Three are the canonical showcase bindings. The rest support the guardrail's caveats and other reporting cuts.
+`contracts/metrics/` ships **10** metric contracts. Three are the canonical showcase bindings. The rest support the guardrail's caveats and other reporting cuts.
 
 | Metric | Source · measure | Canonical for |
 | --- | --- | --- |
@@ -61,6 +61,7 @@ canonic eval baseline \                    # (optional) grain-inference accuracy
 | `active_customers` | distinct count on `rentals.customer_id` | Customers with a non-cancelled rental |
 | `median_rental_amount` | percentile: `rentals.total_amount` | Median order value |
 | `ending_inventory` | semi-additive: `vehicle_inventory.inventory_level` | Fleet size as of the latest snapshot date |
+| `cumulative_rental_revenue` | cumulative: `payments.total_paid` along `payment_date` | Settled revenue to date, per payment method with `on_gap: fill_observed` |
 | `damage_count` / `total_repair_cost` / `avg_repair_costs` | `damages.*` | Damage-claim reporting |
 
 ## Guardrail
@@ -77,7 +78,7 @@ canonic eval baseline \                    # (optional) grain-inference accuracy
 canonic.yaml                    ← SQLite connection, LLM, reconcile settings
 setup.sql                       ← DDL + seed data
 semantics/rental_db/            ← 5 dimensions + 4 facts (incl. vehicle_inventory)
-contracts/metrics/              ← 9 metric contracts (see Metrics above)
+contracts/metrics/              ← 10 metric contracts (see Metrics above)
 contracts/guardrails/           ← completed-rentals-only.yaml
 knowledge/global/               ← 5 pages: rental-revenue, rental-duration, active-customers,
                                    avg-repair-costs, ending-inventory definitions/notes

@@ -49,6 +49,17 @@ A change listed here was reviewed against the classification rules and did not b
 
 ## History
 
+## 2.13 (2026-10-10) - MINOR
+
+- ADR/PR: this PR (feat(compiler): add cumulative metrics)
+- Summary: `QueryMetadata` gains an optional `cumulative` block, `null` unless the query
+  requests a `cumulative` metric, and otherwise `{"metric", "order_by", "partition_by",
+  "on_gap", "visibility_filters"}` for the first one. `partition_by` is resolved per query,
+  which is what an agent needs to explain a running total. The new binding kind and its
+  `order_by`/`on_gap` fields live in the contract file format and do not bump on their own.
+  No request shape changes and no new error codes. Classified MINOR under §4.1: an additive
+  response field.
+
 ## 2.12 (2026-10-06) - MINOR
 
 - ADR/PR: this PR (feat(knowledge): wire ingest-time reference pruning and the staleness signal)

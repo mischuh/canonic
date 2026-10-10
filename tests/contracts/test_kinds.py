@@ -52,6 +52,7 @@ def test_category_sets_match_expected_membership() -> None:
         BindingKind.DISTINCT_COUNT,
         BindingKind.PERCENTILE,
         BindingKind.OPAQUE,
+        BindingKind.CUMULATIVE,
     } == SOURCE_BOUND_KINDS
     assert {BindingKind.RATIO, BindingKind.WEIGHTED_AVG} == COMPOSITE_KINDS
     assert {BindingKind.DISTINCT_COUNT, BindingKind.PERCENTILE} == RECOMPUTE_KINDS
@@ -60,6 +61,7 @@ def test_category_sets_match_expected_membership() -> None:
         BindingKind.SEMI_ADDITIVE,
         BindingKind.DISTINCT_COUNT,
         BindingKind.PERCENTILE,
+        BindingKind.CUMULATIVE,
     } == DESCRIBABLE_KINDS
 
 

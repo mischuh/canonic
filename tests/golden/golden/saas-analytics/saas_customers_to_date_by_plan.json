@@ -1,0 +1,121 @@
+{
+  "case": "saas_customers_to_date_by_plan",
+  "columns": [
+    {
+      "name": "event_date",
+      "type": "timestamp"
+    },
+    {
+      "name": "plan_name",
+      "type": "string"
+    },
+    {
+      "name": "customers_to_date",
+      "type": "int"
+    }
+  ],
+  "dialect": "duckdb",
+  "finality": null,
+  "guardrails_fired": [],
+  "project": "saas-analytics",
+  "resolved": {
+    "metrics": {
+      "customers_to_date": "cumulative(fct_subscription_events.new_customer_count)"
+    }
+  },
+  "row_count": 18,
+  "rows": [
+    [
+      "2024-01-10T00:00:00",
+      "enterprise",
+      1
+    ],
+    [
+      "2024-02-15T00:00:00",
+      "enterprise",
+      2
+    ],
+    [
+      "2024-02-20T00:00:00",
+      "pro",
+      1
+    ],
+    [
+      "2024-03-05T00:00:00",
+      "pro",
+      2
+    ],
+    [
+      "2024-03-12T00:00:00",
+      "enterprise",
+      3
+    ],
+    [
+      "2024-04-01T00:00:00",
+      "enterprise",
+      4
+    ],
+    [
+      "2024-05-18T00:00:00",
+      "starter",
+      1
+    ],
+    [
+      "2024-06-22T00:00:00",
+      "starter",
+      2
+    ],
+    [
+      "2024-07-09T00:00:00",
+      "pro",
+      3
+    ],
+    [
+      "2024-08-14T00:00:00",
+      "enterprise",
+      5
+    ],
+    [
+      "2024-09-30T00:00:00",
+      "pro",
+      4
+    ],
+    [
+      "2024-11-11T00:00:00",
+      "starter",
+      3
+    ],
+    [
+      "2025-03-15T00:00:00",
+      "enterprise",
+      5
+    ],
+    [
+      "2025-05-01T00:00:00",
+      "starter",
+      3
+    ],
+    [
+      "2025-06-01T00:00:00",
+      "enterprise",
+      5
+    ],
+    [
+      "2025-08-01T00:00:00",
+      "pro",
+      4
+    ],
+    [
+      "2025-08-01T00:00:00",
+      "starter",
+      3
+    ],
+    [
+      "2025-10-01T00:00:00",
+      "starter",
+      3
+    ]
+  ],
+  "trust_tier": "provisional",
+  "warnings": []
+}

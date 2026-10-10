@@ -49,6 +49,7 @@ if TYPE_CHECKING:
 
 from canonic.compiler.strategies import (
     plan_composite,
+    plan_cumulative,
     plan_opaque,
     plan_recompute_at_grain,
     plan_semi_additive,
@@ -111,7 +112,7 @@ def _enforce_min_trust(
 
     Enforced from the static signal set only (provenance, assertion coverage) — the signals
     known before SQL is generated. Only metrics with a single resolved (source, measure) are
-    matched (SINGLE/SEMI_ADDITIVE/OPAQUE kinds); composite (ratio/weighted_avg) and
+    matched (SINGLE/SEMI_ADDITIVE/OPAQUE/CUMULATIVE kinds); composite (ratio/weighted_avg) and
     recompute_at_grain metrics have no single source/measure pair to match against
     ``applies_to``, the same limitation ``restrict_source`` already has. ``severity: error``
     (the default) raises GuardrailBlock; ``severity: warn`` returns a warning line instead.
@@ -372,7 +373,7 @@ def compile(  # noqa: A001 — the public verb for this capability is "compile"
         single_kind = [
             _bind_metric(name, b, sources_by_name)
             for name, b in raw_bindings
-            if b.kind is BindingKind.SINGLE
+            if b.kind in {BindingKind.SINGLE, BindingKind.CUMULATIVE}
         ]
         restrict_warnings = (
             _enforce_restrict_source(query, single_kind, resolver, None, sources_by_name)
@@ -409,6 +410,7 @@ def compile(  # noqa: A001 — the public verb for this capability is "compile"
         partial_additive=_first(planned, "partial_additive"),
         recompute_at_grain=_first(planned, "recompute_at_grain"),
         opaque=_first(planned, "opaque"),
+        cumulative=_first(planned, "cumulative"),
         scope=ScopeMetadata(
             tenant=bound_principal.tenant,
             scoped_sources=sorted(composed.scoped_sources),
@@ -459,6 +461,16 @@ def _plan_metric(
             resolver,
             sources_by_name,
             dialect=dialect,
+            principal=principal,
+            effective_policy=effective_policy,
+        )
+    if binding.kind is BindingKind.CUMULATIVE:
+        return plan_cumulative(
+            query,
+            name,
+            binding,
+            resolver,
+            sources_by_name,
             principal=principal,
             effective_policy=effective_policy,
         )
