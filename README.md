@@ -177,6 +177,7 @@ See [Connecting your agent](https://docs.getcanonic.app/mcp-integration/connecti
 | [dutch-railway](https://github.com/mischuh/canonic/tree/main/examples/dutch-railway) | DuckDB | a geography dimension chain and ratio metrics |
 | [marketplace](https://github.com/mischuh/canonic/tree/main/examples/marketplace) | SQLite | tenant scoping, role-based access and column masking |
 | [ossie-retail](https://github.com/mischuh/canonic/tree/main/examples/ossie-retail) | SQLite | context bootstrapped from an Apache Ossie model |
+| [coffeehouse](https://github.com/mischuh/canonic/tree/main/examples/coffeehouse) | DuckDB | the same questions answered by dbt MetricFlow and canonic: count distinct, averages, guardrails |
 
 ## What you can rely on
 

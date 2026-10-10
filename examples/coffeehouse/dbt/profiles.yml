@@ -1,0 +1,12 @@
+# Local profile: dbt builds its marts into its own file and reads the raw tables from the
+# bundled warehouse, attached read-only. The committed coffeehouse.duckdb never changes.
+coffeehouse:
+  target: dev
+  outputs:
+    dev:
+      type: duckdb
+      path: coffeehouse_dbt.duckdb
+      attach:
+        - path: ../coffeehouse.duckdb
+          alias: raw
+          read_only: true

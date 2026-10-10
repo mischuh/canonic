@@ -1,0 +1,10 @@
+id: revenue-per-customer-2026-q1
+query:
+  metrics: [revenue_per_customer]
+  filters: ["order_date >= '2026-01-01'", "order_date < '2026-04-01'"]
+expect:
+  rows: 1
+  values:
+    revenue_per_customer: 156.00
+  tolerance: 0.01
+source_of_truth: "Seed data: 780.00 revenue over 5 distinct active customers in Q1 2026."

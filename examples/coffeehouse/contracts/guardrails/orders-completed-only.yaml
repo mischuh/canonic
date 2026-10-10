@@ -1,0 +1,7 @@
+id: orders-completed-only
+applies_to:
+  source: orders
+kind: mandatory_filter
+filter: "status = 'completed'"
+severity: error
+rationale: "A customer is only active through a completed order. Refunds and cancellations do not count."

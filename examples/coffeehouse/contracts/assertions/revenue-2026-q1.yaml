@@ -1,0 +1,13 @@
+id: revenue-2026-q1
+query:
+  metrics: [revenue]
+  filters: ["order_date >= '2026-01-01'", "order_date < '2026-04-01'"]
+expect:
+  rows: 1
+  values:
+    revenue: 780.00
+  tolerance: 0.01
+source_of_truth: >
+  Seed data: 15 completed, non-test orders, 295.00 + 370.00 + 115.00 = 780.00 by month.
+  All order lines together sum to 1590.00, the difference is two refunds (150.00), one
+  cancellation (60.00) and the QA test order (600.00).

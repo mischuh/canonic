@@ -1,0 +1,10 @@
+# Counted over distinct order_id on the line table: an order with four lines is still one
+# order. Recomputed from base rows at every grain, never summed from partial counts.
+metric: order_count
+canonical:
+  kind: distinct_count
+  source: order_items
+  distinct_on: order_id
+provenance: human_curated
+aliases: ["orders", "number of orders"]
+status: active

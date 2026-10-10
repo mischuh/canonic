@@ -1,0 +1,10 @@
+# Distinct customers with at least one completed order in the requested period. Recomputed
+# from orders at the requested grain, so a quarter is never the sum of its days or months.
+metric: active_customers
+canonical:
+  kind: distinct_count
+  source: orders
+  distinct_on: customer_id
+provenance: human_curated
+aliases: ["customers", "buying customers", "active buyers"]
+status: active

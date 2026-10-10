@@ -1,0 +1,52 @@
+{
+  "case": "coffeehouse_aov_by_category",
+  "columns": [
+    {
+      "name": "category",
+      "type": "string"
+    },
+    {
+      "name": "average_order_value",
+      "type": "float"
+    }
+  ],
+  "dialect": "duckdb",
+  "finality": null,
+  "guardrails_fired": [
+    {
+      "id": "sales-completed-orders-only",
+      "kind": "mandatory_filter",
+      "severity": "error"
+    },
+    {
+      "id": "sales-exclude-test-customers",
+      "kind": "mandatory_filter",
+      "severity": "error"
+    }
+  ],
+  "project": "coffeehouse",
+  "resolved": {
+    "metrics": {
+      "average_order_value": "ratio(revenue, order_count)"
+    }
+  },
+  "row_count": 3,
+  "rows": [
+    [
+      "accessories",
+      30.0
+    ],
+    [
+      "coffee",
+      28.0
+    ],
+    [
+      "equipment",
+      90.0
+    ]
+  ],
+  "trust_tier": "provisional",
+  "warnings": [
+    "zero denominator for metric 'average_order_value' yields NULL (on_zero_denominator=null)"
+  ]
+}

@@ -1,0 +1,11 @@
+name: coffeehouse
+version: "1.0.0"
+config-version: 2
+profile: coffeehouse
+
+model-paths: ["models"]
+target-path: "target"
+
+models:
+  coffeehouse:
+    +materialized: table

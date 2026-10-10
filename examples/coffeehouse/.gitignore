@@ -1,0 +1,6 @@
+# dbt build output, rebuilt by `dbt build`
+dbt/target/
+dbt/logs/
+dbt/coffeehouse_dbt.duckdb
+dbt/coffeehouse_dbt.duckdb.wal
+dbt/.user.yml

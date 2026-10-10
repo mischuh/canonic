@@ -1,0 +1,39 @@
+{
+  "case": "coffeehouse_aov_total",
+  "columns": [
+    {
+      "name": "average_order_value",
+      "type": "float"
+    }
+  ],
+  "dialect": "duckdb",
+  "finality": null,
+  "guardrails_fired": [
+    {
+      "id": "sales-completed-orders-only",
+      "kind": "mandatory_filter",
+      "severity": "error"
+    },
+    {
+      "id": "sales-exclude-test-customers",
+      "kind": "mandatory_filter",
+      "severity": "error"
+    }
+  ],
+  "project": "coffeehouse",
+  "resolved": {
+    "metrics": {
+      "average_order_value": "ratio(revenue, order_count)"
+    }
+  },
+  "row_count": 1,
+  "rows": [
+    [
+      52.0
+    ]
+  ],
+  "trust_tier": "provisional",
+  "warnings": [
+    "zero denominator for metric 'average_order_value' yields NULL (on_zero_denominator=null)"
+  ]
+}

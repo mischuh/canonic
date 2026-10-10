@@ -1,0 +1,23 @@
+name: customers
+connection: coffeehouse_duckdb
+table: customers
+grain: [customer_id]
+description: >
+  One row per customer. is_test marks internal QA accounts, which never count as real
+  business. See [[what-counts-as-a-sale]].
+
+columns:
+  - { name: customer_id, type: int,    nullable: false }
+  - { name: name,        type: string, nullable: false }
+  - { name: country,     type: string, nullable: false }
+  - { name: segment,     type: string, nullable: false }
+  - { name: is_test,     type: bool,   nullable: false }
+
+dimensions:
+  - { name: customer_name, column: name,    label: "Customer" }
+  - { name: country,       column: country, label: "Country" }
+  - { name: segment,       column: segment, label: "Segment", aliases: ["customer segment"] }
+  - { name: is_test,       column: is_test, label: "Test Customer" }
+
+meta:
+  provenance: human_curated

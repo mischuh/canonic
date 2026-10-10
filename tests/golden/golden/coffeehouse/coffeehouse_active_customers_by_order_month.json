@@ -1,0 +1,50 @@
+{
+  "case": "coffeehouse_active_customers_by_order_month",
+  "columns": [
+    {
+      "name": "order_month",
+      "type": "timestamp"
+    },
+    {
+      "name": "active_customers",
+      "type": "int"
+    }
+  ],
+  "dialect": "duckdb",
+  "finality": null,
+  "guardrails_fired": [
+    {
+      "id": "orders-completed-only",
+      "kind": "mandatory_filter",
+      "severity": "error"
+    },
+    {
+      "id": "orders-exclude-test-customers",
+      "kind": "mandatory_filter",
+      "severity": "error"
+    }
+  ],
+  "project": "coffeehouse",
+  "resolved": {
+    "metrics": {
+      "active_customers": "recompute_at_grain(orders.customer_id)"
+    }
+  },
+  "row_count": 3,
+  "rows": [
+    [
+      "2026-01-01T00:00:00",
+      3
+    ],
+    [
+      "2026-02-01T00:00:00",
+      4
+    ],
+    [
+      "2026-03-01T00:00:00",
+      3
+    ]
+  ],
+  "trust_tier": "provisional",
+  "warnings": []
+}

@@ -1,0 +1,29 @@
+name: orders
+connection: coffeehouse_duckdb
+table: orders
+grain: [order_id]
+description: >
+  One row per order header. Refunded and cancelled orders stay in the table with their
+  status, and the QA test customer places real-looking orders. Both are stripped by
+  mandatory_filter guardrails. See [[what-counts-as-a-sale]].
+
+columns:
+  - { name: order_id,    type: int,    nullable: false }
+  - { name: customer_id, type: int,    nullable: false }
+  - { name: order_date,  type: date,   nullable: false }
+  - { name: status,      type: string, nullable: false }
+  - { name: channel,     type: string, nullable: false }
+
+dimensions:
+  - { name: order_date,  column: order_date, label: "Order Date",  granularity: day }
+  - { name: order_month, column: order_date, label: "Order Month", granularity: month }
+  - { name: status,      column: status,     label: "Order Status" }
+  - { name: channel,     column: channel,    label: "Channel", aliases: ["sales channel"] }
+
+joins:
+  - to: customers
+    on: "orders.customer_id = customers.customer_id"
+    relationship: many_to_one
+
+meta:
+  provenance: human_curated
