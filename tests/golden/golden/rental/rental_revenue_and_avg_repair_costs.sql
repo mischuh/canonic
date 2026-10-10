@@ -9,11 +9,11 @@ WITH "_leaf_0" AS (
     )
 ), "_leaf_1" AS (
   SELECT
-    SUM(CASE WHEN "payments"."status" = 'settled' THEN "payments"."amount" ELSE 0 END) AS "total_paid"
+    SUM(CASE WHEN "payments"."status" = 'settled' THEN "payments"."amount" ELSE 0 END) AS "rental_revenue"
   FROM "payments" AS "payments"
 )
 SELECT
-  "_leaf_1"."total_paid" AS "total_paid",
+  "_leaf_1"."rental_revenue" AS "rental_revenue",
   CAST("_leaf_0"."total_repair_cost" AS REAL) / NULLIF("_leaf_0"."damage_count", 0) AS "avg_repair_costs"
 FROM "_leaf_0"
 CROSS JOIN "_leaf_1"

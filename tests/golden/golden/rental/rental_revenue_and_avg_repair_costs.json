@@ -2,7 +2,7 @@
   "case": "rental_revenue_and_avg_repair_costs",
   "columns": [
     {
-      "name": "total_paid",
+      "name": "rental_revenue",
       "type": "float"
     },
     {

@@ -10,7 +10,7 @@
       "type": "int"
     },
     {
-      "name": "scheduled_stop_count",
+      "name": "scheduled_stops",
       "type": "int"
     }
   ],

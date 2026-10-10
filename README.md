@@ -76,9 +76,9 @@ Real output (abridged) from `canonic --json query --metrics gross_revenue` in th
 
 ```json
 {
-  "result": { "columns": [{ "name": "total_amount", "type": "decimal" }], "rows": [["77071.00"]] },
+  "result": { "columns": [{ "name": "gross_revenue", "type": "decimal" }], "rows": [["77071.00"]] },
   "compiled": {
-    "sql": "SELECT SUM(\"fct_invoices\".\"amount\") AS \"total_amount\" FROM \"fct_invoices\" AS \"fct_invoices\" WHERE \"fct_invoices\".\"status\" <> 'refunded' AND \"fct_invoices\".\"is_trial\" = FALSE",
+    "sql": "SELECT SUM(\"fct_invoices\".\"amount\") AS \"gross_revenue\" FROM \"fct_invoices\" AS \"fct_invoices\" WHERE \"fct_invoices\".\"status\" <> 'refunded' AND \"fct_invoices\".\"is_trial\" = FALSE",
     "dialect": "duckdb"
   },
   "metadata": {

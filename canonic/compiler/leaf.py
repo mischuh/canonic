@@ -92,8 +92,9 @@ class LeafMetric:
 
     ``population_filter`` is the metric's own declared population (SPEC-fuller-E15 §4.5),
     already combined with any enclosing composite's filter by the caller. ``alias``
-    overrides the output column name, which the composite path uses so a component's
-    column can be referenced by a fixed name in the compose expression.
+    overrides the output column name. Every strategy sets it to the metric's name, so a
+    result column is always named after the metric the caller asked for, and two metrics
+    on one measure never share a column name.
     """
 
     resolved: _ResolvedMetric
@@ -184,7 +185,9 @@ class LeafKey:
     join_path: tuple[tuple[str, str, str], ...]
     finality: tuple[str, ...]
     strategy_params: tuple[tuple[str, str], ...]
-    measures: tuple[tuple[str, str], ...]
+    #: ``(measure, rendered expr, output column)`` per projected metric. The column is part of
+    #: the key so two metric names never collapse into one leaf that projects only one of them.
+    measures: tuple[tuple[str, str, str], ...]
 
     @property
     def fusion_key(self) -> tuple[object, ...]:
@@ -578,7 +581,8 @@ def plan_leaf(
         finality=finality_key,
         strategy_params=strategy_params,
         measures=tuple(
-            (m.measure.name, _render(_measure_expr(m.source, m.measure))) for m in resolved
+            (m.measure.name, _render(_measure_expr(m.source, m.measure)), alias)
+            for m, alias in zip(resolved, aliases, strict=True)
         ),
     )
 

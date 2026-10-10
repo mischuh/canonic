@@ -138,6 +138,7 @@ def plan_metric(
             LeafMetric(
                 resolved=resolved,
                 population_filter=binding.binding.canonical.population_filter,
+                alias=queried_name,
             )
         ],
         strategy="cumulative",
@@ -153,7 +154,7 @@ def plan_metric(
         leaves=[leaf],
         metric=MetricPlan(
             name=queried_name,
-            refs=(LeafRef(leaf=0, column=measure.name),),
+            refs=(LeafRef(leaf=0, column=queried_name),),
             accumulate=Accumulate(
                 order_by=order_by,
                 partition_by=partition_by,

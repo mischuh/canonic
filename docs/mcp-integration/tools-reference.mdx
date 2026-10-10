@@ -27,7 +27,7 @@ A client that supports MCP server extensions (SEP-2133) does not need either too
 
 ```json
 {
-  "app.getcanonic/contract": {"schema": "2.13", "major": 2, "minor": 13}
+  "app.getcanonic/contract": {"schema": "3.0", "major": 3, "minor": 0}
 }
 ```
 
@@ -38,7 +38,7 @@ A client that declares its own `major`/`minor` for a request gets a MAJOR mismat
 Returns the serving contract version this daemon implements. Call at session start to confirm compatibility.
 
 ```json
-{"contract_schema": "2.13"}
+{"contract_schema": "3.0"}
 ```
 
 ### `negotiate_contract(contract_major: int)`
@@ -79,7 +79,7 @@ On an `ambiguous_join_path` error, inspect the returned candidates (each has a `
 
 ### `query(query: dict)`
 
-Same `query` shape as `compile_query`, but compiles **and executes** read-only. Returns rows plus compiler metadata: resolved bindings, guardrails fired, freshness, and `trust_score` (tier plus reasons, see [Trust score](/concepts/contracts-and-guardrails#trust-score)). A query with a [cumulative metric](/reference/contract-schema#cumulative-metrics) also carries `cumulative`: the metric, its `order_by`, the `partition_by` resolved for this query, `on_gap`, and the `visibility_filters` that only chose which rows are shown. This is the main path: with `--json`/over MCP, the payload is identical to `canonic query --json`.
+Same `query` shape as `compile_query`, but compiles **and executes** read-only. Returns rows, with the dimension columns first and then one column per requested metric, named after that metric, plus compiler metadata: resolved bindings, guardrails fired, freshness, and `trust_score` (tier plus reasons, see [Trust score](/concepts/contracts-and-guardrails#trust-score)). A query with a [cumulative metric](/reference/contract-schema#cumulative-metrics) also carries `cumulative`: the metric, its `order_by`, the `partition_by` resolved for this query, `on_gap`, and the `visibility_filters` that only chose which rows are shown. This is the main path: with `--json`/over MCP, the payload is identical to `canonic query --json`.
 
 ### `run_sql(sql: str, connection: str | None = None)`
 

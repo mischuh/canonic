@@ -204,7 +204,7 @@
         <pre tabindex="0" style="margin: 0; padding: 22px 24px; font-family: 'IBM Plex Mono', monospace; font-size: 12.5px; line-height: 1.7; color: #d8d5cf; overflow-x: auto;">{
   "result": { "rows": [["77071.00"]] },
   "compiled": {
-    "sql": "SELECT SUM(\"fct_invoices\".\"amount\") AS \"total_amount\"
+    "sql": "SELECT SUM(\"fct_invoices\".\"amount\") AS \"gross_revenue\"
             FROM \"fct_invoices\" AS \"fct_invoices\"
             WHERE \"fct_invoices\".\"status\" &lt;&gt; 'refunded'
               AND \"fct_invoices\".\"is_trial\" = FALSE",

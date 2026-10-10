@@ -96,6 +96,7 @@ def _plan_leaf(
                 population_filter=_combine_population_filters(
                     composite_population_filter, component.binding.canonical.population_filter
                 ),
+                alias=component.metric,
             )
         ],
         finality_metric=component.metric,

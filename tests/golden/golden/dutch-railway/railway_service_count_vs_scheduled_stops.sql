@@ -1,6 +1,6 @@
 WITH "_leaf_0" AS (
   SELECT
-    COUNT("fact_services"."service_sk") AS "scheduled_stop_count"
+    COUNT("fact_services"."service_sk") AS "scheduled_stops"
   FROM "fact_services" AS "fact_services"
 ), "_leaf_1" AS (
   SELECT
@@ -11,6 +11,6 @@ WITH "_leaf_0" AS (
 )
 SELECT
   "_leaf_1"."service_count" AS "service_count",
-  "_leaf_0"."scheduled_stop_count" AS "scheduled_stop_count"
+  "_leaf_0"."scheduled_stops" AS "scheduled_stops"
 FROM "_leaf_0"
 CROSS JOIN "_leaf_1"

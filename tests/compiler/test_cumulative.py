@@ -133,6 +133,17 @@ def _resolver(*, guardrails: tuple[Guardrail, ...] = ()) -> ContractResolver:
             MetricBinding(
                 metric="revenue", canonical=CanonicalRef(source="orders", measure="revenue")
             ),
+            *(
+                MetricBinding(
+                    metric=f"revenue_{category}",
+                    canonical=CanonicalRef(
+                        source="orders",
+                        measure="revenue",
+                        population_filter=f"category = '{category}'",
+                    ),
+                )
+                for category in ("a", "b")
+            ),
             MetricBinding(
                 metric="visit_count",
                 canonical=CanonicalRef(source="visits", measure="visit_count"),
@@ -378,6 +389,37 @@ class TestFilters:
             ["monthly_cumulative_revenue"], ["order_month"], ["order_date >= '2025-01-04'"]
         )
         assert [r["monthly_cumulative_revenue"] for r in rows] == [28.0, 32.0]
+
+    @pytest.mark.parametrize("connect", [_duckdb, _sqlite])
+    def test_order_filter_keeps_metrics_sharing_a_measure_apart(
+        self, connect: Callable[[], tuple[Any, str]]
+    ) -> None:
+        # revenue_a and revenue_b share a measure. A lookup by name in the accumulated CTE once
+        # returned revenue_a twice, back when both columns were named after the measure.
+        con, dialect = connect()
+        result = compile(
+            SemanticQuery(
+                metrics=["revenue_a", "revenue_b", "cumulative_revenue"],
+                dimensions=["order_day"],
+                filters=["order_day >= '2025-01-05'"],
+            ),
+            _resolver(),
+            _sources(),
+            connection_dialects={"wh": dialect},
+        )
+        cursor = con.execute(result.sql)
+        assert [d[0] for d in cursor.description] == [
+            "order_day",
+            "revenue_a",
+            "revenue_b",
+            "cumulative_revenue",
+        ]
+        rows = sorted(tuple(_normalize(v) for v in row) for row in cursor.fetchall())
+        assert rows == [
+            ("2025-01-05", None, 1.0, 23.0),
+            ("2025-01-06", 5.0, None, 28.0),
+            ("2025-02-10", None, 4.0, 32.0),
+        ]
 
     def test_s6_partition_filter_keeps_values(self, run: Any) -> None:
         dims = ["order_day", "category"]

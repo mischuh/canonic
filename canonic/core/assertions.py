@@ -56,7 +56,7 @@ class AssertionService:
             principal=SYSTEM_PRINCIPAL,
         )
         result = await self._ctx.execute(compiled.sql, self._ctx.connection_for_sql(compiled))
-        outcome = match_result(assertion, result, resolved=compiled.resolved)
+        outcome = match_result(assertion, result)
         return dataclasses.replace(outcome, bindings=tuple(compiled.resolved.values()))
 
     async def check_assertions(

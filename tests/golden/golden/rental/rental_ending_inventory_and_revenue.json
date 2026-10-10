@@ -6,7 +6,7 @@
       "type": "int"
     },
     {
-      "name": "total_paid",
+      "name": "rental_revenue",
       "type": "float"
     }
   ],

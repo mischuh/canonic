@@ -113,18 +113,14 @@ def plan_metric(
             )
         grain_dims.append(grain_dim)
 
-    # Which branch this leaf takes decides its output column name, and the column name has
-    # to be known before the leaf is planned. Resolving the dimensions twice is cheap and
-    # pure; what it buys is preserving the existing (inconsistent) aliasing exactly —
-    # collapsing across the dimension names the column after the metric, grouping by it
-    # names the column after the measure. Unifying the two is a separate, user-visible
-    # change and is deliberately not made here.
+    # Grouping by the collapse dimension needs no collapse at all, so the leaf is a plain
+    # aggregate. Either way the column is named after the metric.
     grouped = {
         dim.name
         for _alias, dim in _resolve_dimensions(query, sources_by_name, source_name, alias_to_source)
     }
     collapsed = sa.collapse_dimension not in grouped
-    column = queried_name if collapsed else measure_obj.name
+    column = queried_name
 
     def build(
         inputs: LeafInputs, leaf_metrics: Sequence[LeafMetric]

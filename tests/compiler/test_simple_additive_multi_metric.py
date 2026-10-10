@@ -255,13 +255,14 @@ def test_guardrail_mandatory_filter_scoped_per_metric() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_two_metrics_on_the_same_measure_aggregate_once(transactions: SemanticSource) -> None:
-    """Two metrics resolving to one measure with no filters are literally the same query.
+def test_two_metrics_on_the_same_measure_fuse_into_one_select(
+    transactions: SemanticSource,
+) -> None:
+    """Two metrics resolving to one measure with no filters share one leaf plan.
 
-    Same source, same measure, same (empty) filters, so both the leaf plan *and* the
-    projected column are identical and the aggregate is computed once and referenced
-    twice. This is leaf dedup proper, as opposed to fusion, which merges different
-    measures that share a plan.
+    Same source, same measure, same (empty) filters, so they fuse into a single flat
+    SELECT. Each metric still gets its own column under its own name, since a caller only
+    knows metric names and two columns called after the measure could not be told apart.
     """
     b1 = MetricBinding(
         metric="metric_a", canonical=CanonicalRef(source="transactions", measure="amount")
@@ -275,10 +276,9 @@ def test_two_metrics_on_the_same_measure_aggregate_once(transactions: SemanticSo
     sql_upper = result.sql.upper()
     assert "CASE WHEN" not in sql_upper
     assert "WHERE" not in sql_upper
-    assert sql_upper.count("SUM(") == 1, "one aggregate, referenced by both metrics"
-    assert "_LEAF_1" not in sql_upper
-    # The caller asked for two metrics and gets two output columns.
-    assert result.sql.count('"amount" AS "amount"') == 2
+    assert "WITH" not in sql_upper, "one plan, one flat SELECT"
+    assert 'AS "metric_a"' in result.sql
+    assert 'AS "metric_b"' in result.sql
 
 
 def test_two_distinct_measures_no_filters_fuse_to_one_flat_select(

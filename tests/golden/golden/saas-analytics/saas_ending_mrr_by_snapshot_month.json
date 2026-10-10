@@ -6,7 +6,7 @@
       "type": "timestamp"
     },
     {
-      "name": "mrr_sum",
+      "name": "ending_mrr",
       "type": "decimal"
     }
   ],

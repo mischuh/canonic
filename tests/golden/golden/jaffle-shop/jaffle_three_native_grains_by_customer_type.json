@@ -10,7 +10,7 @@
       "type": "decimal"
     },
     {
-      "name": "row_count",
+      "name": "num_customers",
       "type": "int"
     },
     {

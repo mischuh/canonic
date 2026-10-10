@@ -1,7 +1,7 @@
 WITH "_leaf_0" AS (
   SELECT
     "fact_services"."service_type" AS "service_type",
-    COUNT("fact_services"."service_sk") AS "scheduled_stop_count"
+    COUNT("fact_services"."service_sk") AS "scheduled_stops"
   FROM "fact_services" AS "fact_services"
   GROUP BY
     "fact_services"."service_type"
@@ -26,7 +26,7 @@ WITH "_leaf_0" AS (
 SELECT
   "_grain"."service_type" AS "service_type",
   "_leaf_1"."service_count" AS "service_count",
-  "_leaf_0"."scheduled_stop_count" AS "scheduled_stop_count"
+  "_leaf_0"."scheduled_stops" AS "scheduled_stops"
 FROM "_grain"
 LEFT JOIN "_leaf_0"
   ON (

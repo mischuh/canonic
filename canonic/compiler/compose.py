@@ -407,10 +407,15 @@ def compose(
     # through it, even when it is the only leaf.
     single_cte = len(physical) == 1 and not accumulating
     dim_source = names[0] if single_cte else _GRAIN
+    visibility = any(cast("Accumulate", m.accumulate).visibility for m in accumulating)
+    # When the result is read back by name from the accumulated CTE, each metric gets a
+    # positional alias there and its output name only in the final SELECT, so the read never
+    # depends on output names being unique or distinct from a dimension name.
+    internal = [f"_m{i}" for i in range(len(metrics))] if visibility else None
     projections: list[exp.Expression] = [
         _alias(cast("exp.Expression", exp.column(dim, table=dim_source)), dim) for dim in dim_names
     ]
-    for metric in metrics:
+    for position, metric in enumerate(metrics):
         columns = [
             cast("exp.Expression", exp.column(ref.column, table=names_by_index[owner_of[ref.leaf]]))
             for ref in metric.refs
@@ -418,7 +423,7 @@ def compose(
         value = _combine_expr(metric, columns)
         if metric.accumulate is not None:
             value = _accumulate_expr(metric.accumulate, value)
-        projections.append(_alias(value, metric.name))
+        projections.append(_alias(value, internal[position] if internal else metric.name))
     if with_is_final:
         projections.append(
             _alias(cast("exp.Expression", exp.column(_IS_FINAL, table=dim_source)), _IS_FINAL)
@@ -467,10 +472,15 @@ def compose(
 
     final: exp.Select = outer
     if visible:
+        assert internal is not None  # noqa: S101 — visible implies a visibility filter
+        renames = [
+            *zip(dim_names, dim_names, strict=True),
+            *zip(internal, (m.name for m in metrics), strict=True),
+        ]
         final = exp.Select().select(
             *(
-                _alias(cast("exp.Expression", exp.column(column, table=_ACCUMULATED)), column)
-                for column in [*dim_names, *(m.name for m in metrics)]
+                _alias(cast("exp.Expression", exp.column(column, table=_ACCUMULATED)), output)
+                for column, output in renames
             )
         )
         final = final.from_(exp.to_table(_ACCUMULATED)).join(

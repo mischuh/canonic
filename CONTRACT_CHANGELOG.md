@@ -49,6 +49,19 @@ A change listed here was reviewed against the classification rules and did not b
 
 ## History
 
+## 3.0 (2026-10-10) - MAJOR
+
+- ADR/PR: this PR (feat(compiler)!: name result columns after the metric)
+- Summary: every metric column in a result is named after the metric the query asked for.
+  Before, `single` metrics and `semi_additive` metrics grouped by their collapse dimension
+  came out under their measure's name, so two metrics bound to one measure produced two
+  columns with the same name and a client could not tell them apart. `ratio`, `weighted_avg`,
+  `distinct_count`, `percentile`, `opaque` and `cumulative` metrics already used the metric
+  name. The request shape, `QueryMetadata` and the error registry are unchanged, and so are
+  the values. Assertions now match `expect.values` keys against result columns directly.
+  Classified MAJOR under §4.2: a client that reads a result column by its measure name
+  breaks.
+
 ## 2.13 (2026-10-10) - MINOR
 
 - ADR/PR: this PR (feat(compiler): add cumulative metrics)

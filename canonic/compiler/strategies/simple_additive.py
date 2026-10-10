@@ -69,7 +69,9 @@ def plan_metric(
     """
     resolved = _bind_metric(queried_name, binding, sources_by_name)
     leaf_metric = LeafMetric(
-        resolved=resolved, population_filter=binding.binding.canonical.population_filter
+        resolved=resolved,
+        population_filter=binding.binding.canonical.population_filter,
+        alias=queried_name,
     )
     leaf = plan_leaf(
         LeafContext(
@@ -83,12 +85,10 @@ def plan_metric(
         [leaf_metric],
         finality_metric=queried_name,
     )
-    # The output column keeps the measure's name, as it always has on this path.
-    column = resolved.measure.name
     return MetricLeaves(
         leaves=[leaf],
-        metric=MetricPlan(name=column, refs=(LeafRef(leaf=0, column=column),)),
-        resolved=f"{resolved.source}.{column}",
+        metric=MetricPlan(name=queried_name, refs=(LeafRef(leaf=0, column=queried_name),)),
+        resolved=f"{resolved.source}.{resolved.measure.name}",
     )
 
 
