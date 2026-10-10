@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.37.0](https://github.com/mischuh/canonic/compare/v0.36.2...v0.37.0) (2026-10-10)
+
+
+### Features
+
+* **compiler:** add cumulative metrics ([#396](https://github.com/mischuh/canonic/issues/396)) ([f01114e](https://github.com/mischuh/canonic/commit/f01114ecec26b3e620b986cf5420cf6b4c8abb73))
+
+
+### Documentation
+
+* **examples:** add coffeehouse example comparing dbt metricflow and canonic ([#394](https://github.com/mischuh/canonic/issues/394)) ([eab3286](https://github.com/mischuh/canonic/commit/eab3286c5895745cee4f2b14357d43b9e97edda0))
+
 ## [0.36.2](https://github.com/mischuh/canonic/compare/v0.36.1...v0.36.2) (2026-10-10)
 
 
