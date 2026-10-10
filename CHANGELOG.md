@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.38.0](https://github.com/mischuh/canonic/compare/v0.37.0...v0.38.0) (2026-10-10)
+
+
+### ⚠ BREAKING CHANGES
+
+* **compiler:** a result column that used to carry the measure name now carries the metric name, for example total_paid becomes rental_revenue.
+
+### Features
+
+* **compiler:** name result columns after the metric ([#397](https://github.com/mischuh/canonic/issues/397)) ([f1893e4](https://github.com/mischuh/canonic/commit/f1893e4487d2839c191223301d204c634d8e0dd7))
+
 ## [0.37.0](https://github.com/mischuh/canonic/compare/v0.36.2...v0.37.0) (2026-10-10)
 
 
