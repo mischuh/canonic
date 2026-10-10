@@ -2,7 +2,7 @@
   "case": "rental_rental_revenue",
   "columns": [
     {
-      "name": "total_paid",
+      "name": "rental_revenue",
       "type": "float"
     }
   ],

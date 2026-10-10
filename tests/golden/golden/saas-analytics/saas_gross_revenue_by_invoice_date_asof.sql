@@ -1,6 +1,6 @@
 SELECT
   DATE_TRUNC('DAY', "fct_invoices"."invoice_date") AS "invoice_date",
-  SUM("fct_invoices"."amount") AS "total_amount",
+  SUM("fct_invoices"."amount") AS "gross_revenue",
   TRUE AS "is_final"
 FROM "fct_invoices" AS "fct_invoices"
 WHERE
@@ -12,7 +12,7 @@ GROUP BY
 UNION ALL
 SELECT
   DATE_TRUNC('DAY', "fct_invoices_rt"."invoice_date") AS "invoice_date",
-  SUM("fct_invoices_rt"."amount") AS "total_amount",
+  SUM("fct_invoices_rt"."amount") AS "gross_revenue",
   FALSE AS "is_final"
 FROM "fct_invoices_rt" AS "fct_invoices_rt"
 WHERE

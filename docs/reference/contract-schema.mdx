@@ -228,7 +228,7 @@ source_of_truth: "Finance close, FY25 Q1"
 | Field | Type | Default | Governs |
 | --- | --- | --- | --- |
 | `rows` | `int \| null` | `null` | Expected row count. |
-| `values` | `dict[str, Any]` | `{}` | Expected value per output column. |
+| `values` | `dict[str, Any]` | `{}` | Expected value per output column, keyed by the metric or dimension name from `query`. |
 | `tolerance` | `float \| null` | `null` | Relative tolerance for numeric comparison (e.g. `0.01` = 1%). `null` means exact match. |
 
 An assertion is a known-good query paired with the answer it should produce, usually sourced from a finance close or another trusted report. `query` is run through the exact same compiler path a real caller would hit, so an assertion tests the whole stack, not just the metric definition in isolation. `source_of_truth` matters more than it looks: it's the thing that lets a reviewer trust the expected value in the first place, an assertion with no traceable origin is just a number someone typed in.

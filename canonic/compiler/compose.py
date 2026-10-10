@@ -408,9 +408,9 @@ def compose(
     single_cte = len(physical) == 1 and not accumulating
     dim_source = names[0] if single_cte else _GRAIN
     visibility = any(cast("Accumulate", m.accumulate).visibility for m in accumulating)
-    # Output names are not unique: two metrics bound to the same measure both come out under
-    # the measure's name. When the result is read back by name from the accumulated CTE,
-    # each metric gets a positional alias there and its output name only in the final SELECT.
+    # When the result is read back by name from the accumulated CTE, each metric gets a
+    # positional alias there and its output name only in the final SELECT, so the read never
+    # depends on output names being unique or distinct from a dimension name.
     internal = [f"_m{i}" for i in range(len(metrics))] if visibility else None
     projections: list[exp.Expression] = [
         _alias(cast("exp.Expression", exp.column(dim, table=dim_source)), dim) for dim in dim_names

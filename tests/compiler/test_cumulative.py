@@ -394,8 +394,8 @@ class TestFilters:
     def test_order_filter_keeps_metrics_sharing_a_measure_apart(
         self, connect: Callable[[], tuple[Any, str]]
     ) -> None:
-        # revenue_a and revenue_b both come out under the measure's name, so the rows are read
-        # by position: a lookup by name in the accumulated CTE once returned revenue_a twice.
+        # revenue_a and revenue_b share a measure. A lookup by name in the accumulated CTE once
+        # returned revenue_a twice, back when both columns were named after the measure.
         con, dialect = connect()
         result = compile(
             SemanticQuery(
@@ -410,8 +410,8 @@ class TestFilters:
         cursor = con.execute(result.sql)
         assert [d[0] for d in cursor.description] == [
             "order_day",
-            "revenue",
-            "revenue",
+            "revenue_a",
+            "revenue_b",
             "cumulative_revenue",
         ]
         rows = sorted(tuple(_normalize(v) for v in row) for row in cursor.fetchall())

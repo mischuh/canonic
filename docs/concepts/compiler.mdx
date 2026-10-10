@@ -79,7 +79,7 @@ canonic sl compile --metrics rental_revenue --dimensions pickup.country
 ```text
 dialect: sqlite
 
-SELECT "pickup"."country" AS "country", SUM(CASE WHEN "payments"."status" = 'settled' THEN "payments"."amount" ELSE 0 END) AS "total_paid" FROM "payments" AS "payments"
+SELECT "pickup"."country" AS "country", SUM(CASE WHEN "payments"."status" = 'settled' THEN "payments"."amount" ELSE 0 END) AS "rental_revenue" FROM "payments" AS "payments"
 LEFT JOIN "rentals" AS "rentals" ON "payments"."rental_id" = "rentals"."rental_id" LEFT JOIN "locations" AS "pickup" ON "rentals"."pickup_location_id" =
 "pickup"."location_id" GROUP BY "pickup"."country"
 

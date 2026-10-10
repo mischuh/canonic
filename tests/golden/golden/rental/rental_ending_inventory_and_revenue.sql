@@ -1,6 +1,6 @@
 WITH "_leaf_0" AS (
   SELECT
-    SUM(CASE WHEN "payments"."status" = 'settled' THEN "payments"."amount" ELSE 0 END) AS "total_paid"
+    SUM(CASE WHEN "payments"."status" = 'settled' THEN "payments"."amount" ELSE 0 END) AS "rental_revenue"
   FROM "payments" AS "payments"
 ), "_leaf_1__ranked" AS (
   SELECT
@@ -20,6 +20,6 @@ WITH "_leaf_0" AS (
 )
 SELECT
   "_leaf_1"."ending_inventory" AS "ending_inventory",
-  "_leaf_0"."total_paid" AS "total_paid"
+  "_leaf_0"."rental_revenue" AS "rental_revenue"
 FROM "_leaf_0"
 CROSS JOIN "_leaf_1"

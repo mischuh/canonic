@@ -8,7 +8,7 @@ WITH "_leaf_0__visible" AS (
   SELECT
     "payments"."payment_date" AS "payment_date",
     "payments"."method" AS "method",
-    SUM(CASE WHEN "payments"."status" = 'settled' THEN "payments"."amount" ELSE 0 END) AS "total_paid"
+    SUM(CASE WHEN "payments"."status" = 'settled' THEN "payments"."amount" ELSE 0 END) AS "cumulative_rental_revenue"
   FROM "payments" AS "payments"
   GROUP BY
     "payments"."payment_date",
@@ -56,13 +56,13 @@ WITH "_leaf_0__visible" AS (
     "_grain"."payment_date" AS "payment_date",
     "_grain"."method" AS "method",
     CASE
-      WHEN COUNT("_leaf_0"."total_paid") OVER (
+      WHEN COUNT("_leaf_0"."cumulative_rental_revenue") OVER (
         PARTITION BY "_grain"."method"
         ORDER BY CASE WHEN "_grain"."payment_date" IS NULL THEN 1 ELSE 0 END ASC, "_grain"."payment_date" ASC
         ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
       ) = 0
       THEN NULL
-      ELSE SUM(COALESCE("_leaf_0"."total_paid", 0)) OVER (
+      ELSE SUM(COALESCE("_leaf_0"."cumulative_rental_revenue", 0)) OVER (
         PARTITION BY "_grain"."method"
         ORDER BY CASE WHEN "_grain"."payment_date" IS NULL THEN 1 ELSE 0 END ASC, "_grain"."payment_date" ASC
         ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW

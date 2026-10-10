@@ -1,7 +1,7 @@
 WITH "_leaf_0" AS (
   SELECT
     "customers"."customer_type" AS "customer_type",
-    COUNT(*) AS "row_count"
+    COUNT(*) AS "num_customers"
   FROM "main"."customers" AS "customers"
   GROUP BY
     "customers"."customer_type"
@@ -26,7 +26,7 @@ WITH "_leaf_0" AS (
 SELECT
   "_grain"."customer_type" AS "customer_type",
   "_leaf_1"."revenue" AS "revenue",
-  "_leaf_0"."row_count" AS "row_count"
+  "_leaf_0"."num_customers" AS "num_customers"
 FROM "_grain"
 LEFT JOIN "_leaf_0"
   ON (

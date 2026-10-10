@@ -6,7 +6,7 @@
       "type": "timestamp"
     },
     {
-      "name": "total_amount",
+      "name": "gross_revenue",
       "type": "decimal"
     },
     {

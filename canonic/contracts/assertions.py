@@ -166,21 +166,15 @@ def _fmt(values: dict[str, Any]) -> str:
     return "{" + ", ".join(f"{k}: {v}" for k, v in values.items()) + "}"
 
 
-def match_result(
-    assertion: Assertion,
-    result: ResultSet,
-    resolved: dict[str, str] | None = None,
-) -> AssertionOutcome:
+def match_result(assertion: Assertion, result: ResultSet) -> AssertionOutcome:
     """Compare an executed ``result`` to an assertion's expectation (SPEC-Fuller-E15 §3.2).
 
     Checks, in order: the row count (when ``expect.rows`` is set), then each expected
     column value against the first result row (within ``tolerance`` when numeric). The
     first divergence produces a failing outcome with a diff; otherwise the outcome passes.
 
-    ``expect.values`` is keyed on the query's *names* (metric/dimension), but the compiler
-    emits the underlying measure name as the SQL column. ``resolved`` (the compiler's
-    ``{metric: "source.measure"}`` map) bridges that gap so an assertion stays written in
-    the user's vocabulary; a key is tried as a direct column first, then via ``resolved``.
+    ``expect.values`` is keyed on the query's metric and dimension names, which are exactly
+    the result's column names.
     """
     expect: AssertionExpect = assertion.expect
 
@@ -193,12 +187,9 @@ def match_result(
 
     if expect.values:
         col_index = {c.name: i for i, c in enumerate(result.columns)}
-        resolved = resolved or {}
         actual_values: dict[str, Any] = {}
         for col in expect.values:
             idx = col_index.get(col)
-            if idx is None and col in resolved:
-                idx = col_index.get(resolved[col].split(".")[-1])
             if idx is None:
                 return AssertionOutcome(
                     assertion_id=assertion.id,

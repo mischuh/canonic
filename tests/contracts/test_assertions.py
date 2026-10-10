@@ -108,15 +108,16 @@ class TestMatchResult:
         outcome = match_result(_assertion(values={"revenue": 0.0}, tolerance=0.01), _result(0.005))
         assert outcome.passed
 
-    def test_metric_name_resolves_to_measure_column(self) -> None:
-        # Query references metric "revenue"; the SQL column is the measure "total_revenue".
-        rs = _result(Decimal("100.0"), column="total_revenue")
-        outcome = match_result(
-            _assertion(values={"revenue": 100.0}),
-            rs,
-            resolved={"revenue": "orders.total_revenue"},
+    def test_metrics_sharing_a_measure_are_checked_against_their_own_columns(self) -> None:
+        rs = ResultSet(
+            columns=[
+                ResultColumn(name="income", type="decimal"),
+                ResultColumn(name="expenses", type="decimal"),
+            ],
+            rows=[[Decimal("100.0"), Decimal("-40.0")]],
         )
-        assert outcome.passed
+        assert match_result(_assertion(values={"income": 100.0, "expenses": -40.0}), rs).passed
+        assert not match_result(_assertion(values={"income": 100.0, "expenses": 100.0}), rs).passed
 
 
 class TestAccuracyReport:
