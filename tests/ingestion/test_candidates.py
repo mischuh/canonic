@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING, Any
+from pathlib import Path
+from typing import Any
 
 from canonic.config import ReconcileConfig, scaffold_project
 from canonic.connectors.base import (
@@ -20,6 +21,7 @@ from canonic.connectors.base import (
     RelationSchema,
     compute_fingerprint,
 )
+from canonic.connectors.dbt import DbtConnector
 from canonic.contracts.models import MetricBinding
 from canonic.ingestion.builder import MODELING_REVIEW_CONFIDENCE, ContextBuilder
 from canonic.ingestion.candidates import CANDIDATE_SENTINEL
@@ -33,9 +35,7 @@ from canonic.ingestion.reconciliation import (
 from canonic.ingestion.source import evidence_from_definitions, evidence_from_introspection
 from canonic.semantic.models import Additivity, Provenance
 
-if TYPE_CHECKING:
-    from pathlib import Path
-
+_DBT_MANIFEST = Path(__file__).parent.parent / "connectors" / "fixtures" / "dbt_manifest.json"
 _NOW = datetime(2026, 10, 5, 12, 0, 0, tzinfo=UTC)
 _CONN = "warehouse"
 
@@ -146,6 +146,18 @@ class TestBuild:
         }
         assert binding["provenance"] == "inferred"
         assert binding[CANDIDATE_SENTINEL] is True
+
+    async def test_dbt_count_distinct_becomes_a_distinct_count_binding(self) -> None:
+        extract = await DbtConnector(_DBT_MANIFEST, source=_CONN).extract_definitions()
+        fct_orders = _schema("analytics.fct_orders", {"order_id": "int", "customer_id": "int"})
+        evidence = [_item(fct_orders), *(_item(d) for d in extract.definitions)]
+        contracts = _contracts(await ContextBuilder().build(evidence))
+        binding = contracts["contracts/metrics/unique_customers.yaml"]
+        assert binding["canonical"] == {
+            "kind": "distinct_count",
+            "source": "fct_orders",
+            "distinct_on": "customer_id",
+        }
 
     async def test_ratio_proposes_components_then_the_ratio(self) -> None:
         result = await _proposals(_shop_definitions())

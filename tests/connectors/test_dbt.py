@@ -12,11 +12,14 @@ if TYPE_CHECKING:
 
 from canonic.connectors.base import (
     AcquisitionTier,
+    CandidateKind,
     Capability,
+    ContractCandidate,
     DefinitionEntityType,
     DefinitionEvidence,
     DefinitionExtract,
     RelationSchema,
+    ReviewFlag,
 )
 from canonic.connectors.dbt import DbtConnector, _normalize_type
 from canonic.exc import ConnectionError, UnsupportedSourceVersionError
@@ -205,13 +208,29 @@ class TestExtractDefinitions:
         assert revenue.expr == "sum(amount)"
         assert len(revenue.references) > 0
 
-    async def test_ac1_count_distinct_is_additive(self, dbt_manifest_path: Path) -> None:
+    async def test_ac1_count_distinct_is_non_additive(self, dbt_manifest_path: Path) -> None:
         connector = DbtConnector(dbt_manifest_path)
         result = await connector.extract_definitions()
         measures = {
             d.entity: d for d in result.definitions if d.entity_type == DefinitionEntityType.MEASURE
         }
-        assert measures["unique_customers"].additivity == Additivity.ADDITIVE
+        assert measures["unique_customers"].additivity == Additivity.NON_ADDITIVE
+        assert measures["unique_customers"].review_flags == []
+        assert measures["unique_customers"].expr == "count(distinct customer_id)"
+
+    async def test_ac1_count_distinct_proposes_distinct_count(
+        self, dbt_manifest_path: Path
+    ) -> None:
+        connector = DbtConnector(dbt_manifest_path)
+        result = await connector.extract_definitions()
+        candidates = [d for d in result.definitions if d.contract_candidate is not None]
+        assert [d.entity for d in candidates] == ["unique_customers"]
+        (candidate,) = candidates
+        assert candidate.entity_type == DefinitionEntityType.METRIC
+        assert candidate.contract_candidate == ContractCandidate(
+            kind=CandidateKind.DISTINCT_COUNT, measures=["unique_customers"]
+        )
+        assert candidate.references
 
     async def test_ac1_average_is_non_additive(self, dbt_manifest_path: Path) -> None:
         connector = DbtConnector(dbt_manifest_path)
@@ -220,6 +239,18 @@ class TestExtractDefinitions:
             d.entity: d for d in result.definitions if d.entity_type == DefinitionEntityType.MEASURE
         }
         assert measures["avg_order_value"].additivity == Additivity.NON_ADDITIVE
+
+    async def test_ac1_average_is_flagged_as_ratio_suggestion(
+        self, dbt_manifest_path: Path
+    ) -> None:
+        connector = DbtConnector(dbt_manifest_path)
+        result = await connector.extract_definitions()
+        measures = {
+            d.entity: d for d in result.definitions if d.entity_type == DefinitionEntityType.MEASURE
+        }
+        assert measures["avg_order_value"].review_flags == [ReviewFlag.AVG_SUGGESTS_RATIO]
+        assert measures["avg_order_value"].expr == "avg(amount)"
+        assert measures["total_revenue"].review_flags == []
 
     async def test_ac1_non_additive_dimension_yields_semi_additive(
         self, dbt_manifest_path: Path
