@@ -22,9 +22,11 @@ from typing import Any
 
 from canonic.connectors.base import (
     AcquisitionTier,
+    CandidateKind,
     Capability,
     ColumnInfo,
     ConnectorBase,
+    ContractCandidate,
     DefinitionEntityType,
     DefinitionEvidence,
     DefinitionExtract,
@@ -33,6 +35,7 @@ from canonic.connectors.base import (
     Health,
     JoinSpec,
     RelationSchema,
+    ReviewFlag,
     compute_fingerprint,
 )
 from canonic.exc import UnsupportedSourceVersionError
@@ -47,9 +50,9 @@ MIN_MANIFEST_SCHEMA_VERSION = 10
 
 # dbt aggregate function name → Canonic Additivity.  All others are recorded
 # with a warning and omitted (additivity=None → "unknown" per SPEC-E3 §3.1).
-_ADDITIVE_AGGS: frozenset[str] = frozenset({"sum", "count", "min", "max", "count_distinct"})
+_ADDITIVE_AGGS: frozenset[str] = frozenset({"sum", "count", "min", "max"})
 _NON_ADDITIVE_AGGS: frozenset[str] = frozenset(
-    {"average", "median", "percentile", "percentile_cont", "percentile_disc"}
+    {"average", "count_distinct", "median", "percentile", "percentile_cont", "percentile_disc"}
 )
 
 # dbt entity type → join relationship direction (primary entity is the "to" side).
@@ -116,6 +119,32 @@ def _normalize_type(raw: str | None, relation: str, column: str) -> str:
         logger.warning("unmapped dbt type %r on %s.%s recorded as json", raw, relation, column)
         return "json"
     return mapped
+
+
+def _render_aggregate(agg_type: str | None, expr: str) -> str:
+    """Render a dbt aggregate over ``expr`` as SQL.
+
+    dbt aggregate names are not all SQL functions: ``average`` is ``avg`` and
+    ``count_distinct`` is ``count(distinct …)``. Other names render as ``name(expr)``.
+    """
+    if not agg_type:
+        return expr
+    t = agg_type.strip().lower()
+    if t == "count_distinct":
+        return f"count(distinct {expr})"
+    if t == "average":
+        return f"avg({expr})"
+    return f"{t}({expr})"
+
+
+def _review_flags_for(agg_type: str | None) -> list[ReviewFlag]:
+    """Flag aggregates that need a human look after import.
+
+    A plain ``average`` is not additive and usually wants a ``ratio`` binding instead.
+    """
+    if agg_type and agg_type.strip().lower() == "average":
+        return [ReviewFlag.AVG_SUGGESTS_RATIO]
+    return []
 
 
 def _additivity_for(agg_type: str | None, relation: str, measure: str) -> Additivity | None:
@@ -403,8 +432,7 @@ class DbtConnector(ConnectorBase):
             # Store the full aggregation expression so the builder can use it verbatim
             # in the semantic source (e.g. "count(order_id)" not just "order_id").
             raw_expr = measure.get("expr") or m_name
-            agg_lower = agg.strip().lower() if agg else None
-            expr = f"{agg_lower}({raw_expr})" if agg_lower else raw_expr
+            expr = _render_aggregate(agg, raw_expr)
             refs = [node_relation] if node_relation else []
             fp = _definition_fingerprint({"entity": m_name, "entity_type": "measure", "expr": expr})
             definitions.append(
@@ -415,11 +443,30 @@ class DbtConnector(ConnectorBase):
                     expr=expr,
                     additivity=additivity,
                     references=refs,
+                    review_flags=_review_flags_for(agg),
                     native_ref=f"{unique_id}#{m_name}",
                     acquisition_tier=AcquisitionTier.MODELING,
                     source_fingerprint=fp,
                 )
             )
+            if agg and agg.strip().lower() == "count_distinct" and not non_additive_dim:
+                # A distinct count only compiles through a ``distinct_count`` binding.
+                definitions.append(
+                    DefinitionEvidence(
+                        source=self._source,
+                        entity=m_name,
+                        entity_type=DefinitionEntityType.METRIC,
+                        references=refs,
+                        contract_candidate=ContractCandidate(
+                            kind=CandidateKind.DISTINCT_COUNT, measures=[m_name]
+                        ),
+                        native_ref=f"{unique_id}#{m_name}",
+                        acquisition_tier=AcquisitionTier.MODELING,
+                        source_fingerprint=_definition_fingerprint(
+                            {"entity": m_name, "entity_type": "metric", "expr": expr}
+                        ),
+                    )
+                )
 
         # DIMENSION definitions
         for dim in sm.get("dimensions", []):
@@ -479,6 +526,7 @@ class DbtConnector(ConnectorBase):
                     additivity=additivity,
                     references=refs,
                     description=description,
+                    review_flags=_review_flags_for(metric_type),
                     native_ref=unique_id,
                     acquisition_tier=AcquisitionTier.MODELING,
                     source_fingerprint=fp,
