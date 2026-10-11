@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.39.0](https://github.com/mischuh/canonic/compare/v0.38.0...v0.39.0) (2026-10-11)
+
+
+### Features
+
+* **compiler:** add history option to cumulative metrics ([#399](https://github.com/mischuh/canonic/issues/399)) ([bd70a89](https://github.com/mischuh/canonic/commit/bd70a89d866567db2eb3f888c99bf06fd6d800f1))
+
 ## [0.38.0](https://github.com/mischuh/canonic/compare/v0.37.0...v0.38.0) (2026-10-10)
 
 
