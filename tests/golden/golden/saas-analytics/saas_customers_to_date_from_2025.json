@@ -1,0 +1,47 @@
+{
+  "case": "saas_customers_to_date_from_2025",
+  "columns": [
+    {
+      "name": "event_date",
+      "type": "timestamp"
+    },
+    {
+      "name": "customers_to_date",
+      "type": "int"
+    }
+  ],
+  "dialect": "duckdb",
+  "finality": null,
+  "guardrails_fired": [],
+  "project": "saas-analytics",
+  "resolved": {
+    "metrics": {
+      "customers_to_date": "cumulative(fct_subscription_events.new_customer_count)"
+    }
+  },
+  "row_count": 5,
+  "rows": [
+    [
+      "2025-03-15T00:00:00",
+      12
+    ],
+    [
+      "2025-05-01T00:00:00",
+      12
+    ],
+    [
+      "2025-06-01T00:00:00",
+      12
+    ],
+    [
+      "2025-08-01T00:00:00",
+      12
+    ],
+    [
+      "2025-10-01T00:00:00",
+      12
+    ]
+  ],
+  "trust_tier": "provisional",
+  "warnings": []
+}

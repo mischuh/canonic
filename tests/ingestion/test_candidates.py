@@ -211,6 +211,7 @@ class TestBuild:
             "source": "orders",
             "measure": "revenue",
             "order_by": ["order_day"],
+            "history": "include",
         }
 
     async def test_cumulative_over_a_non_additive_measure_is_skipped(self) -> None:

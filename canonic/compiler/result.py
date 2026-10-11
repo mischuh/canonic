@@ -108,15 +108,18 @@ class CumulativeMetadata:
     """Records how a cumulative metric was accumulated for this query.
 
     ``partition_by`` is resolved per query: every requested dimension that is not an order
-    dimension, in request order. ``visibility_filters`` are the query filters that read only
-    order columns. They pick which order tuples are shown and never restrict what is
-    accumulated, so a filtered result still carries the total since the first row of data.
+    dimension, in request order. ``history`` is the binding's setting. Under ``include``,
+    ``visibility_filters`` are the query filters that read only order columns. They pick which
+    order tuples are shown and never restrict what is accumulated, so a filtered result still
+    carries the total since the first row of data. Under ``exclude`` every filter restricts
+    what is accumulated and ``visibility_filters`` is empty.
     """
 
     metric: str
     order_by: list[str]
     partition_by: list[str]
     on_gap: str
+    history: str
     visibility_filters: list[str] = field(default_factory=list)
 
 

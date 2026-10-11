@@ -151,6 +151,11 @@ def _resolver(*, guardrails: tuple[Guardrail, ...] = ()) -> ContractResolver:
             _cumulative("cumulative_revenue", ["order_day"]),
             _cumulative("filled_revenue", ["order_day"], on_gap="fill_observed"),
             _cumulative("monthly_cumulative_revenue", ["order_month"]),
+            _cumulative("carried_revenue", ["order_day"], history="include"),
+            _cumulative(
+                "carried_filled_revenue", ["order_day"], on_gap="fill_observed", history="include"
+            ),
+            _cumulative("carried_monthly_revenue", ["order_month"], history="include"),
             _cumulative("year_month_cumulative_revenue", ["order_year", "order_mon"]),
             _cumulative(
                 "revenue_since_jan_3",
@@ -364,31 +369,79 @@ class TestRunningTotal:
 
 
 class TestFilters:
+    """``history: exclude``, the default: every filter applies before accumulating."""
+
+    def test_order_filter_restarts_the_total_at_zero(self, run: Any) -> None:
+        dims = ["order_day", "category"]
+        filters = ["order_day >= '2025-01-05'"]
+        result, rows = run(["cumulative_revenue"], dims, filters)
+        _, base = run(["revenue"], dims, filters)
+        expected = _running(base, "revenue", ["order_day"], ["category"])
+        assert _values(rows, "cumulative_revenue", ["order_day"], ["category"]) == expected
+        assert rows[0] == {"order_day": "2025-01-05", "category": "b", "cumulative_revenue": 1.0}
+        assert result.cumulative is not None
+        assert result.cumulative.history == "exclude"
+        assert result.cumulative.visibility_filters == []
+
+    def test_filter_on_order_and_partition_columns_is_accepted(self, run: Any) -> None:
+        dims = ["order_day", "category"]
+        filters = ["order_day >= '2025-01-03' OR category = 'a'"]
+        _, rows = run(["cumulative_revenue"], dims, filters)
+        _, base = run(["revenue"], dims, filters)
+        expected = _running(base, "revenue", ["order_day"], ["category"])
+        assert _values(rows, "cumulative_revenue", ["order_day"], ["category"]) == expected
+
+    def test_coarse_bucket_accumulates_only_matching_rows(self, run: Any) -> None:
+        _, rows = run(
+            ["monthly_cumulative_revenue"], ["order_month"], ["order_date >= '2025-01-04'"]
+        )
+        assert [r["monthly_cumulative_revenue"] for r in rows] == [6.0, 10.0]
+
+    def test_fill_observed_fills_only_after_the_filter(self, run: Any) -> None:
+        _, rows = run(["filled_revenue"], ["order_day", "category"], ["order_day >= '2025-01-06'"])
+        assert rows == [
+            {"order_day": "2025-01-06", "category": "a", "filled_revenue": 5.0},
+            {"order_day": "2025-02-10", "category": "a", "filled_revenue": 5.0},
+            {"order_day": "2025-02-10", "category": "b", "filled_revenue": 4.0},
+        ]
+
+    def test_history_settings_do_not_share_a_leaf(self, run: Any) -> None:
+        _, rows = run(
+            ["cumulative_revenue", "carried_revenue"], ["order_day"], ["order_day >= '2025-01-06'"]
+        )
+        assert [(r["cumulative_revenue"], r["carried_revenue"]) for r in rows] == [
+            (5.0, 28.0),
+            (9.0, 32.0),
+        ]
+
+
+class TestFiltersWithHistory:
+    """``history: include``: an order filter only picks which order tuples are shown."""
+
     def test_s5_order_filter_shows_tuples_without_restarting(self, run: Any) -> None:
         dims = ["order_day", "category"]
-        _, unfiltered = run(["cumulative_revenue"], dims)
-        result, filtered = run(["cumulative_revenue"], dims, ["order_day >= '2025-01-05'"])
+        _, unfiltered = run(["carried_revenue"], dims)
+        result, filtered = run(["carried_revenue"], dims, ["order_day >= '2025-01-05'"])
         assert filtered == [
             r for r in unfiltered if r["order_day"] is not None and r["order_day"] >= "2025-01-05"
         ]
         assert filtered[0] == {
             "order_day": "2025-01-05",
             "category": "b",
-            "cumulative_revenue": 6.0,
+            "carried_revenue": 6.0,
         }
         assert result.cumulative is not None
         assert result.cumulative.visibility_filters == ["order_day >= '2025-01-05'"]
 
-    def test_s5_filter_on_the_raw_order_column(self, run: Any) -> None:
-        _, by_dimension = run(["cumulative_revenue"], ["order_day"], ["order_day >= '2025-01-05'"])
-        _, by_column = run(["cumulative_revenue"], ["order_day"], ["order_date >= '2025-01-05'"])
+    @pytest.mark.parametrize("metric", ["cumulative_revenue", "carried_revenue"])
+    def test_s5_filter_on_the_raw_order_column(self, run: Any, metric: str) -> None:
+        _, by_dimension = run([metric], ["order_day"], ["order_day >= '2025-01-05'"])
+        _, by_column = run([metric], ["order_day"], ["order_date >= '2025-01-05'"])
         assert by_dimension == by_column
 
     def test_coarse_bucket_is_shown_when_one_of_its_rows_matches(self, run: Any) -> None:
-        _, rows = run(
-            ["monthly_cumulative_revenue"], ["order_month"], ["order_date >= '2025-01-04'"]
-        )
-        assert [r["monthly_cumulative_revenue"] for r in rows] == [28.0, 32.0]
+        _, rows = run(["carried_monthly_revenue"], ["order_month"], ["order_date >= '2025-01-04'"])
+        assert [r["carried_monthly_revenue"] for r in rows] == [28.0, 32.0]
 
     @pytest.mark.parametrize("connect", [_duckdb, _sqlite])
     def test_order_filter_keeps_metrics_sharing_a_measure_apart(
@@ -399,7 +452,7 @@ class TestFilters:
         con, dialect = connect()
         result = compile(
             SemanticQuery(
-                metrics=["revenue_a", "revenue_b", "cumulative_revenue"],
+                metrics=["revenue_a", "revenue_b", "carried_revenue"],
                 dimensions=["order_day"],
                 filters=["order_day >= '2025-01-05'"],
             ),
@@ -412,7 +465,7 @@ class TestFilters:
             "order_day",
             "revenue_a",
             "revenue_b",
-            "cumulative_revenue",
+            "carried_revenue",
         ]
         rows = sorted(tuple(_normalize(v) for v in row) for row in cursor.fetchall())
         assert rows == [
@@ -432,7 +485,7 @@ class TestFilters:
     def test_s7_filter_on_order_and_partition_columns_is_refused(self, run: Any) -> None:
         with pytest.raises(UnsupportedMeasure, match="reads order and non-order columns"):
             run(
-                ["cumulative_revenue"],
+                ["carried_revenue"],
                 ["order_day", "category"],
                 ["order_day >= '2025-01-03' OR category = 'a'"],
             )
@@ -490,12 +543,14 @@ class TestGaps:
         assert result.warnings == []
 
     def test_fill_observed_rows_respect_visibility(self, run: Any) -> None:
-        _, rows = run(["filled_revenue"], ["order_day", "category"], ["order_day >= '2025-01-06'"])
+        _, rows = run(
+            ["carried_filled_revenue"], ["order_day", "category"], ["order_day >= '2025-01-06'"]
+        )
         assert rows == [
-            {"order_day": "2025-01-06", "category": "a", "filled_revenue": 22.0},
-            {"order_day": "2025-01-06", "category": "b", "filled_revenue": 6.0},
-            {"order_day": "2025-02-10", "category": "a", "filled_revenue": 22.0},
-            {"order_day": "2025-02-10", "category": "b", "filled_revenue": 10.0},
+            {"order_day": "2025-01-06", "category": "a", "carried_filled_revenue": 22.0},
+            {"order_day": "2025-01-06", "category": "b", "carried_filled_revenue": 6.0},
+            {"order_day": "2025-02-10", "category": "a", "carried_filled_revenue": 22.0},
+            {"order_day": "2025-02-10", "category": "b", "carried_filled_revenue": 10.0},
         ]
 
 
@@ -514,7 +569,7 @@ class TestComposition:
 
     def test_non_cumulative_sibling_keeps_its_own_filter(self, run: Any) -> None:
         _, rows = run(
-            ["cumulative_revenue", "revenue"],
+            ["carried_revenue", "revenue"],
             ["order_day", "category"],
             ["order_day >= '2025-01-06'"],
         )
@@ -522,13 +577,13 @@ class TestComposition:
             {
                 "order_day": "2025-01-06",
                 "category": "a",
-                "cumulative_revenue": 22.0,
+                "carried_revenue": 22.0,
                 "revenue": 5.0,
             },
             {
                 "order_day": "2025-02-10",
                 "category": "b",
-                "cumulative_revenue": 10.0,
+                "carried_revenue": 10.0,
                 "revenue": 4.0,
             },
         ]
@@ -539,19 +594,27 @@ class TestComposition:
 
 
 class TestMetadata:
-    def test_compile_result_and_wire_metadata(self, run: Any) -> None:
-        result, _ = run(
-            ["cumulative_revenue"], ["order_day", "category"], ["order_day >= '2025-01-05'"]
-        )
-        assert result.resolved == {"cumulative_revenue": "cumulative(orders.revenue)"}
+    @pytest.mark.parametrize(
+        ("metric", "history", "visibility"),
+        [
+            ("cumulative_revenue", "exclude", []),
+            ("carried_revenue", "include", ["order_day >= '2025-01-05'"]),
+        ],
+    )
+    def test_compile_result_and_wire_metadata(
+        self, run: Any, metric: str, history: str, visibility: list[str]
+    ) -> None:
+        result, _ = run([metric], ["order_day", "category"], ["order_day >= '2025-01-05'"])
+        assert result.resolved == {metric: "cumulative(orders.revenue)"}
         metadata = QueryMetadata.from_compile_result(result).cumulative
         assert metadata is not None
         assert metadata.model_dump() == {
-            "metric": "cumulative_revenue",
+            "metric": metric,
             "order_by": ["order_day"],
             "partition_by": ["category"],
             "on_gap": "skip",
-            "visibility_filters": ["order_day >= '2025-01-05'"],
+            "history": history,
+            "visibility_filters": visibility,
         }
 
     def test_no_cumulative_metadata_for_other_kinds(self, run: Any) -> None:
