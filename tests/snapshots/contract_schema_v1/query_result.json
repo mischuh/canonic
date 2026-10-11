@@ -20,7 +20,7 @@
       "type": "object"
     },
     "CumulativeOut": {
-      "description": "How a cumulative metric's running total was formed for this query.\n\n``partition_by`` is every requested dimension that is not an order dimension, so it\ndiffers per query. ``visibility_filters`` only chose which order tuples are shown. The\ntotal still runs from the first row of data.",
+      "description": "How a cumulative metric's running total was formed for this query.\n\n``partition_by`` is every requested dimension that is not an order dimension, so it\ndiffers per query. Under ``history: exclude`` the total starts at zero at the first row\nthat passes the query's filters. Under ``include`` it runs from the first row of data, and\n``visibility_filters`` only chose which order tuples are shown.",
       "properties": {
         "metric": {
           "title": "Metric",
@@ -45,6 +45,10 @@
           "title": "On Gap",
           "type": "string"
         },
+        "history": {
+          "title": "History",
+          "type": "string"
+        },
         "visibility_filters": {
           "default": [],
           "items": {
@@ -57,7 +61,8 @@
       "required": [
         "metric",
         "order_by",
-        "on_gap"
+        "on_gap",
+        "history"
       ],
       "title": "CumulativeOut",
       "type": "object"
@@ -168,7 +173,7 @@
           "type": "array"
         },
         "contract_schema": {
-          "default": "3.0",
+          "default": "3.1",
           "title": "Contract Schema",
           "type": "string"
         },

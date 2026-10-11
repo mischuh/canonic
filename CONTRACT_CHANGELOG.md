@@ -49,6 +49,19 @@ A change listed here was reviewed against the classification rules and did not b
 
 ## History
 
+## 3.1 (2026-10-11) - MINOR
+
+- ADR/PR: this PR (feat(compiler): add history option to cumulative metrics)
+- Summary: the `cumulative` block in `QueryMetadata` gains `history` (`exclude` or `include`),
+  the binding's setting for rows that a filter on the order columns excludes. Under the new
+  default `exclude`, every query filter applies before accumulating, so a filtered running
+  total starts at zero and `visibility_filters` is empty. `include` keeps the behaviour of 3.0,
+  where such a filter only picks which rows are shown. A filtered cumulative query on a
+  binding without `history` therefore returns different numbers than under 3.0, and
+  `history: include` restores them. The new field lives in the contract file format. No
+  request shape changes and no new error codes. Classified MINOR under §4.1: an additive
+  response field.
+
 ## 3.0 (2026-10-10) - MAJOR
 
 - ADR/PR: this PR (feat(compiler)!: name result columns after the metric)

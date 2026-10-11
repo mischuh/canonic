@@ -31,6 +31,7 @@ from canonic.contracts.models import (
     FinalityRule,
     Guardrail,
     GuardrailKind,
+    History,
     MaskingRule,
     MetricBinding,
     OnGap,
@@ -102,6 +103,7 @@ class CumulativeBinding:
 
     order_by: tuple[str, ...]
     on_gap: OnGap
+    history: History
 
 
 @dataclass(frozen=True, slots=True)
@@ -432,7 +434,9 @@ class ContractResolver:
                 binding=binding,
                 kind=BindingKind.CUMULATIVE,
                 cumulative=CumulativeBinding(
-                    order_by=tuple(canonical.order_by), on_gap=canonical.on_gap
+                    order_by=tuple(canonical.order_by),
+                    on_gap=canonical.on_gap,
+                    history=canonical.history,
                 ),
             )
 

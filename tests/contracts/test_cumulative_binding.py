@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from canonic.contracts.models import BindingKind, CanonicalRef, MetricBinding, OnGap
+from canonic.contracts.models import BindingKind, CanonicalRef, History, MetricBinding, OnGap
 from canonic.contracts.resolver import Binding as ResolvedBinding
 from canonic.contracts.resolver import ContractResolver, CumulativeBinding
 from canonic.contracts.validate import validate_contracts
@@ -104,6 +104,32 @@ class TestShape:
                 on_gap="fill_calendar",
             )
 
+    def test_history_defaults_to_exclude(self) -> None:
+        ref = CanonicalRef(kind="cumulative", source="orders", measure="revenue", order_by=["d"])
+        assert ref.history is History.EXCLUDE
+
+    def test_null_history_is_exclude(self) -> None:
+        ref = CanonicalRef(
+            kind="cumulative", source="orders", measure="revenue", order_by=["d"], history=None
+        )
+        assert ref.history is History.EXCLUDE
+
+    def test_include_history_is_accepted(self) -> None:
+        ref = CanonicalRef(
+            kind="cumulative", source="orders", measure="revenue", order_by=["d"], history="include"
+        )
+        assert ref.history is History.INCLUDE
+
+    def test_unknown_history_is_rejected(self) -> None:
+        with pytest.raises(ValueError, match="history"):
+            CanonicalRef(
+                kind="cumulative",
+                source="orders",
+                measure="revenue",
+                order_by=["d"],
+                history="all",
+            )
+
     @pytest.mark.parametrize("order_by", [None, []])
     def test_order_by_is_required(self, order_by: list[str] | None) -> None:
         with pytest.raises(ValueError, match="order_by"):
@@ -120,7 +146,7 @@ class TestShape:
         with pytest.raises(ValueError, match=missing):
             CanonicalRef(kind="cumulative", order_by=["d"], **fields)
 
-    def test_resolver_carries_order_by_and_on_gap(self) -> None:
+    def test_resolver_carries_order_by_on_gap_and_history(self) -> None:
         binding = MetricBinding(
             metric="cumulative_revenue",
             canonical=CanonicalRef(
@@ -129,6 +155,7 @@ class TestShape:
                 measure="revenue",
                 order_by=["order_day"],
                 on_gap="fill_observed",
+                history="include",
             ),
         )
         resolver = ContractResolver(bindings=[binding], guardrails=(), finality=(), assertions=())
@@ -137,7 +164,7 @@ class TestShape:
         assert resolved.kind is BindingKind.CUMULATIVE
         assert (resolved.source, resolved.measure) == ("orders", "revenue")
         assert resolved.cumulative == CumulativeBinding(
-            order_by=("order_day",), on_gap=OnGap.FILL_OBSERVED
+            order_by=("order_day",), on_gap=OnGap.FILL_OBSERVED, history=History.INCLUDE
         )
         assert resolved.resolved_key == "cumulative(orders.revenue)"
 

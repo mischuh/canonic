@@ -5,11 +5,15 @@ fanout, tenancy, ``population_filter`` and guardrails apply exactly as for a ``s
 metric. The running total itself is a window that compose puts over the spine, after every
 leaf is aggregated. Nothing is ever accumulated over raw rows.
 
-Query filters are split by the columns they read. A filter that reads no order column
-narrows the leaf like any other filter, since partitions accumulate independently. A filter
-that reads only order columns decides which order tuples are shown and is kept out of the
-leaf, so a result from March on still carries the total since the first row of data. A
-filter that reads both has no single answer to "which rows are accumulated" and is refused.
+Under ``history: exclude``, the default, every query filter narrows the leaf, so a result
+from March on is a running total that starts at zero in March.
+
+Under ``history: include``, query filters are split by the columns they read. A filter that
+reads no order column narrows the leaf like any other filter, since partitions accumulate
+independently. A filter that reads only order columns decides which order tuples are shown
+and is kept out of the leaf, so a result from March on still carries the total since the
+first row of data. A filter that reads both has no single answer to "which rows are
+accumulated" and is refused.
 """
 
 from __future__ import annotations
@@ -33,7 +37,7 @@ from canonic.compiler.joins import build_alias_tree
 from canonic.compiler.leaf import AuxCte, LeafContext, LeafMetric, _build_additive, plan_leaf
 from canonic.compiler.result import CumulativeMetadata
 from canonic.compiler.strategies.simple_additive import _bind_metric
-from canonic.contracts.models import OnGap
+from canonic.contracts.models import History, OnGap
 from canonic.exc import Unresolved, UnsupportedMeasure
 from canonic.semantic.models import Additivity
 
@@ -94,20 +98,23 @@ def plan_metric(
     order_set = set(order_dims)
     partition_by = tuple(name for i, name in enumerate(output_names) if i not in order_set)
 
-    order_columns = {
-        (dimensions[i][0], column)
-        for i in order_dims
-        for column in dimensions[i][1].backing_columns()
-    }
-    regular, visibility = _split_filters(
-        queried_name,
-        query.filters,
-        order_columns,
-        sources_by_name,
-        owner,
-        alias_to_source,
-        effective_policy,
-    )
+    regular: list[str] = list(query.filters)
+    visibility: list[str] = []
+    if cumulative.history is History.INCLUDE:
+        order_columns = {
+            (dimensions[i][0], column)
+            for i in order_dims
+            for column in dimensions[i][1].backing_columns()
+        }
+        regular, visibility = _split_filters(
+            queried_name,
+            query.filters,
+            order_columns,
+            sources_by_name,
+            owner,
+            alias_to_source,
+            effective_policy,
+        )
     visibility_conditions, _ = _bind_filters(
         visibility, sources_by_name, owner, alias_to_source, effective_policy
     )
@@ -144,6 +151,7 @@ def plan_metric(
         strategy="cumulative",
         strategy_params=(
             ("order_by", ",".join(order_by)),
+            ("history", str(cumulative.history)),
             ("visibility", "\x00".join(sorted(visibility))),
         ),
         builder=build,
@@ -170,6 +178,7 @@ def plan_metric(
                 query.dimensions[i] for i in range(len(dimensions)) if i not in order_set
             ],
             on_gap=str(cumulative.on_gap),
+            history=str(cumulative.history),
             visibility_filters=list(visibility),
         ),
         warnings=(

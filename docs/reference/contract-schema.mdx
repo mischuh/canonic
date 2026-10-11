@@ -93,6 +93,7 @@ canonical:
   measure: revenue
   order_by: [order_month]   # one or more dimensions, lexicographic in this order
   on_gap: skip              # skip | fill_observed, default skip
+  history: exclude          # exclude | include, default exclude
 ```
 
 **Partition.** The partition is not declared. It is every requested dimension that is not in `order_by`, so the same metric answers "running total overall" and "running total per channel":
@@ -105,13 +106,17 @@ canonical:
 
 **Aggregate first, accumulate last.** The measure is aggregated to the requested dimensions like a `single` metric, so joins, fanout handling, tenancy, `population_filter` and guardrails apply unchanged. The running total is a window over the aggregated rows, from the first order tuple to the current one. Order dimensions sort ascending with `NULL` last on every dialect.
 
-**Filters.** Each query filter is classified by the physical columns it reads:
+#### Filters and history (`history`)
 
-- A filter that reads **no order column** (e.g. `channel = 'online'`) narrows the rows before aggregation, as for any metric.
-- A filter that reads **only order columns** (e.g. `order_date >= '2026-03-01'`) is a visibility filter. It picks which order tuples are shown, and the total still runs from the first row of data: the March row carries everything since the first order, not just March's own revenue. A coarse bucket is shown when at least one of its rows matches.
-- A filter that reads **both** is rejected with `UNSUPPORTED_MEASURE`. Split it into one filter per kind.
+`history` decides whether rows that a query filter on the order columns excludes still count towards the total.
 
-`population_filter` is never a visibility filter. It defines the population and always applies before accumulation.
+- `exclude` (default): every query filter narrows the rows before aggregation, as for any metric. A query with `order_date >= '2026-03-01'` returns a running total that starts at zero in March. Any filter is accepted.
+- `include`: each query filter is classified by the physical columns it reads.
+  - A filter that reads **no order column** (e.g. `channel = 'online'`) narrows the rows before aggregation.
+  - A filter that reads **only order columns** (e.g. `order_date >= '2026-03-01'`) is a visibility filter. It picks which order tuples are shown, and the total still runs from the first row of data: the March row carries everything since the first order, not just March's own revenue. A coarse bucket is shown when at least one of its rows matches.
+  - A filter that reads **both** is rejected with `UNSUPPORTED_MEASURE`. Split it into one filter per kind.
+
+Use `include` when the number means "so far, ever", such as customers to date or an account balance. `population_filter` is never a visibility filter. It defines the population and always applies before accumulation.
 
 #### Gaps (`on_gap`)
 

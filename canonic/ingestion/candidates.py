@@ -143,6 +143,9 @@ def build_candidate_proposals(
                 "source": base["source"],
                 "measure": base["measure"],
                 "order_by": list(candidate.order_by),
+                # MetricFlow accumulates from the start of time even under a time constraint,
+                # so an imported running total keeps the rows before a filter.
+                "history": "include",
             }
             propose(definition.entity, running_total, list(definition.aliases), anchor)
             continue

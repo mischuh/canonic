@@ -26,6 +26,7 @@ __all__ = [
     "FinalityRule",
     "Guardrail",
     "GuardrailKind",
+    "History",
     "KnowledgePolicy",
     "MaskingRule",
     "MaskStrategy",
@@ -111,6 +112,18 @@ class OnGap(StrEnum):
     FILL_OBSERVED = "fill_observed"
 
 
+class History(StrEnum):
+    """Whether a cumulative metric accumulates rows that a filter on its order columns excludes.
+
+    ``EXCLUDE`` applies such a filter before accumulating, so the running total starts at zero
+    at the first row that passes it. ``INCLUDE`` accumulates from the first row of data and
+    uses the filter only to pick which order tuples are shown.
+    """
+
+    EXCLUDE = "exclude"
+    INCLUDE = "include"
+
+
 class CanonicalRef(BaseModel):
     """The canonical binding for a metric — either a single source+measure or a composite (§3).
 
@@ -126,7 +139,7 @@ class CanonicalRef(BaseModel):
     other grain returns UNSUPPORTED_MEASURE (§4.4).
     For ``kind=cumulative``, ``source``, ``measure`` and a non-empty ``order_by`` (dimension
     names, accumulated lexicographically in list order) are required. ``on_gap`` defaults to
-    ``skip``. The partition is not declared: it is every requested dimension that is not an
+    ``skip`` and ``history`` to ``exclude``. The partition is not declared: it is every requested dimension that is not an
     order dimension.
 
     ``population_filter`` is an optional SQL predicate (§4.5) valid for every ``kind``. It defines
@@ -152,6 +165,7 @@ class CanonicalRef(BaseModel):
     native_grain: list[str] | None = None
     order_by: list[str] | None = None
     on_gap: OnGap = OnGap.SKIP
+    history: History = History.EXCLUDE
     population_filter: str | None = None
 
     @field_validator("on_zero_denominator", mode="before")
@@ -166,6 +180,13 @@ class CanonicalRef(BaseModel):
     def _coerce_on_gap(cls, v: object) -> object:
         if v is None:
             return OnGap.SKIP
+        return v
+
+    @field_validator("history", mode="before")
+    @classmethod
+    def _coerce_history(cls, v: object) -> object:
+        if v is None:
+            return History.EXCLUDE
         return v
 
     @model_validator(mode="after")

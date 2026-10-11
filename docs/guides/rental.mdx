@@ -61,7 +61,7 @@ canonic eval baseline \                    # (optional) grain-inference accuracy
 | `active_customers` | distinct count on `rentals.customer_id` | Customers with a non-cancelled rental |
 | `median_rental_amount` | percentile: `rentals.total_amount` | Median order value |
 | `ending_inventory` | semi-additive: `vehicle_inventory.inventory_level` | Fleet size as of the latest snapshot date |
-| `cumulative_rental_revenue` | cumulative: `payments.total_paid` along `payment_date` | Settled revenue to date, per payment method with `on_gap: fill_observed` |
+| `cumulative_rental_revenue` | cumulative: `payments.total_paid` along `payment_date` | Settled revenue to date, per payment method with `on_gap: fill_observed`. A date filter starts the total at zero |
 | `damage_count` / `total_repair_cost` / `avg_repair_costs` | `damages.*` | Damage-claim reporting |
 
 ## Guardrail

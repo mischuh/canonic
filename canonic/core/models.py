@@ -88,8 +88,9 @@ class CumulativeOut(BaseModel):
     """How a cumulative metric's running total was formed for this query.
 
     ``partition_by`` is every requested dimension that is not an order dimension, so it
-    differs per query. ``visibility_filters`` only chose which order tuples are shown. The
-    total still runs from the first row of data.
+    differs per query. Under ``history: exclude`` the total starts at zero at the first row
+    that passes the query's filters. Under ``include`` it runs from the first row of data, and
+    ``visibility_filters`` only chose which order tuples are shown.
     """
 
     model_config = ConfigDict(frozen=True)
@@ -98,6 +99,7 @@ class CumulativeOut(BaseModel):
     order_by: list[str]
     partition_by: list[str] = []
     on_gap: str
+    history: str
     visibility_filters: list[str] = []
 
 
@@ -341,6 +343,7 @@ class QueryMetadata(BaseModel):
                     order_by=list(compiled.cumulative.order_by),
                     partition_by=list(compiled.cumulative.partition_by),
                     on_gap=compiled.cumulative.on_gap,
+                    history=compiled.cumulative.history,
                     visibility_filters=list(compiled.cumulative.visibility_filters),
                 )
                 if compiled.cumulative is not None
