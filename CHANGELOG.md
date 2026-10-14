@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.40.0](https://github.com/mischuh/canonic/compare/v0.39.0...v0.40.0) (2026-10-14)
+
+
+### Features
+
+* **tenancy:** scope a principal to a list of tenants ([#402](https://github.com/mischuh/canonic/issues/402)) ([7239602](https://github.com/mischuh/canonic/commit/72396020dfa2740000addc7e3c4dc58d5342e3db))
+
 ## [0.39.0](https://github.com/mischuh/canonic/compare/v0.38.0...v0.39.0) (2026-10-11)
 
 
