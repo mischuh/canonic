@@ -262,7 +262,7 @@ undeclared_source: deny
 | Field | Type | Default | Governs |
 | --- | --- | --- | --- |
 | `schema` | `Literal["tenancy/v1"]` | n/a (required) | Schema discriminator. |
-| `claim` | `str` | n/a (required) | The verified-token claim carrying the tenant identity. |
+| `claim` | `str` | n/a (required) | The verified-token claim carrying the tenant identity. May hold a scalar or a list of values, a list produces an `IN (...)` predicate, see [Several tenants per principal](/concepts/tenancy-and-access-control#several-tenants-per-principal). |
 | `on_missing_principal` | `deny \| allow_unscoped` | `deny` | Behavior when tenancy is active but the request carries no resolvable tenant. |
 | `scoped_sources` | `list[ScopedSource]` | `[]` | Sources tenant-scoped on a named column, see below. |
 | `shared_sources` | `list[str]` | `[]` | Source names explicitly declared tenant-neutral: no predicate is injected for them. |
@@ -273,7 +273,7 @@ undeclared_source: deny
 | Field | Type | Default | Governs |
 | --- | --- | --- | --- |
 | `source` | `str` | n/a (required) | The scoped source's name. |
-| `column` | `str` | n/a (required) | The column carrying the tenant id: the injected predicate is `<source>.<column> = :tenant`. |
+| `column` | `str` | n/a (required) | The column carrying the tenant id: the injected predicate is `<source>.<column> = :tenant`, or `<source>.<column> IN (:t1, :t2, …)` for a principal with several tenants. |
 
 **Validation rules**, enforced at load time with a file+line location:
 

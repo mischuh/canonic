@@ -33,7 +33,15 @@ from canonic.contracts.models import (
 from canonic.contracts.principal import Principal
 from canonic.contracts.resolver import ContractResolver
 from canonic.exc import TenantScopeMissing, TenantUnresolved, Unresolved
-from canonic.semantic.models import Column, Dimension, Join, Measure, Relationship, SemanticSource
+from canonic.semantic.models import (
+    Column,
+    Dimension,
+    Join,
+    Measure,
+    NormalizedType,
+    Relationship,
+    SemanticSource,
+)
 
 # Shared fixtures — orders (scoped) -> customers (scoped), dim_date (shared),
 # promotions (undeclared — in neither list, a deliberate policy hole).
@@ -185,7 +193,7 @@ def _tenant_predicate(alias: str, column: str, tenant: str) -> str:
 
 
 def test_s11_ac1_tenant_predicate_in_sql(resolver: ContractResolver, sources) -> None:
-    principal = Principal(tenant="4711", roles=("merchant_viewer",))
+    principal = Principal(tenants=("4711",), roles=("merchant_viewer",))
     result = compile(SemanticQuery(metrics=["revenue"]), resolver, sources, principal=principal)
     sqlglot.parse_one(result.sql, dialect="postgres")  # valid SQL
     assert _tenant_predicate("orders", "merchant_id", "4711") in result.sql
@@ -196,8 +204,8 @@ def test_s11_ac1_tenant_predicate_in_sql(resolver: ContractResolver, sources) ->
 
 def test_s11_ac2_byte_identical_except_tenant_literal(resolver: ContractResolver, sources) -> None:
     query = SemanticQuery(metrics=["revenue"])
-    sql_4711 = compile(query, resolver, sources, principal=Principal(tenant="4711")).sql
-    sql_4712 = compile(query, resolver, sources, principal=Principal(tenant="4712")).sql
+    sql_4711 = compile(query, resolver, sources, principal=Principal(tenants=("4711",))).sql
+    sql_4712 = compile(query, resolver, sources, principal=Principal(tenants=("4712",))).sql
     assert sql_4711 != sql_4712
     assert sql_4711.replace("4711", "4712") == sql_4712
 
@@ -207,7 +215,7 @@ def test_s12_ac1_both_scoped_sources_filtered(resolver: ContractResolver, source
         SemanticQuery(metrics=["revenue"], dimensions=["name"]),
         resolver,
         sources,
-        principal=Principal(tenant="4711"),
+        principal=Principal(tenants=("4711",)),
     )
     assert _tenant_predicate("orders", "merchant_id", "4711") in result.sql
     assert _tenant_predicate("customers", "merchant_id", "4711") in result.sql
@@ -220,7 +228,7 @@ def test_s12_ac2_shared_source_gets_no_predicate(resolver: ContractResolver, sou
         SemanticQuery(metrics=["revenue"], dimensions=["day_name"]),
         resolver,
         sources,
-        principal=Principal(tenant="4711"),
+        principal=Principal(tenants=("4711",)),
     )
     assert "dim_date.merchant_id" not in result.sql
     assert result.scope is not None
@@ -241,7 +249,7 @@ def test_s13_ac2_undeclared_source_raises_tenant_scope_missing(
             SemanticQuery(metrics=["revenue"], dimensions=["promo_code"]),
             resolver,
             sources,
-            principal=Principal(tenant="4711"),
+            principal=Principal(tenants=("4711",)),
         )
 
 
@@ -263,7 +271,7 @@ def test_undeclared_source_warns_instead_of_raising(
         SemanticQuery(metrics=["revenue"], dimensions=["promo_code"]),
         resolver,
         sources,
-        principal=Principal(tenant="4711"),
+        principal=Principal(tenants=("4711",)),
     )
     assert any("promotions" in w for w in result.warnings)
 
@@ -295,7 +303,7 @@ def test_s14_ac1_caller_filter_cannot_widen_scope(resolver: ContractResolver, so
         SemanticQuery(metrics=["revenue"], filters=["merchant_id = '9999'"]),
         resolver,
         sources,
-        principal=Principal(tenant="4711"),
+        principal=Principal(tenants=("4711",)),
     )
     assert _tenant_predicate("orders", "merchant_id", "4711") in result.sql
     assert "'9999'" in result.sql
@@ -312,7 +320,7 @@ def test_s14_ac3_crafted_filter_cannot_escape_tenant_predicate(
         SemanticQuery(metrics=["revenue"], filters=["customer_id = '1' OR 1 = 1"]),
         resolver,
         sources,
-        principal=Principal(tenant="4711"),
+        principal=Principal(tenants=("4711",)),
     )
     where = _where_clause(result.sql)
     assert isinstance(where, exp.And)
@@ -335,7 +343,7 @@ def test_s14_ac3_crafted_filter_cannot_escape_tenant_predicate(
 
 
 def test_tenancy_exempt_role_bypasses_scoping_entirely(resolver: ContractResolver, sources) -> None:
-    principal = Principal(tenant=None, roles=("platform_analyst",))
+    principal = Principal(roles=("platform_analyst",))
     result = compile(
         SemanticQuery(metrics=["revenue"], dimensions=["name"]),
         resolver,
@@ -351,7 +359,7 @@ def test_tenancy_exempt_role_bypasses_scoping_entirely(resolver: ContractResolve
 def test_denied_metric_raises_unresolved_like_a_missing_one(
     resolver: ContractResolver, sources
 ) -> None:
-    principal = Principal(tenant="4711", roles=("merchant_viewer",))
+    principal = Principal(tenants=("4711",), roles=("merchant_viewer",))
     with pytest.raises(Unresolved):
         compile(
             SemanticQuery(metrics=["nonexistent_metric"]), resolver, sources, principal=principal
@@ -384,4 +392,137 @@ def test_no_policy_loaded_is_a_no_op(revenue_binding: MetricBinding, sources) ->
     assert "merchant_id" not in result.sql.lower()
     assert result.scope is not None
     assert result.scope.tenant is None
+    assert result.scope.scoped_sources == []
+
+
+def _scope_column_as(source: SemanticSource, column_type: NormalizedType) -> SemanticSource:
+    """``source`` with its ``merchant_id`` column retyped, everything else untouched."""
+    columns = [
+        c.model_copy(update={"type": column_type}) if c.name == "merchant_id" else c
+        for c in source.columns
+    ]
+    return source.model_copy(update={"columns": columns})
+
+
+def test_tenant_list_compiles_to_in_on_every_scoped_source(
+    resolver: ContractResolver, sources
+) -> None:
+    result = compile(
+        SemanticQuery(metrics=["revenue"], dimensions=["name", "day_name"]),
+        resolver,
+        sources,
+        principal=Principal(tenants=("4711", "4712")),
+    )
+    sqlglot.parse_one(result.sql, dialect="postgres")
+    assert "\"orders\".\"merchant_id\" IN ('4711', '4712')" in result.sql
+    assert "\"customers\".\"merchant_id\" IN ('4711', '4712')" in result.sql
+    assert "dim_date.merchant_id" not in result.sql
+    assert result.scope is not None
+    assert result.scope.tenant == ["4711", "4712"]
+    assert result.scope.scoped_sources == ["customers", "orders"]
+
+
+def test_tenant_list_order_and_duplicates_do_not_change_the_sql(
+    resolver: ContractResolver, sources
+) -> None:
+    query = SemanticQuery(metrics=["revenue"])
+    canonical = compile(query, resolver, sources, principal=Principal(tenants=("4711", "4712")))
+    shuffled = compile(
+        query, resolver, sources, principal=Principal(tenants=("4712", "4711", "4712"))
+    )
+    assert shuffled.sql == canonical.sql
+
+
+def test_single_element_list_is_the_scalar_predicate(resolver: ContractResolver, sources) -> None:
+    result = compile(
+        SemanticQuery(metrics=["revenue"]),
+        resolver,
+        sources,
+        principal=Principal(tenants=("4711",)),
+    )
+    assert _tenant_predicate("orders", "merchant_id", "4711") in result.sql
+    assert " IN (" not in result.sql
+    assert result.scope is not None
+    assert result.scope.tenant == "4711"
+
+
+def test_crafted_tenant_element_is_bound_as_a_value(resolver: ContractResolver, sources) -> None:
+    """A tenant value shaped like an injection stays one string literal inside the IN list."""
+    crafted = "x') OR (1=1"
+    result = compile(
+        SemanticQuery(metrics=["revenue"]),
+        resolver,
+        sources,
+        principal=Principal(tenants=("4711", crafted)),
+    )
+    where = _where_clause(result.sql)
+    assert not list(where.find_all(exp.Or))
+    in_nodes = list(where.find_all(exp.In))
+    assert len(in_nodes) == 1
+    literals = [lit.this for lit in in_nodes[0].expressions]
+    assert sorted(literals) == sorted(["4711", crafted])
+
+
+def test_tenant_values_follow_the_scope_column_type(
+    resolver: ContractResolver, orders, customers, dim_date, promotions
+) -> None:
+    """Strings from the IdP match an integer column, and the reverse, per scoped source."""
+    int_orders = _scope_column_as(orders, NormalizedType.INT)
+    result = compile(
+        SemanticQuery(metrics=["revenue"], dimensions=["name"]),
+        resolver,
+        [int_orders, customers, dim_date, promotions],
+        principal=Principal(tenants=("4712", 4711)),
+    )
+    assert '"orders"."merchant_id" IN (4711, 4712)' in result.sql
+    assert "\"customers\".\"merchant_id\" IN ('4711', '4712')" in result.sql
+
+
+def test_same_tenant_as_string_and_integer_collapses_to_one_value(
+    resolver: ContractResolver, orders, customers, dim_date, promotions
+) -> None:
+    int_orders = _scope_column_as(orders, NormalizedType.INT)
+    result = compile(
+        SemanticQuery(metrics=["revenue"]),
+        resolver,
+        [int_orders, customers, dim_date, promotions],
+        principal=Principal(tenants=("4711", 4711)),
+    )
+    assert '"orders"."merchant_id" = 4711' in result.sql
+    assert " IN (" not in result.sql
+
+
+def test_non_numeric_tenant_on_integer_column_fails_closed(
+    resolver: ContractResolver, orders, customers, dim_date, promotions
+) -> None:
+    int_orders = _scope_column_as(orders, NormalizedType.INT)
+    with pytest.raises(TenantUnresolved):
+        compile(
+            SemanticQuery(metrics=["revenue"]),
+            resolver,
+            [int_orders, customers, dim_date, promotions],
+            principal=Principal(tenants=("4711", "abc")),
+        )
+
+
+def test_empty_tenant_list_is_tenant_unresolved(resolver: ContractResolver, sources) -> None:
+    with pytest.raises(TenantUnresolved):
+        compile(
+            SemanticQuery(metrics=["revenue"]),
+            resolver,
+            sources,
+            principal=Principal(tenants=(), roles=("merchant_viewer",)),
+        )
+
+
+def test_tenancy_exempt_role_skips_the_tenant_list(resolver: ContractResolver, sources) -> None:
+    result = compile(
+        SemanticQuery(metrics=["revenue"]),
+        resolver,
+        sources,
+        principal=Principal(tenants=("4711", "4712"), roles=("platform_analyst",)),
+    )
+    assert "merchant_id" not in result.sql.lower()
+    assert result.scope is not None
+    assert result.scope.tenancy_exempt is True
     assert result.scope.scoped_sources == []

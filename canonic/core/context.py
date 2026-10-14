@@ -30,7 +30,7 @@ if TYPE_CHECKING:
     from canonic.instrumentation.events import AnswerEventLog
     from canonic.semantic.models import SemanticSource
 
-_ANONYMOUS_PRINCIPAL = Principal(tenant=None)
+_ANONYMOUS_PRINCIPAL = Principal()
 
 logger = logging.getLogger(__name__)
 

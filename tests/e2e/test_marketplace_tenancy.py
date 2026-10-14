@@ -35,10 +35,10 @@ _EXAMPLE = Path(__file__).parents[2] / "examples" / "marketplace"
 _MERCHANT_A = "byte-gadgets"
 _MERCHANT_B = "urban-threads"
 
-_VIEWER = Principal(tenant=_MERCHANT_A, roles=("merchant_viewer",))
-_VIEWER_B = Principal(tenant=_MERCHANT_B, roles=("merchant_viewer",))
-_ADMIN = Principal(tenant=_MERCHANT_A, roles=("merchant_admin",))
-_PLATFORM = Principal(tenant=None, roles=("platform_analyst",))
+_VIEWER = Principal(tenants=(_MERCHANT_A,), roles=("merchant_viewer",))
+_VIEWER_B = Principal(tenants=(_MERCHANT_B,), roles=("merchant_viewer",))
+_ADMIN = Principal(tenants=(_MERCHANT_A,), roles=("merchant_admin",))
+_PLATFORM = Principal(roles=("platform_analyst",))
 _NO_PRINCIPAL = None
 
 

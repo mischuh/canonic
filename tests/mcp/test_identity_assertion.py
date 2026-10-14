@@ -110,9 +110,10 @@ async def _call(
     tool: str,
     args: dict[str, Any],
     era: str = "sessionless",
+    **server_kwargs: Any,
 ) -> Any:
     monkeypatch.setattr("canonic.mcp.server.get_access_token", lambda: token)
-    async with mcp_client(build_server(service), era) as client:
+    async with mcp_client(build_server(service, **server_kwargs), era) as client:
         result = await client.call_tool(tool, args)
     return result.data
 
@@ -170,6 +171,73 @@ class TestScopedPrincipal:
         )
         assert asserted["code"] == "unresolved"
         assert asserted == interactive
+
+
+class TestTenantList:
+    """A principal scoped to several tenants reads exactly those tenants' rows."""
+
+    @pytest.mark.parametrize("token_for", [_interactive_token, _asserted_token])
+    async def test_rows_and_scope_cover_every_listed_tenant(
+        self, tenant_project: Path, monkeypatch: pytest.MonkeyPatch, token_for: Any
+    ) -> None:
+        service = CanonicService.from_project(tenant_project)
+        claims = {"merchant_id": ["4712", "4711"], "roles": ["merchant_viewer"]}
+        response = await _call(service, token_for(claims), monkeypatch, "query", _query("revenue"))
+
+        assert [[str(v) for v in row] for row in response["result"]["rows"]] == [["1149.00"]]
+        assert response["metadata"]["scope"]["tenant"] == ["4711", "4712"]
+        assert response["metadata"]["scope"]["scoped_sources"] == ["orders"]
+        assert _events(tenant_project)[-1]["tenant"] == ["4711", "4712"]
+
+    async def test_one_element_list_reads_like_the_scalar(
+        self, tenant_project: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        service = CanonicService.from_project(tenant_project)
+        claims = {"merchant_id": ["4711"], "roles": ["merchant_viewer"]}
+        listed = await _call(
+            service, _asserted_token(claims), monkeypatch, "query", _query("revenue")
+        )
+        scalar = await _call(
+            service, _asserted_token(_VIEWER_CLAIMS), monkeypatch, "query", _query("revenue")
+        )
+        assert listed["result"] == scalar["result"]
+        assert listed["metadata"]["scope"]["tenant"] == "4711"
+
+    async def test_crafted_tenant_value_reads_nothing_and_cannot_widen_scope(
+        self, tenant_project: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        service = CanonicService.from_project(tenant_project)
+        claims = {"merchant_id": ["4712", "x') OR (1=1"], "roles": ["merchant_viewer"]}
+        response = await _call(
+            service, _asserted_token(claims), monkeypatch, "query", _query("revenue")
+        )
+        assert [[str(v) for v in row] for row in response["result"]["rows"]] == [["999.00"]]
+
+    @pytest.mark.parametrize("empty", [[], [None, ""]])
+    async def test_empty_list_is_tenant_unresolved(
+        self, tenant_project: Path, monkeypatch: pytest.MonkeyPatch, empty: list[Any]
+    ) -> None:
+        service = CanonicService.from_project(tenant_project)
+        claims = {"merchant_id": empty, "roles": ["merchant_viewer"]}
+        response = await _call(
+            service, _asserted_token(claims), monkeypatch, "query", _query("revenue")
+        )
+        assert response["code"] == "tenant_unresolved"
+
+    async def test_list_above_max_tenants_is_rejected(
+        self, tenant_project: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        service = CanonicService.from_project(tenant_project)
+        claims = {"merchant_id": ["4711", "4712"], "roles": ["merchant_viewer"]}
+        response = await _call(
+            service,
+            _asserted_token(claims),
+            monkeypatch,
+            "query",
+            _query("revenue"),
+            max_tenants=1,
+        )
+        assert response["code"] == "tenant_limit_exceeded"
 
 
 class TestAnswerEventUser:
@@ -264,7 +332,7 @@ class TestPersonalKnowledgeIdentity:
         monkeypatch.setattr(
             "canonic.mcp.server.get_access_token", lambda: _asserted_token(_VIEWER_CLAIMS)
         )
-        principal = Principal(tenant="4711", roles=("merchant_viewer",))
+        principal = Principal(tenants=("4711",), roles=("merchant_viewer",))
         assert _effective_user(principal, user="someone-else") == _EMPLOYEE
 
     def test_effective_user_for_other_tokens_is_client_id(
@@ -274,5 +342,5 @@ class TestPersonalKnowledgeIdentity:
             token="t", client_id="reporting-service", scopes=[], claims=_VIEWER_CLAIMS
         )
         monkeypatch.setattr("canonic.mcp.server.get_access_token", lambda: token)
-        principal = Principal(tenant="4711", roles=("merchant_viewer",))
+        principal = Principal(tenants=("4711",), roles=("merchant_viewer",))
         assert _effective_user(principal, user="someone-else") == "reporting-service"

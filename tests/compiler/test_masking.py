@@ -80,7 +80,7 @@ def resolver_factory(revenue_binding: MetricBinding, role_policy_factory):
 
 @pytest.fixture
 def masked_principal() -> Principal:
-    return Principal(tenant=None, roles=("masked_viewer",))
+    return Principal(roles=("masked_viewer",))
 
 
 def test_null_strategy_replaces_dimension_with_null(
@@ -243,7 +243,7 @@ def test_recompute_at_grain_masks_the_dimension(sources) -> None:
         SemanticQuery(metrics=["distinct_customers"], dimensions=["region"]),
         resolver,
         sources,
-        principal=Principal(tenant=None, roles=("masked_viewer",)),
+        principal=Principal(roles=("masked_viewer",)),
     )
     proj = _projection(_select(result.sql), "region")
     # Re-parsing the emitted ``||`` SQL text yields sqlglot's DPipe node, not the Concat
@@ -305,7 +305,7 @@ def test_semi_additive_masks_projection_but_not_the_partition(sources) -> None:
         SemanticQuery(metrics=["ending_inventory"], dimensions=["warehouse_id"]),
         resolver,
         [inventory],
-        principal=Principal(tenant=None, roles=("masked_viewer",)),
+        principal=Principal(roles=("masked_viewer",)),
     )
     sqlglot.parse_one(result.sql, dialect="postgres")  # valid SQL
     inner_cte = result.sql.split("SELECT ")[1].split(" FROM")[0]

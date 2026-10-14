@@ -468,8 +468,9 @@ def plan_leaf(
         owner,
         join_edges,
         alias_to_source,
-        ctx.principal.tenant,
+        ctx.principal.tenants,
         ctx.effective_policy,
+        sources_by_name,
     )
 
     # population_filter defines the population this leaf is compiled over (§4.5), and is

@@ -524,6 +524,9 @@ class McpAuthConfig(BaseModel):
 
     tokens: list[McpTokenEntry] = []
     oauth: McpOAuthConfig | None = None
+    #: Upper bound on the distinct tenant values one token may carry. A longer list is
+    #: rejected with ``tenant_limit_exceeded`` instead of compiling an unbounded ``IN (...)``.
+    max_tenants: int = Field(default=100, ge=1)
 
 
 class McpConfig(BaseModel):

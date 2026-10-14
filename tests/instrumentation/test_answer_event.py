@@ -320,7 +320,7 @@ async def test_run_sql_records_tenant_and_roles(
 
     monkeypatch.setattr("canonic.core.context.default_factory", _StubFactory())
 
-    principal = Principal(tenant=None, roles=("platform_analyst",))
+    principal = Principal(roles=("platform_analyst",))
     await svc.run_sql("select 1", principal=principal)
 
     events = _read_events(tmp_path)
@@ -457,7 +457,7 @@ async def test_s16_ac1_tenant_and_sorted_roles_recorded(
     monkeypatch.setattr("canonic.core.context.default_factory", _StubFactory())
 
     q = SemanticQuery(metrics=["revenue"])
-    principal = Principal(tenant="4711", roles=("merchant_viewer", "platform_analyst"))
+    principal = Principal(tenants=("4711",), roles=("merchant_viewer", "platform_analyst"))
     await svc.query(q, principal=principal)
 
     events = _read_events(tmp_path)
@@ -478,7 +478,7 @@ async def test_s16_ac2_tenancy_exempt_read_recorded(
     monkeypatch.setattr("canonic.core.context.default_factory", _StubFactory())
 
     q = SemanticQuery(metrics=["revenue"])
-    principal = Principal(tenant=None, roles=("platform_analyst",))
+    principal = Principal(roles=("platform_analyst",))
     await svc.query(q, principal=principal)
 
     events = _read_events(tmp_path)

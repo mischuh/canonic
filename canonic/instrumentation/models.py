@@ -10,6 +10,10 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, model_validator
 
+from canonic.contracts.principal import (
+    TenantScope,  # noqa: TC001 — Pydantic resolves field annotations at runtime
+)
+
 __all__ = [
     "AnswerEvent",
     "AnswerEventUser",
@@ -90,8 +94,9 @@ class AnswerEvent(BaseModel):
     # warehouse content, and is stored verbatim regardless of the AC2 "no content" rule
     # that governs the rest of this event — see the carve-out in
     # test_ac2_log_contains_no_sql_or_rows. Null when no tenancy/role policy is
-    # configured, or for a caller with no resolvable principal.
-    tenant: str | None = None
+    # configured, or for a caller with no resolvable principal. A caller scoped to several
+    # tenants records them as a list, a single tenant keeps the plain value.
+    tenant: TenantScope | None = None
     roles: list[str] | None = None
     tenancy_exempt: bool = False
     # reserved — null until E13 lands (S3-AC1):

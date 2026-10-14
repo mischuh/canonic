@@ -138,7 +138,7 @@ def test_masking_a_column_masks_dimensions_derived_from_it(charges, masked_resol
         SemanticQuery(metrics=["gross_revenue"], dimensions=["email_domain"]),
         masked_resolver,
         [charges],
-        principal=Principal(tenant=None, roles=("masked_viewer",)),
+        principal=Principal(roles=("masked_viewer",)),
     )
     assert isinstance(_projection(_select(result.sql), "email_domain"), exp.Null)
 
@@ -148,7 +148,7 @@ def test_masking_leaves_unrelated_expr_dimension_alone(charges, masked_resolver)
         SemanticQuery(metrics=["gross_revenue"], dimensions=["charge_date"]),
         masked_resolver,
         [charges],
-        principal=Principal(tenant=None, roles=("masked_viewer",)),
+        principal=Principal(roles=("masked_viewer",)),
     )
     assert not isinstance(_projection(_select(result.sql), "charge_date"), exp.Null)
 
@@ -194,7 +194,7 @@ def test_filter_on_denied_expr_dimension_is_refused(charges) -> None:
             SemanticQuery(metrics=["gross_revenue"], filters=["charge_date >= '2025-01-01'"]),
             resolver,
             [charges],
-            principal=Principal(tenant=None, roles=("restricted",)),
+            principal=Principal(roles=("restricted",)),
         )
 
 

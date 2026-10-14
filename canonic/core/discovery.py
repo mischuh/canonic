@@ -57,7 +57,7 @@ def _get_domain(binding: MetricBinding, resolver: ContractResolver) -> str:
     return metric
 
 
-_ANONYMOUS_PRINCIPAL = Principal(tenant=None)
+_ANONYMOUS_PRINCIPAL = Principal()
 
 
 class DiscoveryService:

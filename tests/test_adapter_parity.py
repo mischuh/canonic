@@ -292,7 +292,7 @@ async def test_list_metrics_parity_for_scoped_principal(scoped_service: CanonicS
     the metric the role denies (SPEC-E12 §6, S15 AC1)."""
     from canonic.contracts.principal import Principal
 
-    principal = Principal(tenant=None, roles=("merchant_viewer",))
+    principal = Principal(roles=("merchant_viewer",))
     mcp = build_server(scoped_service, session_principal=principal)
 
     async with Client(mcp) as client:

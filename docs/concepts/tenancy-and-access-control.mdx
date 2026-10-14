@@ -37,9 +37,9 @@ undeclared_source: deny         # deny | warn
 | Field | Type | Default | Governs |
 | --- | --- | --- | --- |
 | `schema` | `Literal["tenancy/v1"]` | n/a (required) | Schema discriminator. |
-| `claim` | `str` | n/a (required) | The verified-token claim carrying the tenant identity (e.g. `merchant_id`). |
+| `claim` | `str` | n/a (required) | The verified-token claim carrying the tenant identity (e.g. `merchant_id`). The claim may be a scalar or a list, see [Several tenants per principal](#several-tenants-per-principal). |
 | `on_missing_principal` | `deny \| allow_unscoped` | `deny` | Behavior when tenancy is active but the request carries no resolvable tenant. `allow_unscoped` serves unfiltered with a warning, but it exists for local development, not production. |
-| `scoped_sources` | `list[{source, column}]` | `[]` | Sources tenant-scoped on `column`: every scoped predicate is `<source>.<column> = :tenant`. |
+| `scoped_sources` | `list[{source, column}]` | `[]` | Sources tenant-scoped on `column`: every scoped predicate is `<source>.<column> = :tenant`, or `<source>.<column> IN (:t1, :t2, …)` for a principal with several tenants. |
 | `shared_sources` | `list[str]` | `[]` | Sources explicitly declared tenant-neutral: no predicate is injected. Must not overlap `scoped_sources`: a source in both fails validation. |
 | `undeclared_source` | `deny \| warn` | `deny` | Behavior when a query reaches a source in neither list above. `warn` exists only for incremental adoption on an existing project. |
 
@@ -129,7 +129,7 @@ mcp:
 
 **MCP identity assertion** covers an agent acting for a specific employee with no browser session, such as a scheduled report or an internal tool. The corporate IdP signs an assertion (SEP-990 ID-JAG) naming the employee, the agent exchanges it for a short-lived token, and the tenant and roles are read from the claims the IdP signed into that assertion, with the same `claim` names and `claim_mapping` as above. Put the tenancy and role claims into the assertion itself: they are the only claims that count on this path. The resulting principal is indistinguishable to the compiler from the one the same employee gets through an interactive login, and an assertion without the tenancy claim fails with `TENANT_UNRESOLVED` like any other token. This path exists only on the `http` transport, since the CLI never exchanges anything with an IdP. See [identity assertion setup](/mcp-integration/connecting-your-agent).
 
-**CLI `--tenant`** binds a fixed principal with no roles, for local development and the platform-operator path. See [`--tenant` CLI override](#--tenant-cli-override) below.
+**CLI `--tenant`** binds a fixed principal with no roles (one tenant, or several, see below), for local development and the platform-operator path. See [`--tenant` CLI override](#--tenant-cli-override) below.
 
 **`SYSTEM_PRINCIPAL`** is the one caller-unreachable principal in the codebase: an unrestricted, `tenancy_exempt` principal used only by canonic's own internal correctness checks, the assertion/CI harness (`canonic assert`, `canonic eval`) and static report validation (`ReportService.validate_reports`). Assertions check whether the compiler computes a metric correctly against a fixed expected value, a question orthogonal to tenant scoping, so they run against the full, unfiltered dataset, exactly the population an assertion's `expect` was calibrated against. It's never bound from a token, a CLI flag, or anything caller-controlled. The only project-configurable way to read cross-tenant is a role with `tenancy_exempt: true`.
 
@@ -141,11 +141,11 @@ Tenancy and RBAC hook into the [deterministic compiler pipeline](/concepts/compi
 
 A metric outside the effective policy is also folded into stage 1's `UNRESOLVED` outcome, not a distinct forbidden code, the same "don't let the error channel become an existence oracle" discipline used elsewhere in the compiler.
 
-**Stage 2b: inject tenant predicates.** For every source actually joined into a leaf's plan (not just the metric's own owning source), the compiler injects `<source>.<column> = :tenant` ahead of query filters, `population_filter`, and guardrails. This is what closes the leak a fact-table-only predicate would miss: filtering `orders` alone while joining an unfiltered `customers` still exposes another tenant's customer rows through join-induced row multiplication. The predicate is built as a real `sqlglot` AST node (`exp.EQ(...)`) bound to the principal's tenant value directly, never by parsing a string with the tenant value interpolated into it, so a crafted `filters` entry (`x) OR (1=1`-style) cannot escape its own predicate. A `tenancy_exempt` principal skips this stage entirely: no predicate, no `Undeclared` enforcement.
+**Stage 2b: inject tenant predicates.** For every source actually joined into a leaf's plan (not just the metric's own owning source), the compiler injects `<source>.<column> = :tenant` (or `IN (...)` for several tenants) ahead of query filters, `population_filter`, and guardrails. This is what closes the leak a fact-table-only predicate would miss: filtering `orders` alone while joining an unfiltered `customers` still exposes another tenant's customer rows through join-induced row multiplication. The predicate is built as a real `sqlglot` AST node (`exp.EQ(...)`) bound to the principal's tenant value directly, never by parsing a string with the tenant value interpolated into it, so a crafted `filters` entry (`x) OR (1=1`-style) cannot escape its own predicate. A `tenancy_exempt` principal skips this stage entirely: no predicate, no `Undeclared` enforcement.
 
 An `Undeclared` source reached mid-leaf raises `TENANT_SCOPE_MISSING` (or warns, per `undeclared_source: warn`).
 
-**`metadata.scope`** (attached at result-metadata time): the sources that actually received a predicate, derived from what was actually emitted, not restated from the policy, so an unjoined scoped source correctly doesn't show up:
+**`metadata.scope`** (attached at result-metadata time): the principal's tenant (a single value, or a list when the principal has several) and the sources that actually received a predicate, derived from what was actually emitted, not restated from the policy, so an unjoined scoped source correctly doesn't show up:
 
 ```json
 {
@@ -190,9 +190,38 @@ Masking applies after granularity bucketing (for time dimensions), so the SELECT
 
 ## `--tenant` CLI override
 
-`canonic query`, `canonic sql`, `canonic report run`, and `canonic mcp start --transport stdio` all accept a shared `--tenant <id>` flag: it binds a fixed, roleless principal for local development and the platform-operator path, and **always prints a warning** when used. It exists because stdio sessions have no per-request auth to derive a principal from.
+`canonic query`, `canonic sql`, `canonic report run`, and `canonic mcp start --transport stdio` all accept a shared `--tenant <id>` flag (repeat it or comma-separate the values, `--tenant 4711,4712`, to scope to several tenants): it binds a fixed, roleless principal for local development and the platform-operator path, and **always prints a warning** when used. It exists because stdio sessions have no per-request auth to derive a principal from.
 
 `canonic mcp start --transport http` **refuses** `--tenant` outright, exiting `1`: an HTTP daemon already derives a fresh principal from each request's verified token, so a single flag-supplied tenant applying to every caller regardless of who they are would be a much larger hole than the one `--tenant` exists to work around on stdio.
+
+## Several tenants per principal
+
+An identity provider often grants one user access to several tenants. The tenant claim named by `tenancy.yaml` may therefore be a scalar or a list, and `tenancy.yaml` itself does not change:
+
+```yaml
+mcp:
+  auth:
+    tokens:
+      - client_id: group-analyst
+        token_ref: env:CANONIC_MCP_TOKEN_GROUP
+        claims:
+          merchant_id: ['4711', '4712']
+```
+
+The compiler then injects `<source>.<column> IN ('4711', '4712')` on every scoped source in the join plan. The predicate is built from `sqlglot` literal nodes and never from an interpolated string, so a crafted value such as `x') OR (1=1` is escaped as one string literal and cannot extend the predicate.
+
+How a claim becomes a list of tenants:
+
+- A scalar claim behaves exactly as before and produces `=`. A list with a single value does the same.
+- Null and blank elements are dropped. Duplicates are removed and the values are put in a fixed order (numbers first, then strings), so the same set of tenants always compiles to the same SQL, whatever order the identity provider sent it in.
+- The values keep the type the identity provider sent. At compile time each one is matched to the type of the source's scope column. An integer column gets integers (`"4711"` becomes `4711`) and a string column gets strings. The match is done per source, so two joined sources with differently typed columns each get the right literals. A value that cannot be an integer on a numeric column, such as `"abc"`, fails with `TENANT_UNRESOLVED` and no SQL is emitted.
+- An empty list, or a list with only null or blank elements, counts as no tenant. Under `on_missing_principal: deny` the request fails with `TENANT_UNRESOLVED`, and it never falls through to an unscoped query.
+- A value that cannot be a tenant identifier at all (a boolean, a fractional number, an object, a nested list) fails with `TENANT_UNRESOLVED`.
+- A list with more distinct values than `mcp.auth.max_tenants` (default `100`) fails with `TENANT_LIMIT_EXCEEDED`.
+
+The same rules apply to static tokens, to `mcp.auth.oauth` in `jwt` and `proxy` mode (including `claim_mapping`), and to identity assertions. A `tenancy_exempt` role still skips predicate injection entirely, and the `run_sql` gate is unchanged: it requires `rls_enforced: true` for every caller that is not exempt, however many tenants the caller has.
+
+`metadata.scope.tenant` and `AnswerEvent.tenant` carry a single tenant as the plain value, as before, and several tenants as a list. A consumer that treats the field as a string has to accept a list. This is recorded in the [contract changelog](https://github.com/mischuh/canonic/blob/main/CONTRACT_CHANGELOG.md) as contract version 3.2.
 
 ## Instrumentation
 

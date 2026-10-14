@@ -26,7 +26,7 @@ from canonic.config import (
 )
 from canonic.contracts.models import RolePolicy, TenancyPolicy
 from canonic.contracts.principal import Caller
-from canonic.exc import CredentialError
+from canonic.exc import CredentialError, TenantLimitExceeded, TenantUnresolved
 from canonic.mcp.auth import (
     ASSERTED_CLAIMS_KEY,
     CLI_OVERRIDE_CLIENT_ID,
@@ -486,7 +486,7 @@ class TestPrincipalFromToken:
             self._token(merchant_id="4711"), tenancy=tenancy, roles=None
         )
         assert principal is not None
-        assert principal.tenant == "4711"
+        assert principal.tenants == ("4711",)
         assert principal.roles == ()
 
     def test_missing_tenant_claim_yields_none_tenant(self) -> None:
@@ -495,7 +495,7 @@ class TestPrincipalFromToken:
         )
         principal = principal_from_token(self._token(), tenancy=tenancy, roles=None)
         assert principal is not None
-        assert principal.tenant is None
+        assert principal.tenants == ()
 
     def test_roles_read_from_list_claim(self) -> None:
         roles = RolePolicy(schema="roles/v1", claim="roles", roles={})
@@ -532,7 +532,79 @@ class TestPrincipalFromToken:
             claim_mapping={"merchant_id": "https://example.com/merchant_id"},
         )
         assert principal is not None
-        assert principal.tenant == "4711"
+        assert principal.tenants == ("4711",)
+
+    def test_static_token_list_claim_is_sorted_and_deduplicated(self) -> None:
+        tenancy = TenancyPolicy(
+            schema="tenancy/v1", claim="merchant_id", scoped_sources=[], shared_sources=[]
+        )
+        principal = principal_from_token(
+            self._token(merchant_id=["4712", "4711", "4712"]), tenancy=tenancy, roles=None
+        )
+        assert principal is not None
+        assert principal.tenants == ("4711", "4712")
+        assert principal.tenant_scope == ["4711", "4712"]
+
+    def test_integer_claim_keeps_its_type(self) -> None:
+        tenancy = TenancyPolicy(
+            schema="tenancy/v1", claim="merchant_id", scoped_sources=[], shared_sources=[]
+        )
+        principal = principal_from_token(
+            self._token(merchant_id=[4712, 4711]), tenancy=tenancy, roles=None
+        )
+        assert principal is not None
+        assert principal.tenants == (4711, 4712)
+
+    def test_jwt_claim_mapping_resolves_namespaced_list_claim(self) -> None:
+        tenancy = TenancyPolicy(
+            schema="tenancy/v1", claim="merchant_id", scoped_sources=[], shared_sources=[]
+        )
+        token = self._token(**{"https://example.com/merchant_id": ["4711", "4712"]})
+        principal = principal_from_token(
+            token,
+            tenancy=tenancy,
+            roles=None,
+            claim_mapping={"merchant_id": "https://example.com/merchant_id"},
+        )
+        assert principal is not None
+        assert principal.tenants == ("4711", "4712")
+
+    @pytest.mark.parametrize("claim", [[], [None], [None, ""], ["  "], None, ""])
+    def test_empty_tenant_claim_resolves_as_no_tenant(self, claim: object) -> None:
+        tenancy = TenancyPolicy(
+            schema="tenancy/v1", claim="merchant_id", scoped_sources=[], shared_sources=[]
+        )
+        principal = principal_from_token(
+            self._token(merchant_id=claim), tenancy=tenancy, roles=None
+        )
+        assert principal is not None
+        assert principal.tenants == ()
+        assert principal.tenant_scope is None
+
+    @pytest.mark.parametrize("bad", [True, 1.5, {"id": 1}, [["4711"]]])
+    def test_unusable_tenant_value_is_tenant_unresolved(self, bad: object) -> None:
+        tenancy = TenancyPolicy(
+            schema="tenancy/v1", claim="merchant_id", scoped_sources=[], shared_sources=[]
+        )
+        with pytest.raises(TenantUnresolved):
+            principal_from_token(self._token(merchant_id=[bad]), tenancy=tenancy, roles=None)
+
+    def test_list_above_max_tenants_is_rejected(self) -> None:
+        tenancy = TenancyPolicy(
+            schema="tenancy/v1", claim="merchant_id", scoped_sources=[], shared_sources=[]
+        )
+        token = self._token(merchant_id=["1", "2", "3"])
+        with pytest.raises(TenantLimitExceeded):
+            principal_from_token(token, tenancy=tenancy, roles=None, max_tenants=2)
+
+    def test_list_at_max_tenants_is_accepted(self) -> None:
+        tenancy = TenancyPolicy(
+            schema="tenancy/v1", claim="merchant_id", scoped_sources=[], shared_sources=[]
+        )
+        token = self._token(merchant_id=["1", "2", "2"])
+        principal = principal_from_token(token, tenancy=tenancy, roles=None, max_tenants=2)
+        assert principal is not None
+        assert principal.tenants == ("1", "2")
 
     def test_both_policies_combine(self) -> None:
         tenancy = TenancyPolicy(
@@ -543,7 +615,7 @@ class TestPrincipalFromToken:
             self._token(merchant_id="4711", roles=["merchant_viewer"]), tenancy=tenancy, roles=roles
         )
         assert principal is not None
-        assert principal.tenant == "4711"
+        assert principal.tenants == ("4711",)
         assert principal.roles == ("merchant_viewer",)
 
 
@@ -581,7 +653,7 @@ class TestIdentityAssertedPrincipal:
         token = _id_jag_token({"merchant_id": "4711", "roles": ["merchant_viewer"]})
         principal = principal_from_token(token, tenancy=_TENANCY, roles=_ROLES)
         assert principal is not None
-        assert principal.tenant == "4711"
+        assert principal.tenants == ("4711",)
         assert principal.roles == ("merchant_viewer",)
         assert principal.source == "assertion:agent-scheduled-reports"
 
@@ -590,7 +662,7 @@ class TestIdentityAssertedPrincipal:
         token = _id_jag_token({}, merchant_id="9999", roles=["platform_analyst"])
         principal = principal_from_token(token, tenancy=_TENANCY, roles=_ROLES)
         assert principal is not None
-        assert principal.tenant is None
+        assert principal.tenants == ()
         assert principal.roles == ()
 
     def test_missing_asserted_claims_yields_unresolved_principal(self) -> None:
@@ -598,7 +670,7 @@ class TestIdentityAssertedPrincipal:
         other unresolvable token produces."""
         principal = principal_from_token(_id_jag_token(), tenancy=_TENANCY, roles=_ROLES)
         assert principal is not None
-        assert principal.tenant is None
+        assert principal.tenants == ()
         assert principal.roles == ()
 
     def test_claim_mapping_applies_to_asserted_claims(self) -> None:
@@ -610,7 +682,7 @@ class TestIdentityAssertedPrincipal:
             claim_mapping={"merchant_id": "https://acme-corp.com/merchant_id"},
         )
         assert principal is not None
-        assert principal.tenant == "4711"
+        assert principal.tenants == ("4711",)
 
 
 class TestCallerFromToken:
@@ -702,11 +774,20 @@ class TestCanonicOIDCProxyExchange:
         }
         principal = principal_from_token(token, tenancy=_TENANCY, roles=_ROLES)
         assert principal is not None
-        assert principal.tenant == "4711"
+        assert principal.tenants == ("4711",)
         assert principal.roles == ("merchant_viewer",)
         assert caller_from_token(token) == Caller(
             id="jsmith@acme-corp.com", acted_via=_AGENT_CLIENT_ID
         )
+
+    async def test_asserted_list_claim_survives_exchange(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        token = await self._exchange(monkeypatch, merchant_id=["4712", "4711"])
+        assert token.claims[ASSERTED_CLAIMS_KEY] == {"merchant_id": ["4712", "4711"]}
+        principal = principal_from_token(token, tenancy=_TENANCY, roles=_ROLES)
+        assert principal is not None
+        assert principal.tenants == ("4711", "4712")
 
     async def test_registered_claims_not_forwarded(self, monkeypatch: pytest.MonkeyPatch) -> None:
         token = await self._exchange(monkeypatch, merchant_id="4711")
@@ -723,7 +804,7 @@ class TestCanonicOIDCProxyExchange:
         assert ASSERTED_CLAIMS_KEY not in token.claims
         principal = principal_from_token(token, tenancy=_TENANCY, roles=_ROLES)
         assert principal is not None
-        assert principal.tenant is None
+        assert principal.tenants == ()
 
 
 class TestIdentityAssertionRejection:

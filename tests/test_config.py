@@ -223,6 +223,20 @@ class TestMcpAuthConfig:
         cfg = load_config(_canonic_yaml(tmp_path, _VALID))
         assert cfg.mcp.auth.tokens == []
 
+    def test_max_tenants_defaults_to_100(self, tmp_path: Path) -> None:
+        cfg = load_config(_canonic_yaml(tmp_path, _VALID))
+        assert cfg.mcp.auth.max_tenants == 100
+
+    def test_max_tenants_configurable(self, tmp_path: Path) -> None:
+        content = _VALID + "mcp:\n  auth:\n    max_tenants: 5\n"
+        cfg = load_config(_canonic_yaml(tmp_path, content))
+        assert cfg.mcp.auth.max_tenants == 5
+
+    def test_max_tenants_below_one_raises(self, tmp_path: Path) -> None:
+        content = _VALID + "mcp:\n  auth:\n    max_tenants: 0\n"
+        with pytest.raises(ConfigError, match="max_tenants"):
+            load_config(_canonic_yaml(tmp_path, content))
+
     def test_tokens_parsed(self, tmp_path: Path) -> None:
         content = (
             _VALID

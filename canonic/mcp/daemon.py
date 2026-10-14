@@ -453,6 +453,7 @@ def serve_http_foreground(
     for the caller to decide ahead of time.
     """
     from canonic.config import LoggingConfig, load_config
+    from canonic.contracts.principal import DEFAULT_MAX_TENANTS
     from canonic.log import _effective_log_params, configure_logging
     from canonic.mcp.server import build_server
 
@@ -478,6 +479,7 @@ def serve_http_foreground(
         suggestions=suggestions,
         auth=auth,
         claim_mapping=claim_mapping,
+        max_tenants=cfg.mcp.auth.max_tenants if cfg is not None else DEFAULT_MAX_TENANTS,
         tasks=tasks,
         tasks_url=tasks_url,
         cache_ttl_seconds=cfg.mcp.cache_ttl_seconds if cfg is not None else 300,
