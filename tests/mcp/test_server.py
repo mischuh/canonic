@@ -357,7 +357,7 @@ class TestPrincipal:
         monkeypatch.setattr("canonic.mcp.server.get_access_token", lambda: token)
         principal = _principal(resolver)
         assert principal is not None
-        assert principal.tenant == "4711"
+        assert principal.tenants == ("4711",)
         assert principal.roles == ("merchant_viewer",)
 
     def test_claim_mapping_resolves_namespaced_claim(self, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -382,7 +382,7 @@ class TestPrincipal:
             resolver, claim_mapping={"merchant_id": "https://example.com/merchant_id"}
         )
         assert principal is not None
-        assert principal.tenant == "4711"
+        assert principal.tenants == ("4711",)
 
 
 class TestClaimMappingWiring:

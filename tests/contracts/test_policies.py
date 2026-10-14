@@ -190,28 +190,28 @@ def _resolver_with_roles(tmp_path: Path, roles_yaml: str = VALID_ROLES_YAML) -> 
 class TestAuthzFor:
     def test_no_role_policy_loaded_is_unrestricted(self) -> None:
         resolver = ContractResolver(bindings=[], guardrails=[])
-        policy = resolver.authz_for(Principal(tenant="4711"))
+        policy = resolver.authz_for(Principal(tenants=("4711",)))
         assert policy.metric_allowed("anything")
         assert policy.dimension_allowed("anything")
         assert policy.run_sql is True
 
     def test_no_role_claim_falls_back_to_default_role(self, tmp_path: Path) -> None:
         resolver = _resolver_with_roles(tmp_path)
-        policy = resolver.authz_for(Principal(tenant="4711", roles=()))
+        policy = resolver.authz_for(Principal(tenants=("4711",), roles=()))
         assert policy.roles == ("merchant_viewer",)
         assert policy.metric_allowed("revenue")
 
     def test_unknown_role_denies_everything(self, tmp_path: Path) -> None:
         """A role claim naming a role absent from the policy fails closed, no default fallback."""
         resolver = _resolver_with_roles(tmp_path)
-        policy = resolver.authz_for(Principal(tenant="4711", roles=("ghost_role",)))
+        policy = resolver.authz_for(Principal(tenants=("4711",), roles=("ghost_role",)))
         assert policy.roles == ()
         assert not policy.metric_allowed("revenue")
         assert policy.run_sql is False
 
     def test_explicit_allow_list_only_permits_named_metrics(self, tmp_path: Path) -> None:
         resolver = _resolver_with_roles(tmp_path)
-        policy = resolver.authz_for(Principal(tenant="4711", roles=("merchant_viewer",)))
+        policy = resolver.authz_for(Principal(tenants=("4711",), roles=("merchant_viewer",)))
         assert policy.metric_allowed("revenue")
         assert policy.metric_allowed("order_count")
         assert not policy.metric_allowed("cogs")
@@ -222,14 +222,14 @@ class TestAuthzFor:
             'metrics:    { allow: ["revenue", "order_count", "aov"], deny: ["revenue"] }',
         )
         resolver = _resolver_with_roles(tmp_path, yaml_src)
-        policy = resolver.authz_for(Principal(tenant="4711", roles=("merchant_viewer",)))
+        policy = resolver.authz_for(Principal(tenants=("4711",), roles=("merchant_viewer",)))
         assert not policy.metric_allowed("revenue")
         assert policy.metric_allowed("order_count")
 
     def test_dimensions_default_unrestricted_when_allow_omitted(self, tmp_path: Path) -> None:
         """dimensions declares only `deny` — omitted `allow` must not mean allow-nothing."""
         resolver = _resolver_with_roles(tmp_path)
-        policy = resolver.authz_for(Principal(tenant="4711", roles=("merchant_viewer",)))
+        policy = resolver.authz_for(Principal(tenants=("4711",), roles=("merchant_viewer",)))
         assert policy.dimension_allowed("region")
         assert not policy.dimension_allowed("customer_email")
         assert not policy.dimension_allowed("customer_phone")
@@ -240,13 +240,13 @@ class TestAuthzFor:
             "metrics:    { allow: [] }",
         )
         resolver = _resolver_with_roles(tmp_path, yaml_src)
-        policy = resolver.authz_for(Principal(tenant="4711", roles=("merchant_viewer",)))
+        policy = resolver.authz_for(Principal(tenants=("4711",), roles=("merchant_viewer",)))
         assert not policy.metric_allowed("revenue")
         assert not policy.metric_allowed("anything")
 
     def test_wildcard_allow_permits_everything_subject_to_deny(self, tmp_path: Path) -> None:
         resolver = _resolver_with_roles(tmp_path)
-        policy = resolver.authz_for(Principal(tenant="op", roles=("platform_analyst",)))
+        policy = resolver.authz_for(Principal(tenants=("op",), roles=("platform_analyst",)))
         assert policy.metric_allowed("revenue")
         assert policy.metric_allowed("literally_anything")
         assert policy.run_sql is True
@@ -255,7 +255,7 @@ class TestAuthzFor:
     def test_inheritance_field_override_not_merge(self, tmp_path: Path) -> None:
         """merchant_admin re-opens PII dimensions rather than adding to the parent's deny list."""
         resolver = _resolver_with_roles(tmp_path)
-        policy = resolver.authz_for(Principal(tenant="4711", roles=("merchant_admin",)))
+        policy = resolver.authz_for(Principal(tenants=("4711",), roles=("merchant_admin",)))
         # dimensions replaced wholesale: deny: [] means nothing is denied anymore
         assert policy.dimension_allowed("customer_email")
         assert policy.dimension_allowed("customer_phone")
@@ -269,7 +269,7 @@ class TestAuthzFor:
     def test_multiple_roles_union_with_deny_winning(self, tmp_path: Path) -> None:
         resolver = _resolver_with_roles(tmp_path)
         policy = resolver.authz_for(
-            Principal(tenant="4711", roles=("merchant_viewer", "merchant_admin"))
+            Principal(tenants=("4711",), roles=("merchant_viewer", "merchant_admin"))
         )
         assert policy.roles == ("merchant_admin", "merchant_viewer")  # stable-sorted
         # union of run_sql: both false -> false
@@ -288,8 +288,8 @@ class TestAuthzFor:
             "      - { column: customers.customer_email, strategy: partial }\n",
         )
         resolver = _resolver_with_roles(tmp_path, yaml_src)
-        policy1 = resolver.authz_for(Principal(tenant="t", roles=("merchant_admin",)))
-        policy2 = resolver.authz_for(Principal(tenant="t", roles=("merchant_admin",)))
+        policy1 = resolver.authz_for(Principal(tenants=("t",), roles=("merchant_admin",)))
+        policy2 = resolver.authz_for(Principal(tenants=("t",), roles=("merchant_admin",)))
         assert policy1.masking == policy2.masking
         assert [m.column for m in policy1.masking] == sorted(m.column for m in policy1.masking)
 
@@ -301,7 +301,7 @@ class TestFromProjectLoadsPolicies:
         resolver = ContractResolver.from_project(tmp_path)
         assert resolver.tenancy_enabled is True
         assert isinstance(resolver.tenancy_for("orders"), ScopeRule)
-        policy = resolver.authz_for(Principal(tenant="4711"))
+        policy = resolver.authz_for(Principal(tenants=("4711",)))
         assert policy.roles == ("merchant_viewer",)
 
     def test_from_project_without_policies_is_unrestricted(self, tmp_path: Path) -> None:

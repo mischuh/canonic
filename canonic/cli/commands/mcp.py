@@ -140,7 +140,7 @@ def start(
         else:
             _console.print(f"[red]error:[/red] {msg}")
         raise typer.Exit(1)
-    if tenant is not None and transport == "http":
+    if tenant and transport == "http":
         msg = (
             "--tenant is refused on --transport http: each request already derives its "
             "own principal from its verified token (SPEC-E12 §5)"

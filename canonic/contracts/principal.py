@@ -13,26 +13,96 @@ it and neither may import the other's caller.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
+
+from canonic.exc import TenantLimitExceeded, TenantUnresolved
 
 if TYPE_CHECKING:
+    from collections.abc import Iterable
+
     from canonic.contracts.models import MaskingRule
 
-__all__ = ["SYSTEM_PRINCIPAL", "Caller", "EffectivePolicy", "Principal"]
+__all__ = [
+    "DEFAULT_MAX_TENANTS",
+    "SYSTEM_PRINCIPAL",
+    "Caller",
+    "EffectivePolicy",
+    "Principal",
+    "TenantScope",
+    "TenantValue",
+    "normalize_tenants",
+    "tenant_sort_key",
+]
+
+#: One tenant identifier as carried by a claim. The type is kept as the IdP delivered it, so the
+#: compiler can match it to the scope column's type instead of guessing from a string.
+TenantValue = int | str
+
+#: ``metadata.scope.tenant`` / ``AnswerEvent.tenant``: a single value for a one-tenant principal
+#: (unchanged from before lists were supported), a list for several.
+TenantScope = TenantValue | list[TenantValue]
+
+#: Default for ``mcp.auth.max_tenants``, and the limit applied to the ``--tenant`` CLI flag.
+DEFAULT_MAX_TENANTS = 100
+
+
+def tenant_sort_key(value: TenantValue) -> tuple[int, int | str]:
+    """Numbers first (numerically), then strings, so mixed lists order deterministically."""
+    return (1, value) if isinstance(value, str) else (0, value)
+
+
+def _tenant_element(raw: Any) -> TenantValue | None:
+    """One claim element as a :data:`TenantValue`, or ``None`` when it is null or blank.
+
+    Raises :class:`TenantUnresolved` for a value that cannot be a tenant identifier at all
+    (bool, non-integral float, mapping, nested list), rather than guessing a string for it.
+    """
+    if raw is None:
+        return None
+    if isinstance(raw, bool):
+        raise TenantUnresolved("tenant claim contains a boolean, expected a string or integer")
+    if isinstance(raw, int):
+        return raw
+    if isinstance(raw, float) and raw.is_integer():
+        return int(raw)
+    if isinstance(raw, str):
+        return raw if raw.strip() else None
+    raise TenantUnresolved(
+        f"tenant claim contains a {type(raw).__name__} value, expected a string or integer"
+    )
+
+
+def normalize_tenants(raw: Any, *, limit: int = DEFAULT_MAX_TENANTS) -> tuple[TenantValue, ...]:
+    """Turn a raw tenant claim (scalar or list) into a sorted, de-duplicated tuple.
+
+    Null and blank elements are dropped, so ``None``, ``[]`` and ``[None, ""]`` all resolve to
+    ``()``, the same as a missing claim. Raises :class:`TenantUnresolved` for an element that
+    cannot be a tenant identifier and :class:`TenantLimitExceeded` when more than ``limit``
+    distinct values remain. The order is canonical (numbers, then strings), so the same set of
+    tenants always compiles to the same SQL regardless of the order the IdP sent it in.
+    """
+    items: Iterable[Any] = raw if isinstance(raw, list | tuple) else (raw,)
+    values = {v for item in items if (v := _tenant_element(item)) is not None}
+    if len(values) > limit:
+        raise TenantLimitExceeded(
+            f"tenant claim carries {len(values)} distinct values, more than the allowed {limit} "
+            "(mcp.auth.max_tenants)"
+        )
+    return tuple(sorted(values, key=tenant_sort_key))
 
 
 @dataclass(frozen=True, slots=True)
 class Principal:
-    """A caller's verified identity: tenant + role set, bound from a verified token.
+    """A caller's verified identity: tenant(s) + role set, bound from a verified token.
 
-    ``tenant`` is ``None`` when no tenancy policy is configured, or when the token
-    carries no tenant claim — callers combine this with
+    ``tenants`` is empty when no tenancy policy is configured, or when the token
+    carries no tenant claim (or one that resolves to no value) — callers combine this with
     ``ContractResolver.tenancy_enabled`` to decide whether that absence is an error
     (SPEC-E12 §5). ``roles`` is the raw claim value, unresolved against any role
     policy; :meth:`ContractResolver.authz_for` does the resolving.
     """
 
-    tenant: str | None
+    tenants: tuple[TenantValue, ...] = ()
     roles: tuple[str, ...] = ()
     source: str = "unknown"
     #: Bypasses ``ContractResolver.authz_for``'s role-policy lookup entirely, granting an
@@ -45,13 +115,25 @@ class Principal:
     #: ``tenancy_exempt: true`` role remains the only caller-reachable way to read cross-tenant.
     system_exempt: bool = False
 
+    @property
+    def tenant_scope(self) -> TenantScope | None:
+        """The tenants as reported in result metadata and answer events.
+
+        ``None`` for no tenant, the bare value for one, a list for several.
+        """
+        if not self.tenants:
+            return None
+        if len(self.tenants) == 1:
+            return self.tenants[0]
+        return list(self.tenants)
+
 
 #: The one caller-unreachable :class:`Principal` in the codebase: canonic's own internal
 #: checks that a query *compiles*, independent of any tenant — the assertion/CI harness
 #: (:mod:`canonic.core.assertions`) and static report validation
 #: (:meth:`canonic.core.reports.ReportService.validate_reports`). Never bound from a token,
 #: a CLI flag, or anything else caller-controlled.
-SYSTEM_PRINCIPAL = Principal(tenant=None, roles=(), source="system", system_exempt=True)
+SYSTEM_PRINCIPAL = Principal(roles=(), source="system", system_exempt=True)
 
 
 @dataclass(frozen=True, slots=True)

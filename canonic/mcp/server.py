@@ -20,6 +20,7 @@ from starlette.responses import JSONResponse
 from canonic import __version__ as CANONIC_VERSION
 from canonic.compiler.query import SemanticQuery
 from canonic.contract import CONTRACT_SCHEMA
+from canonic.contracts.principal import DEFAULT_MAX_TENANTS
 from canonic.core.models import CompileOutput
 from canonic.mcp.auth import caller_from_token, principal_from_token
 from canonic.mcp.errors import canonic_error_response
@@ -51,6 +52,7 @@ def _principal(
     resolver: ContractResolver,
     session_principal: Principal | None = None,
     claim_mapping: dict[str, str] | None = None,
+    max_tenants: int = DEFAULT_MAX_TENANTS,
 ) -> Principal | None:
     """The verified Principal for the current request (SPEC-E12 §5).
 
@@ -74,6 +76,7 @@ def _principal(
         tenancy=resolver.tenancy_policy,
         roles=resolver.role_policy,
         claim_mapping=claim_mapping,
+        max_tenants=max_tenants,
     )
 
 
@@ -194,6 +197,7 @@ def build_server(
     auth: AuthProvider | None = None,
     session_principal: Principal | None = None,
     claim_mapping: dict[str, str] | None = None,
+    max_tenants: int = DEFAULT_MAX_TENANTS,
     tasks: bool = False,
     tasks_url: str | None = None,
     cache_ttl_seconds: int = 300,
@@ -215,6 +219,9 @@ def build_server(
     counterpart to ``session_principal``, resolving a namespaced IdP claim key to a
     tenancy/role policy's own ``claim`` name for every request's derived
     :class:`Principal`. Unused under ``stdio`` or a static-token caller.
+
+    ``max_tenants`` is ``mcp.auth.max_tenants``: the most distinct tenant values one token may
+    carry before the request fails with ``tenant_limit_exceeded``.
 
     ``tasks`` (``mcp.tasks.enabled``) registers the ``io.modelcontextprotocol/tasks``
     extension and runs ``query``, ``run_sql`` and ``run_report`` as optionally-async
@@ -312,7 +319,8 @@ def build_server(
     @canonic_error_response
     async def get_overview(domain: str | None = None) -> dict[str, Any]:
         overview = service.get_overview(
-            domain=domain, principal=_principal(service.resolver, session_principal, claim_mapping)
+            domain=domain,
+            principal=_principal(service.resolver, session_principal, claim_mapping, max_tenants),
         )
         return overview.model_dump(mode="json")
 
@@ -332,7 +340,7 @@ def build_server(
     @canonic_error_response
     async def list_metrics() -> dict[str, Any]:
         summaries = service.list_metrics(
-            principal=_principal(service.resolver, session_principal, claim_mapping)
+            principal=_principal(service.resolver, session_principal, claim_mapping, max_tenants)
         )
         dim_catalog: dict[str, dict[str, Any]] = {}
         metrics_out: list[dict[str, Any]] = []
@@ -355,7 +363,8 @@ def build_server(
     @canonic_error_response
     async def describe_metric(name: str) -> dict[str, Any]:
         detail = service.describe_metric(
-            name, principal=_principal(service.resolver, session_principal, claim_mapping)
+            name,
+            principal=_principal(service.resolver, session_principal, claim_mapping, max_tenants),
         )
         return detail.model_dump(mode="json")
 
@@ -374,7 +383,7 @@ def build_server(
         binding = service.resolve_metric(
             name,
             context=context,
-            principal=_principal(service.resolver, session_principal, claim_mapping),
+            principal=_principal(service.resolver, session_principal, claim_mapping, max_tenants),
         )
         return {
             "metric": binding.metric,
@@ -414,7 +423,8 @@ def build_server(
     async def compile_query(query: dict[str, Any]) -> dict[str, Any]:
         sq = SemanticQuery.model_validate(query)
         result = service.compile_query(
-            sq, principal=_principal(service.resolver, session_principal, claim_mapping)
+            sq,
+            principal=_principal(service.resolver, session_principal, claim_mapping, max_tenants),
         )
         response = CompileOutput.from_compile_result(result).model_dump(mode="json")
         if suggestions:
@@ -459,7 +469,7 @@ def build_server(
         result = await service.query(
             sq,
             caller=_caller(),
-            principal=_principal(service.resolver, session_principal, claim_mapping),
+            principal=_principal(service.resolver, session_principal, claim_mapping, max_tenants),
         )
         response = result.model_dump(mode="json")
         if suggestions:
@@ -485,7 +495,7 @@ def build_server(
             sql,
             connection=connection,
             caller=_caller(),
-            principal=_principal(service.resolver, session_principal, claim_mapping),
+            principal=_principal(service.resolver, session_principal, claim_mapping, max_tenants),
         )
         return result.model_dump(mode="json")
 
@@ -510,7 +520,7 @@ def build_server(
         user: str | None = None,
         limit: int = 5,
     ) -> dict[str, Any]:
-        principal = _principal(service.resolver, session_principal, claim_mapping)
+        principal = _principal(service.resolver, session_principal, claim_mapping, max_tenants)
         result = service.search_knowledge(
             query, user=_effective_user(principal, user), limit=limit, principal=principal
         )
@@ -549,7 +559,7 @@ def build_server(
     )
     @canonic_error_response
     async def read_knowledge_page(page: str, user: str | None = None) -> dict[str, Any]:
-        principal = _principal(service.resolver, session_principal, claim_mapping)
+        principal = _principal(service.resolver, session_principal, claim_mapping, max_tenants)
         return service.read_knowledge_page(
             page, user=_effective_user(principal, user), principal=principal
         )
@@ -602,7 +612,7 @@ def build_server(
     ) -> dict[str, Any]:
         from datetime import datetime
 
-        principal = _principal(service.resolver, session_principal, claim_mapping)
+        principal = _principal(service.resolver, session_principal, claim_mapping, max_tenants)
         parsed_as_of = datetime.fromisoformat(as_of) if as_of is not None else None
         result = await service.run_report(
             report_id,

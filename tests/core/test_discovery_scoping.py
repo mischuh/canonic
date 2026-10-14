@@ -107,8 +107,8 @@ def scoped_service(
     return CanonicService(config=config, resolver=resolver, sources=[orders_source])
 
 
-_VIEWER = Principal(tenant=None, roles=("merchant_viewer",))
-_ANALYST = Principal(tenant=None, roles=("platform_analyst",))
+_VIEWER = Principal(roles=("merchant_viewer",))
+_ANALYST = Principal(roles=("platform_analyst",))
 
 
 class TestListMetrics:

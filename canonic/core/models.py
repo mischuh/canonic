@@ -19,6 +19,9 @@ from canonic.contract import CONTRACT_SCHEMA
 from canonic.contracts.models import (
     Example,  # noqa: TC001 — Pydantic resolves field annotations at runtime
 )
+from canonic.contracts.principal import (
+    TenantScope,  # noqa: TC001 — Pydantic resolves field annotations at runtime
+)
 from canonic.trust.scorer import trust_for_compiled
 
 if TYPE_CHECKING:
@@ -136,7 +139,8 @@ class ScopeOut(BaseModel):
 
     model_config = ConfigDict(frozen=True)
 
-    tenant: str | None = None
+    #: One tenant as the bare value, several as a list (see ``Principal.tenant_scope``).
+    tenant: TenantScope | None = None
     scoped_sources: list[str] = []
     shared_sources: list[str] = []
     roles: list[str] = []

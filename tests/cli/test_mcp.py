@@ -316,7 +316,31 @@ def test_tenant_passed_through_on_stdio(runner: CliRunner, project_dir: Path) ->
     assert result.exit_code == 0, result.output
     assert "warning" in result.output.lower()
     mock_start_stdio.assert_called_once()
-    assert mock_start_stdio.call_args.kwargs["principal"].tenant == "4711"
+    assert mock_start_stdio.call_args.kwargs["principal"].tenants == ("4711",)
+
+
+@pytest.mark.parametrize(
+    "tenant_args",
+    [
+        ["--tenant", "4712", "--tenant", "4711"],
+        ["--tenant", "4712,4711"],
+        ["--tenant", "4711, 4712,4711", "--tenant", ""],
+    ],
+)
+def test_tenant_flag_accepts_repeated_and_comma_separated_values(
+    runner: CliRunner, project_dir: Path, tenant_args: list[str]
+) -> None:
+    """Several tenants reach start_stdio as one sorted, de-duplicated principal."""
+    with (
+        patch(_PATCH_SERVICE) as mock_cls,
+        patch(_PATCH_START_STDIO) as mock_start_stdio,
+        patch("canonic.cli.commands.mcp._save_last_project"),
+    ):
+        mock_cls.from_project.return_value = _mock_service()
+        result = runner.invoke(app, ["mcp", "start", *tenant_args])
+
+    assert result.exit_code == 0, result.output
+    assert mock_start_stdio.call_args.kwargs["principal"].tenants == ("4711", "4712")
 
 
 def test_tasks_enabled_warns_and_is_ignored_on_stdio(runner: CliRunner, project_dir: Path) -> None:

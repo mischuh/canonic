@@ -31,7 +31,7 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-_ANONYMOUS_PRINCIPAL = Principal(tenant=None)
+_ANONYMOUS_PRINCIPAL = Principal()
 
 
 def _event_user(caller: Caller | None) -> str | AnswerEventUser | None:
@@ -314,7 +314,7 @@ class QueryService:
                 if compiled is not None
                 else None,
                 user=_event_user(caller),
-                tenant=principal.tenant if principal is not None else None,
+                tenant=principal.tenant_scope if principal is not None else None,
                 roles=list(effective_policy.roles) or None,
                 tenancy_exempt=effective_policy.tenancy_exempt,
             )
@@ -352,7 +352,7 @@ class QueryService:
                 bytes_scanned=result.bytes_scanned if result is not None else None,
                 error=error_code,
                 user=_event_user(caller),
-                tenant=principal.tenant if principal is not None else None,
+                tenant=principal.tenant_scope if principal is not None else None,
                 roles=list(effective_policy.roles) or None,
                 tenancy_exempt=effective_policy.tenancy_exempt,
             )

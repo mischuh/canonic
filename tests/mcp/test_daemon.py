@@ -301,5 +301,5 @@ class TestStartStdioTenancyGuard:
             "canonic.mcp.server.build_server", lambda *a, **k: called.setdefault("built", True)
         )
         with pytest.raises(AttributeError):
-            start_stdio(service, project_root, principal=Principal(tenant="4711"))
+            start_stdio(service, project_root, principal=Principal(tenants=("4711",)))
         assert called.get("built") is True

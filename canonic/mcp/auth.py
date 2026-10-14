@@ -24,7 +24,13 @@ from fastmcp.server.auth.providers.jwt import JWTVerifier
 from pydantic import AnyHttpUrl
 
 from canonic.config import McpOAuthMode
-from canonic.contracts.principal import Caller, Principal
+from canonic.contracts.principal import (
+    DEFAULT_MAX_TENANTS,
+    Caller,
+    Principal,
+    TenantValue,
+    normalize_tenants,
+)
 from canonic.credentials import resolve_credential
 
 if TYPE_CHECKING:
@@ -159,6 +165,7 @@ def principal_from_token(
     tenancy: TenancyPolicy | None,
     roles: RolePolicy | None,
     claim_mapping: dict[str, str] | None = None,
+    max_tenants: int = DEFAULT_MAX_TENANTS,
 ) -> Principal | None:
     """Derive a :class:`Principal` from a verified token's claims (SPEC-E12 §5, §7).
 
@@ -176,6 +183,10 @@ def principal_from_token(
     :class:`Principal` field is left empty (``tenant=None`` / ``roles=()``); callers
     combine that with ``ContractResolver.tenancy_enabled`` / ``authz_for`` to decide
     whether the absence is an error (SPEC-E12 §5).
+
+    The tenancy claim may be a scalar or a list. Both resolve to a sorted, de-duplicated
+    tuple (:func:`~canonic.contracts.principal.normalize_tenants`); more than ``max_tenants``
+    distinct values raises :class:`~canonic.exc.TenantLimitExceeded`.
     """
     if tenancy is None and roles is None:
         return None
@@ -183,10 +194,10 @@ def principal_from_token(
     mapping = claim_mapping or {}
     claims = _policy_claims(token)
 
-    tenant: str | None = None
+    tenants: tuple[TenantValue, ...] = ()
     if tenancy is not None:
         raw_tenant = claims.get(mapping.get(tenancy.claim, tenancy.claim))
-        tenant = str(raw_tenant) if raw_tenant is not None else None
+        tenants = normalize_tenants(raw_tenant, limit=max_tenants)
 
     role_names: tuple[str, ...] = ()
     if roles is not None:
@@ -197,7 +208,7 @@ def principal_from_token(
             role_names = (raw_roles,)
 
     kind = "assertion" if _is_identity_asserted(token) else "token"
-    return Principal(tenant=tenant, roles=role_names, source=f"{kind}:{token.client_id}")
+    return Principal(tenants=tenants, roles=role_names, source=f"{kind}:{token.client_id}")
 
 
 def caller_from_token(token: AccessToken) -> Caller:

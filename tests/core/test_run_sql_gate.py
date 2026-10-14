@@ -141,9 +141,7 @@ class TestRoleDeniesRunSql:
             rls_enforced=False,
         )
         with pytest.raises(TenantForbidden, match="run_sql: false"):
-            await service.run_sql(
-                "SELECT 1", principal=Principal(tenant=None, roles=(_VIEWER_ROLE,))
-            )
+            await service.run_sql("SELECT 1", principal=Principal(roles=(_VIEWER_ROLE,)))
 
     @pytest.mark.usefixtures("_stub_connector")
     async def test_run_sql_true_role_without_tenancy_is_allowed(
@@ -158,7 +156,7 @@ class TestRoleDeniesRunSql:
             monkeypatch=monkeypatch,
             rls_enforced=False,
         )
-        await service.run_sql("SELECT 1", principal=Principal(tenant=None, roles=(_ANALYST_ROLE,)))
+        await service.run_sql("SELECT 1", principal=Principal(roles=(_ANALYST_ROLE,)))
 
 
 class TestTenancyRlsGate:
@@ -174,7 +172,7 @@ class TestTenancyRlsGate:
         )
         with pytest.raises(TenantForbidden, match="rls_enforced"):
             await service.run_sql(
-                "SELECT 1", principal=Principal(tenant="4711", roles=(_ADMIN_ROLE,))
+                "SELECT 1", principal=Principal(tenants=("4711",), roles=(_ADMIN_ROLE,))
             )
 
     @pytest.mark.usefixtures("_stub_connector")
@@ -188,7 +186,9 @@ class TestTenancyRlsGate:
             monkeypatch=monkeypatch,
             rls_enforced=True,
         )
-        await service.run_sql("SELECT 1", principal=Principal(tenant="4711", roles=(_ADMIN_ROLE,)))
+        await service.run_sql(
+            "SELECT 1", principal=Principal(tenants=("4711",), roles=(_ADMIN_ROLE,))
+        )
 
     @pytest.mark.usefixtures("_stub_connector")
     async def test_tenancy_exempt_role_skips_rls_gate_even_when_unattested(
@@ -205,4 +205,4 @@ class TestTenancyRlsGate:
             monkeypatch=monkeypatch,
             rls_enforced=False,
         )
-        await service.run_sql("SELECT 1", principal=Principal(tenant=None, roles=(_ANALYST_ROLE,)))
+        await service.run_sql("SELECT 1", principal=Principal(roles=(_ANALYST_ROLE,)))

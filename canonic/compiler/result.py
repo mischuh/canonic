@@ -7,6 +7,10 @@ surfaces (E7/E8); they are plain frozen dataclasses so the core stays protocol-n
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from canonic.contracts.principal import TenantScope
 
 __all__ = [
     "CompileResult",
@@ -196,7 +200,7 @@ class ScopeMetadata:
     only for a cross-tenant read served under a ``tenancy_exempt`` role (§5).
     """
 
-    tenant: str | None
+    tenant: TenantScope | None
     scoped_sources: list[str] = field(default_factory=list)
     shared_sources: list[str] = field(default_factory=list)
     roles: list[str] = field(default_factory=list)

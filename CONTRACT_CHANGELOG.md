@@ -49,6 +49,18 @@ A change listed here was reviewed against the classification rules and did not b
 
 ## History
 
+## 3.2 (2026-10-14) - MINOR
+
+- ADR/PR: this PR (feat(tenancy): scope a principal to a list of tenants)
+- Summary: A principal can now carry several tenants, compiled to `<column> IN (...)`.
+  `metadata.scope.tenant` (`QueryResult`, compile output) and `AnswerEvent.tenant` widen from
+  `string | null` to `string | integer | array of (string | integer) | null`. A principal with
+  exactly one tenant is reported as the bare value as before, so a consumer sees a list only
+  for a caller that could not be scoped to several tenants before. The tenant keeps the type
+  the identity provider sent (an integer claim is an integer). Adds the `tenant_limit_exceeded`
+  error (exit 25), raised when a token carries more tenants than `mcp.auth.max_tenants`. A
+  consumer that types `tenant` as a string must accept a list to handle multi-tenant callers.
+
 ## 3.1 (2026-10-11) - MINOR
 
 - ADR/PR: this PR (feat(compiler): add history option to cumulative metrics)

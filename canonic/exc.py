@@ -50,6 +50,7 @@ class ErrorCode(StrEnum):
     TENANT_UNRESOLVED = "tenant_unresolved"
     TENANT_SCOPE_MISSING = "tenant_scope_missing"
     TENANT_FORBIDDEN = "tenant_forbidden"
+    TENANT_LIMIT_EXCEEDED = "tenant_limit_exceeded"
 
 
 EXIT_CODES: dict[ErrorCode, int] = {
@@ -76,6 +77,7 @@ EXIT_CODES: dict[ErrorCode, int] = {
     ErrorCode.TENANT_UNRESOLVED: 22,
     ErrorCode.TENANT_SCOPE_MISSING: 23,
     ErrorCode.TENANT_FORBIDDEN: 24,
+    ErrorCode.TENANT_LIMIT_EXCEEDED: 25,
 }
 
 
@@ -381,6 +383,17 @@ class TenantForbidden(CanonicError):
     """
 
     code = ErrorCode.TENANT_FORBIDDEN
+
+
+class TenantLimitExceeded(CanonicError):
+    """A principal's tenant list is longer than the configured maximum.
+
+    Raised while binding the principal from a verified token or the ``--tenant`` flag, before
+    any compile, so an oversized ``IN (...)`` predicate is never built. The limit is
+    ``mcp.auth.max_tenants`` in ``canonic.yaml``.
+    """
+
+    code = ErrorCode.TENANT_LIMIT_EXCEEDED
 
 
 class EmbeddingUnavailable(CanonicError):

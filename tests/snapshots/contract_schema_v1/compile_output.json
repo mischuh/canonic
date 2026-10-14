@@ -173,7 +173,7 @@
           "type": "array"
         },
         "contract_schema": {
-          "default": "3.1",
+          "default": "3.2",
           "title": "Contract Schema",
           "type": "string"
         },
@@ -316,7 +316,23 @@
         "tenant": {
           "anyOf": [
             {
+              "type": "integer"
+            },
+            {
               "type": "string"
+            },
+            {
+              "items": {
+                "anyOf": [
+                  {
+                    "type": "integer"
+                  },
+                  {
+                    "type": "string"
+                  }
+                ]
+              },
+              "type": "array"
             },
             {
               "type": "null"

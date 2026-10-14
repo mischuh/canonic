@@ -30,6 +30,7 @@ Every canonic error carries a stable, wire-safe `code` string plus a headless pr
 | 22 | `tenant_unresolved` | A [tenancy policy](/concepts/tenancy-and-access-control) is active but the request carries no resolvable tenant. Raised at compiler stage 0, before metric resolution. |
 | 23 | `tenant_scope_missing` | A query reaches a source declared in neither `scoped_sources` nor `shared_sources` of the tenancy policy: a policy hole, not an unfiltered pass-through. |
 | 24 | `tenant_forbidden` | The caller's own policy denies something the caller can already see: `run_sql` denied by role, or `run_sql` refused because the connection lacks `rls_enforced: true` under an active tenancy policy. |
+| 25 | `tenant_limit_exceeded` | A principal's tenant claim holds more distinct values than `mcp.auth.max_tenants`. Raised while the principal is bound from the token, before any SQL is compiled. |
 
 ## Resolving `ambiguous`
 
@@ -68,7 +69,7 @@ canonic query --metrics revenue
 error tenant_unresolved: tenancy policy is active but the request carries no resolvable tenant
 ```
 
-Fix it with `--tenant` for local development (always warns, see [`--tenant` CLI override](/concepts/tenancy-and-access-control#--tenant-cli-override)), or by confirming the token actually carries the configured `claim`:
+Fix it with `--tenant` for local development (always warns, see [`--tenant` CLI override](/concepts/tenancy-and-access-control#--tenant-cli-override)), or by confirming the token actually carries the configured `claim`. A tenant claim that is an empty list, or a list of only null or blank values, counts as missing. So does a value that cannot be a tenant identifier, such as a boolean or an object, and a value that does not fit an integer scope column:
 
 ```bash
 canonic query --metrics revenue --tenant 4711
@@ -85,6 +86,16 @@ error tenant_scope_missing: source 'shipments' is declared in neither scoped_sou
 ```
 
 Fix it by classifying `shipments` in `tenancy.yaml`: as `scoped_sources` (add its tenant column) if it carries per-tenant rows, or `shared_sources` if it's genuinely tenant-neutral (a lookup/dimension table). Setting `undeclared_source: warn` turns this into a warning instead of a hard failure, useful only for incremental adoption on an existing project. It still means the source is served unfiltered in the meantime.
+
+## Resolving `tenant_limit_exceeded`
+
+A token's tenant claim lists more distinct tenants than `mcp.auth.max_tenants` allows (default `100`):
+
+```text
+error tenant_limit_exceeded: tenant claim carries 140 distinct values, more than the allowed 100 (mcp.auth.max_tenants)
+```
+
+Either trim the list at the identity provider, or raise `mcp.auth.max_tenants` in `canonic.yaml` if the larger list is intended. Each tenant adds a value to the `IN (...)` predicate on every scoped source, so the limit also bounds the size of the compiled SQL.
 
 ## Resolving `tenant_forbidden`
 

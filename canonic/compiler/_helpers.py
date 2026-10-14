@@ -22,24 +22,26 @@ from canonic.compiler.result import (
     SourceFreshness,
 )
 from canonic.contracts.models import MaskStrategy, Severity, UndeclaredSource
+from canonic.contracts.principal import tenant_sort_key
 from canonic.contracts.resolver import ScopeRule, Shared, Undeclared
 from canonic.exc import (
     Ambiguous,
     FanoutUnsafe,
     GuardrailBlock,
     TenantScopeMissing,
+    TenantUnresolved,
     Unresolved,
 )
 from canonic.exc import Unreachable as UnreachableError
 from canonic.semantic.models import Additivity, Measure, NormalizedType, Relationship
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator, Sequence
+    from collections.abc import Iterator, Mapping, Sequence
     from datetime import datetime
 
     from canonic.compiler.query import SemanticQuery
     from canonic.contracts.models import FinalityRule, Guardrail, MaskingRule
-    from canonic.contracts.principal import EffectivePolicy
+    from canonic.contracts.principal import EffectivePolicy, TenantValue
     from canonic.contracts.resolver import ContractResolver
     from canonic.semantic.models import Dimension, SemanticSource
 
@@ -48,6 +50,10 @@ if TYPE_CHECKING:
     DimMask = dict[tuple[str, str], MaskStrategy]
 
 
+#: Scope-column types whose tenant values are compared as integers.
+_NUMERIC_TENANT_TYPES = frozenset(
+    {NormalizedType.INT, NormalizedType.DECIMAL, NormalizedType.FLOAT}
+)
 _FANOUT = frozenset({Relationship.ONE_TO_MANY, Relationship.MANY_TO_MANY})
 
 
@@ -275,13 +281,65 @@ class TenantScoping:
     warnings: list[str] = field(default_factory=list)
 
 
+def _tenant_literals(
+    tenants: Sequence[TenantValue], column_type: NormalizedType | None, where: str
+) -> list[TenantValue]:
+    """The principal's tenants matched to the scope column's type, de-duplicated and ordered.
+
+    An IdP delivers ``"4711"`` or ``4711`` regardless of how the warehouse column is typed, and
+    strict engines reject a string against an integer column (and the reverse). So a numeric
+    column gets integers and a string column gets strings; any other column type keeps the claim's
+    own type. Matching happens before de-duplication, so ``4711`` and ``"4711"`` collapse into one.
+    A value that cannot be an integer on a numeric column fails closed with
+    :class:`TenantUnresolved` instead of reaching the warehouse as a cast error.
+    """
+    matched: set[TenantValue] = set()
+    for value in tenants:
+        if column_type in _NUMERIC_TENANT_TYPES:
+            try:
+                matched.add(int(value))
+            except ValueError:
+                raise TenantUnresolved(
+                    f"tenant value {value!r} cannot be matched to the numeric column {where}"
+                ) from None
+        elif column_type is NormalizedType.STRING:
+            matched.add(str(value))
+        else:
+            matched.add(value)
+    return sorted(matched, key=tenant_sort_key)
+
+
+def _tenant_predicate(alias: str, column: str, values: Sequence[TenantValue]) -> exp.Expression:
+    """``alias.column = v`` for one value, ``alias.column IN (v1, v2, ...)`` for several.
+
+    Built from AST literal nodes, never by parsing a string with a value interpolated into it, so
+    a crafted tenant value is rendered (and escaped) as one literal and cannot extend the
+    predicate.
+    """
+    literals = [
+        exp.Literal.string(v) if isinstance(v, str) else exp.Literal.number(v) for v in values
+    ]
+    this = exp.column(column, table=alias)
+    if len(literals) == 1:
+        return cast("exp.Expression", exp.EQ(this=this, expression=literals[0]))
+    return cast("exp.Expression", exp.In(this=this, expressions=literals))
+
+
+def _scope_column_type(source: SemanticSource | None, column: str) -> NormalizedType | None:
+    """The declared type of ``column`` on ``source``, or ``None`` if either is unknown."""
+    if source is None:
+        return None
+    return next((c.type for c in source.columns if c.name == column), None)
+
+
 def _tenant_conditions(
     resolver: ContractResolver,
     owner: str,
     join_edges: list[JoinEdge],
     alias_to_source: dict[str, str],
-    tenant: str | None,
+    tenants: tuple[TenantValue, ...],
     effective_policy: EffectivePolicy,
+    sources_by_name: Mapping[str, SemanticSource],
 ) -> TenantScoping:
     """Stage 2b — inject a tenant predicate for every scoped source already in the leaf's
     join plan (AMENDMENT-tenant-scoping-rbac.md §3).
@@ -293,9 +351,11 @@ def _tenant_conditions(
     :func:`_guardrail_join_sources`: a guardrail predicate may *pull in* a join target,
     tenancy never does — it only ever narrows a join the query already needed.
 
-    The predicate is built as an ``exp.EQ`` AST node bound to ``tenant`` directly, never by
-    parsing an interpolated string, which is what closes S14 AC3 (a crafted filter cannot
-    escape its own predicate) by construction.
+    The predicate is an ``exp.EQ`` (one tenant) or ``exp.In`` (several) AST node holding the
+    tenant values directly, never built by parsing an interpolated string, which is what closes
+    S14 AC3 (a crafted filter or tenant value cannot escape its own predicate) by construction.
+    Each scoped source gets the values matched to its own column type, see
+    :func:`_tenant_literals`.
 
     A ``tenancy_exempt`` principal (§5, the platform-operator escape hatch) bypasses every
     check here — no predicate, no ``Undeclared`` enforcement — since that role is defined as
@@ -315,17 +375,14 @@ def _tenant_conditions(
             # No principal tenant only happens under on_missing_principal: allow_unscoped
             # (a hard-missing tenant already raised TenantUnresolved in stage 0) — the
             # caller has already been warned once about serving unscoped in that case.
-            if tenant is None:
+            if not tenants:
                 continue
-            conditions.append(
-                cast(
-                    "exp.Expression",
-                    exp.EQ(
-                        this=exp.column(resolution.column, table=alias),
-                        expression=exp.Literal.string(tenant),
-                    ),
-                )
+            values = _tenant_literals(
+                tenants,
+                _scope_column_type(sources_by_name.get(source_name), resolution.column),
+                f"{source_name}.{resolution.column}",
             )
+            conditions.append(_tenant_predicate(alias, resolution.column, values))
             scoped.add(source_name)
         elif isinstance(resolution, Shared):
             shared.add(source_name)

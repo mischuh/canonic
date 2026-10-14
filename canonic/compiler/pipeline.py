@@ -295,13 +295,13 @@ def compile(  # noqa: A001 — the public verb for this capability is "compile"
     # resolution, so a TENANT_UNRESOLVED failure never runs long enough to leak whether a
     # named metric exists (SPEC-E12 §3 stage 0).
     logger.debug("stage 0: binding principal=%s", principal)
-    bound_principal = principal if principal is not None else Principal(tenant=None)
+    bound_principal = principal if principal is not None else Principal()
     effective_policy = resolver.authz_for(bound_principal)
     stage0_warnings: list[str] = []
     if (
         resolver.tenancy_enabled
         and not effective_policy.tenancy_exempt
-        and bound_principal.tenant is None
+        and not bound_principal.tenants
     ):
         tenancy_policy = resolver.tenancy_policy
         assert tenancy_policy is not None  # noqa: S101 — tenancy_enabled guarantees this
@@ -412,7 +412,7 @@ def compile(  # noqa: A001 — the public verb for this capability is "compile"
         opaque=_first(planned, "opaque"),
         cumulative=_first(planned, "cumulative"),
         scope=ScopeMetadata(
-            tenant=bound_principal.tenant,
+            tenant=bound_principal.tenant_scope,
             scoped_sources=sorted(composed.scoped_sources),
             shared_sources=sorted(composed.shared_sources),
             roles=list(effective_policy.roles),

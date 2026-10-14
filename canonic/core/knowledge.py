@@ -14,7 +14,7 @@ if TYPE_CHECKING:
     from canonic.knowledge.models import KnowledgePage
     from canonic.knowledge.results import SearchResult
 
-_ANONYMOUS_PRINCIPAL = Principal(tenant=None)
+_ANONYMOUS_PRINCIPAL = Principal()
 _WILDCARD_TAG = "*"
 
 
