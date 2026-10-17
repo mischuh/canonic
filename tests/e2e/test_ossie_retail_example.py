@@ -9,6 +9,7 @@ Ossie model maps to, this fails and the example gets regenerated deliberately.
 from __future__ import annotations
 
 import json
+import re
 import shutil
 import sqlite3
 from pathlib import Path
@@ -21,6 +22,7 @@ from canonic.cli.app import app
 
 _EXAMPLE = Path(__file__).parents[2] / "examples" / "ossie-retail"
 _DRAFTED = ("semantics", "contracts", "knowledge")
+_STAMP_LINE = re.compile(r"^[ \t]*last_validated_at:.*\n", re.MULTILINE)
 
 
 @pytest.fixture
@@ -44,7 +46,7 @@ def _invoke(*args: str) -> str:
 
 
 def _drafted_files(root: Path) -> dict[str, object]:
-    """Every drafted file, with the run-specific freshness stamp removed."""
+    """Every drafted file, with the freshness stamp removed from YAML and page frontmatter."""
     yaml = YAML(typ="safe")
     files: dict[str, object] = {}
     for top in _DRAFTED:
@@ -57,7 +59,7 @@ def _drafted_files(root: Path) -> dict[str, object]:
                 (content.get("meta") or {}).pop("last_validated_at", None)
                 files[key] = content
             else:
-                files[key] = path.read_text()
+                files[key] = _STAMP_LINE.sub("", path.read_text())
     return files
 
 

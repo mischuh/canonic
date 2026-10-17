@@ -1,0 +1,68 @@
+name: refresh-examples
+
+# Knowledge pages report a staleness signal once their references have gone unvalidated for
+# 90 days. The examples ship such pages, so their stamps expire on their own even when nothing
+# is wrong. This restamps them every month, but only after every example still loads and every
+# reference still resolves: a stamp must never hide real drift.
+#
+# Opened with the same token release-please uses, because a pull request created with the
+# default GITHUB_TOKEN does not start the other workflows and would never pass the required checks.
+on:
+  schedule:
+    - cron: "23 6 1 * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+env:
+  TZ: UTC
+  BRANCH: chore/refresh-example-stamps
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.CANONIC_GH_ACTIONS }}
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+        with:
+          enable-cache: true
+
+      - name: Install dependencies
+        run: uv sync --frozen --group dev
+
+      - name: Restamp knowledge pages
+        run: uv run python scripts/refresh_example_stamps.py
+
+      - name: Open a pull request
+        env:
+          GH_TOKEN: ${{ secrets.CANONIC_GH_ACTIONS }}
+        run: |
+          if [ -z "$(git status --porcelain examples)" ]; then
+            echo "Every stamp is recent, nothing to do."
+            exit 0
+          fi
+          if [ -n "$(gh pr list --head "$BRANCH" --state open --json number --jq '.[].number')" ]; then
+            echo "A refresh pull request is already open."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git switch -C "$BRANCH"
+          git add examples
+          git commit -m "chore(examples): refresh knowledge validation stamps" \
+            -m "- restamp last_validated_at on pages whose references still resolve"
+          git push --force origin "$BRANCH"
+          gh pr create --base main --head "$BRANCH" \
+            --title "chore(examples): refresh knowledge validation stamps" \
+            --body "Restamps \`last_validated_at\` on the example knowledge pages, so they stay inside the 90 day staleness window. \`scripts/refresh_example_stamps.py\` only stamps after every example's contracts validate and every page reference resolves."
