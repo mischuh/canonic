@@ -9,8 +9,9 @@ checked against the state that run leaves behind:
 - A page whose references all resolve is *validated*: :meth:`PageReferenceCheck.stamp` refreshes
   ``meta.last_validated_at``, the stamp ``read_knowledge_page`` turns into a staleness signal.
 
-Pages the run already decided (an ingest-drafted page that was re-rendered or pruned) are
-skipped, reconciliation owns them.
+Pages the run already decided (an ingest-drafted page that was added, edited or pruned) are
+skipped, reconciliation owns them. An ingest-drafted page the run found unchanged is validated
+like any other, since its references were resolved when it was rendered.
 """
 
 from __future__ import annotations
@@ -90,7 +91,16 @@ class PageReferenceChecker:
             return PageReferenceCheck([], [])
 
         pages = self._load_pages(knowledge_root)
-        decided = {entry.target for entry in report.entries}
+        decided = {
+            entry.target
+            for entry in report.entries
+            if entry.decision is not ReconciliationDecision.NO_OP
+        }
+        unchanged = {
+            entry.target
+            for entry in report.entries
+            if entry.decision is ReconciliationDecision.NO_OP
+        }
         entity_index = self._entity_index(report, accepted)
         page_index = self._page_index(pages, report)
 
@@ -101,16 +111,24 @@ class PageReferenceChecker:
             target = page.path.relative_to(self._root).as_posix()
             if target in decided or page.meta.frozen:
                 continue
+            if target in unchanged:
+                # The run re-rendered this ingest-drafted page and found it identical, which
+                # means every reference it records resolves against the resulting state.
+                if self._needs_restamp(page, now):
+                    validated.append(page)
+                continue
             stale_sl = self._advisor.stale_sl_refs(page, entity_index)
             stale_refs = self._advisor.stale_refs(page, page_index)
             if stale_sl or stale_refs:
                 entries.append(self._prune_entry(page, target, stale_sl, stale_refs))
-            elif (
-                page.meta.last_validated_at is None
-                or now - page.meta.last_validated_at > _RESTAMP_AFTER
-            ):
+            elif self._needs_restamp(page, now):
                 validated.append(page)
         return PageReferenceCheck(entries, validated)
+
+    @staticmethod
+    def _needs_restamp(page: KnowledgePage, now: datetime) -> bool:
+        last = page.meta.last_validated_at
+        return last is None or now - last > _RESTAMP_AFTER
 
     @staticmethod
     def _load_pages(knowledge_root: Path) -> list[KnowledgePage]:

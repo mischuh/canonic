@@ -99,6 +99,13 @@ async def _run(root: Path, *docs: EvidenceItem, apply: bool = True) -> Any:
     return result
 
 
+def _without_stamp(text: str) -> str:
+    """The page text minus its freshness stamp, which an unchanged run refreshes in place."""
+    return "".join(
+        line for line in text.splitlines(keepends=True) if "last_validated_at" not in line
+    )
+
+
 def _entry(result: Any, target: str = _PAGE) -> Any:
     return next(e for e in result.report.entries if e.target == target)
 
@@ -147,7 +154,7 @@ async def test_unchanged_doc_is_a_no_op(tmp_path: Path) -> None:
     result = await _run(tmp_path, _doc())
 
     assert _entry(result).decision is ReconciliationDecision.NO_OP
-    assert (tmp_path / _PAGE).read_text() == before
+    assert _without_stamp((tmp_path / _PAGE).read_text()) == _without_stamp(before)
 
 
 async def test_changed_doc_is_an_edit(tmp_path: Path) -> None:
@@ -193,3 +200,26 @@ async def test_drafted_page_whose_evidence_disappeared_is_proposed_for_prune(
     result = await _run(tmp_path, apply=False)
 
     assert _entry(result).decision is ReconciliationDecision.PRUNE
+
+
+async def test_unchanged_drafted_page_is_stamped_as_validated(tmp_path: Path) -> None:
+    scaffold_project(tmp_path)
+    await _run(tmp_path, _doc())
+    assert load_knowledge_page(tmp_path / _PAGE).meta.last_validated_at is None
+
+    result = await _run(tmp_path, _doc())
+
+    assert _entry(result).decision is ReconciliationDecision.NO_OP
+    assert load_knowledge_page(tmp_path / _PAGE).meta.last_validated_at is not None
+
+
+async def test_dry_run_does_not_stamp_an_unchanged_drafted_page(tmp_path: Path) -> None:
+    scaffold_project(tmp_path)
+    await _run(tmp_path, _doc())
+    live = _Live()
+    pipeline = IngestionPipeline(tmp_path, {_CONN: live}, ReconcileConfig())
+    evidence = await evidence_from_introspection(live, _CONN) + [_doc()]
+
+    await pipeline.run(evidence, dry_run=True)
+
+    assert load_knowledge_page(tmp_path / _PAGE).meta.last_validated_at is None
