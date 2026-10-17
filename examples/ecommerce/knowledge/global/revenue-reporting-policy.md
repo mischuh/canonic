@@ -7,7 +7,7 @@ sl_refs:
 usage_mode: policy
 meta:
   provenance: human_curated
-  last_validated_at: "2026-06-17T00:00:00Z"
+  last_validated_at: "2026-10-16T00:00:00Z"
   bound_fingerprints:
     "warehouse_pg.orders.total_revenue": "sha256:6193c9db63810d49d8c08c18bacb053c943f8f0c1ea8d0fc3dee16ecc0cd7b34"
 ---

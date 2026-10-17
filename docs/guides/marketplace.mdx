@@ -35,13 +35,13 @@ Seed data: 3,092 orders and 6,891 order line items across 1,180 customers, spann
 ## Setup
 
 ```bash
-sqlite3 marketplace.db < setup.sql   # create the database (one-time)
 cd examples/marketplace              # canonic commands must run from here
+sqlite3 marketplace.db < setup.sql   # create the database (one-time)
 canonic status
 # project root:   .../examples/marketplace
 # config version: 1
 # .canonic/:        absent
-# contract:       2.9
+# contract:       3.2
 ```
 
 ## Quickstart
@@ -104,6 +104,8 @@ This happens because `contracts/policies/tenancy.yaml` sets `on_missing_principa
 | `platform-ops` | `roles: [platform_analyst]` (no `merchant_id`) | `tenancy_exempt: true`, every metric (`allow: ["*"]`), every knowledge tag, `run_sql: true` and actually allowed |
 
 `merchant_admin` `inherits: merchant_viewer` (field-level override, not a list-merge): it re-opens `dimensions.deny` to `[]` and adds a `masking` rule instead.
+
+Every token here carries one `merchant_id`, but the claim may also be a list, for a user who works for several merchants. The compiler then injects `merchant_id IN (...)` on every scoped source, and a token with more than `mcp.auth.max_tenants` values (default 100) fails with `TENANT_LIMIT_EXCEEDED`. `tenancy.yaml` does not change. See [Several tenants per principal](/concepts/tenancy-and-access-control#several-tenants-per-principal).
 
 The five identities above are static bearer tokens, the simplest setup. The same identities can also come from a real identity provider through `mcp.auth.oauth`. The [Keycloak guide](/guides/marketplace-keycloak) runs this exact project behind a local Keycloak with a browser login, and both mechanisms can be active on one daemon.
 

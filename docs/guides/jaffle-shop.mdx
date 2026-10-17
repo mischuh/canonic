@@ -30,14 +30,17 @@ Bundled DuckDB file: no server, no credentials.
 ```bash
 cd examples/jaffle-shop   # canonic commands must run from here
 canonic status
-# Canonic project: jaffle-shop-demo (version 1)
+# project root:   .../examples/jaffle-shop
+# config version: 1
+# .canonic/:        absent
+# contract:       3.2
 ```
 
 ## Quickstart
 
 ```bash
 canonic ingest --bootstrap                              # introspects DuckDB + loads dbt manifest as modeling-tier evidence
-canonic query --metrics revenue --dimensions store_id    # revenue by store
+canonic query --metrics revenue --dimensions name        # revenue by store
 canonic mcp start                                        # expose metrics to any MCP-compatible agent
 ```
 

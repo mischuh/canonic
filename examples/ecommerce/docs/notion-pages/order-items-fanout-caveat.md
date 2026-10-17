@@ -22,12 +22,13 @@ plausible but is wrong.
 - Query `revenue` or `order_count` from `orders` alone (or via its declared joins to `customers`
   and `channels`).
 
-## What is not supported (yet)
+## Combining both facts
 
 Querying `revenue` (from `orders`) and `units_sold` (from `order_items`) in the **same**
-`query()` call crosses fact tables at different grains. This is blocked in Phase 1.
+`query()` call is safe. The compiler aggregates each metric to the requested grain in its own
+subquery and joins the results.
 
-If you need both in one view: run two separate queries and join on `order_id` in your BI layer.
+Hand-written SQL that joins the two fact tables and then sums `orders.amount` is not safe.
 
 ## Reconciliation check
 

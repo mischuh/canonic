@@ -5,8 +5,8 @@ grain: [vehicle_id, snapshot_date]
 description: "Daily snapshot of vehicle inventory level per location. Additive over vehicles/locations but NOT over time (snapshot, not a flow)."
 
 columns:
-  - { name: vehicle_id,     type: string,  nullable: false }
-  - { name: location_id,    type: string,  nullable: false }
+  - { name: vehicle_id,     type: int,     nullable: false }
+  - { name: location_id,    type: int,     nullable: false }
   - { name: snapshot_date,  type: date,    nullable: false }
   - { name: inventory_level, type: int,    nullable: false }
 

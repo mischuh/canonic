@@ -6,7 +6,7 @@ sl_refs:
 usage_mode: caveat
 meta:
   provenance: human_curated
-  last_validated_at: "2026-06-28T00:00:00Z"
+  last_validated_at: "2026-10-16T00:00:00Z"
 ---
 
 ## Why you cannot sum MRR over time

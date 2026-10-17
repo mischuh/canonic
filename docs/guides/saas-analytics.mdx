@@ -35,7 +35,10 @@ Bundled DuckDB file: no server, no credentials.
 cd examples/saas-analytics
 bash scripts/build.sh   # (optional) rebuild the warehouse from setup.sql
 canonic status
-# Canonic project: saas-analytics-demo (version 1)
+# project root:   .../examples/saas-analytics
+# config version: 1
+# .canonic/:        absent
+# contract:       3.2
 ```
 
 ## Quickstart
@@ -66,7 +69,7 @@ No LLM is required for any of these commands: this example ships hand-curated se
 | `opaque` | `customer_ltv` | `native_grain: [customer_id]`, served at customer grain only |
 | `cumulative` | `customers_to_date` | `order_by: [event_date]` with `history: include`, a running total of new logos since the first event, per plan when grouped by `plan_name` |
 
-Ratio and weighted-avg components must themselves be `single`-kind metrics, so a set of small helper metrics (`mrr_total`, `active_accounts`, `churned_customers`, `new_customers`, `won_opportunities`, `total_opportunities`, `campaign_spend`, `discount_value_sum`, `total_contract_value`, `nps_net`, `nps_responses`) provide those building blocks. See [The semantic compiler](/concepts/compiler#fanout--additivity) for how each kind actually compiles.
+Ratio and weighted-avg components must themselves be `single` or `distinct_count` metrics (percentile, semi-additive and composite components are rejected), so a set of small helper metrics (`mrr_total`, `active_accounts`, `churned_customers`, `new_customers`, `won_opportunities`, `total_opportunities`, `campaign_spend`, `discount_value_sum`, `total_contract_value`, `nps_net`, `nps_responses`) provide those building blocks. See [The semantic compiler](/concepts/compiler#fanout--additivity) for how each kind actually compiles.
 
 ## Guardrails: all four kinds
 

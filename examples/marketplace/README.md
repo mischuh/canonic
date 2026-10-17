@@ -15,8 +15,8 @@ The same project behind a real identity provider (Keycloak, OAuth 2.1 browser lo
 ## Quickstart
 
 ```sh
-sqlite3 marketplace.db < setup.sql        # create the database (one-time)
 cd examples/marketplace                   # canonic commands must run from here
+sqlite3 marketplace.db < setup.sql        # create the database (one-time)
 canonic status
 canonic ingest --bootstrap --headless
 canonic query --metrics revenue --dimensions status --tenant byte-gadgets

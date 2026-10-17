@@ -1,9 +1,11 @@
 ---
 summary: "Joining orders to order_items fans out rows: never sum order amounts from the order_items table."
 tags: [orders, order_items, fanout, caveat]
-sl_refs: [order_items.units_sold, orders.revenue]
+sl_refs: [jaffle_duckdb.order_items.units_sold, jaffle_duckdb.orders.revenue]
 usage_mode: caveat
-provenance: human_curated
+meta:
+  provenance: human_curated
+  last_validated_at: "2026-10-16T00:00:00Z"
 ---
 
 The `order_items` table has one row per line item. A single order with 3 items appears as 3 rows in `order_items`.

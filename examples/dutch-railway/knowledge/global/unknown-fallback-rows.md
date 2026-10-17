@@ -3,11 +3,13 @@ summary: "Why dim_nl_provinces, dim_nl_municipalities, and dim_nl_train_stations
 tags: [geography, joins, data-quality]
 sl_refs:
   - railway_duckdb.dim_nl_municipalities
+  - railway_duckdb.dim_nl_provinces
   - railway_duckdb.dim_nl_train_stations
+  - railway_duckdb.fact_services.service_count
 usage_mode: caveat
 meta:
   provenance: human_curated
-  last_validated_at: "2026-07-05T00:00:00Z"
+  last_validated_at: "2026-10-16T00:00:00Z"
 ---
 
 Municipality and province boundaries are resolved by a spatial point-in-polygon join at build

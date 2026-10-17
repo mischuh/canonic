@@ -6,7 +6,7 @@ sl_refs:
 usage_mode: definition
 meta:
   provenance: human_curated
-  last_validated_at: "2026-06-22T00:00:00Z"
+  last_validated_at: "2026-10-16T00:00:00Z"
 ---
 
 **Rental revenue** is the total amount collected from customers across all settled payment transactions.
@@ -47,5 +47,5 @@ customer country, membership tier, vehicle category, and pickup location.
 
 ## Cross-fact fanout warning
 
-See [[no-damage-payment-join]] before joining `damages` to `payments` in the same query.
+Do not join `damages` to `payments` in the same query, because both facts fan out.
 Repair costs and rental revenue must be analysed in separate queries bridged through `rentals`.

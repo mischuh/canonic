@@ -23,4 +23,4 @@ candidates:
   #   provider: openai_compatible
   #   base_url: https://api.your-vendor.com/v1
   #   model: your-model-id
-  #   api_key_ref: env:CANONIC_LLM_KEY
+  #   api_key_ref: env:CANONIC_LLM_API_KEY

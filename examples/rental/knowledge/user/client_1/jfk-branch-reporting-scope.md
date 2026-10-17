@@ -7,7 +7,7 @@ sl_refs:
 usage_mode: caveat
 meta:
   provenance: human_curated
-  last_validated_at: "2026-07-12T00:00:00Z"
+  last_validated_at: "2026-10-16T00:00:00Z"
 ---
 
 **Personal reporting default.** I run the JFK / New York branch (`locations.location_id = 1`,

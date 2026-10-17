@@ -7,7 +7,7 @@ The [marketplace guide](/guides/marketplace) demonstrates tenant scoping and rol
 
 <Info>Full source: [`scripts/local_idp/`](https://github.com/mischuh/canonic/tree/main/scripts/local_idp)</Info>
 
-The setup never modifies `examples/marketplace/canonic.yaml`. The compose file mounts `canonic.docker.yaml` over it inside the container, so the shipped and golden-tested example stays untouched.
+The setup never modifies `examples/marketplace/canonic.yaml`. The compose file mounts `canonic.docker.yaml` over it inside the container, so the shipped example, which the tenancy end-to-end test covers, stays untouched.
 
 ## Prerequisites
 
@@ -111,7 +111,7 @@ The realm export is a local-development artifact. Passwords, the client secret a
     Allow the daemon's public callback, `<base_url>/*`, as a valid redirect URI. `base_url` must be the URL clients reach the daemon under, for example `https://canonic.internal.example.com`, and TLS terminates at your reverse proxy.
   </Step>
   <Step title="Add the claims your policies name">
-    Add a `roles` mapper (type "User Realm Role") and one mapper per tenant claim (type "User Attribute", for example `merchant_id`) to the client, with "Add to access token" on. Set the `claim.name` of each mapper to the `claim` used in `roles.yaml` and `tenancy.yaml`. If your IdP team requires namespaced claim names, name the mapper claim `https://example.com/merchant_id` and map it with `claim_mapping` instead.
+    Add a `roles` mapper (type "User Realm Role") and one mapper per tenant claim (type "User Attribute", for example `merchant_id`) to the client, with "Add to access token" on. Switch on "Multivalued" for a user who may work for several tenants: the claim is then a list and scopes the caller to all of them (see `mcp.auth.max_tenants`). Set the `claim.name` of each mapper to the `claim` used in `roles.yaml` and `tenancy.yaml`. If your IdP team requires namespaced claim names, name the mapper claim `https://example.com/merchant_id` and map it with `claim_mapping` instead.
   </Step>
   <Step title="Point canonic at the realm">
     Set `issuer_url` to `https://<keycloak-host>/realms/<realm>`. In `proxy` mode canonic discovers the endpoints from `issuer_url + /.well-known/openid-configuration`. Keycloak issues JWT access tokens, so the default `verify_id_token: false` works.

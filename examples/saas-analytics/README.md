@@ -29,7 +29,7 @@ canonic.yaml                 ← project config + DuckDB connection
 saas.duckdb                  ← bundled pre-built warehouse (8 dims, 10 facts, 4 marts)
 setup.sql                    ← DDL + seed data (idempotent, rebuild with scripts/build.sh)
 semantics/saas_duckdb/       ← hand-curated dimensions + facts
-contracts/metrics/           ← 30 metric contracts (12 showcase + helper metrics for ratios)
+contracts/metrics/           ← 31 metric contracts (12 showcase + helper metrics for ratios)
 contracts/guardrails/        ← 5 guardrails + 1 finality rule (all 4 guardrail kinds)
 contracts/assertions/        ← 2 query-based assertions, seed-derived expected values
 knowledge/global/            ← 6 definition/caveat/policy/reference pages
