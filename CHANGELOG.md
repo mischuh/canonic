@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.40.1](https://github.com/mischuh/canonic/compare/v0.40.0...v0.40.1) (2026-10-17)
+
+
+### Bug Fixes
+
+* **eval:** point the baseline report at a candidates file that exists ([#408](https://github.com/mischuh/canonic/issues/408)) ([72c3765](https://github.com/mischuh/canonic/commit/72c3765bfe6e1846f08404009c9916329437c906))
+* **ingestion:** stamp ingest-drafted pages the run finds unchanged ([#409](https://github.com/mischuh/canonic/issues/409)) ([b5f6cde](https://github.com/mischuh/canonic/commit/b5f6cde9ea95b2ad883d9f9b7c85779baa32276c))
+
+
+### Documentation
+
+* **examples:** bring examples in line with current contracts and knowledge schema ([#404](https://github.com/mischuh/canonic/issues/404)) ([637a6ef](https://github.com/mischuh/canonic/commit/637a6ef06eae8756e4dc22687e24c3847f7a14c9))
+
 ## [0.40.0](https://github.com/mischuh/canonic/compare/v0.39.0...v0.40.0) (2026-10-14)
 
 
