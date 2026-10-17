@@ -35,4 +35,4 @@ canonic eval baseline --candidates candidates.yaml --out docs/baseline-models.md
 ```
 
 `--candidates` is a YAML list of `openai_compatible` models (see
-`examples/eval/candidates.example.yaml`); `--dataset` defaults to the shipped labeled set.
+`examples/ecommerce/candidates.yaml`); `--dataset` defaults to the shipped labeled set.

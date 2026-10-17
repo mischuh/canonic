@@ -114,7 +114,7 @@ def render_markdown(
         "```",
         "",
         "`--candidates` is a YAML list of `openai_compatible` models (see",
-        "`examples/eval/candidates.example.yaml`); `--dataset` defaults to the shipped labeled set.",
+        "`examples/ecommerce/candidates.yaml`); `--dataset` defaults to the shipped labeled set.",
         "",
     ]
     return "\n".join(lines)
