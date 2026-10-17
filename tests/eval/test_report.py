@@ -2,11 +2,15 @@
 
 from __future__ import annotations
 
+import re
 from datetime import UTC, datetime
+from pathlib import Path
 
 from canonic.eval.harness import run_baseline
 from canonic.eval.report import render_markdown
 from tests.eval.conftest import StubDrafter, StubUsageReader, make_candidate
+
+_REPO_ROOT = Path(__file__).parents[2]
 
 
 async def _report(grain_cases):
@@ -48,3 +52,12 @@ async def test_render_states_when_no_candidate_recommended(grain_cases) -> None:
     # adherence clears the floor — assert the recommended line names it.
     md = render_markdown(report)
     assert "**Recommended for `draft`:** weak." in md
+
+
+async def test_render_points_at_an_example_candidates_file_that_exists(grain_cases) -> None:
+    md = render_markdown(await _report(grain_cases))
+
+    paths = re.findall(r"`(examples/[^`]+\.yaml)`", md)
+    assert paths
+    for relative in paths:
+        assert (_REPO_ROOT / relative).is_file(), relative
