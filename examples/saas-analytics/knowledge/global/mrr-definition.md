@@ -7,7 +7,7 @@ sl_refs:
 usage_mode: definition
 meta:
   provenance: human_curated
-  last_validated_at: "2026-06-28T00:00:00Z"
+  last_validated_at: "2026-10-16T00:00:00Z"
 ---
 
 **Monthly Recurring Revenue (MRR)** is the recurring subscription revenue on the books at the

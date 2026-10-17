@@ -22,7 +22,7 @@ canonic mcp start
 ## What's in here
 
 ```
-canonic.yaml                    ← project config + DuckDB connection + dbt connection
+canonic.yaml                    ← project config, DuckDB and dbt connections, LLM and MCP auth (static token + OAuth)
 dutch_railway.duckdb            ← prebuilt, self-contained warehouse (~4MB, no extensions needed)
 dbt/manifest.json               ← dbt manifest (schema v12), model/relation evidence only
 semantics/railway_duckdb/       ← 3 dimensions (incl. 2 with an 'unknown' fallback row) + 1 fact

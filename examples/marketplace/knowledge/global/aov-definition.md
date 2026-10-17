@@ -7,7 +7,7 @@ sl_refs:
 usage_mode: definition
 meta:
   provenance: human_curated
-  last_validated_at: "2026-08-10T00:00:00Z"
+  last_validated_at: "2026-10-16T00:00:00Z"
 ---
 
 **Average order value (AOV)** is the mean amount charged per order: `revenue` divided

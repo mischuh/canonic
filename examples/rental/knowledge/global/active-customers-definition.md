@@ -2,25 +2,27 @@
 summary: "What active_customers means and how it is calculated."
 tags: [active_customers, definitions, metrics, rentals]
 sl_refs:
-  - rental_db.rentals.active_customers
   - rental_db.rentals
+  - rental_db.rentals.customer_id
+  - rental_db.rentals.status
 usage_mode: definition
 meta:
   provenance: human_curated
-  last_validated_at: "2026-06-24T00:00:00Z"
+  last_validated_at: "2026-10-16T00:00:00Z"
 ---
 
 **Active customers** is the count of distinct customers who have at least one non-cancelled rental.
 
-The live expression: rendered directly from the semantic layer:
-
-> `{{ sl:rental_db.rentals.active_customers.expr }}`
+The metric is a `distinct_count` binding on `rentals.customer_id` with the population filter
+`status != 'cancelled'`. A distinct count has no measure expression to render, so the definition
+lives in the metric contract.
 
 ## Grain
 
-One unique customer per distinct `customer_id`. The measure is fully additive across all
-dimensions reachable from `rentals`: vehicle category, pickup location, membership tier,
-and rental date.
+One unique customer per distinct `customer_id`. The metric can be sliced by any dimension
+reachable from `rentals` (vehicle category, pickup location, membership tier, rental date), but
+a distinct count does not add up across slices. A customer who rents in two locations counts once
+in each.
 
 ## What it counts
 
@@ -40,7 +42,6 @@ customers with only cancelled rentals are not counted as active customers.
 |---|---|---|
 | `active_customers` | rentals | distinct customers with at least one non-cancelled rental |
 | `rental_count` | rentals | total number of rental transactions (all statuses) |
-| `total_customers` | customers | all customer records, regardless of rental activity |
 
 ## Typical values
 

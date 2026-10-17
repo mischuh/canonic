@@ -36,7 +36,7 @@ mcp:
 reconcile:
   strict_contradictions: false
   auto_apply:
-    enabled: true   # propose-only; review diffs before committing
+    enabled: true   # inferred, high-confidence changes apply without review. Grain, joins and measures never do
     min_confidence: 0.95
     max_provenance: inferred
 

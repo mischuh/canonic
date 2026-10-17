@@ -1,8 +1,8 @@
 """Semantic correctness golden suite.
 
 Locks the compiled SQL *and* the executed numbers for a curated set of queries against
-the four zero-infrastructure example projects (jaffle-shop, dutch-railway,
-saas-analytics, rental). Every case in ``cases/*.jsonl`` reproduces the shape of a past
+the six zero-infrastructure example projects (jaffle-shop, dutch-railway,
+saas-analytics, rental, ossie-retail, coffeehouse). Every case in ``cases/*.jsonl`` reproduces the shape of a past
 `fix(compiler)` bug -- each of which was a silently-wrong-number defect found by hand
 -- so the fix stays fixed instead of relying on someone noticing a wrong number again.
 

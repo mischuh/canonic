@@ -2,20 +2,21 @@
 summary: "What ending_inventory means and how it is calculated as a point-in-time snapshot."
 tags: [ending_inventory, inventory, fleet_size, definitions, metrics, vehicle_inventory]
 sl_refs:
-  - rental_db.vehicle_inventory.ending_inventory
+  - rental_db.vehicle_inventory
   - rental_db.vehicle_inventory.inventory_level
 usage_mode: definition
 meta:
   provenance: human_curated
-  last_validated_at: "2026-06-24T00:00:00Z"
+  last_validated_at: "2026-10-16T00:00:00Z"
 ---
 
 **Ending inventory** is the count of available vehicles at the last snapshot date of a reporting period,
 measured per location and vehicle category. It represents a point-in-time fleet size, not a flow.
 
-The live expression: rendered directly from the semantic layer:
+The metric collapses the `inventory_level` measure to the last `snapshot_date` of the period.
+The live expression of that measure, rendered directly from the semantic layer:
 
-> `{{ sl:rental_db.vehicle_inventory.ending_inventory.expr }}`
+> `{{ sl:rental_db.vehicle_inventory.inventory_level.expr }}`
 
 ## Grain
 

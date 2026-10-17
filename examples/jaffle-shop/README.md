@@ -15,7 +15,7 @@ Full walkthrough, metric catalogue, and explanation of what canonic extracts fro
 cd examples/jaffle-shop   # canonic commands must run from here
 canonic status
 canonic ingest --bootstrap
-canonic query --metrics revenue --dimensions store_id
+canonic query --metrics revenue --dimensions name
 canonic mcp start
 ```
 

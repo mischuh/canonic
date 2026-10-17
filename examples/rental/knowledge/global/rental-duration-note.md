@@ -6,7 +6,7 @@ sl_refs:
 usage_mode: caveat
 meta:
   provenance: human_curated
-  last_validated_at: "2026-06-22T00:00:00Z"
+  last_validated_at: "2026-10-16T00:00:00Z"
 ---
 
 **Average rental duration** is the mean number of days a vehicle was actually held, computed

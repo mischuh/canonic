@@ -3,7 +3,7 @@ title: "Guide: Ecommerce (Postgres)"
 description: "A small but complete Postgres project covering the full Phase 1 loop, evidence connectors, and observability."
 ---
 
-A small but end-to-end canonic project: a Postgres connection, a four-source star schema (two facts, three dimensions), three canonical metrics, three guardrail contracts (a refund filter plus a finality-backed board-reporting restriction), and a companion dbt manifest demonstrating the definition-connector class. This is the broadest walkthrough of the full loop: bootstrap, serve, evidence connectors, accuracy tracking, and observability all in one place.
+A small but end-to-end canonic project: a Postgres connection, a six-source star schema (two facts, three dimensions, plus an intraday `orders_rt` mirror), three canonical metrics, four contract files (two refund filters, a board-reporting restriction and the finality rule behind it), three assertions, and a companion dbt manifest demonstrating the definition-connector class. This is the broadest walkthrough of the full loop: bootstrap, serve, evidence connectors, accuracy tracking, and observability all in one place.
 
 <Info>Full source: [`examples/ecommerce/`](https://github.com/mischuh/canonic/tree/main/examples/ecommerce)</Info>
 
@@ -34,9 +34,10 @@ psql "postgres://postgres:${CANONIC_PG_PASSWORD}@localhost:5432/postgres" < setu
 
 cd examples/ecommerce   # canonic commands must run from here
 canonic status
-# Canonic project: ecommerce-demo (version 1)
-# Root: /path/to/examples/ecommerce
-# Connection: warehouse_pg (postgres)
+# project root:   .../examples/ecommerce
+# config version: 1
+# .canonic/:        absent
+# contract:       3.2
 ```
 
 `setup.sql` is idempotent: re-running it drops and recreates all tables in the correct order.
@@ -72,9 +73,10 @@ Each step proves one Phase 1 exit criterion:
 
 ## Guardrails
 
-`contracts/guardrails/` ships **3** contracts, not just the one refund filter:
+`contracts/guardrails/` ships **4** contract files, not just the one refund filter:
 
 - **`revenue-excludes-refunds`** (`mandatory_filter`): AND-s `status != 'refunded'` into every query touching `orders.total_revenue`. Expected revenue after the guardrail: **3790.50** (7 completed + 1 pending order. The seed data's two refunded orders, totaling 260.00, never appear).
+- **`units-sold-excludes-refunds`** (`mandatory_filter`): the same `status != 'refunded'` filter on `order_items.units_sold`, read from `orders` through the declared join.
 - **`board-final-only`** (`restrict_source`): in a `context: board_reporting` query, confines `revenue` to the final `orders` source only, excluding the intraday `orders_rt` estimates.
 - **`finality-revenue`**: not a guardrail kind itself, but the paired finality rule `board-final-only` enforces: it declares `orders` as the `final` realization (watermark `business_day - 1 day`) and `orders_rt` as `provisional`, with `coalescing: "window <= watermark ? final : provisional"`.
 

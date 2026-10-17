@@ -29,9 +29,8 @@ dimensions reachable from `order_items`:
 
 ## What it excludes
 
-Line items belonging to refunded orders. The `revenue-excludes-refunds` guardrail propagates
-through joins, so refunded orders are excluded even when the query reaches `order_items`
-through the join chain.
+Line items belonging to refunded orders. The `units-sold-excludes-refunds` guardrail applies to
+`order_items.units_sold` and reads the order status through the declared join.
 
 ## How this differs from order_count
 

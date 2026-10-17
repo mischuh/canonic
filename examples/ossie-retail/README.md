@@ -42,4 +42,4 @@ knowledge/global/            ← 6 pages from Ossie ai_context instructions
 raw-sources/                 ← evidence snapshots of the last ingest run
 ```
 
-Three objects in the model are intentionally not imported, to show how the connector reports them: the query-sourced dataset `recent_orders`, the MDX-only metric `revenue_cube`, and the window function `running_revenue`.
+Three objects in the model are intentionally not imported: the query-sourced dataset `recent_orders`, the MDX-only metric `revenue_cube`, and the window function `running_revenue`. The connector warns about `recent_orders` and `revenue_cube` and skips `running_revenue` silently, because its additivity is unknown.

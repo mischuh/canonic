@@ -1,6 +1,6 @@
 # Canonic rental demo
 
-An end-to-end canonic project on a vehicle rental service: one SQLite connection, five dimensions, four fact tables, ten metric contracts (three canonical), and one enforced guardrail (NULL-handling on `total_amount`).
+An end-to-end canonic project on a vehicle rental service: one SQLite connection, five dimensions, four fact tables, ten metric contracts (three canonical), and one guardrail (NULL-handling on `total_amount`) that guards any metric bound to `rentals.total_base_revenue`.
 
 Full walkthrough, metrics table, and the cross-fact fanout caveat: **[`docs/guides/rental.mdx`](../../docs/guides/rental.mdx)**.
 
@@ -13,8 +13,8 @@ Full walkthrough, metrics table, and the cross-fact fanout caveat: **[`docs/guid
 ## Quickstart
 
 ```sh
-sqlite3 rental.db < setup.sql   # create the database (one-time)
 cd examples/rental              # canonic commands must run from here
+sqlite3 rental.db < setup.sql   # create the database (one-time)
 canonic status
 canonic ingest --bootstrap
 canonic query --metrics rental_count --dimensions status

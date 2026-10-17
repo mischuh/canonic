@@ -7,13 +7,13 @@ sl_refs:
 usage_mode: definition
 meta:
   provenance: human_curated
-  last_validated_at: "2026-06-17T00:00:00Z"
+  last_validated_at: "2026-10-16T00:00:00Z"
   bound_fingerprints:
     "warehouse_pg.order_items.units_sold": "sha256:f9d568fe8feca201b8e8fde76b4f72941550591233aeba42d91614b90f6aeb6b"
 ---
 
 **Units sold** is the total number of product units shipped across all order line items, excluding
-refunded orders (the `revenue-excludes-refunds` guardrail propagates through joins).
+refunded orders (the `units-sold-excludes-refunds` guardrail filters on the order status through the join).
 
 The live expression: rendered directly from the semantic layer:
 
@@ -34,7 +34,8 @@ contributes 5 to `units_sold`.
 ## What it excludes
 
 Line items belonging to orders with `status = 'refunded'` are excluded by the
-`revenue-excludes-refunds` guardrail, which fires whenever a query reaches `orders.total_revenue`
-through the join path. See [[revenue-excludes-refunds-caveat]] for the business rationale.
+`units-sold-excludes-refunds` guardrail, which applies to `order_items.units_sold` and reads
+`status` from `orders` through the declared join. It mirrors `revenue-excludes-refunds` at the
+line-item grain. See [[revenue-excludes-refunds-caveat]] for the business rationale.
 
 In the ecommerce demo data the total across non-refunded orders is **33 units**.

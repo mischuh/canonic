@@ -34,7 +34,7 @@ $ canonic --json query --metrics revenue
 {
   "result": { "rows": [["3790.50"]] },
   "compiled": {
-    "sql": "SELECT SUM(\"orders\".\"amount\") AS \"total_revenue\" FROM \"fct_orders\" AS \"orders\" WHERE \"orders\".\"status\" <> 'refunded'"
+    "sql": "SELECT SUM(\"orders\".\"amount\") AS \"revenue\" FROM \"fct_orders\" AS \"orders\" WHERE \"orders\".\"status\" <> 'refunded'"
   },
   "metadata": {
     "resolved": { "metrics": { "revenue": "orders.total_revenue" } },

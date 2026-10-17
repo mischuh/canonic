@@ -1,7 +1,7 @@
 """Golden case model + JSONL loader for the semantic correctness suite.
 
 Each case is a pure-data request against one of the zero-infrastructure example
-projects (jaffle-shop, dutch-railway, saas-analytics, rental) -- a bundled DuckDB
+projects (jaffle-shop, dutch-railway, saas-analytics, rental, ossie-retail, coffeehouse) -- a bundled DuckDB
 file or a SQLite database built from a tracked ``setup.sql``, so the suite needs no
 Docker and no network. Cases are declared in JSONL (one JSON object per line,
 ``#``-comment lines and blank lines skipped) following the convention already used

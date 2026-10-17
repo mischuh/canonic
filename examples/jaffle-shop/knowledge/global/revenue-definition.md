@@ -1,9 +1,11 @@
 ---
 summary: Revenue is the total order amount (subtotal + tax). It is additive across orders and time.
 tags: [revenue, orders, finance]
-sl_refs: [orders.revenue]
+sl_refs: [jaffle_duckdb.orders.revenue]
 usage_mode: definition
-provenance: human_curated
+meta:
+  provenance: human_curated
+  last_validated_at: "2026-10-16T00:00:00Z"
 ---
 
 Revenue is calculated as the `amount` column on the `orders` table, which equals `subtotal + tax_paid`.

@@ -8,7 +8,7 @@ sl_refs:
 usage_mode: definition
 meta:
   provenance: human_curated
-  last_validated_at: "2026-06-24T00:00:00Z"
+  last_validated_at: "2026-10-16T00:00:00Z"
 ---
 
 **Average repair costs** is the mean cost per vehicle damage incident, calculated as
