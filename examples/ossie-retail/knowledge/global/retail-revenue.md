@@ -7,7 +7,7 @@ refs: []
 usage_mode: reference
 meta:
   provenance: inferred
-  last_validated_at:
+  last_validated_at: "2026-10-17T00:00:00Z"
   bound_fingerprints:
     retail_db.order_items.revenue: 
       sha256:6f6b373a2021d57c5921a813fc9e24357a9820ed4f9abfdb092bf2be22f408c8

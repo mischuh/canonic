@@ -8,7 +8,7 @@ refs: []
 usage_mode: reference
 meta:
   provenance: inferred
-  last_validated_at:
+  last_validated_at: "2026-10-17T00:00:00Z"
   bound_fingerprints: {}
   frozen: false
   pack_source:

@@ -99,7 +99,7 @@ canonic ingest --headless               # proposes order_items, bindings and pag
 canonic review                          # or: canonic apply .canonic/pending-diffs/<run>
 ```
 
-Bootstrap writes only what is deterministic and unflagged. `order_items` waits for review because of the `AVG` measure, and so does everything under `contracts/` and `knowledge/`. A further `canonic ingest` over the result is a no-op for all 16 files.
+Bootstrap writes only what is deterministic and unflagged. `order_items` waits for review because of the `AVG` measure, and so does everything under `contracts/` and `knowledge/`. A further `canonic ingest` over the result proposes no changes for any of the 16 files, apart from refreshing the `last_validated_at` stamps.
 
 ## Gate Ossie changes in CI
 
