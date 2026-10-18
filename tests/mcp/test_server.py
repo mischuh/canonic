@@ -267,9 +267,9 @@ def ratio_service(canonic_service: CanonicService) -> CanonicService:
         ),
     ]
     return CanonicService(
-        config=canonic_service._config,
+        config=canonic_service._ctx.config,
         resolver=ContractResolver(bindings=bindings, guardrails=[]),
-        sources=canonic_service._sources,
+        sources=canonic_service._ctx.sources,
     )
 
 

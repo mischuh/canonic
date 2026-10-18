@@ -47,6 +47,14 @@ or pass `--token-ref env:SOME_VAR` for a quick one-off token. Starting `--transp
 
 On first start in a project with no active metric contracts, canonic auto-generates inferred metric contracts from the loaded semantic sources before serving.
 
+## Editing a project while the daemon runs
+
+The daemon follows the project files. Before it serves a request it compares the modification time and size of `canonic.yaml`, every file under `contracts/` and every file under `semantics/` with what it loaded. When one changed, it loads all three again, so an edit takes effect on the next request without a restart. Knowledge pages are reloaded the same way.
+
+- A request that has started finishes on the definitions it started with. The new ones apply from the next request on.
+- If the edited files do not validate, the daemon keeps serving the previous definitions and adds a warning that names the failing file to the `warnings` of `query` and `compile_query`. Fixing the file clears the warning. The broken files are not parsed again until they change.
+- A new `connections` entry in `canonic.yaml` is picked up, but settings the daemon reads once at startup need a restart: the MCP auth mechanism, the host and port, and the event log location.
+
 ## Health endpoints
 
 The `http` daemon serves two unauthenticated probe endpoints next to `/mcp`, for orchestrators such as Kubernetes.

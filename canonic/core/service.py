@@ -13,28 +13,28 @@ are unaffected.
 
 from __future__ import annotations
 
-from pathlib import Path
-from typing import TYPE_CHECKING
+import functools
+from typing import TYPE_CHECKING, Any
 
-from canonic.compiler.dialect import DIALECT_ADAPTERS, TYPE_TO_DIALECT, adapter_for
-from canonic.config import CanonicConfig, Connection, load_config
-from canonic.contracts import ContractResolver
 from canonic.core.assertions import AssertionService
 from canonic.core.context import ServiceContext
 from canonic.core.discovery import DiscoveryService
 from canonic.core.knowledge import KnowledgeService
+from canonic.core.project import ProjectReloader, ProjectState
 from canonic.core.query import QueryService
 from canonic.core.reports import ReportService
-from canonic.instrumentation.events import AnswerEventLog, DiskAnswerEventLog, NullAnswerEventLog
-from canonic.semantic.loader import list_semantic_sources
+from canonic.instrumentation.events import DiskAnswerEventLog, NullAnswerEventLog
 
 if TYPE_CHECKING:
+    from collections.abc import Callable, Coroutine
     from datetime import datetime
-    from typing import Any
+    from pathlib import Path
 
     from canonic.compiler import SemanticQuery
     from canonic.compiler.result import CompileResult
+    from canonic.config import CanonicConfig
     from canonic.connectors.base import ResultSet
+    from canonic.contracts import ContractResolver
     from canonic.contracts.assertions import AccuracyReport, AssertionOutcome
     from canonic.contracts.models import Assertion
     from canonic.contracts.principal import Caller, Principal
@@ -47,6 +47,7 @@ if TYPE_CHECKING:
         ReportRunResult,
         ReportSummary,
     )
+    from canonic.instrumentation.events import AnswerEventLog
     from canonic.knowledge.results import SearchResult
     from canonic.semantic.models import SemanticSource
     from canonic.trust.models import TrustScore
@@ -54,52 +55,30 @@ if TYPE_CHECKING:
 __all__ = ["CanonicService"]
 
 
-def _dialect_for_type(connector_type: str) -> str | None:
-    """Map a query connector's type string to a sqlglot dialect name.
+def _served[**P, R](method: Callable[P, R]) -> Callable[P, R]:
+    """Run a public method on one project state, reloading first if the files changed."""
 
-    Returns ``None`` for a definitions/evidence-only connector type (dbt, looker,
-    metabase, notion, ossie, url) — those never serve a compiled query, so they get no entry
-    in ``connection_dialects`` at all rather than a meaningless placeholder dialect.
-    A project pairing a query connector with, say, a dbt companion connection (see
-    examples/dutch-railway, jaffle-shop, ecommerce) is the normal case this must not
-    break: only the query connector's type reaches :func:`adapter_for`.
-    """
-    dialect = TYPE_TO_DIALECT.get(connector_type, connector_type)
-    if dialect not in DIALECT_ADAPTERS:
-        return None
-    return adapter_for(dialect).dialect
+    @functools.wraps(method)
+    def wrapper(*args: P.args, **kwargs: P.kwargs) -> R:
+        service: CanonicService = args[0]  # type: ignore[assignment]
+        with service._ctx.request():
+            return method(*args, **kwargs)
+
+    return wrapper
 
 
-_FILE_PATH_PARAMS: dict[str, str] = {
-    "duckdb": "path",
-    "sqlite": "path",
-    "dbt": "manifest_path",
-    "ossie": "paths",
-}
+def _served_async[**P, R](
+    method: Callable[P, Coroutine[Any, Any, R]],
+) -> Callable[P, Coroutine[Any, Any, R]]:
+    """:func:`_served` for a coroutine method: the state stays pinned until it finishes."""
 
+    @functools.wraps(method)
+    async def wrapper(*args: P.args, **kwargs: P.kwargs) -> R:
+        service: CanonicService = args[0]  # type: ignore[assignment]
+        with service._ctx.request():
+            return await method(*args, **kwargs)
 
-def _resolve_connection_paths(connections: list[Connection], root: Path) -> None:
-    """Resolve relative file paths in file-based connections against the project root.
-
-    Mutates params in-place so callers downstream always receive absolute paths,
-    regardless of the process working directory. A list-valued param (Ossie ``paths``)
-    has each entry resolved, glob patterns included.
-    """
-    for conn in connections:
-        param_key = _FILE_PATH_PARAMS.get(conn.type)
-        if param_key is None:
-            continue
-        raw = conn.params.get(param_key)
-        if isinstance(raw, list):
-            conn.params[param_key] = [_resolve_path(str(p), root) for p in raw]
-        elif raw:
-            conn.params[param_key] = _resolve_path(raw, root)
-
-
-def _resolve_path(raw: str, root: Path) -> str:
-    if raw.startswith(("http://", "https://")) or Path(raw).is_absolute():
-        return raw
-    return str(root / raw)
+    return wrapper
 
 
 class CanonicService:
@@ -117,30 +96,22 @@ class CanonicService:
         *,
         project_root: Path | None = None,
         event_log: AnswerEventLog | None = None,
+        reloader: ProjectReloader | None = None,
     ) -> None:
-        self._config = config
-        self._resolver = resolver
-        self._sources = sources
-        self._project_root = project_root
         self._event_log: AnswerEventLog = (
             event_log if event_log is not None else NullAnswerEventLog()
         )
-        # connection id → sqlglot dialect name, derived from connection types in config.
-        # Definitions/evidence-only connections (dbt, looker, ...) get no entry — see
-        # _dialect_for_type.
-        connection_dialects: dict[str, str] = {
-            c.id: dialect
-            for c in config.connections
-            if (dialect := _dialect_for_type(c.type)) is not None
-        }
-        ctx = ServiceContext(
+        state = ProjectState.build(config, resolver, sources)
+        self._ctx = ServiceContext(
             config=config,
             resolver=resolver,
             sources=sources,
-            connection_dialects=connection_dialects,
+            connection_dialects=state.connection_dialects,
             project_root=project_root,
             event_log=self._event_log,
+            reloader=reloader,
         )
+        ctx = self._ctx
         self._discovery = DiscoveryService(ctx)
         self._assertions = AssertionService(ctx)
         self._knowledge = KnowledgeService(ctx)
@@ -155,27 +126,32 @@ class CanonicService:
         to derive a :class:`~canonic.contracts.principal.Principal` from a verified token
         or check ``tenancy_enabled`` before serving, without duplicating resolver wiring.
         """
-        return self._resolver
+        return self._ctx.resolver
 
     @classmethod
     def from_project(cls, root: Path) -> CanonicService:
-        """Load config, resolver, and semantic sources from a project root."""
-        config = load_config(root / "canonic.yaml")
-        _resolve_connection_paths(config.connections, root)
-        resolver = ContractResolver.from_project(root)
-        sources = list_semantic_sources(root)
+        """Load config, resolver, and semantic sources from a project root.
+
+        The service built here follows the project files: before each request it reloads
+        ``canonic.yaml``, ``contracts/`` and ``semantics/`` if one of them changed, and keeps
+        serving the previous state when the new files do not validate. A service constructed
+        directly has no files to follow and serves what it was given.
+        """
+        state = ProjectState.load(root)
         return cls(
-            config=config,
-            resolver=resolver,
-            sources=sources,
+            config=state.config,
+            resolver=state.resolver,
+            sources=state.sources,
             project_root=root,
-            event_log=DiskAnswerEventLog(root, config.instrumentation.events),
+            event_log=DiskAnswerEventLog(root, state.config.instrumentation.events),
+            reloader=ProjectReloader(root, state),
         )
 
     # ------------------------------------------------------------------
     # Discovery
     # ------------------------------------------------------------------
 
+    @_served
     def list_metrics(self, *, principal: Principal | None = None) -> list[MetricSummary]:
         """Return a summary of every active canonical metric (SPEC §4.1).
 
@@ -183,10 +159,12 @@ class CanonicService:
         """
         return self._discovery.list_metrics(principal=principal)
 
+    @_served
     def trust_report(self) -> list[tuple[str, TrustScore]]:
         """Static trust tier for every active canonical metric, sorted by name (SPEC-E14 §8)."""
         return self._discovery.trust_report()
 
+    @_served
     def describe_metric(self, name: str, *, principal: Principal | None = None) -> MetricDetail:
         """Return grain, dimensions, measures, and freshness for a metric (SPEC §4.1).
 
@@ -195,6 +173,7 @@ class CanonicService:
         """
         return self._discovery.describe_metric(name, principal=principal)
 
+    @_served
     def get_overview(
         self, domain: str | None = None, *, principal: Principal | None = None
     ) -> OverviewResult:
@@ -208,6 +187,7 @@ class CanonicService:
     # Query
     # ------------------------------------------------------------------
 
+    @_served
     def resolve_metric(
         self, name: str, context: str | None = None, *, principal: Principal | None = None
     ) -> Binding:
@@ -218,6 +198,7 @@ class CanonicService:
         """
         return self._query.resolve_metric(name, context=context, principal=principal)
 
+    @_served
     def compile_query(
         self, query: SemanticQuery, *, principal: Principal | None = None
     ) -> CompileResult:
@@ -228,6 +209,7 @@ class CanonicService:
         """
         return self._query.compile_query(query, principal=principal)
 
+    @_served_async
     async def query(
         self,
         query: SemanticQuery,
@@ -239,6 +221,7 @@ class CanonicService:
         """Compile and execute a semantic query read-only (SPEC §2)."""
         return await self._query.query(query, harness=harness, caller=caller, principal=principal)
 
+    @_served_async
     async def run_sql(
         self,
         sql: str,
@@ -259,24 +242,28 @@ class CanonicService:
     # Assertions (SPEC-Fuller-E15 §3) — the oracle for E16's accuracy harness
     # ------------------------------------------------------------------
 
+    @_served_async
     async def run_assertion(
         self, assertion: Assertion, *, resolver: ContractResolver | None = None
     ) -> AssertionOutcome:
         """Compile, execute read-only, and match one assertion (SPEC-Fuller-E15 §3.2)."""
         return await self._assertions.run_assertion(assertion, resolver=resolver)
 
+    @_served_async
     async def check_assertions(
         self, assertions: list[Assertion] | None = None
     ) -> list[AssertionOutcome]:
         """Run every executable assertion and return its outcome (SPEC-Fuller-E15 §3.4)."""
         return await self._assertions.check_assertions(assertions)
 
+    @_served_async
     async def run_accuracy_harness(
         self, assertions: list[Assertion] | None = None
     ) -> AccuracyReport:
         """Run the labeled assertion set and compute its accuracy (SPEC-Fuller-E15 §3.4)."""
         return await self._assertions.run_accuracy_harness(assertions)
 
+    @_served_async
     async def run_accuracy_baseline(
         self, assertions: list[Assertion] | None = None
     ) -> AccuracyReport:
@@ -287,6 +274,7 @@ class CanonicService:
     # Knowledge (E6, P1)
     # ------------------------------------------------------------------
 
+    @_served
     def search_knowledge(
         self,
         query: str,
@@ -302,6 +290,7 @@ class CanonicService:
         """
         return self._knowledge.search_knowledge(query, user=user, limit=limit, principal=principal)
 
+    @_served
     def read_knowledge_page(
         self, page: str, *, user: str | None = None, principal: Principal | None = None
     ) -> dict[str, Any]:
@@ -312,10 +301,12 @@ class CanonicService:
     # Reports (AMENDMENT-curated-reports, P1)
     # ------------------------------------------------------------------
 
+    @_served
     def list_reports(self, domain: str | None = None) -> list[ReportSummary]:
         """Directory listing of committed reports (AMENDMENT-curated-reports)."""
         return self._reports.list_reports(domain)
 
+    @_served_async
     async def run_report(
         self,
         report_id: str,
@@ -340,6 +331,7 @@ class CanonicService:
             principal=principal,
         )
 
+    @_served
     def validate_reports(self) -> None:
         """Validate every committed report's sections compile and narrative refs resolve."""
         self._reports.validate_reports()

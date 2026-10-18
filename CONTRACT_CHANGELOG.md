@@ -77,6 +77,14 @@ A change listed here was reviewed against the classification rules and did not b
   `compile` output has no count and keeps the generic line. A client that matches the old text exactly needs
   to match the new one as well.
 
+### Reload on project file changes (fix(core) #434)
+
+- ADR/PR: this PR (fix(core): reload contracts and semantics when project files change)
+- Decision: no bump. A running server now serves the definitions on disk instead of the ones it
+  loaded at startup. No field, type or error code changes. When an edit does not validate, the
+  previous definitions keep serving and `warnings` of `query` and `compile_query` gains one entry
+  of free text that names the failing file.
+
 ## History
 
 ## 3.6 (2026-10-18) - MINOR
