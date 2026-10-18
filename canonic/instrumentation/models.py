@@ -84,6 +84,10 @@ class AnswerEvent(BaseModel):
     bytes_scanned: int | None = None
     error: str | None = None
     trust_score: str | None = None
+    # Fingerprint of the project files the answer was served from (contents, not mtimes), so an
+    # answer can be traced to the definitions that produced it. Null for a service built in
+    # memory, which has no files.
+    project_fingerprint: str | None = None
     # Verified caller identity (bearer-token client_id) for MCP http-transport calls;
     # None for stdio transport and the CLI, which have no auth layer
     # (AMENDMENT-remote-mcp-transport.md). An identity-asserted call records the

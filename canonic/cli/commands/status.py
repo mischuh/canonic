@@ -8,6 +8,7 @@ from rich.console import Console
 from canonic.cli._errors import get_cli_context
 from canonic.config import find_project_root, load_config
 from canonic.contract import CONTRACT_SCHEMA
+from canonic.core.project import project_fingerprint
 from canonic.exc import ConfigError
 from canonic.instrumentation.report import build_report, read_events
 
@@ -35,6 +36,7 @@ def status(ctx: typer.Context) -> None:
 
     dotcanonic_present = (root / ".canonic").is_dir()
 
+    fingerprint = project_fingerprint(root)
     events = read_events(root, kind="served_answer")
     rep = build_report(events)
     error_count = rep.count - rep.error_distribution.get("ok", 0)
@@ -49,6 +51,7 @@ def status(ctx: typer.Context) -> None:
                     "config_error": config_error,
                     "dotcanonic_present": dotcanonic_present,
                     "contract_schema": CONTRACT_SCHEMA,
+                    "project_fingerprint": fingerprint,
                     "events": {
                         "count": rep.count,
                         "error_count": error_count,
@@ -66,6 +69,7 @@ def status(ctx: typer.Context) -> None:
         _console.print(f"config version: {config_version}")
     _console.print(f".canonic/:        {'present' if dotcanonic_present else 'absent'}")
     _console.print(f"contract:       {CONTRACT_SCHEMA}")
+    _console.print(f"project:        {fingerprint}")
     if rep.count > 0:
         p95_str = f"  p95 {latency_p95}ms" if latency_p95 is not None else ""
         _console.print(f"events:         {rep.count} served · errors {error_count}{p95_str}")

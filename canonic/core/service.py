@@ -20,7 +20,7 @@ from canonic.core.assertions import AssertionService
 from canonic.core.context import ServiceContext
 from canonic.core.discovery import DiscoveryService
 from canonic.core.knowledge import KnowledgeService
-from canonic.core.project import ProjectReloader, ProjectState
+from canonic.core.project import ProjectInfo, ProjectReloader, ProjectState
 from canonic.core.query import QueryService
 from canonic.core.reports import ReportService
 from canonic.instrumentation.events import DiskAnswerEventLog, NullAnswerEventLog
@@ -127,6 +127,16 @@ class CanonicService:
         or check ``tenancy_enabled`` before serving, without duplicating resolver wiring.
         """
         return self._ctx.resolver
+
+    @_served
+    def project_info(self) -> ProjectInfo:
+        """The fingerprint and load time of the project state this service is serving.
+
+        Checks the project files first, so the answer is the state the next request will use.
+        Both are ``None`` for a service built in memory, which has no files.
+        """
+        state = self._ctx.state
+        return ProjectInfo(fingerprint=state.fingerprint, loaded_at=state.loaded_at)
 
     @classmethod
     def from_project(cls, root: Path) -> CanonicService:

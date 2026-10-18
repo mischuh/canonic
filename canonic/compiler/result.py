@@ -313,3 +313,6 @@ class CompileResult:
     #: which the serving layer replaces once it knows how many returned rows were affected.
     zero_denominator_metrics: dict[str, str] = field(default_factory=dict)
     scope: ScopeMetadata | None = None
+    #: Fingerprint of the project files the query was compiled against. The compiler leaves it
+    #: empty. The serving layer fills it from the project state the request ran on.
+    project_fingerprint: str | None = None

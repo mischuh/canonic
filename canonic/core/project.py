@@ -12,8 +12,10 @@ a half-loaded project.
 
 from __future__ import annotations
 
+import hashlib
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -26,7 +28,14 @@ from canonic.semantic.loader import list_semantic_sources
 if TYPE_CHECKING:
     from canonic.semantic.models import SemanticSource
 
-__all__ = ["ProjectReloader", "ProjectSignature", "ProjectState", "ReloadFailure"]
+__all__ = [
+    "ProjectInfo",
+    "ProjectReloader",
+    "ProjectSignature",
+    "ProjectState",
+    "ReloadFailure",
+    "project_fingerprint",
+]
 
 logger = logging.getLogger(__name__)
 
@@ -86,6 +95,35 @@ def _resolve_path(raw: str, root: Path) -> str:
     return str(root / raw)
 
 
+def watched_files(root: Path) -> list[Path]:
+    """The files a project's definitions are loaded from, in a stable order."""
+    files = [root / "canonic.yaml"]
+    for directory in ("contracts", "semantics"):
+        base = root / directory
+        if base.is_dir():
+            files.extend(sorted(base.rglob("*.yaml")))
+    return files
+
+
+def project_fingerprint(root: Path) -> str:
+    """A stable hash over the contents of the files the project is loaded from.
+
+    The hash covers each file's path relative to the root and its bytes, never a timestamp,
+    so the same project checked out twice, or on two machines, yields the same value. The
+    CLI and a running server compute it with this function and can be compared directly.
+    """
+    digest = hashlib.sha256()
+    for path in watched_files(root):
+        try:
+            content = path.read_bytes()
+        except OSError:
+            continue
+        digest.update(path.relative_to(root).as_posix().encode())
+        digest.update(b"\0")
+        digest.update(hashlib.sha256(content).digest())
+    return digest.hexdigest()[:16]
+
+
 @dataclass(frozen=True)
 class ProjectState:
     """Everything a request reads from the project, loaded together and never mutated."""
@@ -95,6 +133,9 @@ class ProjectState:
     sources: list[SemanticSource]
     connection_dialects: dict[str, str]
     source_by_name: dict[str, SemanticSource]
+    #: Hash of the files this state was loaded from, ``None`` for a state built in memory.
+    fingerprint: str | None = None
+    loaded_at: datetime | None = None
 
     @classmethod
     def build(
@@ -122,7 +163,17 @@ class ProjectState:
         """Load config, contracts and semantic sources from a project root."""
         config = load_config(root / "canonic.yaml")
         _resolve_connection_paths(config.connections, root)
-        return cls.build(config, ContractResolver.from_project(root), list_semantic_sources(root))
+        fingerprint = project_fingerprint(root)
+        state = cls.build(config, ContractResolver.from_project(root), list_semantic_sources(root))
+        return replace(state, fingerprint=fingerprint, loaded_at=datetime.now(UTC))
+
+
+@dataclass(frozen=True)
+class ProjectInfo:
+    """Which project state is being served: a content hash and when it was loaded."""
+
+    fingerprint: str | None
+    loaded_at: datetime | None
 
 
 @dataclass(frozen=True)
@@ -187,18 +238,10 @@ class ProjectReloader:
 
     def _read_signature(self) -> ProjectSignature:
         entries: list[tuple[str, int, int]] = []
-        for path in self._watched_files():
+        for path in watched_files(self._root):
             try:
                 stat = path.stat()
             except OSError:
                 continue
             entries.append((str(path.relative_to(self._root)), stat.st_mtime_ns, stat.st_size))
         return tuple(entries)
-
-    def _watched_files(self) -> list[Path]:
-        files = [self._root / "canonic.yaml"]
-        for directory in ("contracts", "semantics"):
-            base = self._root / directory
-            if base.is_dir():
-                files.extend(sorted(base.rglob("*.yaml")))
-        return files
