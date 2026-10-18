@@ -29,6 +29,7 @@ if TYPE_CHECKING:
     from canonic.core.assertions import AssertionService
     from canonic.core.context import ServiceContext
     from canonic.core.knowledge import KnowledgeService
+    from canonic.core.probes import ProbeValues
 
 logger = logging.getLogger(__name__)
 
@@ -127,6 +128,7 @@ class QueryService:
         error_code: str | None = None
         outcome_history: BindingOutcomeHistory | None = None
         assertion_history: AssertionHistory | None = None
+        probes: ProbeValues | None = None
         qid_token = query_id_var.set(uuid.uuid4().hex[:8])
         logger.info(
             "query received: metrics=%s dimensions=%d",
@@ -175,6 +177,7 @@ class QueryService:
                 assertion_history,
                 caller=caller,
                 principal=principal,
+                probes=probes,
             )
             query_id_var.reset(qid_token)
 
@@ -289,6 +292,7 @@ class QueryService:
         *,
         caller: Caller | None = None,
         principal: Principal | None = None,
+        probes: ProbeValues | None = None,
     ) -> None:
         try:
             effective_policy = self._ctx.resolver.authz_for(
@@ -329,6 +333,7 @@ class QueryService:
                     outcome_window_days=self._ctx.config.feedback.trust_cap_window_days,
                     assertion_history=assertion_history,
                     now=self._serving_clock(query),
+                    probes=probes,
                 ).tier.value
                 if compiled is not None
                 else None,

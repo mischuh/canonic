@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from canonic.trust.models import SignalVerdict, TrustScore, TrustTier
 from canonic.trust.periods import open_periods
@@ -15,7 +15,7 @@ from canonic.trust.signals import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable
+    from collections.abc import Iterable, Mapping
     from datetime import datetime
 
     from canonic.compiler.result import CompileResult
@@ -67,6 +67,7 @@ def trust_for_compiled(
     outcome_window_days: int = _DEFAULT_OUTCOME_WINDOW_DAYS,
     assertion_history: AssertionHistory | None = None,
     now: datetime | None = None,
+    probes: Mapping[tuple[str, str], Any] | None = None,
 ) -> TrustScore:
     """Compute the trust tier for a compiled query (SPEC-E14 §3, §6).
 
@@ -85,7 +86,8 @@ def trust_for_compiled(
 
     ``now`` is the serving clock. With it, a result whose latest period of a time dimension has
     not ended caps the tier at ``provisional`` (see :func:`canonic.trust.periods.open_periods`).
-    Omitting it leaves that signal inactive.
+    Omitting it leaves that signal inactive. ``probes`` are the values read from the compiler's
+    probe columns, which carry the latest period of a time dimension the query only filters on.
     """
     final_rows: int | None = None
     provisional_rows: int | None = None
@@ -99,7 +101,7 @@ def trust_for_compiled(
         *static_signals_for(compiled.trust_inputs, assertion_history),
         finality_signal(final_rows, provisional_rows),
         freshness_signal(compiled.freshness),
-        open_period_signal(open_periods(compiled, result, now)),
+        open_period_signal(open_periods(compiled, result, now, probes)),
     ]
     if outcome_history is not None:
         signals.extend(

@@ -114,10 +114,14 @@ class ProbeColumn:
     column: str
     kind: str
     subject: str
+    #: The period grain of the dimension a ``latest_period`` probe reads, else ``None``.
+    grain: str | None = None
 
 
 #: The probe that flags a row whose denominator is zero, one per ratio metric.
 PROBE_ZERO_DENOMINATOR = "zero_denominator"
+#: The probe that carries the latest value of a time dimension a query filters on.
+PROBE_LATEST_PERIOD = "latest_period"
 
 
 @dataclass(frozen=True, slots=True)
