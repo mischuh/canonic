@@ -17,11 +17,19 @@ from canonic.compiler._helpers import (
     _query_references_dimension,
     parse_dialect,
 )
-from canonic.compiler.compose import MetricLeaves, MetricPlan, compose
+from canonic.compiler.compose import (
+    MetricLeaves,
+    MetricPlan,
+    compose,
+    substitutes_zero_denominator,
+    zero_denominator_column,
+)
 from canonic.compiler.dialect import adapter_for
 from canonic.compiler.joins import build_alias_tree, reachable_dimension_names
 from canonic.compiler.result import (
+    PROBE_ZERO_DENOMINATOR,
     CompileResult,
+    ProbeColumn,
     RelatedDimension,
     RelatedMetadata,
     RelatedMetric,
@@ -417,6 +425,15 @@ def compile(  # noqa: A001 — the public verb for this capability is "compile"
         finality=composed.finality,
         related=related,
         trust_inputs=trust_inputs,
+        probe_columns=tuple(
+            ProbeColumn(
+                column=zero_denominator_column(plan.name),
+                kind=PROBE_ZERO_DENOMINATOR,
+                subject=name,
+            )
+            for (name, _), plan in zip(raw_bindings, metric_plans, strict=True)
+            if substitutes_zero_denominator(plan)
+        ),
         time_dimensions=tuple(
             {td.column: td for leaf in leaves for td in leaf.time_dimensions}.values()
         ),

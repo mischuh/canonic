@@ -241,7 +241,9 @@ def test_s12_ac1_ratio_alongside_a_scalar_metric(
     )
     _parse_ok(result.sql)
     projections = sqlglot.parse_one(result.sql, dialect="postgres").expressions
-    assert [p.alias for p in projections] == ["region", "revenue", "avg_order_value"]
+    probes = [probe.column for probe in result.probe_columns]
+    assert [p.alias for p in projections] == ["region", "revenue", "avg_order_value", *probes]
+    assert probes == ["_canonic_zero_denominator_avg_order_value"]
     assert "NULLIF" in result.sql.upper(), "the division is applied after aggregation"
 
 

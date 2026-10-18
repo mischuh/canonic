@@ -16,5 +16,6 @@ WITH "_leaf_0" AS (
 )
 SELECT
   "_leaf_0"."province_name" AS "province_name",
-  "_leaf_0"."cancelled_arrivals" / NULLIF("_leaf_0"."scheduled_stops", 0) AS "cancelled_arrival_rate"
+  "_leaf_0"."cancelled_arrivals" / NULLIF("_leaf_0"."scheduled_stops", 0) AS "cancelled_arrival_rate",
+  CASE WHEN "_leaf_0"."scheduled_stops" = 0 THEN 1 ELSE 0 END AS "_canonic_zero_denominator_cancelled_arrival_rate"
 FROM "_leaf_0"

@@ -18,6 +18,7 @@ from canonic.connectors.factory import default_factory
 from canonic.contracts.principal import Principal
 from canonic.contracts.resolver import Ambiguous as ResolverAmbiguous
 from canonic.contracts.resolver import Unresolved as ResolverUnresolved
+from canonic.core.probes import strip_probes
 from canonic.exc import Ambiguous, Unresolved
 
 if TYPE_CHECKING:
@@ -27,6 +28,7 @@ if TYPE_CHECKING:
     from canonic.config import CanonicConfig
     from canonic.connectors.base import ConnectorBase, ResultSet, SQLExecutable
     from canonic.contracts.resolver import Binding, ContractResolver
+    from canonic.core.probes import ProbeCounts
     from canonic.instrumentation.events import AnswerEventLog
     from canonic.semantic.models import SemanticSource
 
@@ -104,6 +106,15 @@ class ServiceContext:
             ).run_read_only_sql(sql)
         finally:
             await connector.aclose()
+
+    async def execute_compiled(
+        self, compiled: CompileResult, connection_id: str | None
+    ) -> tuple[ResultSet, ProbeCounts]:
+        """Run a compiled query and return its result without the compiler's probe columns.
+
+        The second value holds what each probe counted, for the response metadata.
+        """
+        return strip_probes(compiled, await self.execute(compiled.sql, connection_id))
 
     def connection_for_sql(self, compiled: CompileResult) -> str | None:
         """Pick the connection id from the first resolved metric's owning source.

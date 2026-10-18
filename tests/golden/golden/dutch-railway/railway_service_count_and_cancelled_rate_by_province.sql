@@ -40,7 +40,8 @@ WITH "_leaf_0" AS (
 SELECT
   "_grain"."province_name" AS "province_name",
   "_leaf_1"."service_count" AS "service_count",
-  "_leaf_0"."cancelled_arrivals" / NULLIF("_leaf_0"."scheduled_stops", 0) AS "cancelled_arrival_rate"
+  "_leaf_0"."cancelled_arrivals" / NULLIF("_leaf_0"."scheduled_stops", 0) AS "cancelled_arrival_rate",
+  CASE WHEN "_leaf_0"."scheduled_stops" = 0 THEN 1 ELSE 0 END AS "_canonic_zero_denominator_cancelled_arrival_rate"
 FROM "_grain"
 LEFT JOIN "_leaf_0"
   ON (

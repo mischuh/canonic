@@ -59,6 +59,17 @@ A change listed here was reviewed against the classification rules and did not b
 
 ## History
 
+## 3.6 (2026-10-18) - MINOR
+
+- ADR/PR: this PR (feat(compiler): count zero-denominator substitutions in the query result)
+- Summary: Each entry of `metadata.composition` gains an optional `zero_denominator_rows`: how many
+  rows of the returned result had a zero denominator and were given the value of
+  `on_zero_denominator` (`NULL` or `0`). It is `null` when nothing was counted: in the compile
+  output, which has no result, and under `on_zero_denominator: error`. The compiled SQL of a ratio
+  metric now ends with one extra column, `_canonic_zero_denominator_<metric>`, that `query` strips
+  from the result before it is returned. A consumer that executes `compiled.sql` itself sees that
+  column and can ignore it. A consumer that ignores unknown fields is unaffected.
+
 ## 3.5 (2026-10-18) - MINOR
 
 - ADR/PR: this PR (feat(mcp): return predicate and knowledge references for fired guardrails)

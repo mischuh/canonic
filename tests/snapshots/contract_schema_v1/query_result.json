@@ -58,7 +58,7 @@
       "type": "object"
     },
     "CompositionOut": {
-      "description": "How one composite metric (``ratio``, ``weighted_avg``) was formed for this query.\n\n``on_zero_denominator`` is the policy applied to a row with a zero denominator. Under\n``zero`` that row becomes ``0`` without any warning, so a caller needs it here to tell a\nreal zero from a substituted one.",
+      "description": "How one composite metric (``ratio``, ``weighted_avg``) was formed for this query.\n\n``on_zero_denominator`` is the policy applied to a row with a zero denominator. Under\n``zero`` that row becomes ``0`` without any warning, so a caller needs it here to tell a\nreal zero from a substituted one. ``zero_denominator_rows`` is how many rows of the returned\nresult had a zero denominator and were given the policy's value. It is ``None`` when it was\nnot counted: without an executed result, and under ``on_zero_denominator: error``.",
       "properties": {
         "kind": {
           "title": "Kind",
@@ -73,6 +73,18 @@
         "on_zero_denominator": {
           "title": "On Zero Denominator",
           "type": "string"
+        },
+        "zero_denominator_rows": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Zero Denominator Rows"
         }
       },
       "required": [
@@ -258,7 +270,7 @@
           "type": "array"
         },
         "contract_schema": {
-          "default": "3.5",
+          "default": "3.6",
           "title": "Contract Schema",
           "type": "string"
         },

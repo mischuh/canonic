@@ -142,7 +142,11 @@ def run() -> Any:
         cursor = con.execute(result.sql)
         names = [d[0] for d in cursor.description]
         assert len(names) == len(set(names)), f"duplicate output columns: {names}"
-        rows = [dict(zip(names, row, strict=True)) for row in cursor.fetchall()]
+        probes = {probe.column for probe in result.probe_columns}
+        rows = [
+            {name: value for name, value in zip(names, row, strict=True) if name not in probes}
+            for row in cursor.fetchall()
+        ]
         return sorted(rows, key=lambda r: tuple(str(v) for v in r.values()))
 
     return _run

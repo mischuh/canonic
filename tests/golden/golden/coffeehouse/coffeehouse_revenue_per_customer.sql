@@ -18,6 +18,7 @@ WITH "_leaf_0" AS (
     "orders"."status" = 'completed' AND "customers"."is_test" = FALSE
 )
 SELECT
-  "_leaf_0"."revenue" / NULLIF("_leaf_1"."active_customers", 0) AS "revenue_per_customer"
+  "_leaf_0"."revenue" / NULLIF("_leaf_1"."active_customers", 0) AS "revenue_per_customer",
+  CASE WHEN "_leaf_1"."active_customers" = 0 THEN 1 ELSE 0 END AS "_canonic_zero_denominator_revenue_per_customer"
 FROM "_leaf_0"
 CROSS JOIN "_leaf_1"
