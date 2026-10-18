@@ -25,7 +25,8 @@ WITH "_leaf_0" AS (
 )
 SELECT
   "_grain"."channel" AS "channel",
-  CAST("_leaf_0"."revenue" AS REAL) / NULLIF("_leaf_1"."order_count", 0) AS "average_order_value"
+  CAST("_leaf_0"."revenue" AS REAL) / NULLIF("_leaf_1"."order_count", 0) AS "average_order_value",
+  CASE WHEN "_leaf_1"."order_count" = 0 THEN 1 ELSE 0 END AS "_canonic_zero_denominator_average_order_value"
 FROM "_grain"
 LEFT JOIN "_leaf_0"
   ON (

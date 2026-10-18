@@ -103,6 +103,24 @@ class TimeDimension:
 
 
 @dataclass(frozen=True, slots=True)
+class ProbeColumn:
+    """A column the compiler adds to the statement for the serving layer, not for the caller.
+
+    The serving layer reads it after execution, folds it into the response metadata and drops
+    it from the result set, so a caller never sees it. ``subject`` is the requested metric
+    name the probe belongs to.
+    """
+
+    column: str
+    kind: str
+    subject: str
+
+
+#: The probe that flags a row whose denominator is zero, one per ratio metric.
+PROBE_ZERO_DENOMINATOR = "zero_denominator"
+
+
+@dataclass(frozen=True, slots=True)
 class CompositionComponent:
     """One side of a composite metric as it was compiled.
 
@@ -284,4 +302,6 @@ class CompileResult:
     cumulative: CumulativeMetadata | None = None
     trust_inputs: list[TrustInput] = field(default_factory=list)
     time_dimensions: tuple[TimeDimension, ...] = ()
+    #: Columns added to ``sql`` that the serving layer strips again, see :class:`ProbeColumn`.
+    probe_columns: tuple[ProbeColumn, ...] = ()
     scope: ScopeMetadata | None = None

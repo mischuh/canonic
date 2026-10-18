@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel, ConfigDict
 
+from canonic.compiler.result import PROBE_ZERO_DENOMINATOR
 from canonic.connectors.base import (
     ResultSet,  # noqa: TC001 — Pydantic resolves field annotations at runtime
 )
@@ -30,6 +31,7 @@ if TYPE_CHECKING:
 
     from canonic.compiler.result import CompileResult, CompositionMetadata
     from canonic.contracts.resolver import Binding
+    from canonic.core.probes import ProbeCounts
     from canonic.feedback.assertion_history import AssertionHistory
     from canonic.feedback.history import BindingOutcomeHistory
 
@@ -116,7 +118,9 @@ class CompositionOut(BaseModel):
 
     ``on_zero_denominator`` is the policy applied to a row with a zero denominator. Under
     ``zero`` that row becomes ``0`` without any warning, so a caller needs it here to tell a
-    real zero from a substituted one.
+    real zero from a substituted one. ``zero_denominator_rows`` is how many rows of the returned
+    result had a zero denominator and were given the policy's value. It is ``None`` when it was
+    not counted: without an executed result, and under ``on_zero_denominator: error``.
     """
 
     model_config = ConfigDict(frozen=True)
@@ -125,6 +129,7 @@ class CompositionOut(BaseModel):
     numerator: CompositionComponentOut
     denominator: CompositionComponentOut
     on_zero_denominator: str
+    zero_denominator_rows: int | None = None
 
 
 class CumulativeOut(BaseModel):
@@ -368,6 +373,7 @@ class QueryMetadata(BaseModel):
         outcome_window_days: int = 90,
         assertion_history: AssertionHistory | None = None,
         now: datetime | None = None,
+        probes: ProbeCounts | None = None,
     ) -> QueryMetadata:
         """Project a :class:`CompileResult` onto the §2.2 metadata shape.
 
@@ -380,7 +386,8 @@ class QueryMetadata(BaseModel):
         ``assertion_history`` folds in E16 Phase 2's persisted assertion signal
         (SPEC-E14 §5); omitting either leaves trust scoring as it was before that signal.
         ``now`` is the serving clock: with it, a latest period of a time dimension that has not
-        ended is named in ``warnings`` and caps the trust tier at ``provisional``.
+        ended is named in ``warnings`` and caps the trust tier at ``provisional``. ``probes`` are
+        the counts read from the compiler's probe columns, see :mod:`canonic.core.probes`.
         """
         final_rows: int | None = None
         provisional_rows: int | None = None
@@ -465,13 +472,17 @@ class QueryMetadata(BaseModel):
                 else None
             ),
             composition={
-                name: _composition_out(composition)
+                name: _composition_out(
+                    composition, (probes or {}).get((PROBE_ZERO_DENOMINATOR, name))
+                )
                 for name, composition in compiled.compositions.items()
             },
         )
 
 
-def _composition_out(composition: CompositionMetadata) -> CompositionOut:
+def _composition_out(
+    composition: CompositionMetadata, zero_denominator_rows: int | None
+) -> CompositionOut:
     numerator, denominator = (
         CompositionComponentOut(
             metric=c.metric, resolved=c.resolved, population_filter=c.population_filter
@@ -483,6 +494,7 @@ def _composition_out(composition: CompositionMetadata) -> CompositionOut:
         numerator=numerator,
         denominator=denominator,
         on_zero_denominator=str(composition.on_zero_denominator),
+        zero_denominator_rows=zero_denominator_rows,
     )
 
 
@@ -505,6 +517,7 @@ class QueryResult(BaseModel):
         outcome_window_days: int = 90,
         assertion_history: AssertionHistory | None = None,
         now: datetime | None = None,
+        probes: ProbeCounts | None = None,
     ) -> QueryResult:
         """Merge the compiler output and the executed result set (no field renamed)."""
         return cls(
@@ -517,6 +530,7 @@ class QueryResult(BaseModel):
                 outcome_window_days=outcome_window_days,
                 assertion_history=assertion_history,
                 now=now,
+                probes=probes,
             ),
         )
 

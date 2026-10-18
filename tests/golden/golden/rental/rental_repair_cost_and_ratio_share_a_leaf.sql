@@ -29,7 +29,8 @@ WITH "_leaf_0" AS (
 SELECT
   "_grain"."severity" AS "severity",
   "_leaf_0"."total_repair_cost" AS "total_repair_cost",
-  CAST("_leaf_1"."total_repair_cost" AS REAL) / NULLIF("_leaf_1"."damage_count", 0) AS "avg_repair_costs"
+  CAST("_leaf_1"."total_repair_cost" AS REAL) / NULLIF("_leaf_1"."damage_count", 0) AS "avg_repair_costs",
+  CASE WHEN "_leaf_1"."damage_count" = 0 THEN 1 ELSE 0 END AS "_canonic_zero_denominator_avg_repair_costs"
 FROM "_grain"
 LEFT JOIN "_leaf_0"
   ON (

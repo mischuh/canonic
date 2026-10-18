@@ -143,7 +143,7 @@ class QueryService:
                     "connection selected: id=%s (project default; no source-level match)",
                     self._ctx.config.project.default_connection,
                 )
-            result = await self._ctx.execute(compiled.sql, connection_id)
+            result, probes = await self._ctx.execute_compiled(compiled, connection_id)
             outcome_history = self._load_outcome_history()
             assertion_history = self._load_assertion_history()
             query_result = QueryResult.from_parts(
@@ -153,6 +153,7 @@ class QueryService:
                 outcome_window_days=self._ctx.config.feedback.trust_cap_window_days,
                 assertion_history=assertion_history,
                 now=self._serving_clock(query),
+                probes=probes,
             )
             await self._assertions.check_query_assertions(query, harness=harness)
             return query_result

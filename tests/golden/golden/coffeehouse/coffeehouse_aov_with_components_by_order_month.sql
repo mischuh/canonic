@@ -37,7 +37,8 @@ SELECT
   "_grain"."order_month" AS "order_month",
   "_leaf_1"."revenue" / NULLIF("_leaf_0"."order_count", 0) AS "average_order_value",
   "_leaf_1"."revenue" AS "revenue",
-  "_leaf_0"."order_count" AS "order_count"
+  "_leaf_0"."order_count" AS "order_count",
+  CASE WHEN "_leaf_0"."order_count" = 0 THEN 1 ELSE 0 END AS "_canonic_zero_denominator_average_order_value"
 FROM "_grain"
 LEFT JOIN "_leaf_0"
   ON (

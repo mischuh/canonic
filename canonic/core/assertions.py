@@ -55,7 +55,9 @@ class AssertionService:
             connection_dialects=self._ctx.connection_dialects,
             principal=SYSTEM_PRINCIPAL,
         )
-        result = await self._ctx.execute(compiled.sql, self._ctx.connection_for_sql(compiled))
+        result, _ = await self._ctx.execute_compiled(
+            compiled, self._ctx.connection_for_sql(compiled)
+        )
         outcome = match_result(assertion, result)
         return dataclasses.replace(outcome, bindings=tuple(compiled.resolved.values()))
 

@@ -241,6 +241,32 @@ def _merge_into(target: _Physical, leaf: LeafPlan) -> None:
         target.finality = leaf.finality
 
 
+#: The combine modes whose result hides a zero denominator: ``NULL`` and ``0`` stand in for it.
+#: ``RATIO_RAW`` divides as is and lets the warehouse decide, so there is nothing to count.
+_SUBSTITUTING = frozenset({Combine.RATIO_NULL, Combine.RATIO_ZERO})
+
+_ZERO_DENOMINATOR_PREFIX = "_canonic_zero_denominator_"
+
+
+def zero_denominator_column(metric_name: str) -> str:
+    """The name of the hidden column that flags a zero denominator for ``metric_name``."""
+    return f"{_ZERO_DENOMINATOR_PREFIX}{metric_name}"
+
+
+def substitutes_zero_denominator(metric: MetricPlan) -> bool:
+    """Whether the metric is a ratio that replaces a zero denominator instead of failing."""
+    return metric.combine in _SUBSTITUTING and metric.accumulate is None
+
+
+def _zero_denominator_flag(denominator: exp.Expression, name: str) -> exp.Expression:
+    """``CASE WHEN <denominator> = 0 THEN 1 ELSE 0 END``, a 1 for each row to count."""
+    flag = exp.Case().when(
+        exp.EQ(this=denominator.copy(), expression=exp.Literal.number(0)),
+        exp.Literal.number(1),
+    )
+    return _alias(cast("exp.Expression", flag.else_(exp.Literal.number(0))), name)
+
+
 def _combine_expr(metric: MetricPlan, columns: list[exp.Expression]) -> exp.Expression:
     """Build one requested metric's output expression from its leaf column references."""
     if metric.combine is Combine.DIRECT:
@@ -428,6 +454,16 @@ def compose(
         projections.append(
             _alias(cast("exp.Expression", exp.column(_IS_FINAL, table=dim_source)), _IS_FINAL)
         )
+    for metric in metrics:
+        if substitutes_zero_denominator(metric):
+            denominator = exp.column(
+                metric.refs[1].column, table=names_by_index[owner_of[metric.refs[1].leaf]]
+            )
+            projections.append(
+                _zero_denominator_flag(
+                    cast("exp.Expression", denominator), zero_denominator_column(metric.name)
+                )
+            )
 
     outer = exp.Select().select(*projections)
     if single_cte:
