@@ -143,8 +143,8 @@ class CanonicService:
         )
         self._discovery = DiscoveryService(ctx)
         self._assertions = AssertionService(ctx)
-        self._query = QueryService(ctx, self._assertions)
         self._knowledge = KnowledgeService(ctx)
+        self._query = QueryService(ctx, self._assertions, self._knowledge)
         self._reports = ReportService(ctx, self._query, self._knowledge)
 
     @property

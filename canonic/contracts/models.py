@@ -413,6 +413,9 @@ class Guardrail(BaseModel):
     severity: Severity = Severity.ERROR
     rationale: str
     phase: str | None = None
+    #: Ids of the knowledge pages that explain this guardrail. When set, these are returned
+    #: with the fired guardrail as they are and replace the pages inferred from ``sl_refs``.
+    knowledge_refs: list[str] = []
     provenance: Provenance = Provenance.HUMAN_CURATED
     #: Which context pack installed this guardrail (AMENDMENT-context-packs §2.3); None
     #: for a hand-written guardrail.

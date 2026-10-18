@@ -21,7 +21,13 @@ from canonic.compiler.result import (
     FiredGuardrail,
     SourceFreshness,
 )
-from canonic.contracts.models import MaskStrategy, Severity, UndeclaredSource
+from canonic.contracts.models import (
+    Guardrail,
+    GuardrailKind,
+    MaskStrategy,
+    Severity,
+    UndeclaredSource,
+)
 from canonic.contracts.principal import tenant_sort_key
 from canonic.contracts.resolver import ScopeRule, Shared, Undeclared
 from canonic.exc import (
@@ -481,10 +487,63 @@ def _enforce_guardrails(
                     warnings.append(f"{guardrail.id}: {guardrail.rationale}")
             fired.append(
                 FiredGuardrail(
-                    id=guardrail.id, kind=str(guardrail.kind), severity=guardrail.severity.value
+                    id=guardrail.id,
+                    kind=str(guardrail.kind),
+                    severity=guardrail.severity.value,
+                    predicate=_guardrail_predicate(guardrail),
+                    entities=_guardrail_entities(guardrail, m, sources_by_name),
+                    declared_knowledge_refs=tuple(guardrail.knowledge_refs),
                 )
             )
     return _GuardrailEnforcement(conditions=conditions, fired=fired, warnings=warnings)
+
+
+def _guardrail_predicate(guardrail: Guardrail) -> str | None:
+    """The filter or constraint a guardrail applies, as a caller should read it."""
+    if guardrail.kind is GuardrailKind.MANDATORY_FILTER:
+        return guardrail.filter
+    if guardrail.kind is GuardrailKind.REQUIRED_DIMENSION:
+        return f"group by or filter on {guardrail.dimension}"
+    if guardrail.kind is GuardrailKind.RESTRICT_SOURCE and guardrail.restrict_to is not None:
+        return f"source role = {guardrail.restrict_to.role}"
+    if guardrail.kind is GuardrailKind.MIN_TRUST:
+        return f"trust tier >= {guardrail.level}"
+    return None
+
+
+def _guardrail_entities(
+    guardrail: Guardrail,
+    metric: _ResolvedMetric,
+    sources_by_name: dict[str, SemanticSource],
+) -> tuple[str, ...]:
+    """Fully qualified semantic entities a guardrail reads, in a stable order.
+
+    The guarded measure, the columns of a ``mandatory_filter`` predicate (and the dimensions
+    declared on those columns, since a page may refer to either), and the dimension of a
+    ``required_dimension``. The names have the form ``connection.source.member``, the form
+    knowledge pages use in ``sl_refs``. The bare source is left out on purpose: a page about a
+    whole source would otherwise match every guardrail on it.
+    """
+    entities: dict[str, None] = {}
+
+    def add(source: str, member: str) -> None:
+        owner = sources_by_name.get(source)
+        if owner is not None:
+            entities[f"{owner.connection}.{source}.{member}"] = None
+
+    add(metric.source, metric.measure.name)
+    if guardrail.filter:
+        bound, _ = _qualify_columns(_parse(guardrail.filter), sources_by_name, metric.source)
+        for column in bound.find_all(exp.Column):
+            if column.table not in sources_by_name:
+                continue
+            add(column.table, column.name)
+            for dimension in sources_by_name[column.table].dimensions:
+                if dimension.column == column.name:
+                    add(column.table, dimension.name)
+    if guardrail.dimension:
+        add(metric.source, guardrail.dimension.rsplit(".", 1)[-1])
+    return tuple(entities)
 
 
 def _guardrail_join_sources(

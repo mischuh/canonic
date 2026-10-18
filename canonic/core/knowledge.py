@@ -9,6 +9,9 @@ from canonic.config import LOCAL_STATE_DIR
 from canonic.contracts.principal import Principal
 
 if TYPE_CHECKING:
+    from pathlib import Path
+
+    from canonic.compiler.result import CompileResult
     from canonic.core.context import ServiceContext
     from canonic.knowledge.embeddings import Embedder
     from canonic.knowledge.models import KnowledgePage
@@ -28,6 +31,8 @@ class KnowledgeService:
         # per search call (SPEC-E10 §5, SPEC-E6 §5.2).
         self._embedder: Embedder | None = None
         self._embedder_checked = False
+        self._pages: list[KnowledgePage] = []
+        self._pages_signature: tuple[tuple[Path, int, int], ...] = ()
 
     def _tag_visible_pages(
         self, pages: list[KnowledgePage], principal: Principal | None
@@ -46,6 +51,48 @@ class KnowledgeService:
         if _WILDCARD_TAG in allow_tags:
             return pages
         return [p for p in pages if any(t in allow_tags for t in p.tags)]
+
+    def link_guardrails(
+        self, compiled: CompileResult, principal: Principal | None
+    ) -> CompileResult:
+        """Fill ``knowledge_refs`` on the guardrails a compile fired.
+
+        Only global pages the caller's role may see are considered: a compile carries no user,
+        and a personal page must not be attached to a shared answer. Returns ``compiled``
+        unchanged when no guardrail fired or the project has no knowledge directory.
+        """
+        from dataclasses import replace
+
+        from canonic.knowledge import KnowledgeScope
+        from canonic.knowledge.guardrail_refs import GuardrailKnowledgeLinker
+
+        if not compiled.guardrails_fired:
+            return compiled
+        pages = [p for p in self._loaded_pages() if p.scope is KnowledgeScope.GLOBAL]
+        if not pages:
+            return compiled
+        linker = GuardrailKnowledgeLinker(self._tag_visible_pages(pages, principal))
+        return replace(compiled, guardrails_fired=linker.link(compiled.guardrails_fired))
+
+    def _loaded_pages(self) -> list[KnowledgePage]:
+        """All loaded pages, re-read only when a file under ``knowledge/`` changed.
+
+        Compiling happens on every query, so the knowledge directory is not parsed each time:
+        the pages are kept until the set of files, or the modification time or size of one, changes.
+        """
+        from canonic.knowledge import load_knowledge_page
+
+        if self._ctx.project_root is None:
+            return []
+        knowledge_root = self._ctx.project_root / "knowledge"
+        if not knowledge_root.exists():
+            return []
+        paths = sorted(knowledge_root.rglob("*.md"))
+        signature = tuple((path, path.stat().st_mtime_ns, path.stat().st_size) for path in paths)
+        if signature != self._pages_signature:
+            self._pages = [load_knowledge_page(path) for path in paths]
+            self._pages_signature = signature
+        return self._pages
 
     def search_knowledge(
         self,

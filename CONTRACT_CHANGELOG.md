@@ -49,6 +49,19 @@ A change listed here was reviewed against the classification rules and did not b
 
 ## History
 
+## 3.5 (2026-10-18) - MINOR
+
+- ADR/PR: this PR (feat(mcp): return predicate and knowledge references for fired guardrails)
+- Summary: Each entry of `guardrails_fired` (`QueryResult.metadata`, compile output) gains two
+  optional fields. `predicate` is the filter or constraint the guardrail applied: the filter of a
+  `mandatory_filter`, `group by or filter on <dimension>`, `source role = <role>` or
+  `trust tier >= <level>`. `knowledge_refs` lists the ids of the global knowledge pages that
+  explain the guardrail, sorted, and `[]` when there are none. A page matches when its `sl_refs`
+  overlap the entities the guardrail reads (its measure, the columns of its filter, its
+  dimension), or when the guardrail names it in the new optional contract field
+  `knowledge_refs`, which replaces the inferred match. Pages the caller's role may not read are
+  never listed. A consumer that ignores unknown fields is unaffected.
+
 ## 3.4 (2026-10-18) - MINOR
 
 - ADR/PR: this PR (feat(compiler): expose composition metadata per metric in the query result)

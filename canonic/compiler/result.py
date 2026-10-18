@@ -63,11 +63,22 @@ class FiredGuardrail:
     the query (the compile call raises before this value would ever be reported), ``"warn"``
     guardrails still fire but only annotate ``CompileResult.warnings``. Defaults to
     ``"error"`` so existing direct-construction call sites (tests, fixtures) keep working.
+
+    ``predicate`` is the filter or constraint the guardrail applied, as authored.
+    ``entities`` are the fully qualified semantic entities it reads (``connection.source.name``),
+    which the serving layer matches against the ``sl_refs`` of knowledge pages.
+    ``declared_knowledge_refs`` are the pages the contract names explicitly. The compiler has no
+    knowledge store, so ``knowledge_refs`` (the page ids returned to the caller) stays empty
+    until the serving layer fills it.
     """
 
     id: str
     kind: str
     severity: str = "error"
+    predicate: str | None = None
+    entities: tuple[str, ...] = ()
+    declared_knowledge_refs: tuple[str, ...] = ()
+    knowledge_refs: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)

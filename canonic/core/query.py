@@ -28,6 +28,7 @@ if TYPE_CHECKING:
     from canonic.contracts.resolver import Binding
     from canonic.core.assertions import AssertionService
     from canonic.core.context import ServiceContext
+    from canonic.core.knowledge import KnowledgeService
 
 logger = logging.getLogger(__name__)
 
@@ -46,9 +47,12 @@ def _event_user(caller: Caller | None) -> str | AnswerEventUser | None:
 class QueryService:
     """Compile and execute semantic queries and raw SQL, emitting answer events."""
 
-    def __init__(self, ctx: ServiceContext, assertions: AssertionService) -> None:
+    def __init__(
+        self, ctx: ServiceContext, assertions: AssertionService, knowledge: KnowledgeService
+    ) -> None:
         self._ctx = ctx
         self._assertions = assertions
+        self._knowledge = knowledge
 
     def resolve_metric(
         self, name: str, context: str | None = None, *, principal: Principal | None = None
@@ -76,7 +80,8 @@ class QueryService:
         """Compile, then apply the project's staleness policy to the freshness metadata.
 
         The compiler never reads the clock, so staleness is decided here, in the serving layer
-        (``trust.stale_after_days``, off by default).
+        (``trust.stale_after_days``, off by default). The guardrails that fired are then linked to
+        the knowledge pages that explain them.
         """
         compiled = compile(
             query,
@@ -85,7 +90,8 @@ class QueryService:
             connection_dialects=self._ctx.connection_dialects,
             principal=principal,
         )
-        return apply_staleness_policy(compiled, self._ctx.config.trust.stale_after_days)
+        compiled = apply_staleness_policy(compiled, self._ctx.config.trust.stale_after_days)
+        return self._knowledge.link_guardrails(compiled, principal)
 
     async def query(
         self,
