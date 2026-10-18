@@ -91,6 +91,18 @@ class SourceFreshness:
 
 
 @dataclass(frozen=True, slots=True)
+class TimeDimension:
+    """A requested dimension whose values are periods of a known grain.
+
+    ``column`` is the dimension's output column in the result. The serving layer reads the
+    latest period in that column to tell whether it has ended.
+    """
+
+    column: str
+    grain: str
+
+
+@dataclass(frozen=True, slots=True)
 class CompositionComponent:
     """One side of a composite metric as it was compiled.
 
@@ -271,4 +283,5 @@ class CompileResult:
     opaque: OpaqueMetadata | None = None
     cumulative: CumulativeMetadata | None = None
     trust_inputs: list[TrustInput] = field(default_factory=list)
+    time_dimensions: tuple[TimeDimension, ...] = ()
     scope: ScopeMetadata | None = None

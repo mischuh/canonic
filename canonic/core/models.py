@@ -22,9 +22,12 @@ from canonic.contracts.models import (
 from canonic.contracts.principal import (
     TenantScope,  # noqa: TC001 — Pydantic resolves field annotations at runtime
 )
+from canonic.trust.periods import open_periods
 from canonic.trust.scorer import trust_for_compiled
 
 if TYPE_CHECKING:
+    from datetime import datetime
+
     from canonic.compiler.result import CompileResult, CompositionMetadata
     from canonic.contracts.resolver import Binding
     from canonic.feedback.assertion_history import AssertionHistory
@@ -364,6 +367,7 @@ class QueryMetadata(BaseModel):
         outcome_history: BindingOutcomeHistory | None = None,
         outcome_window_days: int = 90,
         assertion_history: AssertionHistory | None = None,
+        now: datetime | None = None,
     ) -> QueryMetadata:
         """Project a :class:`CompileResult` onto the §2.2 metadata shape.
 
@@ -375,6 +379,8 @@ class QueryMetadata(BaseModel):
         ``outcome_history`` folds in E11's dynamic outcome-history signal (SPEC-E11 §5);
         ``assertion_history`` folds in E16 Phase 2's persisted assertion signal
         (SPEC-E14 §5); omitting either leaves trust scoring as it was before that signal.
+        ``now`` is the serving clock: with it, a latest period of a time dimension that has not
+        ended is named in ``warnings`` and caps the trust tier at ``provisional``.
         """
         final_rows: int | None = None
         provisional_rows: int | None = None
@@ -398,6 +404,7 @@ class QueryMetadata(BaseModel):
             outcome_history=outcome_history,
             outcome_window_days=outcome_window_days,
             assertion_history=assertion_history,
+            now=now,
         )
         return cls(
             resolved={"metrics": dict(compiled.resolved)},
@@ -417,7 +424,10 @@ class QueryMetadata(BaseModel):
                 )
                 for f in compiled.freshness
             ],
-            warnings=list(compiled.warnings),
+            warnings=[
+                *compiled.warnings,
+                *(period.warning for period in open_periods(compiled, result, now)),
+            ],
             contract_schema=CONTRACT_SCHEMA,
             finality=finality_out,
             related=RelatedOut(
@@ -494,6 +504,7 @@ class QueryResult(BaseModel):
         outcome_history: BindingOutcomeHistory | None = None,
         outcome_window_days: int = 90,
         assertion_history: AssertionHistory | None = None,
+        now: datetime | None = None,
     ) -> QueryResult:
         """Merge the compiler output and the executed result set (no field renamed)."""
         return cls(
@@ -505,6 +516,7 @@ class QueryResult(BaseModel):
                 outcome_history=outcome_history,
                 outcome_window_days=outcome_window_days,
                 assertion_history=assertion_history,
+                now=now,
             ),
         )
 

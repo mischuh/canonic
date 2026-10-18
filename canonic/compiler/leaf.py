@@ -41,7 +41,7 @@ from canonic.compiler._helpers import (
     _tenant_conditions,
 )
 from canonic.compiler.joins import build_alias_tree, plan_joins
-from canonic.compiler.result import FinalityMetadata
+from canonic.compiler.result import FinalityMetadata, TimeDimension
 from canonic.exc import Ambiguous, AmbiguousJoinPath, FanoutUnsafe, UnsupportedMeasure
 from canonic.exc import Unreachable as UnreachableError
 from canonic.semantic.models import Additivity
@@ -271,6 +271,8 @@ class LeafPlan:
     #: window or the grain lock applies to. Such leaves still deduplicate against an
     #: identical leaf, they just never absorb a *different* measure.
     fusable: bool = True
+    #: The requested dimensions whose values are periods of a known grain, by output column.
+    time_dimensions: tuple[TimeDimension, ...] = ()
 
 
 @dataclass(slots=True)
@@ -632,4 +634,11 @@ def plan_leaf(
         projects_is_final=leaf_finality is not None,
         scoped_sources=tenant_scoping.scoped_sources,
         shared_sources=tenant_scoping.shared_sources,
+        time_dimensions=tuple(
+            TimeDimension(column=name, grain=dim.period_grain)
+            for name, (_alias, dim) in zip(
+                _dimension_output_names(dimensions), dimensions, strict=True
+            )
+            if dim.period_grain is not None
+        ),
     )

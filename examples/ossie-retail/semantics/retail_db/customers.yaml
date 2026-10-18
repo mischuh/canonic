@@ -28,6 +28,7 @@ dimensions:
   json_path:
   type:
   granularity:
+  time_grain:
   label:
   description:
   aliases: []
@@ -37,6 +38,7 @@ dimensions:
   json_path:
   type:
   granularity:
+  time_grain:
   label:
   description:
   aliases: []
@@ -46,6 +48,7 @@ dimensions:
   json_path:
   type:
   granularity:
+  time_grain:
   label:
   description: consumer or business
   aliases:
