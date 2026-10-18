@@ -334,6 +334,7 @@ def start_http(
     suggestions: bool = False,
     token_ref: str | None = None,
     auth_mechanisms: list[str] | None = None,
+    reload: bool | None = None,
 ) -> None:
     """Spawn a detached uvicorn HTTP daemon in the background and write the state file.
 
@@ -393,6 +394,8 @@ def start_http(
         cmd += ["--token-ref", token_ref]
     if suggestions:
         cmd.append("--suggestions")
+    if reload is not None:
+        cmd.append("--reload" if reload else "--no-reload")
 
     with open(log_path, "ab") as log_fh:
         proc = subprocess.Popen(  # noqa: S603 — fixed argv, no shell, no user-controlled parts

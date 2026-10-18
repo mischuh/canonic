@@ -10,7 +10,7 @@ description: "Every top-level field in the project config file, and what it gove
 | Field | Type | Default | Governs |
 | --- | --- | --- | --- |
 | `version` | `int` | n/a (required) | Config schema version. Currently only `1` is recognized. |
-| `project` | `ProjectConfig` | n/a (required) | Project `name` and optional `default_connection`. |
+| `project` | `ProjectConfig` | n/a (required) | Project `name`, optional `default_connection`, and `reload` (`off` or `auto`, default `off`), see [below](#project). |
 | `connections` | `list[Connection]` | `[]` | Configured data sources, see [Connectors](/concepts/connectors). |
 | `llm` | `LLMConfig \| null` | `null` | LLM provider config, see [Configuring an LLM](/configuring-an-llm). |
 | `embeddings` | `EmbeddingConfig` | `model: all-MiniLM-L6-v2` | Local embedding model for knowledge vector search. |
@@ -25,6 +25,14 @@ description: "Every top-level field in the project config file, and what it gove
 | `mcp` | `McpConfig` | `auth: { tokens: [] }` | Bearer-token auth for the MCP daemon's `http` transport, see [below](#mcp). |
 
 `version` and `project` are the only fields canonic actually needs to boot. Everything else configures a specific subsystem and can be left out entirely for a local, single-user setup: `connections` is empty until you add a data source, `llm` is `null` until you configure a provider, and the rest fall back to safe local defaults. `embeddings` and `telemetry` rarely need touching, they exist mostly for opt-in tuning and privacy control rather than day-to-day project setup.
+
+## `project`
+
+| Field | Type | Default | Governs |
+| --- | --- | --- | --- |
+| `name` | `str` | n/a (required) | Project name. |
+| `default_connection` | `str \| null` | `null` | Connection used when a source names none. |
+| `reload` | `off \| auto` | `off` | Whether a running server follows edits to `canonic.yaml`, `contracts/` and `semantics/`. `off` serves the state loaded at startup until the process restarts, and `contract_info` reports `project_files_changed` when the files on disk have moved on. `auto` reloads when a file changes. Read once at startup, `canonic mcp start --reload` / `--no-reload` overrides it. See [Editing a project while the daemon runs](/cli-reference/mcp#editing-a-project-while-the-daemon-runs). |
 
 ## Environment variables in values
 

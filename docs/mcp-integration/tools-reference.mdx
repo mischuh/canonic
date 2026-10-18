@@ -27,7 +27,7 @@ A client that supports MCP server extensions (SEP-2133) does not need either too
 
 ```json
 {
-  "app.getcanonic/contract": {"schema": "3.7", "major": 3, "minor": 7}
+  "app.getcanonic/contract": {"schema": "3.8", "major": 3, "minor": 8}
 }
 ```
 
@@ -39,14 +39,16 @@ Returns the serving contract version this daemon implements, the canonic version
 
 ```json
 {
-  "contract_schema": "3.7",
+  "contract_schema": "3.8",
   "canonic_version": "0.41.0",
   "project_fingerprint": "3f9a1c6e0b24d871",
-  "project_loaded_at": "2026-10-18T14:02:11.482913+00:00"
+  "project_loaded_at": "2026-10-18T14:02:11.482913+00:00",
+  "project_reload": "off",
+  "project_files_changed": false
 }
 ```
 
-`project_fingerprint` is a hash over the contents of `canonic.yaml`, `contracts/` and `semantics/`, not their modification times, so the same project checked out twice gives the same value. `canonic status` prints the same value, which tells whether a running daemon has loaded the files on disk. `project_loaded_at` is when the daemon last loaded them. The daemon reloads when a file changes, see [Editing a project while the daemon runs](/cli-reference/mcp#editing-a-project-while-the-daemon-runs). Both are `null` for a daemon that was not started from a project directory. Knowledge pages are not part of the fingerprint, they reload on their own.
+`project_fingerprint` is a hash over the contents of `canonic.yaml`, `contracts/` and `semantics/`, not their modification times, so the same project checked out twice gives the same value. `canonic status` prints the same value, which tells whether a running daemon has loaded the files on disk. `project_loaded_at` is when the daemon last loaded them. `project_reload` is the [reload mode](/cli-reference/mcp#editing-a-project-while-the-daemon-runs), `off` or `auto`. Under `off`, `project_files_changed` is `true` once the files on disk differ in content from the state the daemon serves, so a deployment that was not rolled out shows as drift. A file that was only touched does not count. Under `auto` the daemon reloads, so it stays `false`. Both are `null` for a daemon that was not started from a project directory. Knowledge pages are not part of the fingerprint, they reload on their own.
 
 ### `negotiate_contract(contract_major: int)`
 

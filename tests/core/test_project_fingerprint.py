@@ -11,6 +11,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from canonic.compiler import SemanticQuery
+from canonic.config import ProjectReload
 from canonic.connectors.base import Capability, ResultSet
 from canonic.core.models import QueryMetadata
 from canonic.core.project import project_fingerprint
@@ -93,7 +94,7 @@ def test_a_service_reports_the_fingerprint_it_loaded(project_dir: Path) -> None:
 
 
 def test_a_reload_moves_the_fingerprint_and_the_load_time(project_dir: Path) -> None:
-    service = CanonicService.from_project(project_dir)
+    service = CanonicService.from_project(project_dir, reload=ProjectReload.AUTO)
     first = service.project_info()
 
     _append(project_dir / _REVENUE, "# edited\n")
@@ -114,7 +115,7 @@ def test_the_fingerprint_stays_while_the_files_stay(project_dir: Path) -> None:
 
 
 def test_a_failed_reload_keeps_reporting_the_state_being_served(project_dir: Path) -> None:
-    service = CanonicService.from_project(project_dir)
+    service = CanonicService.from_project(project_dir, reload=ProjectReload.AUTO)
     served = service.project_info()
 
     (project_dir / _REVENUE).write_text("metric: revenue\ncanonical: [not, a, mapping\n")

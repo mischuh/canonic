@@ -279,16 +279,21 @@ def build_server(
             "capabilities and enforced per request without an extra call; this tool is the "
             "fallback for clients that do not. Also returns project_fingerprint, a hash of the "
             "project files this daemon serves, and project_loaded_at, when they were loaded: "
-            "two daemons with the same fingerprint serve the same definitions."
+            "two daemons with the same fingerprint serve the same definitions. "
+            "project_reload is the reload mode ('off' serves the state loaded at startup, "
+            "'auto' follows file changes) and project_files_changed says whether the files "
+            "on disk now differ from what is being served."
         )
     )
-    async def contract_info() -> dict[str, str | None]:
+    async def contract_info() -> dict[str, str | bool | None]:
         info = service.project_info()
         return {
             "contract_schema": CONTRACT_SCHEMA,
             "canonic_version": CANONIC_VERSION,
             "project_fingerprint": info.fingerprint,
             "project_loaded_at": info.loaded_at.isoformat() if info.loaded_at else None,
+            "project_reload": str(info.reload),
+            "project_files_changed": info.files_changed,
         }
 
     # ------------------------------------------------------------------

@@ -23,6 +23,7 @@ canonic mcp start --transport http --port 7474
 | `--foreground` | With `--transport http`, run the daemon in the current process instead of detaching. Use this as a container's start command so the daemon is PID 1 and receives `SIGTERM` directly. Writes no state file, so `mcp status` and `mcp stop` do not apply. |
 | `--token-ref` | Bearer token reference (`env:VAR`) for `--transport http`, overriding/supplementing `mcp.auth.tokens` in `canonic.yaml`. |
 | `--suggestions` | Enable follow-up suggestions in query responses. |
+| `--reload` / `--no-reload` | Follow edits to `canonic.yaml`, `contracts/` and `semantics/`, or never, overriding `project.reload` (default `off`). See [Editing a project while the daemon runs](#editing-a-project-while-the-daemon-runs). |
 | `--tenant` | Repeatable, or comma-separated for several tenants. Bind a fixed, roleless principal for a `stdio` session, local-development/platform-operator use only. Always logs a warning. Refused (exit `1`) on `--transport http`. See [Tenancy & access control](/concepts/tenancy-and-access-control#--tenant-cli-override). |
 
 With `--transport stdio` (the default), the daemon runs in the foreground over stdio, and the MCP client manages its process lifetime. There's no auth layer, since a local subprocess is inherently process-trusted. If a [tenancy policy](/concepts/tenancy-and-access-control) is active, a `stdio` session has no per-request auth to derive a principal from, so `--tenant <id>` must be passed explicitly.
@@ -49,11 +50,15 @@ On first start in a project with no active metric contracts, canonic auto-genera
 
 ## Editing a project while the daemon runs
 
-The daemon follows the project files. Before it serves a request it compares the modification time and size of `canonic.yaml`, every file under `contracts/` and every file under `semantics/` with what it loaded. When one changed, it loads all three again, so an edit takes effect on the next request without a restart. Knowledge pages are reloaded the same way.
+By default the daemon serves the project it loaded at startup. A deployment decides which definitions are live, so editing `canonic.yaml`, `contracts/` or `semantics/` on a running daemon changes nothing until it restarts. Knowledge pages are the exception: they are read from disk on every request.
+
+The daemon still notices. `contract_info` returns `project_files_changed: true` once the contents of those files differ from what the daemon serves. A file that was only touched, or edited and then reverted, does not count. Compare `project_fingerprint` with the output of `canonic status` to see which state a daemon runs. The daemon also logs a warning the first time it sees a change.
+
+To have the daemon follow edits instead, set `project.reload: auto` in `canonic.yaml` or start it with `--reload` (`--no-reload` forces the default). This suits a local server that an agent client started and that outlives an edit. Before it serves a request, the daemon compares the modification time and size of the watched files with what it loaded. When one changed, it loads all three again, so an edit takes effect on the next request.
 
 - A request that has started finishes on the definitions it started with. The new ones apply from the next request on.
 - If the edited files do not validate, the daemon keeps serving the previous definitions and adds a warning that names the failing file to the `warnings` of `query` and `compile_query`. Fixing the file clears the warning. The broken files are not parsed again until they change.
-- A new `connections` entry in `canonic.yaml` is picked up, but settings the daemon reads once at startup need a restart: the MCP auth mechanism, the host and port, and the event log location.
+- A new `connections` entry in `canonic.yaml` is picked up, but settings the daemon reads once at startup need a restart: the reload mode itself, the MCP auth mechanism, the host and port, and the event log location.
 
 ## Health endpoints
 
