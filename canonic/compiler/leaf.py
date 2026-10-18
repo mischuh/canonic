@@ -20,6 +20,8 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, cast
 
+from sqlglot import exp
+
 from canonic.compiler._helpers import (
     _FANOUT,
     _bind_filters,
@@ -46,8 +48,6 @@ from canonic.semantic.models import Additivity
 
 if TYPE_CHECKING:
     from collections.abc import Iterator, Sequence
-
-    from sqlglot import exp
 
     from canonic.compiler._helpers import DimMask, _ResolvedMetric
     from canonic.compiler.joins import JoinEdge
@@ -158,6 +158,35 @@ _KEY_DIALECT = "postgres"
 
 def _render(expr: exp.Expression) -> str:
     return expr.sql(dialect=_KEY_DIALECT, identify=True)
+
+
+def _conjuncts(condition: exp.Expression) -> list[exp.Expression]:
+    """Split a condition into the predicates it ANDs together, with redundant parentheses removed.
+
+    A parenthesised OR keeps its parentheses, since they carry meaning once the conjunct stands
+    alone. Any other wrapper is dropped: ``(a = 1)`` and ``a = 1`` select the same rows.
+    """
+    node = condition
+    while isinstance(node, exp.Paren) and not isinstance(node.this, exp.Or):
+        node = node.this
+    if isinstance(node, exp.And):
+        return [*_conjuncts(node.this), *_conjuncts(node.expression)]
+    if isinstance(node, exp.Or):
+        return [exp.Paren(this=node)]
+    return [node]
+
+
+def _filter_key(conditions: Sequence[exp.Expression]) -> tuple[str, ...]:
+    """The WHERE conditions of a leaf in the normal form its key compares.
+
+    Parenthesisation and a predicate repeated by two scoping sources (a ``population_filter``
+    equal to a guardrail predicate) do not change which rows a leaf selects, so they must not
+    change its identity either. Conjuncts keep their first-seen order and are not sorted: the
+    key stays exact about everything else, and a leaf that differs only in conjunct order simply
+    does not fuse, which costs a scan and never a wrong number.
+    """
+    rendered = (_render(c) for condition in conditions for c in _conjuncts(condition))
+    return tuple(dict.fromkeys(rendered))
 
 
 @dataclass(frozen=True, slots=True)
@@ -577,7 +606,7 @@ def plan_leaf(
             _render(_dimension_expr(src, dim, _dim_mask_strategy(dim_mask, src, dim)))
             for src, dim in dimensions
         ),
-        filters=tuple(_render(c) for c in scoping.where_conditions),
+        filters=_filter_key(scoping.where_conditions),
         join_path=tuple((e.from_alias, e.alias, e.on_sql) for e in join_edges),
         finality=finality_key,
         strategy_params=strategy_params,
