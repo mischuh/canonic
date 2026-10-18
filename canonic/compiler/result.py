@@ -80,17 +80,33 @@ class SourceFreshness:
 
 
 @dataclass(frozen=True, slots=True)
+class CompositionComponent:
+    """One side of a composite metric as it was compiled.
+
+    ``population_filter`` is the filter the component's leaf was actually compiled over: the
+    composite's own filter and the component's own filter, ANDed when both are declared. It
+    defines what the component counts, and is ``None`` when neither is declared.
+    """
+
+    metric: str
+    resolved: str | None
+    population_filter: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
 class CompositionMetadata:
     """Records how a composable_post_agg metric was produced (SPEC-Fuller-E15 §4.1, §6 stage 8).
 
     Consumed by E14 (trust scoring) and E16 (event log) to record that division
-    was applied post-aggregation, not row-by-row.
+    was applied post-aggregation, not row-by-row. ``components`` is the numerator then the
+    denominator, with their resolved bindings and the populations they were compiled over.
     """
 
     kind: str
     numerator: str
     denominator: str
     on_zero_denominator: str
+    components: tuple[CompositionComponent, CompositionComponent]
 
 
 @dataclass(frozen=True, slots=True)
@@ -236,6 +252,9 @@ class CompileResult:
     finality: FinalityMetadata | None = None
     related: RelatedMetadata = field(default_factory=RelatedMetadata)
     composition: CompositionMetadata | None = None
+    #: Every composite metric of the query by requested name, where ``composition`` keeps only
+    #: the first one.
+    compositions: dict[str, CompositionMetadata] = field(default_factory=dict)
     partial_additive: PartialAdditiveMetadata | None = None
     recompute_at_grain: RecomputeAtGrainMetadata | None = None
     opaque: OpaqueMetadata | None = None

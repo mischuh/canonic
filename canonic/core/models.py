@@ -25,7 +25,7 @@ from canonic.contracts.principal import (
 from canonic.trust.scorer import trust_for_compiled
 
 if TYPE_CHECKING:
-    from canonic.compiler.result import CompileResult
+    from canonic.compiler.result import CompileResult, CompositionMetadata
     from canonic.contracts.resolver import Binding
     from canonic.feedback.assertion_history import AssertionHistory
     from canonic.feedback.history import BindingOutcomeHistory
@@ -33,6 +33,8 @@ if TYPE_CHECKING:
 __all__ = [
     "Compiled",
     "CompileOutput",
+    "CompositionComponentOut",
+    "CompositionOut",
     "CumulativeOut",
     "DimensionInfo",
     "DomainGroup",
@@ -88,6 +90,32 @@ class FinalityOut(BaseModel):
     sources_used: list[str]
     final_rows: int | None = None
     provisional_rows: int | None = None
+
+
+class CompositionComponentOut(BaseModel):
+    """One side of a composite metric: its binding and the population it counts."""
+
+    model_config = ConfigDict(frozen=True)
+
+    metric: str
+    resolved: str | None = None
+    population_filter: str | None = None
+
+
+class CompositionOut(BaseModel):
+    """How one composite metric (``ratio``, ``weighted_avg``) was formed for this query.
+
+    ``on_zero_denominator`` is the policy applied to a row with a zero denominator. Under
+    ``zero`` that row becomes ``0`` without any warning, so a caller needs it here to tell a
+    real zero from a substituted one.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    kind: str
+    numerator: CompositionComponentOut
+    denominator: CompositionComponentOut
+    on_zero_denominator: str
 
 
 class CumulativeOut(BaseModel):
@@ -319,6 +347,7 @@ class QueryMetadata(BaseModel):
     trust_score: TrustScoreOut | None = None
     scope: ScopeOut | None = None
     cumulative: CumulativeOut | None = None
+    composition: dict[str, CompositionOut] = {}
 
     @classmethod
     def from_compile_result(
@@ -413,7 +442,26 @@ class QueryMetadata(BaseModel):
                 if compiled.cumulative is not None
                 else None
             ),
+            composition={
+                name: _composition_out(composition)
+                for name, composition in compiled.compositions.items()
+            },
         )
+
+
+def _composition_out(composition: CompositionMetadata) -> CompositionOut:
+    numerator, denominator = (
+        CompositionComponentOut(
+            metric=c.metric, resolved=c.resolved, population_filter=c.population_filter
+        )
+        for c in composition.components
+    )
+    return CompositionOut(
+        kind=composition.kind,
+        numerator=numerator,
+        denominator=denominator,
+        on_zero_denominator=str(composition.on_zero_denominator),
+    )
 
 
 class QueryResult(BaseModel):

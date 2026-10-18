@@ -19,6 +19,71 @@
       "title": "Compiled",
       "type": "object"
     },
+    "CompositionComponentOut": {
+      "description": "One side of a composite metric: its binding and the population it counts.",
+      "properties": {
+        "metric": {
+          "title": "Metric",
+          "type": "string"
+        },
+        "resolved": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Resolved"
+        },
+        "population_filter": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Population Filter"
+        }
+      },
+      "required": [
+        "metric"
+      ],
+      "title": "CompositionComponentOut",
+      "type": "object"
+    },
+    "CompositionOut": {
+      "description": "How one composite metric (``ratio``, ``weighted_avg``) was formed for this query.\n\n``on_zero_denominator`` is the policy applied to a row with a zero denominator. Under\n``zero`` that row becomes ``0`` without any warning, so a caller needs it here to tell a\nreal zero from a substituted one.",
+      "properties": {
+        "kind": {
+          "title": "Kind",
+          "type": "string"
+        },
+        "numerator": {
+          "$ref": "#/$defs/CompositionComponentOut"
+        },
+        "denominator": {
+          "$ref": "#/$defs/CompositionComponentOut"
+        },
+        "on_zero_denominator": {
+          "title": "On Zero Denominator",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "numerator",
+        "denominator",
+        "on_zero_denominator"
+      ],
+      "title": "CompositionOut",
+      "type": "object"
+    },
     "CumulativeOut": {
       "description": "How a cumulative metric's running total was formed for this query.\n\n``partition_by`` is every requested dimension that is not an order dimension, so it\ndiffers per query. Under ``history: exclude`` the total starts at zero at the first row\nthat passes the query's filters. Under ``include`` it runs from the first row of data, and\n``visibility_filters`` only chose which order tuples are shown.",
       "properties": {
@@ -173,7 +238,7 @@
           "type": "array"
         },
         "contract_schema": {
-          "default": "3.3",
+          "default": "3.4",
           "title": "Contract Schema",
           "type": "string"
         },
@@ -227,6 +292,14 @@
             }
           ],
           "default": null
+        },
+        "composition": {
+          "additionalProperties": {
+            "$ref": "#/$defs/CompositionOut"
+          },
+          "default": {},
+          "title": "Composition",
+          "type": "object"
         }
       },
       "required": [
