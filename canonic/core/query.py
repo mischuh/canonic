@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 import time
 import uuid
+from dataclasses import replace
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, cast
 
@@ -92,6 +93,8 @@ class QueryService:
             principal=principal,
         )
         compiled = apply_staleness_policy(compiled, self._ctx.config.trust.stale_after_days)
+        if (reload_warning := self._ctx.reload_warning) is not None:
+            compiled = replace(compiled, warnings=[*compiled.warnings, reload_warning])
         return self._knowledge.link_guardrails(compiled, principal)
 
     async def query(

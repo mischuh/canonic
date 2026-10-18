@@ -11,6 +11,8 @@ a duplicated copy of the wiring.
 from __future__ import annotations
 
 import logging
+from contextlib import contextmanager
+from contextvars import ContextVar
 from typing import TYPE_CHECKING, cast
 
 from canonic.connectors.base import Capability, require_capability
@@ -19,9 +21,11 @@ from canonic.contracts.principal import Principal
 from canonic.contracts.resolver import Ambiguous as ResolverAmbiguous
 from canonic.contracts.resolver import Unresolved as ResolverUnresolved
 from canonic.core.probes import strip_probes
+from canonic.core.project import ProjectState
 from canonic.exc import Ambiguous, Unresolved
 
 if TYPE_CHECKING:
+    from collections.abc import Iterator
     from pathlib import Path
 
     from canonic.compiler.result import CompileResult
@@ -29,6 +33,7 @@ if TYPE_CHECKING:
     from canonic.connectors.base import ConnectorBase, ResultSet, SQLExecutable
     from canonic.contracts.resolver import Binding, ContractResolver
     from canonic.core.probes import ProbeValues
+    from canonic.core.project import ProjectReloader
     from canonic.instrumentation.events import AnswerEventLog
     from canonic.semantic.models import SemanticSource
 
@@ -36,9 +41,20 @@ _ANONYMOUS_PRINCIPAL = Principal()
 
 logger = logging.getLogger(__name__)
 
+#: The project state a request in flight was started on, with the context that owns it.
+_PINNED: ContextVar[tuple[ServiceContext, ProjectState] | None] = ContextVar(
+    "canonic_pinned_project_state", default=None
+)
+
 
 class ServiceContext:
-    """The shared state and infrastructure the core service collaborators build on."""
+    """The shared state and infrastructure the core service collaborators build on.
+
+    The project definitions (config, contracts, semantic sources) live in one immutable
+    :class:`ProjectState`. A context built with a :class:`ProjectReloader` swaps that state when
+    the project files change, and :meth:`request` pins the state for the duration of a request so
+    the request finishes on the definitions it started with.
+    """
 
     def __init__(
         self,
@@ -49,15 +65,71 @@ class ServiceContext:
         connection_dialects: dict[str, str],
         project_root: Path | None,
         event_log: AnswerEventLog,
+        reloader: ProjectReloader | None = None,
     ) -> None:
-        self.config = config
-        self.resolver = resolver
-        self.sources = sources
-        self.connection_dialects = connection_dialects
+        self._state = ProjectState(
+            config=config,
+            resolver=resolver,
+            sources=sources,
+            connection_dialects=connection_dialects,
+            # name → source for fast lookup (sources have unique names within project)
+            source_by_name={s.name: s for s in sources},
+        )
+        self._reloader = reloader
         self.project_root = project_root
         self.event_log = event_log
-        # name → source for fast lookup (sources have unique names within project)
-        self.source_by_name: dict[str, SemanticSource] = {s.name: s for s in sources}
+
+    @property
+    def state(self) -> ProjectState:
+        """The pinned state inside a request, otherwise the latest loaded one."""
+        pinned = _PINNED.get()
+        if pinned is not None and pinned[0] is self:
+            return pinned[1]
+        return self._reloader.state if self._reloader is not None else self._state
+
+    @property
+    def config(self) -> CanonicConfig:
+        return self.state.config
+
+    @property
+    def resolver(self) -> ContractResolver:
+        return self.state.resolver
+
+    @property
+    def sources(self) -> list[SemanticSource]:
+        return self.state.sources
+
+    @property
+    def connection_dialects(self) -> dict[str, str]:
+        return self.state.connection_dialects
+
+    @property
+    def source_by_name(self) -> dict[str, SemanticSource]:
+        return self.state.source_by_name
+
+    @property
+    def reload_warning(self) -> str | None:
+        """Why the project files on disk are not being served, or ``None`` when they are."""
+        failure = self._reloader.failure if self._reloader is not None else None
+        return failure.warning() if failure is not None else None
+
+    @contextmanager
+    def request(self) -> Iterator[ProjectState]:
+        """Serve one request on a single project state, reloading first if the files changed.
+
+        Nested calls, such as a report running its sections through ``query``, reuse the state
+        the outermost call pinned, so a reload never lands in the middle of a request.
+        """
+        pinned = _PINNED.get()
+        if pinned is not None and pinned[0] is self:
+            yield pinned[1]
+            return
+        state = self._reloader.refresh() if self._reloader is not None else self._state
+        token = _PINNED.set((self, state))
+        try:
+            yield state
+        finally:
+            _PINNED.reset(token)
 
     def resolve_or_raise(
         self, name: str, context: str | None = None, *, principal: Principal | None = None

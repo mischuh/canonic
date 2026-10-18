@@ -40,7 +40,7 @@ class TestResolverProperty:
         """SPEC-E12 §5: adapters derive a Principal via ``service.resolver``, not a
         duplicate resolver wiring of their own."""
         assert isinstance(canonic_service.resolver, ContractResolver)
-        assert canonic_service.resolver is canonic_service._resolver  # noqa: SLF001
+        assert canonic_service.resolver is canonic_service._ctx.resolver  # noqa: SLF001
 
 
 class TestListMetrics:
@@ -563,7 +563,7 @@ class TestSearchKnowledge:
 
 def test_resolve_connection_paths_resolves_each_ossie_path(tmp_path: Path) -> None:
     from canonic.config import Connection
-    from canonic.core.service import _resolve_connection_paths
+    from canonic.core.project import _resolve_connection_paths
 
     conn = Connection(
         id="shop_ossie",

@@ -559,7 +559,7 @@ def adapter_for(dialect: str) -> DialectAdapter:
     ``DIALECT_ADAPTERS`` — compiling a query in the wrong SQL flavor and returning it
     successfully is worse than a clear error, since e.g. ``sl compile`` has no later
     execution-time check that would otherwise catch the mismatch. Only called with a
-    query-connector's dialect (see ``core.service._dialect_for_type``, which never
+    query-connector's dialect (see ``core.project._dialect_for_type``, which never
     resolves a dialect for definitions/evidence-only connector types such as dbt/looker/
     metabase/notion/url in the first place), so this never fires for a normally
     configured project.
