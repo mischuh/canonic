@@ -6,9 +6,11 @@ from typing import TYPE_CHECKING, Any
 
 from canonic.compiler.joins import build_alias_tree, reachable_dimension_names
 from canonic.compiler.result import TrustInput
+from canonic.compiler.trust_inputs import trust_inputs_for_binding
 from canonic.contracts.kinds import spec_for
 from canonic.contracts.models import Status
 from canonic.contracts.principal import Principal
+from canonic.contracts.resolver import Binding as ResolverBinding
 from canonic.core.models import (
     DimensionInfo,
     DomainGroup,
@@ -138,12 +140,20 @@ class DiscoveryService:
             if b.metric in seen:
                 continue
             seen.add(b.metric)
-            trust_input = TrustInput(
-                metric=b.metric,
-                provenance=b.provenance.value,
-                has_assertion=bool(self._ctx.resolver.assertions_for({"metrics": [b.metric]})),
-            )
-            scores.append((b.metric, TrustScorer.score(static_signals_for([trust_input]))))
+            resolved = self._ctx.resolver.resolve_metric(b.metric)
+            if isinstance(resolved, ResolverBinding):
+                trust_inputs = trust_inputs_for_binding(b.metric, resolved, self._ctx.resolver)
+            else:
+                trust_inputs = [
+                    TrustInput(
+                        metric=b.metric,
+                        provenance=b.provenance.value,
+                        has_assertion=bool(
+                            self._ctx.resolver.assertions_for({"metrics": [b.metric]})
+                        ),
+                    )
+                ]
+            scores.append((b.metric, TrustScorer.score(static_signals_for(trust_inputs))))
         return sorted(scores, key=lambda item: item[0])
 
     def describe_metric(self, name: str, *, principal: Principal | None = None) -> MetricDetail:

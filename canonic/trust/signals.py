@@ -43,7 +43,7 @@ def provenance_signal(trust_input: TrustInput) -> SignalVerdict:
     """Binding provenance (SPEC-E14 §3 table row "Binding provenance")."""
     if trust_input.provenance == Provenance.INFERRED.value:
         return SignalVerdict(
-            cap=TrustTier.PROVISIONAL, reason=f"{trust_input.metric}: binding inferred"
+            cap=TrustTier.PROVISIONAL, reason=f"{trust_input.label}: binding inferred"
         )
     return SignalVerdict(cap=None)
 
@@ -64,18 +64,18 @@ def assertion_signal(
     """
     if not trust_input.has_assertion:
         return SignalVerdict(
-            cap=TrustTier.PROVISIONAL, reason=f"{trust_input.metric}: untested (no assertion)"
+            cap=TrustTier.PROVISIONAL, reason=f"{trust_input.label}: untested (no assertion)"
         )
     record = history.status_for(trust_input.binding) if history and trust_input.binding else None
     if record is None:
         return SignalVerdict(
             cap=TrustTier.PROVISIONAL,
-            reason=f"{trust_input.metric}: assertion unverified (pass/fail not yet persisted)",
+            reason=f"{trust_input.label}: assertion unverified (pass/fail not yet persisted)",
         )
     if not record.passed:
         return SignalVerdict(
             cap=TrustTier.CAUTION,
-            reason=f"{trust_input.metric}: assertion failed ({record.assertion_id})",
+            reason=f"{trust_input.label}: assertion failed ({record.assertion_id})",
         )
     return SignalVerdict(cap=None)
 
@@ -134,5 +134,8 @@ def outcome_signal(
     if trust_input.binding is None:
         return SignalVerdict(cap=None)
     if history.is_capped(trust_input.binding, window_days=window_days):
-        return SignalVerdict(cap=TrustTier.CAUTION, reason="outcome: confirmed-wrong")
+        reason = "outcome: confirmed-wrong"
+        if trust_input.owner is not None:
+            reason = f"{trust_input.label}: {reason}"
+        return SignalVerdict(cap=TrustTier.CAUTION, reason=reason)
     return SignalVerdict(cap=None)

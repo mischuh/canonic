@@ -623,7 +623,7 @@ def test_s17_ac3_trust_inputs_cover_every_requested_metric(
         resolver,
         sources,
     )
-    assert {t.metric for t in result.trust_inputs} == {
+    assert {t.metric for t in result.trust_inputs if t.owner is None} == {
         "revenue",
         "shipped_weight",
         "avg_order_value",

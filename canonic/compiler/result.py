@@ -164,12 +164,22 @@ class TrustInput:
     key persisted to ``.canonic/assertions.json`` and E11's per-binding outcome history
     (SPEC-E11 §5, SPEC-E14 §5). ``None`` only for kinds with no derivable key (e.g.
     recompute_at_grain).
+
+    ``owner`` is set on the inputs a composite metric inherits from its components: it names
+    the queried composite, so a reason reads ``margin: component profit: ...`` rather than
+    blaming a metric the caller never asked for.
     """
 
     metric: str
     provenance: str
     has_assertion: bool
     binding: str | None = None
+    owner: str | None = None
+
+    @property
+    def label(self) -> str:
+        """How reasons refer to this input: the metric, or ``owner: component metric``."""
+        return self.metric if self.owner is None else f"{self.owner}: component {self.metric}"
 
 
 @dataclass(frozen=True, slots=True)
