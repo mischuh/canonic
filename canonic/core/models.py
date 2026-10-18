@@ -62,13 +62,19 @@ __all__ = [
 
 
 class FiredGuardrailOut(BaseModel):
-    """A guardrail that fired during compilation (mirrors compiler ``FiredGuardrail``)."""
+    """A guardrail that fired during compilation (mirrors compiler ``FiredGuardrail``).
+
+    ``predicate`` is the filter or constraint it applied. ``knowledge_refs`` are the ids of the
+    knowledge pages that explain it, readable with ``read_knowledge_page``.
+    """
 
     model_config = ConfigDict(frozen=True)
 
     id: str
     kind: str
     severity: str = "error"
+    predicate: str | None = None
+    knowledge_refs: list[str] = []
 
 
 class SourceFreshnessOut(BaseModel):
@@ -396,7 +402,13 @@ class QueryMetadata(BaseModel):
         return cls(
             resolved={"metrics": dict(compiled.resolved)},
             guardrails_fired=[
-                FiredGuardrailOut(id=g.id, kind=g.kind, severity=g.severity)
+                FiredGuardrailOut(
+                    id=g.id,
+                    kind=g.kind,
+                    severity=g.severity,
+                    predicate=g.predicate,
+                    knowledge_refs=list(g.knowledge_refs),
+                )
                 for g in compiled.guardrails_fired
             ],
             freshness=[

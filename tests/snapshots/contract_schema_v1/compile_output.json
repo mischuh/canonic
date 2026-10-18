@@ -179,7 +179,7 @@
       "type": "object"
     },
     "FiredGuardrailOut": {
-      "description": "A guardrail that fired during compilation (mirrors compiler ``FiredGuardrail``).",
+      "description": "A guardrail that fired during compilation (mirrors compiler ``FiredGuardrail``).\n\n``predicate`` is the filter or constraint it applied. ``knowledge_refs`` are the ids of the\nknowledge pages that explain it, readable with ``read_knowledge_page``.",
       "properties": {
         "id": {
           "title": "Id",
@@ -193,6 +193,26 @@
           "default": "error",
           "title": "Severity",
           "type": "string"
+        },
+        "predicate": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Predicate"
+        },
+        "knowledge_refs": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Knowledge Refs",
+          "type": "array"
         }
       },
       "required": [
@@ -238,7 +258,7 @@
           "type": "array"
         },
         "contract_schema": {
-          "default": "3.4",
+          "default": "3.5",
           "title": "Contract Schema",
           "type": "string"
         },

@@ -171,6 +171,7 @@ rationale: "Refunds are reversals, not revenue."
 | `severity` | `Severity` | `error` | `error` blocks the query. `warn` lets it through with a `warnings[]` entry instead. See below for how this applies per `kind`. |
 | `rationale` | `str` | n/a (required) | Why the rule exists, surfaced to the caller. |
 | `phase` | `str \| null` | `null` | Optional compiler-pipeline phase hint. |
+| `knowledge_refs` | `list[str]` | `[]` | Ids of the knowledge pages that explain this guardrail. When set, these are returned with the fired guardrail and replace the pages otherwise inferred from their `sl_refs`, see [Guardrails and knowledge](#guardrails-and-knowledge). |
 
 | `kind` | Behavior | Status |
 | --- | --- | --- |
@@ -180,6 +181,12 @@ rationale: "Refunds are reversals, not revenue."
 | `min_trust` | In a given `context`, blocks (`severity: error`) or warns if the computed trust tier is below `level`. | Enforced |
 
 A guardrail attaches a rule to either a specific `(source, measure)` pair or a whole `metric`, chosen by which shape you fill in under `applies_to`. Which fields besides `kind` are required depends entirely on that `kind`: a `mandatory_filter` needs `filter`, a `restrict_source` needs `restrict_to` and `context`, a `min_trust` needs `level` and `context`, a `required_dimension` needs `dimension`. `severity` decides how hard the rule bites: for `restrict_source`, `min_trust`, and `required_dimension`, `error` stops the query outright while `warn` lets it through with a `warnings[]` entry instead. `mandatory_filter` has no "block" action to gate, its predicate is always injected, and `severity: warn` there only adds the `warnings[]` entry. `rationale` is what actually gets shown to whoever hit the block (or the warning), so it's worth writing for a person, not just as a code comment.
+
+### Guardrails and knowledge
+
+Each entry of `guardrails_fired` in the query metadata carries `predicate`, the filter or constraint the guardrail applied, and `knowledge_refs`, the ids of the knowledge pages that explain it. An agent reads them with `read_knowledge_page` instead of guessing a search term.
+
+A page is listed when its `sl_refs` name an entity the guardrail reads: the guarded measure, a column of its `filter` (or the dimension declared on that column), or its `dimension`. A bare source in `sl_refs` does not match, because it would match every guardrail on that source. Setting `knowledge_refs` on the guardrail replaces this inference with exactly the pages you name. Only global pages that the caller's role may read are returned, and an id that does not match a readable page is dropped. The ids are sorted.
 
 ## `contracts/guardrails/finality-*.yaml`: `FinalityRule`
 
