@@ -1,5 +1,29 @@
 # Changelog
 
+## [0.41.0](https://github.com/mischuh/canonic/compare/v0.40.1...v0.41.0) (2026-10-18)
+
+
+### Features
+
+* **compiler:** count zero-denominator substitutions in the query result ([#428](https://github.com/mischuh/canonic/issues/428)) ([c5c60c0](https://github.com/mischuh/canonic/commit/c5c60c078d9889504c6e35ec342cef38de872ea1))
+* **compiler:** expose composition metadata per metric in the query result ([#423](https://github.com/mischuh/canonic/issues/423)) ([790979f](https://github.com/mischuh/canonic/commit/790979fe160af60d3aca0fa9be1cd9404f30766f))
+* **mcp:** return predicate and knowledge references for fired guardrails ([#424](https://github.com/mischuh/canonic/issues/424)) ([f435f7d](https://github.com/mischuh/canonic/commit/f435f7dd1fb21b645b5ccc290417df54ac3878b8))
+* **trust:** flag filter-only queries that include a period that has not ended ([#429](https://github.com/mischuh/canonic/issues/429)) ([a85c93b](https://github.com/mischuh/canonic/commit/a85c93bfe2fa3ec325a1237bf7fd795da14af9bc))
+* **trust:** flag results that include a period that has not ended ([#425](https://github.com/mischuh/canonic/issues/425)) ([9af4f16](https://github.com/mischuh/canonic/commit/9af4f16f0efd859af356e0d8a2e33d76310d21a1))
+* **trust:** probe time dimensions on joined sources for the open-period check ([#431](https://github.com/mischuh/canonic/issues/431)) ([0664eb7](https://github.com/mischuh/canonic/commit/0664eb7e361c50464f9c5022ec95805568afe3fc))
+
+
+### Bug Fixes
+
+* **compiler:** fuse component and standalone leaves with equivalent filters ([#421](https://github.com/mischuh/canonic/issues/421)) ([5e85d6c](https://github.com/mischuh/canonic/commit/5e85d6c106e487829237595b7762a1b83b9dc1e7))
+* **mcp:** return binding details for composite metrics ([#422](https://github.com/mischuh/canonic/issues/422)) ([b77d958](https://github.com/mischuh/canonic/commit/b77d958c75570898be263d44e3b997430da0b193))
+* **trust:** inherit component trust signals in composite metrics ([#419](https://github.com/mischuh/canonic/issues/419)) ([2e20704](https://github.com/mischuh/canonic/commit/2e207048bbcbf4bc983740d7c516eac0e8f65e00))
+
+
+### Documentation
+
+* describe composite trust, guardrail references and probe columns ([#432](https://github.com/mischuh/canonic/issues/432)) ([6b65b4a](https://github.com/mischuh/canonic/commit/6b65b4a9a69bb50886f4a60bcf05e63b467d1ede))
+
 ## [0.40.1](https://github.com/mischuh/canonic/compare/v0.40.0...v0.40.1) (2026-10-17)
 
 
