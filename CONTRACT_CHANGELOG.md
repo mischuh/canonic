@@ -68,6 +68,15 @@ A change listed here was reviewed against the classification rules and did not b
   itself sees the extra column and can ignore it. For a time dimension on a joined source the
   column is named `_canonic_latest_period_<alias>_<dimension>` (feat(trust) #430).
 
+### Zero-denominator warning follows the count (feat(compiler) #433)
+
+- ADR/PR: this PR (feat(compiler): warn about a zero denominator only when a returned row has one)
+- Decision: no bump. `warnings` is a list of free text and keeps its shape. In `query`, the warning of a
+  ratio under `on_zero_denominator: null` now appears only when `zero_denominator_rows` is above zero, and
+  then reads `zero denominator in <n> rows for metric '<metric>' yields NULL (on_zero_denominator=null)`. The
+  `compile` output has no count and keeps the generic line. A client that matches the old text exactly needs
+  to match the new one as well.
+
 ## History
 
 ## 3.6 (2026-10-18) - MINOR

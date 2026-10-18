@@ -62,7 +62,5 @@
     ]
   ],
   "trust_tier": "provisional",
-  "warnings": [
-    "zero denominator for metric 'average_order_value' yields NULL (on_zero_denominator=null)"
-  ]
+  "warnings": []
 }

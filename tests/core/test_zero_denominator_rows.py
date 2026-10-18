@@ -2,20 +2,18 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+import pytest
 
 import canonic.core.context as context_mod
 from canonic.compiler import SemanticQuery
+from canonic.compiler.result import PROBE_ZERO_DENOMINATOR, CompileResult
 from canonic.config import CanonicConfig
 from canonic.connectors.base import Capability, ConnectorBase, Health, ResultColumn, ResultSet
 from canonic.contracts.models import BindingKind, CanonicalRef, MetricBinding, OnZeroDenominator
 from canonic.contracts.resolver import ContractResolver
-from canonic.core.models import CompileOutput
+from canonic.core.models import CompileOutput, _with_zero_denominator_counts
 from canonic.core.service import CanonicService
 from canonic.semantic.models import Column, Dimension, Measure, SemanticSource
-
-if TYPE_CHECKING:
-    import pytest
 
 _CONFIG = {
     "version": 1,
@@ -86,6 +84,7 @@ def _service(
         ),
         MetricBinding(
             metric="share",
+            aliases=["sh"],
             canonical=CanonicalRef(
                 kind=BindingKind.RATIO,
                 numerator="shipping",
@@ -155,3 +154,91 @@ def test_compile_output_has_no_result_to_count(monkeypatch: pytest.MonkeyPatch) 
 
     assert output.metadata.composition["share"].zero_denominator_rows is None
     assert _PROBE in output.compiled.sql
+
+
+_GENERIC = "zero denominator for metric 'share' yields NULL (on_zero_denominator=null)"
+
+
+def _flagged(count: int) -> ResultSet:
+    rows = [["a", 0.1, 0], ["b", None, 1], ["c", None, 1], ["d", None, 1]][: 1 + count]
+    return ResultSet(columns=_result().columns, rows=rows)
+
+
+class TestWarningFollowsTheCount:
+    """The warning of the ``null`` policy names the rows that need it, not the policy."""
+
+    async def test_no_affected_row_means_no_warning(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        served = await _service(monkeypatch, OnZeroDenominator.NULL, _flagged(0)).query(_QUERY)
+
+        assert not any("zero denominator" in w for w in served.metadata.warnings)
+        assert served.metadata.composition["share"].zero_denominator_rows == 0
+
+    async def test_affected_rows_are_named(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        served = await _service(monkeypatch, OnZeroDenominator.NULL, _flagged(3)).query(_QUERY)
+
+        assert served.metadata.warnings == [
+            "zero denominator in 3 rows for metric 'share' yields NULL (on_zero_denominator=null)"
+        ]
+
+    async def test_a_single_row_is_singular(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        served = await _service(monkeypatch, OnZeroDenominator.NULL, _flagged(1)).query(_QUERY)
+
+        assert served.metadata.warnings == [
+            "zero denominator in 1 row for metric 'share' yields NULL (on_zero_denominator=null)"
+        ]
+
+    async def test_the_metric_is_named_by_its_canonical_name_when_asked_by_alias(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        query = SemanticQuery(metrics=["sh"], dimensions=["category"])
+
+        served = await _service(monkeypatch, OnZeroDenominator.NULL, _flagged(2)).query(query)
+
+        assert served.metadata.warnings == [
+            "zero denominator in 2 rows for metric 'share' yields NULL (on_zero_denominator=null)"
+        ]
+
+    def test_compile_keeps_the_generic_warning(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        compiled = _service(monkeypatch, OnZeroDenominator.NULL).compile_query(_QUERY)
+
+        output = CompileOutput.from_compile_result(compiled)
+
+        assert output.metadata.warnings == [_GENERIC]
+
+    @pytest.mark.parametrize("count", [0, 3])
+    async def test_zero_policy_stays_silent(
+        self, monkeypatch: pytest.MonkeyPatch, count: int
+    ) -> None:
+        served = await _service(monkeypatch, OnZeroDenominator.ZERO, _flagged(count)).query(_QUERY)
+
+        assert not any("zero denominator" in w for w in served.metadata.warnings)
+        assert served.metadata.composition["share"].zero_denominator_rows == count
+
+
+class TestOtherWarningsAreKept:
+    def _compiled(self) -> CompileResult:
+        return CompileResult(
+            sql="SELECT 1",
+            dialect="postgres",
+            resolved={},
+            warnings=["before", _GENERIC, "after"],
+            zero_denominator_metrics={"sh": "share"},
+        )
+
+    def test_a_zero_count_removes_only_the_zero_denominator_warning(self) -> None:
+        probes = {(PROBE_ZERO_DENOMINATOR, "sh"): 0}
+
+        assert _with_zero_denominator_counts(self._compiled(), probes) == ["before", "after"]
+
+    def test_a_count_replaces_the_warning_in_place(self) -> None:
+        probes = {(PROBE_ZERO_DENOMINATOR, "sh"): 2}
+
+        assert _with_zero_denominator_counts(self._compiled(), probes) == [
+            "before",
+            "zero denominator in 2 rows for metric 'share' yields NULL (on_zero_denominator=null)",
+            "after",
+        ]
+
+    def test_without_a_count_nothing_changes(self) -> None:
+        assert _with_zero_denominator_counts(self._compiled(), None) == self._compiled().warnings
+        assert _with_zero_denominator_counts(self._compiled(), {}) == self._compiled().warnings

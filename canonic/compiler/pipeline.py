@@ -18,6 +18,7 @@ from canonic.compiler._helpers import (
     parse_dialect,
 )
 from canonic.compiler.compose import (
+    Combine,
     MetricLeaves,
     MetricPlan,
     compose,
@@ -450,6 +451,11 @@ def compile(  # noqa: A001 — the public verb for this capability is "compile"
             ),
             *latest_probes,
         ),
+        zero_denominator_metrics={
+            name: plan.name
+            for (name, _), plan in zip(raw_bindings, metric_plans, strict=False)
+            if plan.combine is Combine.RATIO_NULL and plan.accumulate is None
+        },
         time_dimensions=tuple(
             {td.column: td for leaf in leaves for td in leaf.time_dimensions}.values()
         ),

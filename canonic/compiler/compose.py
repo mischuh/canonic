@@ -248,6 +248,18 @@ _SUBSTITUTING = frozenset({Combine.RATIO_NULL, Combine.RATIO_ZERO})
 _ZERO_DENOMINATOR_PREFIX = "_canonic_zero_denominator_"
 
 
+def zero_denominator_warning(metric_name: str, rows: int | None = None) -> str:
+    """The warning for a ratio that turns a zero denominator into ``NULL``.
+
+    Without ``rows`` it is the compile-time statement of the policy. With the number of returned
+    rows that were affected, which only the serving layer knows, it names that number.
+    """
+    where = "" if rows is None else f" in {rows} row{'' if rows == 1 else 's'}"
+    return (
+        f"zero denominator{where} for metric {metric_name!r} yields NULL (on_zero_denominator=null)"
+    )
+
+
 def zero_denominator_column(metric_name: str) -> str:
     """The name of the hidden column that flags a zero denominator for ``metric_name``."""
     return f"{_ZERO_DENOMINATOR_PREFIX}{metric_name}"

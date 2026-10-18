@@ -308,4 +308,8 @@ class CompileResult:
     time_dimensions: tuple[TimeDimension, ...] = ()
     #: Columns added to ``sql`` that the serving layer strips again, see :class:`ProbeColumn`.
     probe_columns: tuple[ProbeColumn, ...] = ()
+    #: Requested ratio name to the metric it resolves to, for each ratio under
+    #: ``on_zero_denominator: null``. ``warnings`` carries one generic warning per such metric,
+    #: which the serving layer replaces once it knows how many returned rows were affected.
+    zero_denominator_metrics: dict[str, str] = field(default_factory=dict)
     scope: ScopeMetadata | None = None
