@@ -273,6 +273,9 @@ class LeafPlan:
     fusable: bool = True
     #: The requested dimensions whose values are periods of a known grain, by output column.
     time_dimensions: tuple[TimeDimension, ...] = ()
+    #: Whether a join of this leaf multiplies the owner's rows, which the builder answers by
+    #: deduplicating the owner grain first.
+    fanout: bool = False
 
 
 @dataclass(slots=True)
@@ -634,6 +637,7 @@ def plan_leaf(
         projects_is_final=leaf_finality is not None,
         scoped_sources=tenant_scoping.scoped_sources,
         shared_sources=tenant_scoping.shared_sources,
+        fanout=fanout,
         time_dimensions=tuple(
             TimeDimension(column=name, grain=dim.period_grain)
             for name, (_alias, dim) in zip(

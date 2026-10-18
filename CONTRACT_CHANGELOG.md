@@ -65,7 +65,8 @@ A change listed here was reviewed against the classification rules and did not b
   to `trust_score.reasons`, as before. The compiled SQL of such a query gains one column,
   `_canonic_latest_period_<dimension>`, which `query` strips from the result, the same mechanism
   as the zero-denominator column recorded under 3.6. A consumer that executes `compiled.sql`
-  itself sees the extra column and can ignore it.
+  itself sees the extra column and can ignore it. For a time dimension on a joined source the
+  column is named `_canonic_latest_period_<alias>_<dimension>` (feat(trust) #430).
 
 ## History
 

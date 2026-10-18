@@ -198,36 +198,6 @@ class TestProbeIsSkipped:
 
         assert "_canonic_latest_period_json_day" not in compiled.sql
 
-    def test_dimension_on_a_joined_source_is_not_probed(self) -> None:
-        calendar = SemanticSource(
-            name="calendar",
-            connection="wh",
-            table="calendar",
-            grain=["day"],
-            columns=[Column(name="day", type="date", nullable=False)],
-            dimensions=[Dimension(name="cal_day", column="day", granularity="day")],
-        )
-        orders = _orders().model_copy(
-            update={
-                "joins": [
-                    Join(
-                        to="calendar",
-                        on="orders.created_at = calendar.day",
-                        relationship=Relationship.MANY_TO_ONE,
-                    )
-                ]
-            }
-        )
-
-        compiled = compile(
-            SemanticQuery(metrics=["revenue"], filters=["cal_day >= '2026-10-01'"]),
-            _resolver(),
-            [orders, calendar],
-            connection_dialects={"wh": "duckdb"},
-        )
-
-        assert "_canonic_latest_period" not in compiled.sql
-
 
 class TestProbeValue:
     NOW = datetime(2026, 10, 18, 12, 0)
@@ -285,3 +255,195 @@ class TestProbeValue:
         assert values[(PROBE_LATEST_PERIOD, "order_month")] == datetime(2026, 10, 17, 9, 30)
         (period,) = open_periods(compiled, result, self.NOW, values)
         assert period.label == "2026-10"
+
+
+def _calendar(*, relationship: Relationship = Relationship.MANY_TO_ONE, name: str | None = None):
+    """An ``orders`` source joined to a calendar table, and the calendar itself."""
+    calendar = SemanticSource(
+        name="calendar",
+        connection="wh",
+        table="calendar",
+        grain=["day"],
+        columns=[Column(name="day", type="date", nullable=False)],
+        dimensions=[
+            Dimension(name="cal_day", column="day", granularity="day"),
+            Dimension(
+                name="cal_month", expr="date_trunc('month', day)", type="date", time_grain="month"
+            ),
+        ],
+    )
+    orders = _orders().model_copy(
+        update={
+            "joins": [
+                Join(
+                    to="calendar",
+                    on="orders.created_at = calendar.day",
+                    relationship=relationship,
+                    name=name,
+                )
+            ]
+        }
+    )
+    return orders, calendar
+
+
+def _compile_joined(
+    filters: list[str],
+    *,
+    relationship: Relationship = Relationship.MANY_TO_ONE,
+    name: str | None = None,
+    dialect: str = "duckdb",
+) -> CompileResult:
+    orders, calendar = _calendar(relationship=relationship, name=name)
+    return compile(
+        SemanticQuery(metrics=["revenue"], filters=filters),
+        _resolver(),
+        [orders, calendar],
+        connection_dialects={"wh": dialect},
+    )
+
+
+class TestJoinedSourceDimension:
+    def test_dimension_on_a_many_to_one_join_is_probed(self) -> None:
+        compiled = _compile_joined(["cal_day >= '2026-10-01'"])
+
+        (probe,) = compiled.probe_columns
+        assert (probe.subject, probe.grain) == ("calendar.cal_day", "day")
+        assert probe.column == "_canonic_latest_period_calendar_cal_day"
+        assert 'MAX("calendar"."day")' in compiled.sql
+
+    def test_filter_on_the_joined_column_is_recognised(self) -> None:
+        compiled = _compile_joined(["calendar.day >= '2026-10-01'"])
+
+        assert [p.subject for p in compiled.probe_columns] == ["calendar.cal_day"]
+
+    def test_the_joined_dimension_is_read_through_the_join_alias(self) -> None:
+        compiled = _compile_joined(["cal_day >= '2026-10-01'"], name="booked_on")
+
+        (probe,) = compiled.probe_columns
+        assert probe.subject == "booked_on.cal_day"
+        assert 'MAX("booked_on"."day")' in compiled.sql
+
+    def test_derived_dimension_on_the_joined_source_is_qualified_to_its_alias(self) -> None:
+        compiled = _compile_joined(["cal_month >= '2026-10-01'"])
+
+        (probe,) = compiled.probe_columns
+        assert probe.subject == "calendar.cal_month"
+        assert '"calendar"."day"' in compiled.sql
+
+    def test_join_that_multiplies_rows_is_left_unchecked(self) -> None:
+        compiled = _compile_joined(
+            ["cal_day >= '2026-10-01'"], relationship=Relationship.ONE_TO_MANY
+        )
+
+        assert compiled.probe_columns == ()
+        assert "_canonic_latest_period" not in compiled.sql
+
+    def test_own_dimension_is_still_probed_behind_a_join_that_multiplies_rows(self) -> None:
+        compiled = _compile_joined(
+            ["created_at >= '2026-10-01'", "cal_day >= '2026-10-01'"],
+            relationship=Relationship.ONE_TO_MANY,
+        )
+
+        assert [p.subject for p in compiled.probe_columns] == ["order_month"]
+
+    def test_probe_still_fuses_into_the_metric_cte(self) -> None:
+        compiled = _compile_joined(["cal_day >= '2026-10-01'"])
+
+        assert "WITH" not in compiled.sql.upper()
+
+    def test_open_day_on_the_joined_dimension_is_flagged(self) -> None:
+        compiled = _compile_joined(["cal_day >= '2026-10-01'"])
+        con = duckdb.connect()
+        con.execute(
+            "CREATE TABLE orders (order_id INT, created_at DATE, booked TEXT, status TEXT, "
+            "amount DOUBLE, props JSON)"
+        )
+        con.execute("CREATE TABLE calendar (day DATE)")
+        con.execute("INSERT INTO calendar VALUES ('2026-10-16'), ('2026-10-17'), ('2026-10-18')")
+        con.execute(
+            "INSERT INTO orders VALUES (1, '2026-10-17', 'x', 'ok', 10.0, NULL), "
+            "(2, '2026-10-18', 'x', 'ok', 5.0, NULL)"
+        )
+        cursor = con.execute(compiled.sql)
+        raw = ResultSet(
+            columns=[ResultColumn(name=d[0], type="any") for d in cursor.description],
+            rows=[list(row) for row in cursor.fetchall()],
+        )
+
+        result, values = strip_probes(compiled, raw)
+        (period,) = open_periods(compiled, result, datetime(2026, 10, 18, 12, 0), values)
+
+        assert [c.name for c in result.columns] == ["revenue"]
+        assert (period.dimension, period.grain, period.label) == (
+            "calendar.cal_day",
+            "day",
+            "2026-10-18",
+        )
+
+
+class TestProbeSurvivesEveryDialect:
+    """A double-quoted name is a string in some dialects, so the probe must be written for the
+    dialect it is read back in."""
+
+    @pytest.mark.parametrize("dialect", ["postgres", "duckdb", "snowflake", "databricks"])
+    def test_probe_aggregates_a_column_and_not_a_string(self, dialect: str) -> None:
+        import sqlglot
+        from sqlglot import exp
+
+        compiled = _compile(filters=["created_at >= '2026-10-01'"])
+        compiled = compile(
+            SemanticQuery(metrics=["revenue"], filters=["created_at >= '2026-10-01'"]),
+            _resolver(),
+            [_orders()],
+            connection_dialects={"wh": dialect},
+        )
+
+        read_as = "spark" if dialect == "databricks" else dialect
+        maxima = list(sqlglot.parse_one(compiled.sql, read=read_as).find_all(exp.Max))
+        assert len(maxima) == 1
+        assert isinstance(maxima[0].this, exp.Column), compiled.sql
+        assert maxima[0].this.name.lower() == "created_at"
+
+
+class TestProbeNeverBreaksAQuery:
+    def test_column_that_needs_quoting_is_not_probed(self) -> None:
+        source = SemanticSource(
+            name="orders",
+            connection="wh",
+            table="orders",
+            grain=["order_id"],
+            columns=[
+                Column(name="order_id", type="int", nullable=False),
+                Column(name="Order Date", type="timestamp", nullable=False),
+                Column(name="amount", type="decimal", nullable=False),
+            ],
+            measures=[Measure(name="total", expr="sum(amount)", additivity="additive")],
+            dimensions=[Dimension(name="order_day", column="Order Date", granularity="day")],
+        )
+
+        compiled = _compile(filters=["order_day >= '2026-10-01'"], source=source)
+
+        assert compiled.probe_columns == ()
+        assert compiled.sql
+
+    @pytest.mark.parametrize("dialect", ["postgres", "databricks", "snowflake"])
+    def test_derived_dimension_compiles_in_every_dialect(self, dialect: str) -> None:
+        source = _orders(
+            Dimension(
+                name="booked_day",
+                expr="cast(created_at as date)",
+                type="date",
+                granularity="day",
+            )
+        )
+
+        compiled = compile(
+            SemanticQuery(metrics=["revenue"], filters=["booked_day >= '2026-10-01'"]),
+            _resolver(),
+            [source],
+            connection_dialects={"wh": dialect},
+        )
+
+        assert compiled.sql
+        assert {p.subject for p in compiled.probe_columns} <= {"booked_day"}
