@@ -143,6 +143,11 @@ def _parse(sql: str) -> exp.Expression:
     return parsed.transform(_rewrite_sqlite_date_modifiers)
 
 
+def _render_for_parse(expr: exp.Expression) -> str:
+    """``expr`` as text that :func:`_parse` reads back, written in the dialect it is read in."""
+    return expr.sql(dialect=_PARSE_DIALECT.get())
+
+
 def _alias(expr: exp.Expression, name: str) -> exp.Expression:
     return cast("exp.Expression", exp.alias_(expr, name))
 

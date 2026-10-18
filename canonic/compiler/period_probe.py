@@ -3,15 +3,26 @@
 from __future__ import annotations
 
 import dataclasses
+import re
 from typing import TYPE_CHECKING
 
 import sqlglot
 from sqlglot import exp
 
-from canonic.compiler._helpers import _measure_expr, _ResolvedMetric
+from canonic.compiler._helpers import (
+    _bind_name,
+    _find_dimension,
+    _measure_expr,
+    _parse,
+    _qualify_to,
+    _render_for_parse,
+    _ResolvedMetric,
+)
 from canonic.compiler.compose import Combine, LeafRef, MetricPlan
+from canonic.compiler.joins import build_alias_tree
 from canonic.compiler.leaf import LeafMetric, LeafPlan, _render
 from canonic.compiler.result import PROBE_LATEST_PERIOD, ProbeColumn
+from canonic.exc import Ambiguous
 from canonic.semantic.models import Additivity, Dimension, Measure
 
 if TYPE_CHECKING:
@@ -20,14 +31,14 @@ if TYPE_CHECKING:
     from canonic.compiler.query import SemanticQuery
     from canonic.semantic.models import SemanticSource
 
-__all__ = ["latest_period_probes", "latest_period_column"]
+__all__ = ["latest_period_column", "latest_period_probes"]
 
 _PREFIX = "_canonic_latest_period_"
 
 
-def latest_period_column(dimension: str) -> str:
-    """The name of the hidden column that carries the latest value of ``dimension``."""
-    return f"{_PREFIX}{dimension}"
+def latest_period_column(subject: str) -> str:
+    """The name of the hidden column that carries the latest value of ``subject``."""
+    return f"{_PREFIX}{subject.replace('.', '_')}"
 
 
 def latest_period_probes(
@@ -47,8 +58,9 @@ def latest_period_probes(
     ``grouped`` names the time dimensions already read from the result, which need no probe.
     ``first_index`` is the index the first probe leaf will have in the final leaf list.
 
-    Only a dimension declared on the metric's own source is probed, and only on a plain
-    additive leaf. Anything else is left unchecked, as before.
+    A dimension is probed on a plain additive leaf, either on the metric's own source or on a
+    joined source that does not multiply the metric's rows. A dimension behind a join that fans
+    out, and one that reads a JSON key, are left unchecked.
     """
     anchor = next(
         (leaf for leaf in leaves if leaf.key.strategy == "single" and leaf.finality is None),
@@ -56,27 +68,31 @@ def latest_period_probes(
     )
     if anchor is None or not query.filters:
         return [], [], []
-    owner = sources_by_name.get(anchor.key.source)
-    if owner is None:
-        return [], [], []
-    names = _filtered_names(query.filters)
+    owner = anchor.key.source
+    alias_to_source = build_alias_tree(owner, sources_by_name)
     probe_leaves: list[LeafPlan] = []
     plans: list[MetricPlan] = []
     probes: list[ProbeColumn] = []
-    for dimension in owner.dimensions:
+    for alias, dimension in _filtered_time_dimensions(
+        query.filters, owner, sources_by_name, alias_to_source
+    ):
+        subject = dimension.name if alias == owner else f"{alias}.{dimension.name}"
         grain = dimension.period_grain
-        expression = _max_expression(dimension)
+        expression = _max_expression(dimension, alias)
         if (
             grain is None
             or expression is None
+            or subject in grouped
             or dimension.name in grouped
-            or not ({dimension.name, dimension.column or ""} & names)
+            or (alias != owner and anchor.fanout)
         ):
             continue
-        column = latest_period_column(dimension.name)
+        column = latest_period_column(subject)
         measure = Measure(name=column, expr=expression, additivity=Additivity.ADDITIVE)
+        if not measure.is_p0_compilable:
+            continue  # a probe must never turn a query that compiles into one that does not
         metric = LeafMetric(
-            resolved=_ResolvedMetric(name=column, source=owner.name, measure=measure),
+            resolved=_ResolvedMetric(name=column, source=owner, measure=measure),
             population_filter=anchor.metrics[0].population_filter,
             alias=column,
         )
@@ -87,7 +103,7 @@ def latest_period_probes(
                 measure_aliases=(column,),
                 key=dataclasses.replace(
                     anchor.key,
-                    measures=((column, _render(_measure_expr(owner.name, measure)), column),),
+                    measures=((column, _render(_measure_expr(owner, measure)), column),),
                 ),
                 time_dimensions=(),
             )
@@ -100,31 +116,78 @@ def latest_period_probes(
             )
         )
         probes.append(
-            ProbeColumn(
-                column=column, kind=PROBE_LATEST_PERIOD, subject=dimension.name, grain=grain
-            )
+            ProbeColumn(column=column, kind=PROBE_LATEST_PERIOD, subject=subject, grain=grain)
         )
     return probe_leaves, plans, probes
 
 
-def _max_expression(dimension: Dimension) -> str | None:
-    """``MAX`` over the dimension's value, or ``None`` for a JSON key, which is not probed."""
-    if dimension.json_path is not None:
-        return None
-    if dimension.expr is not None:
-        return f"max({dimension.expr})"
-    if dimension.column is None:
-        return None
-    return exp.Max(this=exp.column(dimension.column)).sql(dialect="postgres", identify=True)
+def _filtered_time_dimensions(
+    filters: Sequence[str],
+    owner: str,
+    sources_by_name: dict[str, SemanticSource],
+    alias_to_source: dict[str, str],
+) -> list[tuple[str, Dimension]]:
+    """The ``(alias, dimension)`` pairs with a known period that the filters read, in order.
 
-
-def _filtered_names(filters: Sequence[str]) -> set[str]:
-    """Every bare name the query's filters read."""
-    names: set[str] = set()
+    Names resolve the way the filter itself does: a dimension name first, then a column, which
+    stands for the dimensions declared on that column. A name that matches a dimension without a
+    known period counts for that dimension only.
+    """
+    found: dict[tuple[str, str], tuple[str, Dimension]] = {}
     for text in filters:
         try:
             parsed = sqlglot.parse_one(text)
         except sqlglot.errors.ParseError:
             continue
-        names.update(column.name for column in parsed.find_all(exp.Column))
-    return names
+        for column in parsed.find_all(exp.Column):
+            for alias, dimension in _dimensions_of(column, owner, sources_by_name, alias_to_source):
+                if dimension.period_grain is not None:
+                    found.setdefault((alias, dimension.name), (alias, dimension))
+    return list(found.values())
+
+
+def _dimensions_of(
+    column: exp.Column,
+    owner: str,
+    sources_by_name: dict[str, SemanticSource],
+    alias_to_source: dict[str, str],
+) -> list[tuple[str, Dimension]]:
+    if column.table:
+        source = sources_by_name.get(alias_to_source.get(column.table, ""))
+        if source is None:
+            return []
+        return [(column.table, d) for d in source.dimensions if d.column == column.name]
+    try:
+        named = _find_dimension(column.name, sources_by_name, owner, alias_to_source)
+    except Ambiguous:
+        return []
+    if named is not None:
+        return [named]
+    bound = _bind_name(column.name, sources_by_name, owner, alias_to_source)
+    if bound is None:
+        return []
+    alias, physical = bound
+    source = sources_by_name.get(alias_to_source.get(alias, alias))
+    if source is None:
+        return []
+    return [(alias, d) for d in source.dimensions if d.column == physical]
+
+
+_SIMPLE_NAME = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+
+
+def _max_expression(dimension: Dimension, alias: str) -> str | None:
+    """``MAX`` over the dimension's value on ``alias``, or ``None`` if it cannot be probed.
+
+    The text is read back in the connection's dialect and, to check that it compiles, in the
+    default one. A quoted name would be a string in some dialects, and a dialect's own quoting
+    does not parse in the default one, so a name is written bare and qualified by its alias.
+    Names that would need quoting, and JSON keys, are not probed.
+    """
+    if dimension.json_path is not None or not _SIMPLE_NAME.match(alias):
+        return None
+    if dimension.expr is not None:
+        return _render_for_parse(exp.Max(this=_qualify_to(_parse(dimension.expr), alias)))
+    if dimension.column is None or not _SIMPLE_NAME.match(dimension.column):
+        return None
+    return f"MAX({alias}.{dimension.column})"
