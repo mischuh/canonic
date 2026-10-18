@@ -109,8 +109,20 @@ def orders_source() -> SemanticSource:
 
 
 @pytest.fixture
+def warehouse_pg_params() -> dict[str, Any]:
+    """Connection params of the ``warehouse_pg`` connection behind ``canonic_service``.
+
+    Nothing listens on these by default, which is enough for tests that never reach the
+    warehouse. A test class that needs a live database overrides this fixture.
+    """
+    return {"host": "localhost", "port": 5432, "dbname": "testdb", "user": "test"}
+
+
+@pytest.fixture
 def canonic_service(
-    orders_source: SemanticSource, monkeypatch: pytest.MonkeyPatch
+    orders_source: SemanticSource,
+    warehouse_pg_params: dict[str, Any],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> CanonicService:
     monkeypatch.setenv("PG_PASSWORD", "testpw")
     binding = MetricBinding(
@@ -141,12 +153,7 @@ def canonic_service(
                 {
                     "id": "warehouse_pg",
                     "type": "postgres",
-                    "params": {
-                        "host": "localhost",
-                        "port": 5432,
-                        "dbname": "testdb",
-                        "user": "test",
-                    },
+                    "params": warehouse_pg_params,
                     "credentials_ref": "env:PG_PASSWORD",
                 }
             ],

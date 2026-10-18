@@ -30,8 +30,10 @@ jobs:
         with:
           enable-cache: true
 
+      # The tasks extra lets the background-task tests run instead of skipping. They start a
+      # PostgreSQL container, which the runner's Docker provides.
       - name: Install dependencies
-        run: uv sync --frozen --group dev
+        run: uv sync --frozen --group dev --extra tasks
 
       - name: Lint
         run: uv run ruff check .

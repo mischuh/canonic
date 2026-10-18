@@ -26,6 +26,8 @@ from fastmcp.utilities.tasks import TASKS_EXTENSION_ID
 from canonic.mcp.server import build_server
 
 if TYPE_CHECKING:
+    from typing import Any
+
     from canonic.core.service import CanonicService
 
 
@@ -96,11 +98,21 @@ class TestBuildServerTasksWiring:
             build_server(canonic_service, tasks=True)
 
 
+class _NeedsTasksExtra:
+    """Skips a test class when the real ``fastmcp_tasks`` extension is not installed.
+
+    The extension runs a Docket backend (even the in-memory one), so these tests only run
+    with ``canonic[tasks]`` installed, as the CI job does.
+    """
+
+    @pytest.fixture(autouse=True)
+    def _require_fastmcp_tasks(self) -> None:
+        pytest.importorskip("fastmcp_tasks")
+
+
 @pytest.mark.integration
-class TestTasksExecution:
-    """S22 AC1-AC3 — requires the real ``fastmcp_tasks`` extension running a Docket
-    backend (even the in-memory one), so these only run with ``canonic[tasks]``
-    installed. Install it and drop the ``importorskip`` to exercise this locally."""
+class TestTasksExecution(_NeedsTasksExtra):
+    """S22 AC3. Needs the extension, but no warehouse: the error path never reaches one."""
 
     async def test_task_error_matches_synchronous_error_payload(
         self, canonic_service: CanonicService
@@ -124,9 +136,14 @@ class TestTasksExecution:
         assert task_result.data == sync_result.data
         assert sync_result.data["code"] == "read_only_violation"
 
-    @pytest.fixture(autouse=True)
-    def _require_fastmcp_tasks(self) -> None:
-        pytest.importorskip("fastmcp_tasks")
+
+@pytest.mark.integration
+class TestTasksExecutionAgainstPostgres(_NeedsTasksExtra):
+    """S22 AC1-AC2. These run a real query, so they use a PostgreSQL container."""
+
+    @pytest.fixture
+    def warehouse_pg_params(self, orders_postgres: dict[str, Any]) -> dict[str, Any]:
+        return orders_postgres
 
     async def test_polled_task_result_matches_synchronous_result(
         self, canonic_service: CanonicService
@@ -156,4 +173,4 @@ class TestTasksExecution:
         async with Client(mcp, mode="legacy") as client:
             result = await client.call_tool("query", {"query": {"metrics": ["revenue"]}})
 
-        assert "rows" in result.data or "code" in result.data
+        assert result.data["result"]["rows"] == [["350.50"]]
