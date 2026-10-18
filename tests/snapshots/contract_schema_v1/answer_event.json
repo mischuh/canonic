@@ -138,6 +138,18 @@
       "default": null,
       "title": "Over Limit Blocked"
     },
+    "project_fingerprint": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Project Fingerprint"
+    },
     "query_hash": {
       "title": "Query Hash",
       "type": "string"

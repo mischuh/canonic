@@ -99,6 +99,8 @@ async def test_contract_info_returns_schema(canonic_service: CanonicService) -> 
     assert result.data == {
         "contract_schema": CONTRACT_SCHEMA,
         "canonic_version": CANONIC_VERSION,
+        "project_fingerprint": None,
+        "project_loaded_at": None,
     }
 
 

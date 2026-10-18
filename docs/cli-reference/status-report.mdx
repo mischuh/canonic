@@ -11,7 +11,9 @@ Show the current canonic project root, config version, and local state presence.
 canonic status
 ```
 
-Prints the project root, `canonic.yaml` config version (or a config error if invalid), whether `.canonic/` (local state) is present, the serving contract schema version, and a one-line summary of served-answer events (count, error count, p95 latency) if any exist. This is always a safe "what's my next step" command. Run it whenever you're unsure of project state.
+Prints the project root, `canonic.yaml` config version (or a config error if invalid), whether `.canonic/` (local state) is present, the serving contract schema version, the project fingerprint, and a one-line summary of served-answer events (count, error count, p95 latency) if any exist. This is always a safe "what's my next step" command. Run it whenever you're unsure of project state.
+
+The project fingerprint is a hash over the contents of `canonic.yaml`, `contracts/` and `semantics/`. It is the same value `contract_info` returns for a running daemon, so a mismatch shows that the daemon serves other files than the ones on disk. The same project gives the same value on every machine.
 
 The serving contract schema is currently `2.2`. It moved from `2.0` across two additive bumps: `2.1` added the E14 trust tier to `QueryMetadata`, and `2.2` added the trust tier to every logged `AnswerEvent` plus the new `answer_outcome` event kind.
 

@@ -241,6 +241,7 @@ async def test_ac1_event_written_on_served_answer(
     assert ev["bytes_scanned"] == 10485760
     assert ev["error"] is None
     assert ev["user"] is None
+    assert ev["project_fingerprint"] is None
 
 
 # ---------------------------------------------------------------------------

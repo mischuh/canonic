@@ -108,6 +108,10 @@ class ServiceContext:
         return self.state.source_by_name
 
     @property
+    def project_fingerprint(self) -> str | None:
+        return self.state.fingerprint
+
+    @property
     def reload_warning(self) -> str | None:
         """Why the project files on disk are not being served, or ``None`` when they are."""
         failure = self._reloader.failure if self._reloader is not None else None

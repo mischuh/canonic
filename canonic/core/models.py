@@ -363,6 +363,7 @@ class QueryMetadata(BaseModel):
     scope: ScopeOut | None = None
     cumulative: CumulativeOut | None = None
     composition: dict[str, CompositionOut] = {}
+    project_fingerprint: str | None = None
 
     @classmethod
     def from_compile_result(
@@ -438,6 +439,7 @@ class QueryMetadata(BaseModel):
                 *(period.warning for period in open_periods(compiled, result, now, probes)),
             ],
             contract_schema=CONTRACT_SCHEMA,
+            project_fingerprint=compiled.project_fingerprint,
             finality=finality_out,
             related=RelatedOut(
                 unused_dimensions=[

@@ -93,6 +93,7 @@ class QueryService:
             principal=principal,
         )
         compiled = apply_staleness_policy(compiled, self._ctx.config.trust.stale_after_days)
+        compiled = replace(compiled, project_fingerprint=self._ctx.state.fingerprint)
         if (reload_warning := self._ctx.reload_warning) is not None:
             compiled = replace(compiled, warnings=[*compiled.warnings, reload_warning])
         return self._knowledge.link_guardrails(compiled, principal)
@@ -340,6 +341,7 @@ class QueryService:
                 ).tier.value
                 if compiled is not None
                 else None,
+                project_fingerprint=self._ctx.state.fingerprint,
                 user=_event_user(caller),
                 tenant=principal.tenant_scope if principal is not None else None,
                 roles=list(effective_policy.roles) or None,
@@ -378,6 +380,7 @@ class QueryService:
                 latency_ms=latency_ms,
                 bytes_scanned=result.bytes_scanned if result is not None else None,
                 error=error_code,
+                project_fingerprint=self._ctx.state.fingerprint,
                 user=_event_user(caller),
                 tenant=principal.tenant_scope if principal is not None else None,
                 roles=list(effective_policy.roles) or None,

@@ -87,6 +87,16 @@ A change listed here was reviewed against the classification rules and did not b
 
 ## History
 
+## 3.7 (2026-10-18) - MINOR
+
+- ADR/PR: this PR (feat(mcp): expose a fingerprint of the loaded project state)
+- Summary: `contract_info` gains `project_fingerprint` and `project_loaded_at`. The fingerprint is a
+  hash over the contents of `canonic.yaml`, `contracts/` and `semantics/`, so the same project
+  yields the same value on every machine. `QueryMetadata`, which the query and compile outputs
+  share, and `AnswerEvent` gain an optional `project_fingerprint`, so an answer can be traced to
+  the definitions that produced it. All fields are `null` for a service built in memory. A
+  consumer that ignores unknown fields is unaffected.
+
 ## 3.6 (2026-10-18) - MINOR
 
 - ADR/PR: this PR (feat(compiler): count zero-denominator substitutions in the query result)

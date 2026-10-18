@@ -277,11 +277,19 @@ def build_server(
             "daemon is up to date (relevant when launched via uvx). Clients that support the "
             "'app.getcanonic/contract' MCP extension get the same version advertised in "
             "capabilities and enforced per request without an extra call; this tool is the "
-            "fallback for clients that do not."
+            "fallback for clients that do not. Also returns project_fingerprint, a hash of the "
+            "project files this daemon serves, and project_loaded_at, when they were loaded: "
+            "two daemons with the same fingerprint serve the same definitions."
         )
     )
-    async def contract_info() -> dict[str, str]:
-        return {"contract_schema": CONTRACT_SCHEMA, "canonic_version": CANONIC_VERSION}
+    async def contract_info() -> dict[str, str | None]:
+        info = service.project_info()
+        return {
+            "contract_schema": CONTRACT_SCHEMA,
+            "canonic_version": CANONIC_VERSION,
+            "project_fingerprint": info.fingerprint,
+            "project_loaded_at": info.loaded_at.isoformat() if info.loaded_at else None,
+        }
 
     # ------------------------------------------------------------------
     # Tool: negotiate_contract
