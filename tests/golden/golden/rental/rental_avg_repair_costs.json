@@ -22,7 +22,5 @@
     ]
   ],
   "trust_tier": "provisional",
-  "warnings": [
-    "zero denominator for metric 'avg_repair_costs' yields NULL (on_zero_denominator=null)"
-  ]
+  "warnings": []
 }

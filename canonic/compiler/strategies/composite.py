@@ -4,7 +4,13 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from canonic.compiler.compose import Combine, LeafRef, MetricLeaves, MetricPlan
+from canonic.compiler.compose import (
+    Combine,
+    LeafRef,
+    MetricLeaves,
+    MetricPlan,
+    zero_denominator_warning,
+)
 from canonic.compiler.leaf import LeafContext, LeafMetric, LeafPlan, plan_leaf
 from canonic.compiler.result import CompositionComponent, CompositionMetadata
 from canonic.compiler.strategies.recompute import plan_metric as plan_recompute_at_grain
@@ -186,10 +192,7 @@ def plan_metric(
     assert resolved_key is not None  # noqa: S101 — ratio/weighted_avg always resolve a key
     zero_warnings: tuple[str, ...] = ()
     if on_zero is OnZeroDenominator.NULL:
-        zero_warnings = (
-            f"zero denominator for metric {composite.metric!r} yields NULL "
-            f"(on_zero_denominator=null)",
-        )
+        zero_warnings = (zero_denominator_warning(composite.metric),)
 
     return MetricLeaves(
         leaves=leaves,

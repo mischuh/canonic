@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel, ConfigDict
 
+from canonic.compiler.compose import zero_denominator_warning
 from canonic.compiler.result import PROBE_ZERO_DENOMINATOR
 from canonic.connectors.base import (
     ResultSet,  # noqa: TC001 — Pydantic resolves field annotations at runtime
@@ -433,7 +434,7 @@ class QueryMetadata(BaseModel):
                 for f in compiled.freshness
             ],
             warnings=[
-                *compiled.warnings,
+                *_with_zero_denominator_counts(compiled, probes),
                 *(period.warning for period in open_periods(compiled, result, now, probes)),
             ],
             contract_schema=CONTRACT_SCHEMA,
@@ -479,6 +480,27 @@ class QueryMetadata(BaseModel):
                 for name, composition in compiled.compositions.items()
             },
         )
+
+
+def _with_zero_denominator_counts(compiled: CompileResult, probes: ProbeValues | None) -> list[str]:
+    """``compiled.warnings`` with each zero-denominator warning set to what the result shows.
+
+    The compiler can only state the policy. Once the rows are counted, a ratio with no zero
+    denominator in the result needs no warning, and one with some names how many. Without a
+    count (``compile`` has no result) the generic warning stays.
+    """
+    replaced: dict[str, list[str]] = {}
+    for name, metric in compiled.zero_denominator_metrics.items():
+        rows = (probes or {}).get((PROBE_ZERO_DENOMINATOR, name))
+        if rows is None:
+            continue
+        replaced[zero_denominator_warning(metric)] = (
+            [zero_denominator_warning(metric, rows)] if rows else []
+        )
+    out: list[str] = []
+    for warning in compiled.warnings:
+        out.extend(replaced.get(warning, [warning]))
+    return out
 
 
 def _composition_out(

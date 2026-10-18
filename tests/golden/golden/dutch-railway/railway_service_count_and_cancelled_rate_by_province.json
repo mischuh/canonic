@@ -99,7 +99,5 @@
     ]
   ],
   "trust_tier": "provisional",
-  "warnings": [
-    "zero denominator for metric 'cancelled_arrival_rate' yields NULL (on_zero_denominator=null)"
-  ]
+  "warnings": []
 }
