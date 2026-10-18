@@ -25,6 +25,19 @@ canonic sl resolve revenue --context finance_review
 
 Prints the resolved metric, owning source, measure, and binding kind.
 
+With `--json` the payload also carries `kind`, `components` and `population_filter`. For a composite metric (`ratio`, `weighted_avg`) `source` and `measure` are `null` and `components` names the numerator, the denominator and the `on_zero_denominator` policy:
+
+```json
+{
+  "metric": "margin",
+  "kind": "ratio",
+  "source": null,
+  "measure": null,
+  "components": { "numerator": "profit", "denominator": "revenue", "on_zero_denominator": "null" },
+  "population_filter": null
+}
+```
+
 ## `sl compile`
 
 Compile a semantic query to SQL + metadata without executing it.
@@ -58,3 +71,5 @@ canonic sl describe revenue
 | `name` | Metric name or alias (positional). |
 
 Prints the metric's source, grain, dimensions, freshness (`last_validated_at`), and any worked examples on file.
+
+For a composite metric there is no single source. `--json` then returns `kind`, `components` and `population_filter` as for `sl resolve`, `measures` lists the measures its components read, and `grain` is the shared grain when both components sit on one source, otherwise empty.
