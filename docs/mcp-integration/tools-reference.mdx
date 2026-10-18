@@ -27,7 +27,7 @@ A client that supports MCP server extensions (SEP-2133) does not need either too
 
 ```json
 {
-  "app.getcanonic/contract": {"schema": "3.2", "major": 3, "minor": 2}
+  "app.getcanonic/contract": {"schema": "3.3", "major": 3, "minor": 3}
 }
 ```
 
@@ -38,7 +38,7 @@ A client that declares its own `major`/`minor` for a request gets a MAJOR mismat
 Returns the serving contract version this daemon implements. Call at session start to confirm compatibility.
 
 ```json
-{"contract_schema": "3.2"}
+{"contract_schema": "3.3"}
 ```
 
 ### `negotiate_contract(contract_major: int)`
@@ -57,11 +57,26 @@ Lists all active canonical metrics this project defines, plus a deduplicated cat
 
 ### `describe_metric(name: str)`
 
-Returns grain, dimensions, measures, and freshness for one metric.
+Returns grain, dimensions, measures, and freshness for one metric, plus how it is built: `kind`, `components` and `population_filter`.
+
+For a composite metric (`ratio`, `weighted_avg`) `source` and `measure` are `null`, `components` names the numerator and denominator metrics, `measures` lists the measures those components read, and `grain` is the shared grain when both components sit on one source (empty otherwise).
 
 ### `resolve_metric(name: str, context: str | None = None)`
 
 Resolves a metric name or alias to its canonical binding. Returns the binding on success, or a structured error when the name is ambiguous or unresolved.
+
+```json
+{
+  "metric": "margin",
+  "kind": "ratio",
+  "source": null,
+  "measure": null,
+  "components": {"numerator": "profit", "denominator": "revenue", "on_zero_denominator": "null"},
+  "population_filter": null
+}
+```
+
+`source` and `measure` are set for a single-source metric and `null` for a composite. `components` is `null` unless the metric is a composite. `on_zero_denominator` is `null`, `zero` or `error`.
 
 ## Query execution
 

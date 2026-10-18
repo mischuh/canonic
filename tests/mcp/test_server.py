@@ -243,6 +243,82 @@ async def test_resolve_metric(canonic_service: CanonicService) -> None:
     assert data["source"] == "orders"
 
 
+@pytest.fixture
+def ratio_service(canonic_service: CanonicService) -> CanonicService:
+    """The ``canonic_service`` project plus ``aov``, a ratio of ``revenue`` over ``order_count``."""
+    bindings = [
+        MetricBinding(
+            metric="revenue",
+            canonical=CanonicalRef(source="orders", measure="total_revenue"),
+        ),
+        MetricBinding(
+            metric="order_count",
+            canonical=CanonicalRef(source="orders", measure="order_count"),
+        ),
+        MetricBinding(
+            metric="aov",
+            canonical=CanonicalRef(
+                kind="ratio",
+                numerator="revenue",
+                denominator="order_count",
+                on_zero_denominator="zero",
+                population_filter="status = 'completed'",
+            ),
+        ),
+    ]
+    return CanonicService(
+        config=canonic_service._config,
+        resolver=ContractResolver(bindings=bindings, guardrails=[]),
+        sources=canonic_service._sources,
+    )
+
+
+@pytest.mark.asyncio
+async def test_resolve_metric_composite_returns_kind_and_components(
+    ratio_service: CanonicService,
+) -> None:
+    async with Client(build_server(ratio_service)) as client:
+        result = await client.call_tool("resolve_metric", {"name": "aov"})
+    assert result.data == {
+        "metric": "aov",
+        "kind": "ratio",
+        "source": None,
+        "measure": None,
+        "components": {
+            "numerator": "revenue",
+            "denominator": "order_count",
+            "on_zero_denominator": "zero",
+        },
+        "population_filter": "status = 'completed'",
+    }
+
+
+@pytest.mark.asyncio
+async def test_resolve_metric_single_keeps_source_and_measure(
+    ratio_service: CanonicService,
+) -> None:
+    async with Client(build_server(ratio_service)) as client:
+        result = await client.call_tool("resolve_metric", {"name": "revenue"})
+    assert result.data["kind"] == "single"
+    assert result.data["source"] == "orders"
+    assert result.data["measure"] == "total_revenue"
+    assert result.data["components"] is None
+
+
+@pytest.mark.asyncio
+async def test_describe_metric_composite_returns_components(ratio_service: CanonicService) -> None:
+    async with Client(build_server(ratio_service)) as client:
+        result = await client.call_tool("describe_metric", {"name": "aov"})
+    data = result.data
+    assert data["kind"] == "ratio"
+    assert data["source"] is None
+    assert data["components"]["numerator"] == "revenue"
+    assert data["components"]["denominator"] == "order_count"
+    assert data["population_filter"] == "status = 'completed'"
+    assert data["measures"] == ["total_revenue", "order_count"]
+    assert data["grain"] == ["order_id"]
+
+
 @pytest.mark.asyncio
 async def test_resolve_metric_unresolved(canonic_service: CanonicService) -> None:
     mcp = build_server(canonic_service)

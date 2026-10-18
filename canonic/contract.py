@@ -1,3 +1,3 @@
 """Serving contract version — the single source of truth for ``contract_schema``."""
 
-CONTRACT_SCHEMA = "3.2"
+CONTRACT_SCHEMA = "3.3"

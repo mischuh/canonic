@@ -21,7 +21,7 @@ from canonic import __version__ as CANONIC_VERSION
 from canonic.compiler.query import SemanticQuery
 from canonic.contract import CONTRACT_SCHEMA
 from canonic.contracts.principal import DEFAULT_MAX_TENANTS
-from canonic.core.models import CompileOutput
+from canonic.core.models import BindingOut, CompileOutput
 from canonic.mcp.auth import caller_from_token, principal_from_token
 from canonic.mcp.errors import canonic_error_response
 from canonic.mcp.extensions import ContractExtension
@@ -385,11 +385,7 @@ def build_server(
             context=context,
             principal=_principal(service.resolver, session_principal, claim_mapping, max_tenants),
         )
-        return {
-            "metric": binding.metric,
-            "source": binding.source,
-            "measure": binding.measure,
-        }
+        return BindingOut.from_binding(binding).model_dump(mode="json")
 
     # ------------------------------------------------------------------
     # Tool: compile_query
