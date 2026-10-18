@@ -17,7 +17,13 @@ from canonic.contracts.models import (
     Status,
 )
 from canonic.contracts.resolver import ContractResolver
-from canonic.core.models import DimensionInfo, MetricDetail, MetricSummary, OverviewResult
+from canonic.core.models import (
+    ComponentsOut,
+    DimensionInfo,
+    MetricDetail,
+    MetricSummary,
+    OverviewResult,
+)
 from canonic.core.service import CanonicService
 from canonic.exc import Ambiguous, Unresolved
 from canonic.knowledge.results import MatchedOn
@@ -326,10 +332,40 @@ class TestDescribeMetricComposite:
         assert isinstance(detail, MetricDetail)
         assert detail.source is None
         assert detail.measure is None
-        assert detail.grain == []
         dim_names = {d.name for d in detail.dimensions}
         assert "order_date" in dim_names
         assert "status" in dim_names
+
+    def test_ratio_describes_how_it_is_built(self, ratio_service: CanonicService) -> None:
+        detail = ratio_service.describe_metric("avg_cost")
+        assert detail.kind == "ratio"
+        assert detail.components == ComponentsOut(
+            numerator="revenue", denominator="damage_count", on_zero_denominator="null"
+        )
+        assert detail.population_filter is None
+
+    def test_ratio_lists_component_measures_and_shared_grain(
+        self, ratio_service: CanonicService
+    ) -> None:
+        detail = ratio_service.describe_metric("avg_cost")
+        assert detail.measures == ["total_revenue"]
+        assert detail.grain == ["order_id"]
+
+    def test_weighted_avg_names_weighted_sum_and_weight(
+        self, weighted_avg_service: CanonicService
+    ) -> None:
+        detail = weighted_avg_service.describe_metric("avg_weighted_cost")
+        assert detail.kind == "weighted_avg"
+        assert detail.components is not None
+        assert (detail.components.numerator, detail.components.denominator) == (
+            "revenue",
+            "damage_count",
+        )
+
+    def test_single_metric_has_no_components(self, canonic_service: CanonicService) -> None:
+        detail = canonic_service.describe_metric("revenue")
+        assert detail.kind == "single"
+        assert detail.components is None
 
     def test_ratio_aliases_preserved(self, ratio_service: CanonicService) -> None:
         detail = ratio_service.describe_metric("avg_cost")

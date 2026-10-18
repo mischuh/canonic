@@ -26,6 +26,7 @@ from canonic.trust.scorer import trust_for_compiled
 
 if TYPE_CHECKING:
     from canonic.compiler.result import CompileResult
+    from canonic.contracts.resolver import Binding
     from canonic.feedback.assertion_history import AssertionHistory
     from canonic.feedback.history import BindingOutcomeHistory
 
@@ -36,6 +37,8 @@ __all__ = [
     "DimensionInfo",
     "DomainGroup",
     "FinalityOut",
+    "BindingOut",
+    "ComponentsOut",
     "FiredGuardrailOut",
     "MetricDetail",
     "MetricRef",
@@ -191,14 +194,71 @@ class MetricSummary(BaseModel):
     dimensions: list[DimensionInfo] = []
 
 
-class MetricDetail(BaseModel):
-    """Grain, dimensions, owning source, and freshness for one metric (SPEC §4.1)."""
+class ComponentsOut(BaseModel):
+    """The building blocks of a composite metric (``ratio``, ``weighted_avg``)."""
+
+    model_config = ConfigDict(frozen=True)
+
+    numerator: str
+    denominator: str
+    on_zero_denominator: str
+
+    @classmethod
+    def from_binding(cls, binding: Binding) -> ComponentsOut | None:
+        """The components of a composite binding, ``None`` for any other kind."""
+        if binding.components is None:
+            return None
+        return cls(
+            numerator=binding.components.numerator.metric,
+            denominator=binding.components.denominator.metric,
+            on_zero_denominator=str(binding.components.on_zero_denominator),
+        )
+
+
+class BindingOut(BaseModel):
+    """How a metric is built: the payload of ``resolve_metric`` (SPEC §4.1).
+
+    ``source`` and ``measure`` are ``None`` for a composite, which has no single pair.
+    ``components`` names the numerator and denominator metrics instead.
+    """
 
     model_config = ConfigDict(frozen=True)
 
     metric: str
+    kind: str
+    source: str | None
+    measure: str | None
+    components: ComponentsOut | None = None
+    population_filter: str | None = None
+
+    @classmethod
+    def from_binding(cls, binding: Binding) -> BindingOut:
+        return cls(
+            metric=binding.metric,
+            kind=str(binding.kind),
+            source=binding.source,
+            measure=binding.measure,
+            components=ComponentsOut.from_binding(binding),
+            population_filter=binding.binding.canonical.population_filter,
+        )
+
+
+class MetricDetail(BaseModel):
+    """Grain, dimensions, owning source, and freshness for one metric (SPEC §4.1).
+
+    ``kind``, ``components`` and ``population_filter`` say how the metric is built, as in
+    :class:`BindingOut`. For a composite, ``measures`` lists the measures its components read
+    and ``grain`` is the shared grain when both components sit on one source, otherwise empty.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    metric: str
+    kind: str = "single"
     source: str | None
     measure: str | None = None
+    components: ComponentsOut | None = None
+    population_filter: str | None = None
     grain: list[str]
     dimensions: list[DimensionInfo]
     measures: list[str]

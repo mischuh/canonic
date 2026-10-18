@@ -12,6 +12,7 @@ from canonic.contracts.models import Status
 from canonic.contracts.principal import Principal
 from canonic.contracts.resolver import Binding as ResolverBinding
 from canonic.core.models import (
+    ComponentsOut,
     DimensionInfo,
     DomainGroup,
     MetricDetail,
@@ -57,6 +58,16 @@ def _get_domain(binding: MetricBinding, resolver: ContractResolver) -> str:
         if src is not None:
             return src
     return metric
+
+
+def _leaf_bindings(binding: ResolverBinding) -> list[ResolverBinding]:
+    """The source-bound bindings a metric reads, walking nested composites, in order."""
+    if binding.components is None:
+        return [binding]
+    return [
+        *_leaf_bindings(binding.components.numerator),
+        *_leaf_bindings(binding.components.denominator),
+    ]
 
 
 _ANONYMOUS_PRINCIPAL = Principal()
@@ -202,18 +213,20 @@ class DiscoveryService:
             for dim_name in common_dim_names:
                 all_dims.append(num_dims_by_name[dim_name])
 
-            for component in (binding.components.numerator, binding.components.denominator):
-                if component.source is not None:
-                    comp_src = self._ctx.source_by_name.get(component.source)
-                    if comp_src is not None:
-                        for m in comp_src.measures:
-                            if m.name not in all_measures:
-                                all_measures.append(m.name)
+            leaves = _leaf_bindings(binding)
+            for leaf in leaves:
+                if leaf.measure is not None and leaf.measure not in all_measures:
+                    all_measures.append(leaf.measure)
+            leaf_sources = {leaf.source for leaf in leaves}
+            shared = self._ctx.source_by_name.get(next(iter(leaf_sources), "") or "")
             return MetricDetail(
                 metric=binding.metric,
+                kind=str(binding.kind),
                 source=None,
                 measure=None,
-                grain=[],
+                components=ComponentsOut.from_binding(binding),
+                population_filter=binding.binding.canonical.population_filter,
+                grain=list(shared.grain) if shared is not None and len(leaf_sources) == 1 else [],
                 dimensions=all_dims,
                 measures=all_measures,
                 aliases=list(binding.binding.aliases),
@@ -244,8 +257,10 @@ class DiscoveryService:
             )
         return MetricDetail(
             metric=binding.metric,
+            kind=str(binding.kind),
             source=binding.source,
             measure=binding.measure,
+            population_filter=binding.binding.canonical.population_filter,
             grain=list(source.grain),
             dimensions=self._reachable_dimensions(source.name, effective_policy),
             measures=[m.name for m in source.measures],

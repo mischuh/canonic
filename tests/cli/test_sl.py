@@ -191,7 +191,14 @@ class TestSlResolveCommand:
     def test_json_has_mcp_parity_keys(self, runner: CliRunner, project_dir: Path) -> None:
         result = runner.invoke(app, ["--json", "sl", "resolve", "revenue"])
         payload = json.loads(result.output)
-        assert set(payload.keys()) == {"metric", "source", "measure"}
+        assert set(payload.keys()) == {
+            "metric",
+            "kind",
+            "source",
+            "measure",
+            "components",
+            "population_filter",
+        }
 
     def test_unresolved_exits_2(self, runner: CliRunner, project_dir: Path) -> None:
         result = runner.invoke(app, ["sl", "resolve", "does_not_exist"])

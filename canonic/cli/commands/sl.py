@@ -11,6 +11,7 @@ from rich.console import Console
 
 from canonic.cli._errors import get_cli_context, handle_errors
 from canonic.cli.commands import build_semantic_query, load_service
+from canonic.core.models import BindingOut
 
 if TYPE_CHECKING:
     from canonic.compiler.result import CompileResult
@@ -35,7 +36,7 @@ def resolve(
     With ``--json`` the output matches the MCP ``resolve_metric`` tool payload byte-for-byte.
     """
     binding = load_service(ctx).resolve_metric(name, context=context)
-    payload = {"metric": binding.metric, "source": binding.source, "measure": binding.measure}
+    payload = BindingOut.from_binding(binding).model_dump(mode="json")
 
     if get_cli_context(ctx).json_output:
         typer.echo(json.dumps(payload))

@@ -49,6 +49,17 @@ A change listed here was reviewed against the classification rules and did not b
 
 ## History
 
+## 3.3 (2026-10-18) - MINOR
+
+- ADR/PR: this PR (fix(mcp): return binding details for composite metrics)
+- Summary: `resolve_metric` and `describe_metric` now say how a metric is built. Both add `kind`,
+  `components` (`numerator`, `denominator`, `on_zero_denominator` for a `ratio` or `weighted_avg`,
+  `null` for any other kind) and `population_filter`. `source` and `measure` stay `null` for a
+  composite, so existing callers keep working. For a composite, `describe_metric` lists the
+  measures its components read in `measures` (it listed every measure of the owning sources) and
+  returns the shared `grain` when both components sit on one source (it was always empty). All
+  additions are optional, and a consumer that ignores unknown fields is unaffected.
+
 ## 3.2 (2026-10-14) - MINOR
 
 - ADR/PR: this PR (feat(tenancy): scope a principal to a list of tenants)

@@ -16,7 +16,7 @@ from fastmcp import Client
 from canonic import __version__ as CANONIC_VERSION
 from canonic.compiler.query import SemanticQuery
 from canonic.contract import CONTRACT_SCHEMA
-from canonic.core.models import CompileOutput
+from canonic.core.models import BindingOut, CompileOutput
 from canonic.mcp.server import build_server
 from tests.conftest import MCP_ERAS, mcp_client
 
@@ -39,11 +39,7 @@ async def test_resolve_metric_parity(canonic_service: CanonicService, era: str) 
     mcp_payload = result.data
 
     binding = canonic_service.resolve_metric("revenue")
-    service_payload = {
-        "metric": binding.metric,
-        "source": binding.source,
-        "measure": binding.measure,
-    }
+    service_payload = BindingOut.from_binding(binding).model_dump(mode="json")
 
     assert mcp_payload == service_payload
 
