@@ -79,7 +79,9 @@ Scoring is **worst-signal-dominates**. The tier starts at `trusted` and drops to
 | Freshness | `provisional` | A source's `last_validated_at` is older than `trust.stale_after_days`. Off until you set it, see [config](/reference/config-schema#trust). A source that was never validated is not stale. |
 | Outcome (E11, dynamic) | `caution` | A binding has a recent confirmed `wrong_definition` outcome within the feedback loop's trust-cap window. See [Feedback loop](/concepts/ingestion-and-reconciliation#feedback-loop-e11). |
 
-A `min_trust` guardrail enforces a floor on the served tier for a given `context`:
+A composite metric (`ratio`, `weighted_avg`) is only as trustworthy as its parts, so it also takes the signals of its numerator and denominator, and of theirs when a component is itself a composite. A ratio whose numerator has a failing assertion is `caution`, not `provisional`, and its `reasons` name the component that caused the cap, for example `margin: component profit: assertion failed (<assertion-id>)`. This applies to `query`, `compile` and `canonic audit` alike.
+
+A `min_trust` guardrail enforces a floor on the served tier for a given `context`. On a composite it is matched through the components: a guardrail on a component's `(source, measure)` also applies when the component is reached through a ratio, and the ratio is held to the floor with the inherited tier, so it cannot pass a threshold its numerator fails.
 
 ```yaml
 id: board-reporting-trusted-only
