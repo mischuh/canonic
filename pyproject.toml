@@ -87,6 +87,12 @@ ignore_missing_imports = false
 module = ["boto3", "botocore.*"]
 ignore_missing_imports = true
 
+# sentence-transformers is an optional extra (the embeddings add-on). It is imported inside a
+# function behind a clear install error, so a checkout without the extra must still type-check.
+[[tool.mypy.overrides]]
+module = ["sentence_transformers", "sentence_transformers.*"]
+ignore_missing_imports = true
+
 # fastmcp[tasks] (the fastmcp_tasks distribution) is an optional extra scoped to the
 # http profile's background-task support. build_server imports it lazily behind a
 # clear install error, so a checkout without the extra installed must still type-check.
