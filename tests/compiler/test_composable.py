@@ -216,7 +216,8 @@ def test_ratio_metric_trust_input_binding_matches_resolved_key(
     §4) must match the string actually persisted to .canonic/assertions.json (result.resolved),
     or a passing assertion for this metric can never be recognized as trusted."""
     result = compile(SemanticQuery(metrics=["avg_repair_costs"]), resolver, sources)
-    (trust_input,) = result.trust_inputs
+    trust_input = result.trust_inputs[0]
+    assert trust_input.owner is None
     assert trust_input.binding == result.resolved["avg_repair_costs"]
     assert trust_input.binding == "ratio(total_repair_cost, damage_count)"
 

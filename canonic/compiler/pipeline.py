@@ -28,6 +28,7 @@ from canonic.compiler.result import (
     ScopeMetadata,
     TrustInput,
 )
+from canonic.compiler.trust_inputs import trust_inputs_for_binding
 from canonic.contracts.models import BindingKind, OnMissingPrincipal
 from canonic.contracts.principal import Principal
 from canonic.contracts.resolver import Ambiguous as ResolverAmbiguous
@@ -87,19 +88,27 @@ def _trust_inputs_for(
     raw_bindings: list[tuple[str, ResolverBinding]],
     resolver: ContractResolver,
 ) -> list[TrustInput]:
-    """Gather static per-metric trust signals once, shared by every compile path (SPEC-E14 §4)."""
+    """Gather static per-metric trust signals once, shared by every compile path (SPEC-E14 §4).
+
+    A composite metric also contributes the inputs of its components, see
+    :func:`trust_inputs_for_binding`.
+    """
     inputs: list[TrustInput] = []
     for name, binding in raw_bindings:
-        has_assertion = bool(resolver.assertions_for({"metrics": [name]}))
-        inputs.append(
-            TrustInput(
-                metric=name,
-                provenance=binding.binding.provenance.value,
-                has_assertion=has_assertion,
-                binding=binding.resolved_key,
-            )
-        )
+        inputs.extend(trust_inputs_for_binding(name, binding, resolver))
     return inputs
+
+
+def _source_measure_pairs(binding: ResolverBinding) -> list[tuple[str, str]]:
+    """The (source, measure) pairs a binding reads: its own, or those of its components."""
+    if binding.source is not None and binding.measure is not None:
+        return [(binding.source, binding.measure)]
+    if binding.components is None:
+        return []
+    return [
+        *_source_measure_pairs(binding.components.numerator),
+        *_source_measure_pairs(binding.components.denominator),
+    ]
 
 
 def _enforce_min_trust(
@@ -111,30 +120,32 @@ def _enforce_min_trust(
     """Stage 6b: block or warn when a min_trust guardrail's floor is not met (SPEC-E14 §7).
 
     Enforced from the static signal set only (provenance, assertion coverage) — the signals
-    known before SQL is generated. Only metrics with a single resolved (source, measure) are
-    matched (SINGLE/SEMI_ADDITIVE/OPAQUE/CUMULATIVE kinds); composite (ratio/weighted_avg) and
-    recompute_at_grain metrics have no single source/measure pair to match against
-    ``applies_to``, the same limitation ``restrict_source`` already has. ``severity: error``
-    (the default) raises GuardrailBlock; ``severity: warn`` returns a warning line instead.
+    known before SQL is generated. A metric with a single resolved (source, measure) is matched
+    directly (SINGLE/SEMI_ADDITIVE/OPAQUE/CUMULATIVE kinds). A composite (ratio/weighted_avg) is
+    matched through the (source, measure) of its components, so a ratio cannot pass a floor its
+    numerator fails: ``trust_inputs`` already carry the components' signals, and the floor is
+    checked against the guardrails of every component. recompute_at_grain metrics have no
+    resolved pair and stay unmatched, the same limitation ``restrict_source`` has.
+    ``severity: error`` (the default) raises GuardrailBlock; ``severity: warn`` returns a
+    warning line instead.
     """
     warnings: list[str] = []
     if context is None:
         return warnings
     score = TrustScorer.score(static_signals_for(trust_inputs))
     for _name, binding in raw_bindings:
-        if binding.source is None or binding.measure is None:
-            continue
-        for guardrail in resolver.min_trust_for(binding.source, binding.measure, context):
-            assert guardrail.level is not None  # noqa: S101 — enforced by model_validator
-            floor = TrustTier(guardrail.level)
-            if not tier_meets(score.tier, floor):
-                logger.warning(
-                    "min_trust enforced: guardrail=%s tier=%s required=%s",
-                    guardrail.id,
-                    score.tier.value,
-                    floor.value,
-                )
-                warnings.append(_block_or_warn(guardrail))
+        for source, measure in _source_measure_pairs(binding):
+            for guardrail in resolver.min_trust_for(source, measure, context):
+                assert guardrail.level is not None  # noqa: S101 — enforced by model_validator
+                floor = TrustTier(guardrail.level)
+                if not tier_meets(score.tier, floor):
+                    logger.warning(
+                        "min_trust enforced: guardrail=%s tier=%s required=%s",
+                        guardrail.id,
+                        score.tier.value,
+                        floor.value,
+                    )
+                    warnings.append(_block_or_warn(guardrail))
     return warnings
 
 
