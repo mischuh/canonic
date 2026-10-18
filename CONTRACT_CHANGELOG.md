@@ -47,6 +47,16 @@ A change listed here was reviewed against the classification rules and did not b
   cannot tell a client whether an older server supports derived dimensions. A client that
   needs to know reads `canonic_version`.
 
+### Open-period warning and `dimensions[].time_grain` (feat(trust) #417)
+
+- ADR/PR: this PR (feat(trust): flag results that include a period that has not ended)
+- Decision: no bump. `time_grain` is an optional field on the semantic-source file schema and
+  `trust.flag_open_periods` an optional key of `canonic.yaml`. Neither changes the shape of the
+  semantic query, `QueryResult`, the compile output, the error registry or the `ContractResolver`
+  hooks. The check adds an entry to the existing `warnings` list and a reason to the existing
+  `trust_score.reasons`, both lists of free text, and the tier it can set (`provisional`) is
+  already part of the contract. A client that renders `warnings` and `reasons` needs no change.
+
 ## History
 
 ## 3.5 (2026-10-18) - MINOR

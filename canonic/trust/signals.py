@@ -28,11 +28,13 @@ if TYPE_CHECKING:
     from canonic.compiler.result import SourceFreshness, TrustInput
     from canonic.feedback.assertion_history import AssertionHistory
     from canonic.feedback.history import BindingOutcomeHistory
+    from canonic.trust.periods import OpenPeriod
 
 __all__ = [
     "assertion_signal",
     "finality_signal",
     "freshness_signal",
+    "open_period_signal",
     "outcome_signal",
     "provenance_signal",
     "static_signals_for",
@@ -104,6 +106,20 @@ def finality_signal(final_rows: int | None, provisional_rows: int | None) -> Sig
             cap=TrustTier.PROVISIONAL, reason="finality: provisional rows included"
         )
     return SignalVerdict(cap=None)
+
+
+def open_period_signal(periods: list[OpenPeriod]) -> SignalVerdict:
+    """A served period that has not ended (the trailing, partly booked period).
+
+    Serve-time only, like finality: it needs the executed result and the serving clock. It
+    caps at ``provisional`` because the trailing period holds only what has been booked so far,
+    which for a ratio can sit far outside its normal range.
+    """
+    if not periods:
+        return SignalVerdict(cap=None)
+    return SignalVerdict(
+        cap=TrustTier.PROVISIONAL, reason="; ".join(period.reason for period in periods)
+    )
 
 
 def freshness_signal(freshness: list[SourceFreshness]) -> SignalVerdict:

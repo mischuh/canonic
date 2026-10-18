@@ -152,6 +152,7 @@ class QueryService:
                 outcome_history=outcome_history,
                 outcome_window_days=self._ctx.config.feedback.trust_cap_window_days,
                 assertion_history=assertion_history,
+                now=self._serving_clock(query),
             )
             await self._assertions.check_query_assertions(query, harness=harness)
             return query_result
@@ -175,6 +176,16 @@ class QueryService:
                 principal=principal,
             )
             query_id_var.reset(qid_token)
+
+    def _serving_clock(self, query: SemanticQuery) -> datetime | None:
+        """The instant a period must have ended by, or ``None`` when the check is switched off.
+
+        A query pinned with ``as_of`` is judged at that instant, so a replay gives the same
+        answer as the original. Otherwise it is the current time.
+        """
+        if not self._ctx.config.trust.flag_open_periods:
+            return None
+        return query.as_of if query.as_of is not None else datetime.now(UTC)
 
     def _load_outcome_history(self) -> BindingOutcomeHistory | None:
         """Load the current per-binding outcome history, or None with no project root.
@@ -316,6 +327,7 @@ class QueryService:
                     outcome_history=outcome_history,
                     outcome_window_days=self._ctx.config.feedback.trust_cap_window_days,
                     assertion_history=assertion_history,
+                    now=self._serving_clock(query),
                 ).tier.value
                 if compiled is not None
                 else None,

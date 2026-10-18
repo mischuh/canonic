@@ -177,6 +177,10 @@ def compute_dimension_fingerprint(dimension: Dimension) -> str | None:
     return f"sha256:{digest}"
 
 
+#: The period grains a time dimension can declare, shortest first.
+PERIOD_GRAINS: tuple[str, ...] = ("hour", "day", "week", "month", "quarter", "year")
+
+
 class Dimension(BaseModel):
     """A column or derived value exposed for grouping/filtering, optionally time-bucketed.
 
@@ -197,6 +201,10 @@ class Dimension(BaseModel):
     json_path: list[str] | None = None  # [P1] key segments into the JSON ``column``
     type: NormalizedType | None = None  # required with ``expr``/``json_path``, else ignored
     granularity: str | None = None  # [P1] time granularity, e.g. "day"
+    #: The period one value of this dimension stands for (``hour``, ``day``, ``week``, ``month``,
+    #: ``quarter`` or ``year``), for a dimension whose values are not bucketed by ``granularity``,
+    #: such as a month label. It lets a served result be checked for a period that has not ended.
+    time_grain: str | None = None
     label: str | None = None  # human-readable display name, e.g. "Product Type"
     description: str | None = None  # freetext explanation
     aliases: list[str] = []  # alternate lookup names, e.g. ["product_type"]
@@ -221,6 +229,27 @@ class Dimension(BaseModel):
                 f"{self.type.value if self.type else None!r}; it must be date or timestamp"
             )
         return self
+
+    @model_validator(mode="after")
+    def _validate_time_grain(self) -> Dimension:
+        if self.time_grain is not None and self.time_grain not in PERIOD_GRAINS:
+            raise ValueError(
+                f"dimension {self.name!r} sets time_grain {self.time_grain!r}; "
+                f"it must be one of {', '.join(PERIOD_GRAINS)}"
+            )
+        return self
+
+    @property
+    def period_grain(self) -> str | None:
+        """The period each value stands for: ``time_grain``, else a ``granularity`` that is one.
+
+        ``None`` when the grain is unknown, which switches the open-period check off for this
+        dimension rather than guessing.
+        """
+        if self.time_grain is not None:
+            return self.time_grain
+        granularity = (self.granularity or "").lower()
+        return granularity if granularity in PERIOD_GRAINS else None
 
     def _validate_json_path(self) -> None:
         if self.expr is not None:

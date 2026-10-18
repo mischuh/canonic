@@ -417,6 +417,9 @@ def compile(  # noqa: A001 — the public verb for this capability is "compile"
         finality=composed.finality,
         related=related,
         trust_inputs=trust_inputs,
+        time_dimensions=tuple(
+            {td.column: td for leaf in leaves for td in leaf.time_dimensions}.values()
+        ),
         composition=_first(planned, "composition"),
         compositions={
             name: metric_leaves.composition

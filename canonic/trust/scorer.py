@@ -5,15 +5,18 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from canonic.trust.models import SignalVerdict, TrustScore, TrustTier
+from canonic.trust.periods import open_periods
 from canonic.trust.signals import (
     finality_signal,
     freshness_signal,
+    open_period_signal,
     outcome_signal,
     static_signals_for,
 )
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
+    from datetime import datetime
 
     from canonic.compiler.result import CompileResult
     from canonic.connectors.base import ResultSet
@@ -63,6 +66,7 @@ def trust_for_compiled(
     outcome_history: BindingOutcomeHistory | None = None,
     outcome_window_days: int = _DEFAULT_OUTCOME_WINDOW_DAYS,
     assertion_history: AssertionHistory | None = None,
+    now: datetime | None = None,
 ) -> TrustScore:
     """Compute the trust tier for a compiled query (SPEC-E14 §3, §6).
 
@@ -78,6 +82,10 @@ def trust_for_compiled(
     ``assertion_history`` folds in E16 Phase 2's assertion signal (SPEC-E14 §5) — a
     metric with a persisted, passing ``canonic assert`` verdict can reach ``trusted``;
     omitting it leaves every metric capped at ``provisional``, as before E16 Phase 2.
+
+    ``now`` is the serving clock. With it, a result whose latest period of a time dimension has
+    not ended caps the tier at ``provisional`` (see :func:`canonic.trust.periods.open_periods`).
+    Omitting it leaves that signal inactive.
     """
     final_rows: int | None = None
     provisional_rows: int | None = None
@@ -91,6 +99,7 @@ def trust_for_compiled(
         *static_signals_for(compiled.trust_inputs, assertion_history),
         finality_signal(final_rows, provisional_rows),
         freshness_signal(compiled.freshness),
+        open_period_signal(open_periods(compiled, result, now)),
     ]
     if outcome_history is not None:
         signals.extend(

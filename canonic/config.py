@@ -214,9 +214,15 @@ class TrustConfig(BaseModel):
     trust tier at ``provisional``. ``null`` (the default) defines no policy, so nothing is ever
     stale. It is opt-in because a project that never re-runs ingest would otherwise see its
     tiers drop, and fail any ``min_trust`` guardrail, on the day the window elapses.
+
+    ``flag_open_periods`` (on by default) warns when the latest period of a time dimension in a
+    served result has not ended, and caps the answer's trust tier at ``provisional``. Switch it
+    off for a project whose sources are always complete. A finality rule, where one governs the
+    query, takes precedence over it.
     """
 
     stale_after_days: int | None = Field(default=None, ge=1)
+    flag_open_periods: bool = True
 
 
 class TelemetryConfig(BaseModel):
