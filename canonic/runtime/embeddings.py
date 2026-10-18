@@ -39,7 +39,7 @@ def _load_backend(model_name: str) -> tuple[Any, str]:
     and so tests can substitute it. Returns the loaded model and the installed library
     version (part of the identity fingerprint).
     """
-    import sentence_transformers  # type: ignore[import-not-found]  # optional add-on, no stubs
+    import sentence_transformers  # optional add-on, see the mypy override in pyproject.toml
 
     # huggingface_hub is always installed (a transitive dependency of litellm's
     # tokenizers, not of the optional embeddings extra), so no import-not-found guard is

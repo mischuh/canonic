@@ -86,11 +86,12 @@ class TestBuildServerTasksWiring:
         assert not list_metrics.task_config.supports_tasks()
 
     def test_enabled_without_extra_raises_actionable_error(
-        self, canonic_service: CanonicService
+        self, canonic_service: CanonicService, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """S22: fails loudly, not silently, when mcp.tasks.enabled but the extra isn't
-        installed. ``fastmcp_tasks`` is genuinely absent in this environment, so this
-        exercises the real import failure rather than a mocked one."""
+        installed. A ``None`` entry in ``sys.modules`` makes the import fail the way a
+        missing package does, whether or not the extra is installed in this environment."""
+        monkeypatch.setitem(sys.modules, "fastmcp_tasks", None)
         with pytest.raises(RuntimeError, match=r"canonic\[tasks\]"):
             build_server(canonic_service, tasks=True)
 
