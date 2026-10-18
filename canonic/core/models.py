@@ -31,7 +31,7 @@ if TYPE_CHECKING:
 
     from canonic.compiler.result import CompileResult, CompositionMetadata
     from canonic.contracts.resolver import Binding
-    from canonic.core.probes import ProbeCounts
+    from canonic.core.probes import ProbeValues
     from canonic.feedback.assertion_history import AssertionHistory
     from canonic.feedback.history import BindingOutcomeHistory
 
@@ -373,7 +373,7 @@ class QueryMetadata(BaseModel):
         outcome_window_days: int = 90,
         assertion_history: AssertionHistory | None = None,
         now: datetime | None = None,
-        probes: ProbeCounts | None = None,
+        probes: ProbeValues | None = None,
     ) -> QueryMetadata:
         """Project a :class:`CompileResult` onto the §2.2 metadata shape.
 
@@ -412,6 +412,7 @@ class QueryMetadata(BaseModel):
             outcome_window_days=outcome_window_days,
             assertion_history=assertion_history,
             now=now,
+            probes=probes,
         )
         return cls(
             resolved={"metrics": dict(compiled.resolved)},
@@ -433,7 +434,7 @@ class QueryMetadata(BaseModel):
             ],
             warnings=[
                 *compiled.warnings,
-                *(period.warning for period in open_periods(compiled, result, now)),
+                *(period.warning for period in open_periods(compiled, result, now, probes)),
             ],
             contract_schema=CONTRACT_SCHEMA,
             finality=finality_out,
@@ -517,7 +518,7 @@ class QueryResult(BaseModel):
         outcome_window_days: int = 90,
         assertion_history: AssertionHistory | None = None,
         now: datetime | None = None,
-        probes: ProbeCounts | None = None,
+        probes: ProbeValues | None = None,
     ) -> QueryResult:
         """Merge the compiler output and the executed result set (no field renamed)."""
         return cls(

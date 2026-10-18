@@ -26,6 +26,7 @@ from canonic.compiler.compose import (
 )
 from canonic.compiler.dialect import adapter_for
 from canonic.compiler.joins import build_alias_tree, reachable_dimension_names
+from canonic.compiler.period_probe import latest_period_probes
 from canonic.compiler.result import (
     PROBE_ZERO_DENOMINATOR,
     CompileResult,
@@ -388,6 +389,18 @@ def compile(  # noqa: A001 — the public verb for this capability is "compile"
             metric_plans.append(metric_leaves.offset(len(leaves)))
             leaves.extend(metric_leaves.leaves)
 
+        # A time dimension the query only filters on has no period in the result, so one more
+        # column carries its latest value. It is added after the requested metrics.
+        probe_leaves, probe_plans, latest_probes = latest_period_probes(
+            leaves,
+            query,
+            sources_by_name,
+            {td.column for leaf in leaves for td in leaf.time_dimensions},
+            first_index=len(leaves),
+        )
+        leaves.extend(probe_leaves)
+        metric_plans.extend(probe_plans)
+
         # Stage 5b — restrict_source, for the metrics that resolve to a single source/measure.
         single_kind = [
             _bind_metric(name, b, sources_by_name)
@@ -425,14 +438,17 @@ def compile(  # noqa: A001 — the public verb for this capability is "compile"
         finality=composed.finality,
         related=related,
         trust_inputs=trust_inputs,
-        probe_columns=tuple(
-            ProbeColumn(
-                column=zero_denominator_column(plan.name),
-                kind=PROBE_ZERO_DENOMINATOR,
-                subject=name,
-            )
-            for (name, _), plan in zip(raw_bindings, metric_plans, strict=True)
-            if substitutes_zero_denominator(plan)
+        probe_columns=(
+            *(
+                ProbeColumn(
+                    column=zero_denominator_column(plan.name),
+                    kind=PROBE_ZERO_DENOMINATOR,
+                    subject=name,
+                )
+                for (name, _), plan in zip(raw_bindings, metric_plans, strict=False)
+                if substitutes_zero_denominator(plan)
+            ),
+            *latest_probes,
         ),
         time_dimensions=tuple(
             {td.column: td for leaf in leaves for td in leaf.time_dimensions}.values()

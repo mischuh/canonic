@@ -28,7 +28,7 @@ if TYPE_CHECKING:
     from canonic.config import CanonicConfig
     from canonic.connectors.base import ConnectorBase, ResultSet, SQLExecutable
     from canonic.contracts.resolver import Binding, ContractResolver
-    from canonic.core.probes import ProbeCounts
+    from canonic.core.probes import ProbeValues
     from canonic.instrumentation.events import AnswerEventLog
     from canonic.semantic.models import SemanticSource
 
@@ -109,7 +109,7 @@ class ServiceContext:
 
     async def execute_compiled(
         self, compiled: CompileResult, connection_id: str | None
-    ) -> tuple[ResultSet, ProbeCounts]:
+    ) -> tuple[ResultSet, ProbeValues]:
         """Run a compiled query and return its result without the compiler's probe columns.
 
         The second value holds what each probe counted, for the response metadata.

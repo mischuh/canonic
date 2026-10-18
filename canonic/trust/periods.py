@@ -8,10 +8,12 @@ from datetime import UTC, date, datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping
+
     from canonic.compiler.result import CompileResult, TimeDimension
     from canonic.connectors.base import ResultSet
 
-__all__ = ["OpenPeriod", "open_periods", "parse_period_start", "period_end"]
+__all__ = ["OpenPeriod", "floor_to_grain", "open_periods", "parse_period_start", "period_end"]
 
 _YEAR = re.compile(r"^(\d{4})$")
 _MONTH = re.compile(r"^(\d{4})-(\d{2})$")
@@ -65,6 +67,26 @@ def period_end(start: datetime, grain: str) -> datetime:
     return start.replace(year=month_index // 12, month=month_index % 12 + 1, day=1)
 
 
+def floor_to_grain(moment: datetime, grain: str) -> datetime:
+    """The start of the period of ``grain`` that contains ``moment``.
+
+    A week starts on Monday. A warehouse that starts its weeks on Sunday buckets a Sunday
+    differently, which can move the end of the latest week by up to six days.
+    """
+    day = moment.replace(hour=0, minute=0, second=0, microsecond=0)
+    if grain == "hour":
+        return moment.replace(minute=0, second=0, microsecond=0)
+    if grain == "day":
+        return day
+    if grain == "week":
+        return day - timedelta(days=day.weekday())
+    if grain == "month":
+        return day.replace(day=1)
+    if grain == "quarter":
+        return day.replace(month=3 * ((day.month - 1) // 3) + 1, day=1)
+    return day.replace(month=1, day=1)
+
+
 def parse_period_start(value: Any, grain: str) -> datetime | None:
     """The instant a dimension value's period begins, as naive UTC, or ``None`` if unreadable.
 
@@ -97,13 +119,22 @@ def parse_period_start(value: Any, grain: str) -> datetime | None:
 
 
 def open_periods(
-    compiled: CompileResult, result: ResultSet | None, now: datetime | None
+    compiled: CompileResult,
+    result: ResultSet | None,
+    now: datetime | None,
+    probes: Mapping[tuple[str, str], Any] | None = None,
 ) -> list[OpenPeriod]:
     """The time dimensions of ``compiled`` whose latest period in ``result`` has not ended.
+
+    A dimension the query groups by is read from ``result``. A dimension the query only filters
+    on has no column in the result, so its latest value comes from the compiler's probe
+    (``probes``), floored to the dimension's grain.
 
     Inactive (empty) without a result or a clock, and whenever a finality rule governs the
     query: finality already says which rows are provisional, so this check defers to it.
     """
+    from canonic.compiler.result import PROBE_LATEST_PERIOD
+
     if result is None or now is None or compiled.finality is not None:
         return []
     names = [column.name for column in result.columns]
@@ -113,6 +144,15 @@ def open_periods(
         period = _latest_open(time_dimension, names, result.rows, now_utc)
         if period is not None:
             found.append(period)
+    for probe in compiled.probe_columns:
+        if probe.kind != PROBE_LATEST_PERIOD or probe.grain is None:
+            continue
+        latest = parse_period_start((probes or {}).get((probe.kind, probe.subject)), probe.grain)
+        if latest is None:
+            continue
+        start = floor_to_grain(latest, probe.grain)
+        if period_end(start, probe.grain) > now_utc:
+            found.append(OpenPeriod(probe.subject, probe.grain, start))
     return found
 
 

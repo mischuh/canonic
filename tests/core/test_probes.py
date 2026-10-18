@@ -2,7 +2,14 @@
 
 from __future__ import annotations
 
-from canonic.compiler.result import PROBE_ZERO_DENOMINATOR, CompileResult, ProbeColumn
+from datetime import datetime
+
+from canonic.compiler.result import (
+    PROBE_LATEST_PERIOD,
+    PROBE_ZERO_DENOMINATOR,
+    CompileResult,
+    ProbeColumn,
+)
 from canonic.connectors.base import ResultColumn, ResultSet
 from canonic.core.probes import strip_probes
 
@@ -72,3 +79,34 @@ def test_query_without_probes_returns_the_result_itself() -> None:
 
     assert stripped is result
     assert counts == {}
+
+
+def test_latest_period_probe_reduces_to_the_greatest_value() -> None:
+    probe = ProbeColumn("_latest", PROBE_LATEST_PERIOD, "order_month", "month")
+    result = _result(
+        "revenue",
+        "_latest",
+        rows=[[1, datetime(2026, 9, 3)], [2, datetime(2026, 10, 17)], [3, None]],
+    )
+
+    stripped, values = strip_probes(_compiled(probe), result)
+
+    assert [c.name for c in stripped.columns] == ["revenue"]
+    assert values == {(PROBE_LATEST_PERIOD, "order_month"): datetime(2026, 10, 17)}
+
+
+def test_latest_period_probe_without_any_value_is_none() -> None:
+    probe = ProbeColumn("_latest", PROBE_LATEST_PERIOD, "order_month", "month")
+
+    _, values = strip_probes(_compiled(probe), _result("revenue", "_latest", rows=[[1, None]]))
+
+    assert values == {(PROBE_LATEST_PERIOD, "order_month"): None}
+
+
+def test_values_that_cannot_be_compared_give_no_latest() -> None:
+    probe = ProbeColumn("_latest", PROBE_LATEST_PERIOD, "order_month", "month")
+    result = _result("revenue", "_latest", rows=[[1, datetime(2026, 9, 3)], [2, "2026-10"]])
+
+    _, values = strip_probes(_compiled(probe), result)
+
+    assert values == {(PROBE_LATEST_PERIOD, "order_month"): None}

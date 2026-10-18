@@ -57,6 +57,16 @@ A change listed here was reviewed against the classification rules and did not b
   `trust_score.reasons`, both lists of free text, and the tier it can set (`provisional`) is
   already part of the contract. A client that renders `warnings` and `reasons` needs no change.
 
+### Open-period check for filter-only queries (feat(trust) #427)
+
+- ADR/PR: this PR (feat(trust): flag filter-only queries that include a period that has not ended)
+- Decision: no bump. The check extends the open-period warning to a query that only filters on a
+  time dimension. The response shape does not change: it adds an entry to `warnings` and a reason
+  to `trust_score.reasons`, as before. The compiled SQL of such a query gains one column,
+  `_canonic_latest_period_<dimension>`, which `query` strips from the result, the same mechanism
+  as the zero-denominator column recorded under 3.6. A consumer that executes `compiled.sql`
+  itself sees the extra column and can ignore it.
+
 ## History
 
 ## 3.6 (2026-10-18) - MINOR

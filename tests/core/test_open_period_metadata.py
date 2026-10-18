@@ -220,3 +220,60 @@ class TestServedThroughTheService:
         warnings = (await served(query, flag_open_periods=False)).metadata.warnings
 
         assert not any("has not ended" in w for w in warnings)
+
+
+class TestFilterOnlyThroughTheService:
+    """A query that only filters on a time dimension is judged from the probe column."""
+
+    _PROBE = "_canonic_latest_period_order_month"
+
+    @pytest.fixture
+    def served(self, monkeypatch: pytest.MonkeyPatch):
+        def run(latest: object, query: SemanticQuery, **trust: object):
+            service = _service(monkeypatch, **trust)
+            result = ResultSet(
+                columns=[
+                    ResultColumn(name="revenue", type="int"),
+                    ResultColumn(name=self._PROBE, type="timestamp"),
+                ],
+                rows=[[10, latest]],
+            )
+            monkeypatch.setattr(
+                context_mod.default_factory, "for_id", lambda *a, **k: _FakeConnector(result)
+            )
+            return service.query(query)
+
+        return run
+
+    def _query(self, as_of: datetime) -> SemanticQuery:
+        return SemanticQuery(
+            metrics=["revenue"], filters=["created_at >= '2026-01-01'"], as_of=as_of
+        )
+
+    async def test_open_period_is_warned_and_the_probe_is_dropped(self, served) -> None:
+        served_query = await served(
+            datetime(2026, 3, 10, 8), self._query(datetime(2026, 3, 15, tzinfo=UTC))
+        )
+
+        assert any("the month 2026-03 has not ended" in w for w in served_query.metadata.warnings)
+        assert [c.name for c in served_query.result.columns] == ["revenue"]
+        assert served_query.metadata.trust_score is not None
+        assert (
+            "order_month: month 2026-03 has not ended" in served_query.metadata.trust_score.reasons
+        )
+
+    async def test_ended_period_is_not_flagged(self, served) -> None:
+        served_query = await served(
+            datetime(2026, 3, 10, 8), self._query(datetime(2026, 4, 2, tzinfo=UTC))
+        )
+
+        assert not any("has not ended" in w for w in served_query.metadata.warnings)
+
+    async def test_switched_off_by_config(self, served) -> None:
+        served_query = await served(
+            datetime(2026, 3, 10, 8),
+            self._query(datetime(2026, 3, 15, tzinfo=UTC)),
+            flag_open_periods=False,
+        )
+
+        assert not any("has not ended" in w for w in served_query.metadata.warnings)
