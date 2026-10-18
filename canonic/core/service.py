@@ -32,7 +32,7 @@ if TYPE_CHECKING:
 
     from canonic.compiler import SemanticQuery
     from canonic.compiler.result import CompileResult
-    from canonic.config import CanonicConfig
+    from canonic.config import CanonicConfig, ProjectReload
     from canonic.connectors.base import ResultSet
     from canonic.contracts import ContractResolver
     from canonic.contracts.assertions import AccuracyReport, AssertionOutcome
@@ -136,16 +136,24 @@ class CanonicService:
         Both are ``None`` for a service built in memory, which has no files.
         """
         state = self._ctx.state
-        return ProjectInfo(fingerprint=state.fingerprint, loaded_at=state.loaded_at)
+        return ProjectInfo(
+            fingerprint=state.fingerprint,
+            loaded_at=state.loaded_at,
+            files_changed=self._ctx.project_files_changed,
+            reload=self._ctx.reload_mode,
+        )
 
     @classmethod
-    def from_project(cls, root: Path) -> CanonicService:
+    def from_project(cls, root: Path, *, reload: ProjectReload | None = None) -> CanonicService:
         """Load config, resolver, and semantic sources from a project root.
 
-        The service built here follows the project files: before each request it reloads
-        ``canonic.yaml``, ``contracts/`` and ``semantics/`` if one of them changed, and keeps
-        serving the previous state when the new files do not validate. A service constructed
-        directly has no files to follow and serves what it was given.
+        ``reload`` overrides ``project.reload`` from ``canonic.yaml``. Under ``off`` (the
+        default) the service serves the state it loaded until the process restarts, and
+        :meth:`project_info` reports when the files on disk have moved on. Under ``auto``,
+        before each request it reloads ``canonic.yaml``, ``contracts/`` and ``semantics/`` if
+        one of them changed, and keeps serving the previous state when the new files do not
+        validate. A service constructed directly has no files to follow and serves what it
+        was given.
         """
         state = ProjectState.load(root)
         return cls(
@@ -154,7 +162,9 @@ class CanonicService:
             sources=state.sources,
             project_root=root,
             event_log=DiskAnswerEventLog(root, state.config.instrumentation.events),
-            reloader=ProjectReloader(root, state),
+            reloader=ProjectReloader(
+                root, state, reload if reload is not None else state.config.project.reload
+            ),
         )
 
     # ------------------------------------------------------------------

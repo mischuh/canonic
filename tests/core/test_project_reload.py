@@ -8,6 +8,7 @@ from pathlib import Path  # noqa: TC003
 import pytest
 
 from canonic.compiler import SemanticQuery
+from canonic.config import ProjectReload
 from canonic.core import project as project_module
 from canonic.core.project import ProjectState
 from canonic.core.service import CanonicService
@@ -62,7 +63,7 @@ def loads(monkeypatch: pytest.MonkeyPatch) -> list[Path]:
 
 
 def test_a_new_contract_is_served_without_a_restart(project_dir: Path) -> None:
-    service = CanonicService.from_project(project_dir)
+    service = CanonicService.from_project(project_dir, reload=ProjectReload.AUTO)
     assert "order_count" not in {m.metric for m in service.list_metrics()}
 
     _with_order_count(project_dir)
@@ -73,7 +74,7 @@ def test_a_new_contract_is_served_without_a_restart(project_dir: Path) -> None:
 
 
 def test_a_changed_semantic_source_is_compiled_against(project_dir: Path) -> None:
-    service = CanonicService.from_project(project_dir)
+    service = CanonicService.from_project(project_dir, reload=ProjectReload.AUTO)
     query = SemanticQuery(metrics=["revenue"], dimensions=["channel"])
     with pytest.raises(Unreachable):
         service.compile_query(query)
@@ -92,7 +93,7 @@ def test_a_changed_semantic_source_is_compiled_against(project_dir: Path) -> Non
 
 
 def test_a_removed_contract_is_no_longer_served(project_dir: Path) -> None:
-    service = CanonicService.from_project(project_dir)
+    service = CanonicService.from_project(project_dir, reload=ProjectReload.AUTO)
     assert service.resolve_metric("revenue")
 
     (project_dir / _REVENUE).unlink()
@@ -102,7 +103,7 @@ def test_a_removed_contract_is_no_longer_served(project_dir: Path) -> None:
 
 
 def test_unchanged_files_are_not_parsed_again(project_dir: Path, loads: list[Path]) -> None:
-    service = CanonicService.from_project(project_dir)
+    service = CanonicService.from_project(project_dir, reload=ProjectReload.AUTO)
     loads.clear()
 
     for _ in range(3):
@@ -112,7 +113,7 @@ def test_unchanged_files_are_not_parsed_again(project_dir: Path, loads: list[Pat
 
 
 def test_an_invalid_edit_keeps_the_previous_state_and_names_the_file(project_dir: Path) -> None:
-    service = CanonicService.from_project(project_dir)
+    service = CanonicService.from_project(project_dir, reload=ProjectReload.AUTO)
     _edit(project_dir, _REVENUE, "metric: revenue\ncanonical: [not, a, mapping\n")
 
     assert [m.metric for m in service.list_metrics()] == ["revenue"]
@@ -121,7 +122,7 @@ def test_an_invalid_edit_keeps_the_previous_state_and_names_the_file(project_dir
 
 
 def test_the_same_broken_files_are_parsed_once(project_dir: Path, loads: list[Path]) -> None:
-    service = CanonicService.from_project(project_dir)
+    service = CanonicService.from_project(project_dir, reload=ProjectReload.AUTO)
     loads.clear()
     _edit(project_dir, _REVENUE, "metric: revenue\ncanonical: [not, a, mapping\n")
 
@@ -132,7 +133,7 @@ def test_the_same_broken_files_are_parsed_once(project_dir: Path, loads: list[Pa
 
 
 def test_fixing_the_files_serves_the_new_state_and_drops_the_warning(project_dir: Path) -> None:
-    service = CanonicService.from_project(project_dir)
+    service = CanonicService.from_project(project_dir, reload=ProjectReload.AUTO)
     good = (project_dir / _REVENUE).read_text()
     _edit(project_dir, _REVENUE, "metric: revenue\ncanonical: [not, a, mapping\n")
     service.list_metrics()
@@ -146,7 +147,7 @@ def test_fixing_the_files_serves_the_new_state_and_drops_the_warning(project_dir
 
 
 def test_a_request_finishes_on_the_state_it_started_with(project_dir: Path) -> None:
-    service = CanonicService.from_project(project_dir)
+    service = CanonicService.from_project(project_dir, reload=ProjectReload.AUTO)
     ctx = service._ctx  # noqa: SLF001
 
     with ctx.request():

@@ -270,7 +270,7 @@
           "type": "array"
         },
         "contract_schema": {
-          "default": "3.7",
+          "default": "3.8",
           "title": "Contract Schema",
           "type": "string"
         },

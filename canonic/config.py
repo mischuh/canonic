@@ -47,9 +47,23 @@ CONTEXT_DIRS: tuple[str, ...] = ("semantics", "knowledge", "contracts", "reports
 LOCAL_STATE_DIR = ".canonic"
 
 
+class ProjectReload(StrEnum):
+    """Whether a running server follows edits to the project files.
+
+    ``off`` loads the project once at startup and serves that state until the process is
+    restarted, which is what a deployed server wants: a deployment decides which definitions
+    are served. ``auto`` reloads contracts and semantics when their files change, which suits
+    a local server that an agent client started and that outlives an edit.
+    """
+
+    OFF = "off"
+    AUTO = "auto"
+
+
 class ProjectConfig(BaseModel):
     name: str
     default_connection: str | None = None
+    reload: ProjectReload = ProjectReload.OFF
 
 
 class Connection(BaseModel):

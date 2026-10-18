@@ -20,7 +20,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from canonic.compiler.dialect import DIALECT_ADAPTERS, TYPE_TO_DIALECT, adapter_for
-from canonic.config import CanonicConfig, Connection, load_config
+from canonic.config import CanonicConfig, Connection, ProjectReload, load_config
 from canonic.contracts import ContractResolver
 from canonic.exc import CanonicError, ConfigError
 from canonic.semantic.loader import list_semantic_sources
@@ -174,6 +174,10 @@ class ProjectInfo:
 
     fingerprint: str | None
     loaded_at: datetime | None
+    #: Whether the files on disk differ in content from the loaded state. Under
+    #: ``reload: off`` the difference is reported but not applied.
+    files_changed: bool = False
+    reload: ProjectReload = ProjectReload.OFF
 
 
 @dataclass(frozen=True)
@@ -188,28 +192,45 @@ class ReloadFailure:
 
 
 class ProjectReloader:
-    """Rebuilds the project state when the files it was loaded from change.
+    """Keeps the project state current, or reports that it is not, depending on ``mode``.
 
     :meth:`refresh` is called before a request is served and returns the state that request
     should use. Only ``canonic.yaml``, ``contracts/`` and ``semantics/`` are watched.
-    Connections are read from the new config too, but a connector already built for a request
-    in flight is not torn down, and settings consumed at startup (the MCP auth mechanism, the
-    event log location) need a restart.
 
-    A change that fails validation is remembered by its signature. The previous state keeps
-    serving, :attr:`failure` names the file, and the same broken files are not parsed again
-    until they change.
+    With ``reload: auto`` a changed file triggers a reload. Connections are read from the new
+    config too, but a connector already built for a request in flight is not torn down, and
+    settings consumed at startup (the MCP auth mechanism, the event log location, this mode)
+    need a restart. A change that fails validation is remembered by its signature. The previous
+    state keeps serving, :attr:`failure` names the file, and the same broken files are not
+    parsed again until they change.
+
+    With ``reload: off`` the state never changes. A changed file is only noticed:
+    :attr:`files_changed` says whether the contents on disk differ from the loaded state.
+    That is decided by content, so a file that was touched or checked out again unchanged does
+    not count, and it is computed once per change of the files, not per request.
     """
 
-    def __init__(self, root: Path, state: ProjectState) -> None:
+    def __init__(self, root: Path, state: ProjectState, mode: ProjectReload) -> None:
         self._root = root
         self._state = state
+        self._mode = mode
         self._signature = self._read_signature()
         self._failure: ReloadFailure | None = None
+        self._checked_signature = self._signature
+        self._files_changed = False
 
     @property
     def state(self) -> ProjectState:
         return self._state
+
+    @property
+    def mode(self) -> ProjectReload:
+        return self._mode
+
+    @property
+    def files_changed(self) -> bool:
+        """Whether the files on disk differ in content from the state being served."""
+        return self._files_changed
 
     @property
     def failure(self) -> ReloadFailure | None:
@@ -217,8 +238,11 @@ class ProjectReloader:
         return self._failure
 
     def refresh(self) -> ProjectState:
-        """The current state, reloaded first if a watched file changed since the last call."""
+        """The state to serve, reloaded first under ``auto`` if a watched file changed."""
         signature = self._read_signature()
+        if self._mode is ProjectReload.OFF:
+            self._note_drift(signature)
+            return self._state
         if signature == self._signature:
             self._failure = None
             return self._state
@@ -235,6 +259,19 @@ class ProjectReloader:
         self._failure = None
         logger.info("project reloaded after a file change: %s", self._root)
         return state
+
+    def _note_drift(self, signature: ProjectSignature) -> None:
+        if signature == self._checked_signature:
+            return
+        self._checked_signature = signature
+        drifted = project_fingerprint(self._root) != self._state.fingerprint
+        if drifted and not self._files_changed:
+            logger.warning(
+                "project files changed on disk, serving the state loaded at startup "
+                "(project.reload is off): %s",
+                self._root,
+            )
+        self._files_changed = drifted
 
     def _read_signature(self) -> ProjectSignature:
         entries: list[tuple[str, int, int]] = []

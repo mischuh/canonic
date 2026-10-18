@@ -15,6 +15,7 @@ from contextlib import contextmanager
 from contextvars import ContextVar
 from typing import TYPE_CHECKING, cast
 
+from canonic.config import ProjectReload
 from canonic.connectors.base import Capability, require_capability
 from canonic.connectors.factory import default_factory
 from canonic.contracts.principal import Principal
@@ -110,6 +111,15 @@ class ServiceContext:
     @property
     def project_fingerprint(self) -> str | None:
         return self.state.fingerprint
+
+    @property
+    def reload_mode(self) -> ProjectReload:
+        return self._reloader.mode if self._reloader is not None else ProjectReload.OFF
+
+    @property
+    def project_files_changed(self) -> bool:
+        """Whether the project files on disk differ in content from the state being served."""
+        return self._reloader.files_changed if self._reloader is not None else False
 
     @property
     def reload_warning(self) -> str | None:

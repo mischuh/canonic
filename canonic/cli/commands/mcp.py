@@ -12,7 +12,7 @@ from rich.console import Console
 
 from canonic.cli._errors import get_cli_context
 from canonic.cli._tenant import TenantOption, cli_tenant_principal
-from canonic.config import find_project_root, load_config
+from canonic.config import ProjectReload, find_project_root, load_config
 from canonic.exc import ConfigError
 
 app = typer.Typer(name="mcp", help="Control the local MCP daemon.")
@@ -106,6 +106,17 @@ def start(
             ),
         ),
     ] = False,
+    reload: Annotated[
+        bool | None,
+        typer.Option(
+            "--reload/--no-reload",
+            help=(
+                "Reload contracts and semantics when their files change, or never, "
+                "overriding project.reload in canonic.yaml (default off: the server serves "
+                "the state it loaded at startup)."
+            ),
+        ),
+    ] = None,
     child: Annotated[
         bool,
         typer.Option(
@@ -170,8 +181,9 @@ def start(
     from canonic.mcp.auth import build_mcp_auth, describe_auth_mechanisms
     from canonic.mcp.daemon import start_http, start_stdio
 
+    reload_mode = None if reload is None else ProjectReload.AUTO if reload else ProjectReload.OFF
     try:
-        service = CanonicService.from_project(root)
+        service = CanonicService.from_project(root, reload=reload_mode)
     except Exception as exc:
         msg = f"failed to load project context: {exc}"
         if json_output:
@@ -197,7 +209,7 @@ def start(
             if count:
                 if not json_output:
                     _console.print(f"[dim]auto-generated {count} inferred metric contract(s)[/dim]")
-                service = CanonicService.from_project(root)
+                service = CanonicService.from_project(root, reload=reload_mode)
 
     try:
         if transport == "http":
@@ -268,6 +280,7 @@ def start(
                 suggestions=suggestions,
                 token_ref=token_ref,
                 auth_mechanisms=auth_mechanisms,
+                reload=reload,
             )
             if json_output:
                 typer.echo(

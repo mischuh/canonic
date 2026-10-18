@@ -101,6 +101,8 @@ async def test_contract_info_returns_schema(canonic_service: CanonicService) -> 
         "canonic_version": CANONIC_VERSION,
         "project_fingerprint": None,
         "project_loaded_at": None,
+        "project_reload": "off",
+        "project_files_changed": False,
     }
 
 

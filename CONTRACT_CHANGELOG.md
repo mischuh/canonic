@@ -83,9 +83,21 @@ A change listed here was reviewed against the classification rules and did not b
 - Decision: no bump. A running server now serves the definitions on disk instead of the ones it
   loaded at startup. No field, type or error code changes. When an edit does not validate, the
   previous definitions keep serving and `warnings` of `query` and `compile_query` gains one entry
-  of free text that names the failing file.
+  of free text that names the failing file. Reloading is off by default since the
+  `project.reload` setting (feat(core) #440), see 3.8.
 
 ## History
+
+## 3.8 (2026-10-18) - MINOR
+
+- ADR/PR: this PR (feat(core): make reloading project files opt-in and report drift when it is off)
+- Summary: `contract_info` gains `project_reload` (`off` or `auto`) and `project_files_changed`.
+  The latter is `true` when the contents of `canonic.yaml`, `contracts/` or `semantics/` differ
+  from the state the server is serving, which is how a server with `project.reload: off` shows
+  that its files moved on. Both are present for every server, `off` and `false` for a service
+  built in memory. A consumer that ignores unknown fields is unaffected. The behaviour of #434
+  is now opt-in through `project.reload: auto` in `canonic.yaml`, or `--reload` on
+  `canonic mcp start`.
 
 ## 3.7 (2026-10-18) - MINOR
 
