@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import sys
 from typing import TYPE_CHECKING
 from unittest.mock import MagicMock, patch
 
@@ -259,10 +260,10 @@ def test_start_http_tasks_enabled_without_extra_exits_error(
 ) -> None:
     """mcp.tasks.enabled without the ``tasks`` extra installed is a hard, clear error.
 
-    ``fastmcp_tasks`` is genuinely not installed in the test environment (it's an
-    optional extra scoped to this feature), so this exercises the real check rather
-    than a mocked one.
+    A ``None`` entry in ``sys.modules`` makes the import fail the way a missing package
+    does, whether or not the extra is installed in this environment.
     """
+    monkeypatch.setitem(sys.modules, "fastmcp_tasks", None)
     (tmp_path / "canonic.yaml").write_text(_VALID_CONFIG + "mcp:\n  tasks:\n    enabled: true\n")
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("CANONIC_TEST_MCP_TOKEN", "s3cr3t")
