@@ -382,3 +382,50 @@ def test_single_population_filter_in_where(damages: SemanticSource) -> None:
     sql_lower = result.sql.lower()
     assert "severity" in sql_lower
     assert "major" in sql_lower
+
+
+def test_composition_reports_the_population_each_component_counts(
+    resolver_ratio: ContractResolver, damages: SemanticSource
+) -> None:
+    """The ratio's own filter is reported as declared, not wrapped in parentheses."""
+    result = compile(SemanticQuery(metrics=["avg_repair_costs"]), resolver_ratio, [damages])
+
+    components = result.compositions["avg_repair_costs"].components
+    assert [c.population_filter for c in components] == ["severity IN ('major', 'moderate')"] * 2
+
+
+def test_composition_combines_the_ratio_and_component_filters(
+    damages: SemanticSource,
+) -> None:
+    bindings = [
+        MetricBinding(
+            metric="total_repair_cost",
+            canonical=CanonicalRef(
+                source="damages",
+                measure="total_repair_cost",
+                population_filter="reported_month = '2024-01'",
+            ),
+        ),
+        MetricBinding(
+            metric="damage_count",
+            canonical=CanonicalRef(source="damages", measure="damage_count"),
+        ),
+        MetricBinding(
+            metric="avg_repair_costs",
+            canonical=CanonicalRef(
+                kind=BindingKind.RATIO,
+                numerator="total_repair_cost",
+                denominator="damage_count",
+                population_filter="severity = 'major'",
+            ),
+        ),
+    ]
+    result = compile(
+        SemanticQuery(metrics=["avg_repair_costs"]),
+        ContractResolver(bindings=bindings, guardrails=[]),
+        [damages],
+    )
+
+    numerator, denominator = result.compositions["avg_repair_costs"].components
+    assert numerator.population_filter == "(severity = 'major') AND (reported_month = '2024-01')"
+    assert denominator.population_filter == "severity = 'major'"

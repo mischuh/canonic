@@ -418,6 +418,11 @@ def compile(  # noqa: A001 — the public verb for this capability is "compile"
         related=related,
         trust_inputs=trust_inputs,
         composition=_first(planned, "composition"),
+        compositions={
+            name: metric_leaves.composition
+            for (name, _), metric_leaves in zip(raw_bindings, planned, strict=True)
+            if metric_leaves.composition is not None
+        },
         partial_additive=_first(planned, "partial_additive"),
         recompute_at_grain=_first(planned, "recompute_at_grain"),
         opaque=_first(planned, "opaque"),
@@ -510,9 +515,9 @@ def _first(planned: list[MetricLeaves], field: str) -> Any:
     """First requested metric's value for a per-kind metadata field, or None.
 
     ``CompileResult`` carries one slot per kind rather than one per metric, so a query
-    mixing two ratios can only report the first one's composition. Reporting *a* correct
-    composition beats reporting none; a per-metric map is a frozen-shape change and is
-    deferred (AMENDMENT §10).
+    mixing two ratios can only report the first one's composition there. Composition has a
+    per-metric map as well (``CompileResult.compositions``), which is what the served
+    metadata projects.
     """
     for metric_leaves in planned:
         value = getattr(metric_leaves, field)

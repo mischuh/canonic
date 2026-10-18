@@ -23,6 +23,7 @@ from canonic.core.models import (
     MetricDetail,
     MetricSummary,
     OverviewResult,
+    QueryMetadata,
 )
 from canonic.core.service import CanonicService
 from canonic.exc import Ambiguous, Unresolved
@@ -375,6 +376,31 @@ class TestDescribeMetricComposite:
         detail = weighted_avg_service.describe_metric("avg_weighted_cost")
         assert detail.source is None
         assert len(detail.dimensions) > 0
+
+
+class TestCompositionMetadata:
+    def test_ratio_metadata_carries_the_composition_block(
+        self, ratio_service: CanonicService
+    ) -> None:
+        compiled = ratio_service.compile_query(SemanticQuery(metrics=["avg_cost", "revenue"]))
+
+        metadata = QueryMetadata.from_compile_result(compiled)
+
+        assert set(metadata.composition) == {"avg_cost"}
+        composition = metadata.composition["avg_cost"]
+        assert composition.kind == "ratio"
+        assert composition.on_zero_denominator == "null"
+        assert composition.numerator.metric == "revenue"
+        assert composition.numerator.resolved == "orders.total_revenue"
+        assert composition.denominator.metric == "damage_count"
+        assert composition.denominator.population_filter is None
+
+    def test_metadata_without_a_composite_has_an_empty_composition(
+        self, canonic_service: CanonicService
+    ) -> None:
+        compiled = canonic_service.compile_query(SemanticQuery(metrics=["revenue"]))
+
+        assert QueryMetadata.from_compile_result(compiled).composition == {}
 
 
 class TestCompileQuery:

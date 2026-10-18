@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING
 
 from canonic.compiler.compose import Combine, LeafRef, MetricLeaves, MetricPlan
 from canonic.compiler.leaf import LeafContext, LeafMetric, LeafPlan, plan_leaf
-from canonic.compiler.result import CompositionMetadata
+from canonic.compiler.result import CompositionComponent, CompositionMetadata
 from canonic.compiler.strategies.recompute import plan_metric as plan_recompute_at_grain
 from canonic.contracts.models import BindingKind, OnZeroDenominator
 from canonic.exc import Unresolved, UnsupportedMeasure
@@ -113,6 +113,30 @@ _ZERO_POLICY: dict[OnZeroDenominator, Combine] = {
 }
 
 
+def _reported_population(*filters: str | None) -> str | None:
+    """The population a component was compiled over, as the caller should read it.
+
+    The same ANDing the leaf gets, but a lone filter is reported as declared instead of
+    wrapped in the parentheses that exist to keep two filters apart.
+    """
+    present = [f for f in filters if f]
+    if len(present) <= 1:
+        return present[0] if present else None
+    return _combine_population_filters(*present)
+
+
+def _composition_component(
+    component: ResolverBinding, composite_population_filter: str | None
+) -> CompositionComponent:
+    return CompositionComponent(
+        metric=component.metric,
+        resolved=component.resolved_key,
+        population_filter=_reported_population(
+            composite_population_filter, component.binding.canonical.population_filter
+        ),
+    )
+
+
 def plan_metric(
     query: SemanticQuery,
     queried_name: str,
@@ -182,6 +206,10 @@ def plan_metric(
             numerator=num_name,
             denominator=den_name,
             on_zero_denominator=on_zero,
+            components=(
+                _composition_component(components.numerator, composite_pop_filter),
+                _composition_component(components.denominator, composite_pop_filter),
+            ),
         ),
         warnings=zero_warnings,
     )

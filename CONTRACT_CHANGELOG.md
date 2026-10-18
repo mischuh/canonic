@@ -49,6 +49,17 @@ A change listed here was reviewed against the classification rules and did not b
 
 ## History
 
+## 3.4 (2026-10-18) - MINOR
+
+- ADR/PR: this PR (feat(compiler): expose composition metadata per metric in the query result)
+- Summary: `QueryResult.metadata` and the compile output gain an optional `composition` map, one
+  entry per composite metric (`ratio`, `weighted_avg`) of the query, keyed by the requested metric
+  name. Each entry carries `kind`, `on_zero_denominator` and the `numerator` and `denominator`,
+  each with its `metric`, its `resolved` binding and the `population_filter` its leaf was compiled
+  over (the composite's own filter and the component's, ANDed when both are declared). The map is
+  empty for a query without a composite metric. A consumer that ignores unknown fields is
+  unaffected.
+
 ## 3.3 (2026-10-18) - MINOR
 
 - ADR/PR: this PR (fix(mcp): return binding details for composite metrics)

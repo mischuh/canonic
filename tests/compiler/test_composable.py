@@ -567,3 +567,63 @@ def test_single_missing_source_raises() -> None:
 
     with pytest.raises(ValidationError, match="source"):
         CanonicalRef(kind=BindingKind.SINGLE, measure="m")
+
+
+def test_composition_names_components_with_their_resolved_bindings(
+    resolver: ContractResolver, sources: list[SemanticSource]
+) -> None:
+    result = compile(SemanticQuery(metrics=["avg_repair_costs"]), resolver, sources)
+
+    composition = result.compositions["avg_repair_costs"]
+    assert [(c.metric, c.resolved, c.population_filter) for c in composition.components] == [
+        ("total_repair_cost", "damages.total_repair_cost", None),
+        ("damage_count", "damages.damage_count", None),
+    ]
+
+
+def test_composition_reports_every_composite_metric_of_a_query(
+    sources: list[SemanticSource],
+    total_cost_binding: MetricBinding,
+    damage_count_binding: MetricBinding,
+) -> None:
+    """``composition`` keeps only the first composite, the map has all of them."""
+    bindings = [
+        total_cost_binding,
+        damage_count_binding,
+        MetricBinding(
+            metric="cost_per_damage",
+            canonical=CanonicalRef(
+                kind=BindingKind.RATIO,
+                numerator="total_repair_cost",
+                denominator="damage_count",
+            ),
+        ),
+        MetricBinding(
+            metric="damages_per_cost",
+            canonical=CanonicalRef(
+                kind=BindingKind.RATIO,
+                numerator="damage_count",
+                denominator="total_repair_cost",
+                on_zero_denominator=OnZeroDenominator.ZERO,
+            ),
+        ),
+    ]
+    result = compile(
+        SemanticQuery(metrics=["cost_per_damage", "damages_per_cost", "damage_count"]),
+        ContractResolver(bindings=bindings, guardrails=[]),
+        sources,
+    )
+
+    assert set(result.compositions) == {"cost_per_damage", "damages_per_cost"}
+    assert result.compositions["cost_per_damage"].on_zero_denominator == "null"
+    assert result.compositions["damages_per_cost"].on_zero_denominator == "zero"
+    assert result.compositions["damages_per_cost"].numerator == "damage_count"
+    assert result.composition == result.compositions["cost_per_damage"]
+
+
+def test_composition_is_empty_without_a_composite_metric(
+    resolver: ContractResolver, sources: list[SemanticSource]
+) -> None:
+    result = compile(SemanticQuery(metrics=["damage_count"]), resolver, sources)
+
+    assert result.compositions == {}
