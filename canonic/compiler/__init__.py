@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from canonic.compiler._helpers import filter_entities
 from canonic.compiler.dialect import DIALECT_ADAPTERS, DialectAdapter, PostgresDialectAdapter
 from canonic.compiler.pipeline import compile
 from canonic.compiler.query import SemanticQuery
@@ -16,4 +17,5 @@ __all__ = [
     "SemanticQuery",
     "SourceFreshness",
     "compile",
+    "filter_entities",
 ]

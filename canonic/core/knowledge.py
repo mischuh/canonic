@@ -14,6 +14,7 @@ if TYPE_CHECKING:
     from canonic.compiler.result import CompileResult
     from canonic.core.context import ServiceContext
     from canonic.knowledge.embeddings import Embedder
+    from canonic.knowledge.linker import KnowledgeLinker
     from canonic.knowledge.models import KnowledgePage
     from canonic.knowledge.results import SearchResult
 
@@ -63,16 +64,25 @@ class KnowledgeService:
         """
         from dataclasses import replace
 
-        from canonic.knowledge import KnowledgeScope
-        from canonic.knowledge.guardrail_refs import GuardrailKnowledgeLinker
-
         if not compiled.guardrails_fired:
             return compiled
+        linker = self.linker(principal)
+        if linker is None:
+            return compiled
+        return replace(compiled, guardrails_fired=linker.link(compiled.guardrails_fired))
+
+    def linker(self, principal: Principal | None) -> KnowledgeLinker | None:
+        """A linker over the global pages the caller's role may see, ``None`` without any.
+
+        Global pages only: a shared answer or description must not point at a personal page.
+        """
+        from canonic.knowledge import KnowledgeScope
+        from canonic.knowledge.linker import KnowledgeLinker
+
         pages = [p for p in self._loaded_pages() if p.scope is KnowledgeScope.GLOBAL]
         if not pages:
-            return compiled
-        linker = GuardrailKnowledgeLinker(self._tag_visible_pages(pages, principal))
-        return replace(compiled, guardrails_fired=linker.link(compiled.guardrails_fired))
+            return None
+        return KnowledgeLinker(self._tag_visible_pages(pages, principal))
 
     def _loaded_pages(self) -> list[KnowledgePage]:
         """All loaded pages, re-read only when a file under ``knowledge/`` changed.

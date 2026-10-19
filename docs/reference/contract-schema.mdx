@@ -41,6 +41,7 @@ status: active
 | `deprecated_alternatives` | `list[DeprecatedAlternative]` | `[]` | Known non-canonical definitions, explicitly flagged as superseded. |
 | `examples` | `list[Example]` | `[]` | Usage-backed example queries (from assertions, observed queries, or usage evidence). |
 | `status` | `Status` | `active` | `active` \| `deprecated`. Only `active` bindings are checked for duplicate names/aliases across the project. |
+| `knowledge_refs` | `list[str]` | `[]` | Ids of the global knowledge pages that define or qualify this metric. When set, `describe_metric` and `list_metrics` return exactly these (the ones the caller may see) and look no further. `canonic validate` rejects an id that is not a global page. |
 
 A metric binding is what turns a name like `revenue` into something the compiler can actually run. `metric` is the name callers ask for, `canonical` is the recipe for computing it, and `owner`/`aliases`/`examples` exist to keep the binding discoverable and accountable rather than a bare formula nobody can trace back to a person or a prior query. `status: deprecated` lets you keep an old binding around for history without it competing for a name a newer binding now owns.
 

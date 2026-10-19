@@ -76,6 +76,10 @@ class KnowledgePage(BaseModel):
     tags: list[str] = []
     sl_refs: list[str] = []  # → semantic entities (E5), fully qualified
     refs: list[str] = []  # → other pages by id/slug
+    #: Metrics this page defines or qualifies, by canonical name. ``describe_metric`` returns the
+    #: page for a metric named here, which an ``sl_ref`` cannot express for a metric that has no
+    #: column of its own.
+    metrics: list[str] = []
     usage_mode: UsageMode = UsageMode.REFERENCE
     meta: KnowledgePageMeta = KnowledgePageMeta()
     body: str = ""  # Markdown body, verbatim

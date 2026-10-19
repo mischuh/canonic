@@ -13,6 +13,7 @@ sl_refs:
   - warehouse_pg.customers
   - warehouse_pg.orders.total_revenue
 refs: [test-account-policy]
+metrics: [active_customers]
 usage_mode: caveat
 meta:
   provenance: human_curated
@@ -31,6 +32,7 @@ meta:
 | `tags` | `list[str]` | `[]` | Free-form tags, indexed and boosted in lexical search. |
 | `sl_refs` | `list[str]` | `[]` | Fully-qualified semantic entity references (e.g. `orders.revenue`). Each must resolve to a live semantic entity at write time, or the write is rejected. |
 | `refs` | `list[str]` | `[]` | References to other pages by id/slug. Each must point at an existing page in a visible scope, or the write is rejected. |
+| `metrics` | `list[str]` | `[]` | Canonical names of the metrics this page defines or qualifies. `describe_metric` and `list_metrics` return the page in the `knowledge_refs` of each metric named here. `canonic validate` rejects a name that is not an active metric, and tells you the canonical name when you used an alias. |
 | `usage_mode` | `UsageMode` | `reference` | `reference` \| `caveat` \| `policy` \| `definition`, see below. |
 | `meta` | `KnowledgePageMeta` | `{provenance: inferred}` | System-managed, see below. |
 

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
+from canonic.compiler import filter_entities
 from canonic.compiler.joins import build_alias_tree, reachable_dimension_names
 from canonic.compiler.result import TrustInput
 from canonic.compiler.trust_inputs import trust_inputs_for_binding
@@ -32,7 +33,10 @@ if TYPE_CHECKING:
     from canonic.contracts.principal import EffectivePolicy
     from canonic.contracts.resolver import ContractResolver
     from canonic.core.context import ServiceContext
+    from canonic.core.knowledge import KnowledgeService
+    from canonic.knowledge.linker import KnowledgeLinker
     from canonic.semantic.models import Dimension as _Dimension
+    from canonic.semantic.models import SemanticSource
     from canonic.trust.models import TrustScore
 
 
@@ -70,14 +74,60 @@ def _leaf_bindings(binding: ResolverBinding) -> list[ResolverBinding]:
     ]
 
 
+def _filter_entities_of(
+    binding: ResolverBinding,
+    sources_by_name: dict[str, SemanticSource],
+    inherited: tuple[str, ...] = (),
+) -> tuple[str, ...]:
+    """The entities read by the population filters of a metric and of its components.
+
+    A filter on a composite is compiled into each of its leaves, so it is read against the
+    source of every leaf. The measures the metric reads are not included on purpose.
+    """
+    own = binding.binding.canonical.population_filter
+    filters = (*inherited, own) if own else inherited
+    if binding.components is not None:
+        return tuple(
+            dict.fromkeys(
+                entity
+                for component in (binding.components.numerator, binding.components.denominator)
+                for entity in _filter_entities_of(component, sources_by_name, filters)
+            )
+        )
+    if binding.source is None:
+        return ()
+    return tuple(
+        dict.fromkeys(
+            entity
+            for filter_sql in filters
+            for entity in filter_entities(filter_sql, binding.source, sources_by_name)
+        )
+    )
+
+
 _ANONYMOUS_PRINCIPAL = Principal()
 
 
 class DiscoveryService:
     """Read-only metric discovery: summaries, detail, trust worklist, and domain overview."""
 
-    def __init__(self, ctx: ServiceContext) -> None:
+    def __init__(self, ctx: ServiceContext, knowledge: KnowledgeService) -> None:
         self._ctx = ctx
+        self._knowledge = knowledge
+
+    def _knowledge_refs(
+        self, binding: ResolverBinding, linker: KnowledgeLinker | None
+    ) -> list[str]:
+        """The ids of the visible knowledge pages that define or qualify ``binding``'s metric."""
+        if linker is None:
+            return []
+        return list(
+            linker.refs_for_metric(
+                binding.metric,
+                binding.binding.knowledge_refs,
+                _filter_entities_of(binding, self._ctx.source_by_name),
+            )
+        )
 
     def list_metrics(self, *, principal: Principal | None = None) -> list[MetricSummary]:
         """Return a summary of every active canonical metric (SPEC §4.1).
@@ -88,10 +138,17 @@ class DiscoveryService:
         effective_policy = self._ctx.resolver.authz_for(
             principal if principal is not None else _ANONYMOUS_PRINCIPAL
         )
+        linker = self._knowledge.linker(principal)
         summaries: list[MetricSummary] = []
         for b in self._ctx.resolver.active_bindings():
             if not effective_policy.metric_allowed(b.metric):
                 continue
+            resolved = self._ctx.resolver.resolve_metric(b.metric)
+            knowledge_refs = (
+                self._knowledge_refs(resolved, linker)
+                if isinstance(resolved, ResolverBinding)
+                else []
+            )
             canonical = b.canonical
             spec = spec_for(canonical.kind)
             source: str | None
@@ -115,6 +172,7 @@ class DiscoveryService:
                     status=b.status.value,
                     aliases=list(b.aliases),
                     components=components,
+                    knowledge_refs=knowledge_refs,
                 )
             )
         # deduplicate by metric name (each metric may appear multiple times in the name index
@@ -185,6 +243,7 @@ class DiscoveryService:
             principal if principal is not None else _ANONYMOUS_PRINCIPAL
         )
         spec = spec_for(binding.kind)
+        knowledge_refs = self._knowledge_refs(binding, self._knowledge.linker(principal))
         if spec.is_composite:
             assert binding.components is not None  # noqa: S101
             all_dims: list[DimensionInfo] = []
@@ -232,6 +291,7 @@ class DiscoveryService:
                 aliases=list(binding.binding.aliases),
                 freshness=None,
                 examples=list(binding.binding.examples),
+                knowledge_refs=knowledge_refs,
             )
         if not spec.is_describable:
             raise UnsupportedMeasure(
@@ -267,6 +327,7 @@ class DiscoveryService:
             aliases=list(binding.binding.aliases),
             freshness=freshness,
             examples=list(binding.binding.examples),
+            knowledge_refs=knowledge_refs,
         )
 
     def get_overview(

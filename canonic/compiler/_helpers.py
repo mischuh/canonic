@@ -538,16 +538,37 @@ def _guardrail_entities(
 
     add(metric.source, metric.measure.name)
     if guardrail.filter:
-        bound, _ = _qualify_columns(_parse(guardrail.filter), sources_by_name, metric.source)
-        for column in bound.find_all(exp.Column):
-            if column.table not in sources_by_name:
-                continue
-            add(column.table, column.name)
-            for dimension in sources_by_name[column.table].dimensions:
-                if dimension.column == column.name:
-                    add(column.table, dimension.name)
+        entities.update(
+            dict.fromkeys(filter_entities(guardrail.filter, metric.source, sources_by_name))
+        )
     if guardrail.dimension:
         add(metric.source, guardrail.dimension.rsplit(".", 1)[-1])
+    return tuple(entities)
+
+
+def filter_entities(
+    filter_sql: str, owner: str, sources_by_name: dict[str, SemanticSource]
+) -> tuple[str, ...]:
+    """Fully qualified semantic entities a filter reads, in a stable order.
+
+    The columns of the predicate and the dimensions declared on those columns, since a page may
+    refer to either, as ``connection.source.member``. ``owner`` is the source bare names resolve
+    against. A filter that does not parse, or names something the sources do not have, reads no
+    entities: this is for describing a contract, never for compiling it.
+    """
+    entities: dict[str, None] = {}
+    try:
+        bound, _ = _qualify_columns(_parse(filter_sql), sources_by_name, owner)
+    except (sqlglot.errors.SqlglotError, UnreachableError):
+        return ()
+    for column in bound.find_all(exp.Column):
+        source = sources_by_name.get(column.table)
+        if source is None:
+            continue
+        entities[f"{source.connection}.{source.name}.{column.name}"] = None
+        for dimension in source.dimensions:
+            if dimension.column == column.name:
+                entities[f"{source.connection}.{source.name}.{dimension.name}"] = None
     return tuple(entities)
 
 

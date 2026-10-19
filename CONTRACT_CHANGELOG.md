@@ -88,6 +88,17 @@ A change listed here was reviewed against the classification rules and did not b
 
 ## History
 
+## 3.9 (2026-10-19) - MINOR
+
+- ADR/PR: this PR (feat(mcp): return the knowledge pages that define a metric in describe_metric)
+- Summary: `describe_metric` and each entry of `list_metrics` gain `knowledge_refs`: the ids of the
+  visible knowledge pages that define or qualify the metric, sorted. They come from the first
+  step that applies: the optional `knowledge_refs` on the metric binding, the pages that name the
+  metric in the new `metrics` front matter list, then the definition and caveat pages whose
+  `sl_refs` overlap the entities of the metric's filter. The binding and the knowledge page schema
+  gain those optional fields. `[]` when nothing applies. A consumer that ignores unknown fields is
+  unaffected.
+
 ## 3.8 (2026-10-18) - MINOR
 
 - ADR/PR: this PR (feat(core): make reloading project files opt-in and report drift when it is off)

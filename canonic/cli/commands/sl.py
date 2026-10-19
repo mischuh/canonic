@@ -146,6 +146,8 @@ def describe(
         console.print(f"  dimensions: {', '.join(d.name for d in detail.dimensions)}")
     if detail.freshness:
         console.print(f"  freshness:  {detail.freshness.last_validated_at}")
+    if detail.knowledge_refs:
+        console.print(f"  knowledge:  {', '.join(detail.knowledge_refs)}")
     if detail.examples:
         console.print("  examples:")
         for ex in detail.examples:

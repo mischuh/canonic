@@ -112,9 +112,9 @@ class CanonicService:
             reloader=reloader,
         )
         ctx = self._ctx
-        self._discovery = DiscoveryService(ctx)
         self._assertions = AssertionService(ctx)
         self._knowledge = KnowledgeService(ctx)
+        self._discovery = DiscoveryService(ctx, self._knowledge)
         self._query = QueryService(ctx, self._assertions, self._knowledge)
         self._reports = ReportService(ctx, self._query, self._knowledge)
 

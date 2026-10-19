@@ -27,7 +27,7 @@ A client that supports MCP server extensions (SEP-2133) does not need either too
 
 ```json
 {
-  "app.getcanonic/contract": {"schema": "3.8", "major": 3, "minor": 8}
+  "app.getcanonic/contract": {"schema": "3.9", "major": 3, "minor": 9}
 }
 ```
 
@@ -39,7 +39,7 @@ Returns the serving contract version this daemon implements, the canonic version
 
 ```json
 {
-  "contract_schema": "3.8",
+  "contract_schema": "3.9",
   "canonic_version": "0.41.0",
   "project_fingerprint": "3f9a1c6e0b24d871",
   "project_loaded_at": "2026-10-18T14:02:11.482913+00:00",
@@ -62,11 +62,19 @@ The recommended first call: active metrics grouped by domain with plain-language
 
 ### `list_metrics()`
 
-Lists all active canonical metrics this project defines, plus a deduplicated catalog of every dimension queryable against them. Each metric's `dimensions` list holds canonical names only: look those up in the top-level `dimensions` catalog for the human-readable label and source. Use canonical names directly in `query()` calls.
+Lists all active canonical metrics this project defines, plus a deduplicated catalog of every dimension queryable against them. Each metric's `dimensions` list holds canonical names only: look those up in the top-level `dimensions` catalog for the human-readable label and source. Use canonical names directly in `query()` calls. Each metric also carries `knowledge_refs`, the ids of the knowledge pages that define or qualify it, resolved as described under `describe_metric`, so an agent choosing between related metrics can read the page that tells them apart.
 
 ### `describe_metric(name: str)`
 
-Returns grain, dimensions, measures, and freshness for one metric, plus how it is built: `kind`, `components` and `population_filter`.
+Returns grain, dimensions, measures, and freshness for one metric, plus how it is built: `kind`, `components` and `population_filter`, and `knowledge_refs`, the ids of the knowledge pages that define or qualify it. Read them with `read_knowledge_page` before choosing between related metrics, for example a broad and a narrow variant of one measure.
+
+`knowledge_refs` lists only pages the caller may see, sorted, and comes from the first of these that applies:
+
+1. The `knowledge_refs` declared on the metric binding. Ids that are not visible to the caller are dropped.
+2. The pages that name the metric in their front matter `metrics:` list.
+3. The `definition` and `caveat` pages whose `sl_refs` overlap the columns, or the dimensions declared on them, that the metric's `population_filter` reads. For a composite this includes the filters of its components. The measure itself is not used, because many metrics share one measure and every page touching it would match them all.
+
+A composite metric gets its own list. The pages of its components are not merged in: call `describe_metric` on a component when you need them. Only global pages are listed.
 
 For a composite metric (`ratio`, `weighted_avg`) `source` and `measure` are `null`, `components` names the numerator and denominator metrics, `measures` lists the measures those components read, and `grain` is the shared grain when both components sit on one source (empty otherwise).
 
