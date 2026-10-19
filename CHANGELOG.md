@@ -1,5 +1,24 @@
 # Changelog
 
+## [0.43.0](https://github.com/mischuh/canonic/compare/v0.42.0...v0.43.0) (2026-10-19)
+
+
+### Features
+
+* **contracts:** declare numerator_parts on ratio and weighted_avg metrics ([#447](https://github.com/mischuh/canonic/issues/447)) ([e2b5eaa](https://github.com/mischuh/canonic/commit/e2b5eaab321968623ea9dd3ee3415c776ccc95ae))
+* **core:** decompose the change of a metric between two periods ([#450](https://github.com/mischuh/canonic/issues/450)) ([1fbdcb8](https://github.com/mischuh/canonic/commit/1fbdcb882dfaa9470e195972318200cc1e4ea8db))
+* **mcp:** expose decompose_change and canonic decompose ([#452](https://github.com/mischuh/canonic/issues/452)) ([fde1221](https://github.com/mischuh/canonic/commit/fde1221f7277c0f8478bd35a43e9ce8704be23ac))
+
+
+### Bug Fixes
+
+* **compiler:** skip the latest-period probe on the column of a grouped time dimension ([#454](https://github.com/mischuh/canonic/issues/454)) ([bf72aa4](https://github.com/mischuh/canonic/commit/bf72aa412d25a963b8d05c0513cde31e578273e8))
+
+
+### Documentation
+
+* document decompose where commands, task tools and answer events are listed ([#456](https://github.com/mischuh/canonic/issues/456)) ([52010cc](https://github.com/mischuh/canonic/commit/52010cc612e7ed3775f90b59ed6900946cd996f4))
+
 ## [0.42.0](https://github.com/mischuh/canonic/compare/v0.41.0...v0.42.0) (2026-10-19)
 
 
