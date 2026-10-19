@@ -3,9 +3,10 @@
 MCP and CLI adapters call this service; they do not duplicate any logic (SPEC §2.1).
 
 :class:`CanonicService` is a thin facade: it wires the injected dependencies into a shared
-:class:`~canonic.core.context.ServiceContext` and delegates each capability to one of five
+:class:`~canonic.core.context.ServiceContext` and delegates each capability to one of six
 focused collaborators — :class:`~canonic.core.discovery.DiscoveryService`,
-:class:`~canonic.core.query.QueryService`, :class:`~canonic.core.assertions.AssertionService`,
+:class:`~canonic.core.query.QueryService`, :class:`~canonic.core.decompose.DecomposeService`,
+:class:`~canonic.core.assertions.AssertionService`,
 :class:`~canonic.core.knowledge.KnowledgeService`, and :class:`~canonic.core.reports.ReportService`.
 The public method surface is unchanged, so the CLI/MCP adapters and their byte-identical parity
 are unaffected.
@@ -18,6 +19,7 @@ from typing import TYPE_CHECKING, Any
 
 from canonic.core.assertions import AssertionService
 from canonic.core.context import ServiceContext
+from canonic.core.decompose import DecomposeService
 from canonic.core.discovery import DiscoveryService
 from canonic.core.knowledge import KnowledgeService
 from canonic.core.project import ProjectInfo, ProjectReloader, ProjectState
@@ -39,6 +41,7 @@ if TYPE_CHECKING:
     from canonic.contracts.models import Assertion
     from canonic.contracts.principal import Caller, Principal
     from canonic.contracts.resolver import Binding
+    from canonic.core.decompose_models import DecomposeRequest, DecomposeResult
     from canonic.core.models import (
         MetricDetail,
         MetricSummary,
@@ -116,6 +119,7 @@ class CanonicService:
         self._knowledge = KnowledgeService(ctx)
         self._discovery = DiscoveryService(ctx, self._knowledge)
         self._query = QueryService(ctx, self._assertions, self._knowledge)
+        self._decompose = DecomposeService(ctx, self._query)
         self._reports = ReportService(ctx, self._query, self._knowledge)
 
     @property
@@ -240,6 +244,17 @@ class CanonicService:
     ) -> QueryResult:
         """Compile and execute a semantic query read-only (SPEC §2)."""
         return await self._query.query(query, harness=harness, caller=caller, principal=principal)
+
+    @_served_async
+    async def decompose(
+        self,
+        request: DecomposeRequest,
+        *,
+        caller: Caller | None = None,
+        principal: Principal | None = None,
+    ) -> DecomposeResult:
+        """Attribute the change of one metric between two periods, overall and by member."""
+        return await self._decompose.decompose(request, caller=caller, principal=principal)
 
     @_served_async
     async def run_sql(

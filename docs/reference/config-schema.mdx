@@ -18,6 +18,7 @@ description: "Every top-level field in the project config file, and what it gove
 | `reconcile` | `ReconcileConfig` | propose-only | Auto-apply policy for ingestion, see [Ingestion & reconciliation](/concepts/ingestion-and-reconciliation#propose-only-by-default). |
 | `knowledge` | `KnowledgeConfig` | `staleness_window_days: 90` | Days a knowledge page's references may go unvalidated before `read_knowledge_page` reports a staleness signal, see [below](#knowledge). |
 | `trust` | `TrustConfig` | `stale_after_days: null`, `flag_open_periods: true` | Staleness policy for source freshness and the open-period check, see [below](#trust). |
+| `decompose` | `DecomposeConfig` | `enabled: true`, see [below](#decompose) | Limits of the `decompose` capability, which attributes a metric's change between two periods. |
 | `feedback` | `FeedbackConfig` | see [below](#feedback) | Pattern-gate and trust-cap thresholds for the E11 feedback loop, see [Feedback loop (E11)](/concepts/ingestion-and-reconciliation#feedback-loop-e11). |
 | `runtime` | `RuntimeConfig` | `air_gapped: false` | Air-gapped enforcement, see [LLM & embeddings runtime](/concepts/llm-runtime#air-gapped-mode--enforced-not-advisory). |
 | `logging` | `LoggingConfig` | `level: WARNING`, `format: text` | Log level, optional file, text/json format, and size-based rotation, see [below](#logging). |
@@ -180,6 +181,27 @@ trust:
 `stale_after_days` is the staleness policy for source freshness. A source whose `meta.last_validated_at` is older than this reports `stale: true` in the `freshness` block, and the answer's trust tier is capped at `provisional` with the reason `freshness: stale (<source>)`. `canonic ingest` refreshes the stamp whenever a source is unchanged. The default `null` defines no policy, so nothing is ever stale. It is opt-in because a project that stops running ingest would otherwise fall below any `min_trust` guardrail on the day the window elapses.
 
 `flag_open_periods` (default `true`) turns on the check for a period that has not ended. When a query groups by a time dimension and the latest period in the result has not ended at the serving clock, the response carries a warning naming the period and the dimension, and the trust tier is capped at `provisional` with the reason `<dimension>: <grain> <period> has not ended`. The trailing period holds only what has been booked so far, and a ratio over it can sit far outside its normal range. The clock is the current time, or the query's `as_of` when it is pinned. A finality rule that governs the query takes precedence and this check stays silent. Set it to `false` for a project whose sources are always complete. The period is known from the dimension's `time_grain` or its `granularity`, see [semantic schema](/reference/semantic-schema#dimensions). A query that only filters on a time dimension has no period in its result, so the compiler adds a hidden column, `_canonic_latest_period_<dimension>`, with the latest value of that dimension over the rows the first metric is computed from. `query` reads it and removes it from the result. Its guardrails and tenant scoping apply, so a row they exclude does not count as the latest period. That check covers a time dimension declared on the metric's own source, or on a joined source whose join does not multiply the metric's rows (a calendar table, for example), on a plain additive metric or a ratio of such metrics. A dimension behind a join that fans out, a JSON-key dimension, and a column whose name needs quoting are left unchecked. The latest value is placed in its period by the dimension's grain, and a week starts on Monday.
+
+## `decompose`
+
+```yaml
+decompose:
+  enabled: true        # register the capability on every surface
+  max_by: 3            # split dimensions per call
+  top_n: 10            # default rows per dimension
+  max_top_n: 50        # upper bound for a request's top_n
+  parts_tolerance: 1.0e-9
+```
+
+| Field | Type | Default | Governs |
+| --- | --- | --- | --- |
+| `enabled` | `bool` | `true` | Whether `decompose` is offered. With `false` the capability fails with `capability_disabled`. |
+| `max_by` | `int` (`ge=1`) | `3` | How many split dimensions one call may name. More fail with `validation_failed`. |
+| `top_n` | `int` (`ge=1`) | `10` | Members listed per dimension when the request sets no `top_n`. The rest are merged into one row. |
+| `max_top_n` | `int` (`ge=1`) | `50` | The upper bound for a request's `top_n`. A larger value is capped. Must be at least `top_n`. |
+| `parts_tolerance` | `float` (`ge=0`) | `1e-9` | The relative difference allowed between the sum of a metric's `numerator_parts` and its numerator before the call fails with `decomposition_inconsistent`. |
+
+One call runs one statement for the overall values and one per split dimension, so these limits bound its cost on the warehouse. A project that does not want that extra load sets `enabled: false`.
 
 ## `feedback`
 

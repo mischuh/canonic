@@ -31,6 +31,9 @@ Every canonic error carries a stable, wire-safe `code` string plus a headless pr
 | 23 | `tenant_scope_missing` | A query reaches a source declared in neither `scoped_sources` nor `shared_sources` of the tenancy policy: a policy hole, not an unfiltered pass-through. |
 | 24 | `tenant_forbidden` | The caller's own policy denies something the caller can already see: `run_sql` denied by role, or `run_sql` refused because the connection lacks `rls_enforced: true` under an active tenancy policy. |
 | 25 | `tenant_limit_exceeded` | A principal's tenant claim holds more distinct values than `mcp.auth.max_tenants`. Raised while the principal is bound from the token, before any SQL is compiled. |
+| 26 | `period_open` | `decompose` was asked to compare a period that has not ended at the serving clock (or `as_of`). Set `allow_open_period: true` to decompose it anyway. |
+| 27 | `decomposition_inconsistent` | The declared `numerator_parts` of a metric do not sum to its numerator in one of the compared periods: a contract bug that a decomposition would hide. |
+| 28 | `capability_disabled` | A capability was called that the project config switches off, such as `decompose` under `decompose.enabled: false`. |
 
 ## Resolving `ambiguous`
 

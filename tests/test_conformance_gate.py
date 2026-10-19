@@ -2,7 +2,7 @@
 
 Golden JSON schemas are stored under tests/snapshots/contract_schema_v1/.
 Any change to the frozen field set of SemanticQuery, QueryResult, CompileOutput,
-or the error registry fails these tests unless the snapshot is updated *and*
+DecomposeResult, or the error registry fails these tests unless the snapshot is updated *and*
 contract_schema is bumped per §4.
 """
 
@@ -15,6 +15,7 @@ import pytest
 
 from canonic.compiler.query import SemanticQuery
 from canonic.contract import CONTRACT_SCHEMA
+from canonic.core.decompose_models import DecomposeResult
 from canonic.core.models import CompileOutput, QueryResult
 from canonic.exc import EXIT_CODES, ErrorCode
 
@@ -47,6 +48,13 @@ def test_compile_output_schema_unchanged() -> None:
 
 
 @pytest.mark.release_gate
+def test_decompose_result_schema_unchanged() -> None:
+    assert DecomposeResult.model_json_schema() == _load("decompose_result.json"), (
+        "DecomposeResult schema changed — update the snapshot and bump contract_schema per §4"
+    )
+
+
+@pytest.mark.release_gate
 def test_error_registry_unchanged() -> None:
     registry = {code.value: EXIT_CODES[code] for code in ErrorCode}
     assert registry == _load("error_registry.json"), (
@@ -58,7 +66,8 @@ def test_error_registry_unchanged() -> None:
 def test_contract_schema_stamped_in_snapshots() -> None:
     qr_schema = _load("query_result.json")
     co_schema = _load("compile_output.json")
-    for schema in (qr_schema, co_schema):
+    dr_schema = _load("decompose_result.json")
+    for schema in (qr_schema, co_schema, dr_schema):
         props = schema.get("$defs", {}).get("QueryMetadata", {}).get("properties", {})
         default = props.get("contract_schema", {}).get("default")
         assert default == CONTRACT_SCHEMA, (

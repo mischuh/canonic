@@ -1,0 +1,982 @@
+{
+  "$defs": {
+    "AdditiveBreakdown": {
+      "description": "The change split by the members of one dimension. ``residual`` is what the rows miss.",
+      "properties": {
+        "rows": {
+          "items": {
+            "$ref": "#/$defs/AdditiveRow"
+          },
+          "title": "Rows",
+          "type": "array"
+        },
+        "residual": {
+          "title": "Residual",
+          "type": "number"
+        }
+      },
+      "required": [
+        "rows",
+        "residual"
+      ],
+      "title": "AdditiveBreakdown",
+      "type": "object"
+    },
+    "AdditiveRow": {
+      "description": "One member's values and its contribution to the change.\n\nA row with ``rest: true`` merges every member beyond ``top_n``. Its ``member`` is ``null``.",
+      "properties": {
+        "member": {
+          "title": "Member"
+        },
+        "base": {
+          "title": "Base",
+          "type": "number"
+        },
+        "compare": {
+          "title": "Compare",
+          "type": "number"
+        },
+        "contribution": {
+          "title": "Contribution",
+          "type": "number"
+        },
+        "rest": {
+          "default": false,
+          "title": "Rest",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "member",
+        "base",
+        "compare",
+        "contribution"
+      ],
+      "title": "AdditiveRow",
+      "type": "object"
+    },
+    "CompositionComponentOut": {
+      "description": "One side of a composite metric: its binding and the population it counts.",
+      "properties": {
+        "metric": {
+          "title": "Metric",
+          "type": "string"
+        },
+        "resolved": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Resolved"
+        },
+        "population_filter": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Population Filter"
+        }
+      },
+      "required": [
+        "metric"
+      ],
+      "title": "CompositionComponentOut",
+      "type": "object"
+    },
+    "CompositionOut": {
+      "description": "How one composite metric (``ratio``, ``weighted_avg``) was formed for this query.\n\n``on_zero_denominator`` is the policy applied to a row with a zero denominator. Under\n``zero`` that row becomes ``0`` without any warning, so a caller needs it here to tell a\nreal zero from a substituted one. ``zero_denominator_rows`` is how many rows of the returned\nresult had a zero denominator and were given the policy's value. It is ``None`` when it was\nnot counted: without an executed result, and under ``on_zero_denominator: error``.\n``numerator_parts`` lists the disjoint metrics declared to sum to the numerator, ``None``\nwhen none are declared.",
+      "properties": {
+        "kind": {
+          "title": "Kind",
+          "type": "string"
+        },
+        "numerator": {
+          "$ref": "#/$defs/CompositionComponentOut"
+        },
+        "denominator": {
+          "$ref": "#/$defs/CompositionComponentOut"
+        },
+        "on_zero_denominator": {
+          "title": "On Zero Denominator",
+          "type": "string"
+        },
+        "zero_denominator_rows": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Zero Denominator Rows"
+        },
+        "numerator_parts": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Numerator Parts"
+        }
+      },
+      "required": [
+        "kind",
+        "numerator",
+        "denominator",
+        "on_zero_denominator"
+      ],
+      "title": "CompositionOut",
+      "type": "object"
+    },
+    "CumulativeOut": {
+      "description": "How a cumulative metric's running total was formed for this query.\n\n``partition_by`` is every requested dimension that is not an order dimension, so it\ndiffers per query. Under ``history: exclude`` the total starts at zero at the first row\nthat passes the query's filters. Under ``include`` it runs from the first row of data, and\n``visibility_filters`` only chose which order tuples are shown.",
+      "properties": {
+        "metric": {
+          "title": "Metric",
+          "type": "string"
+        },
+        "order_by": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Order By",
+          "type": "array"
+        },
+        "partition_by": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Partition By",
+          "type": "array"
+        },
+        "on_gap": {
+          "title": "On Gap",
+          "type": "string"
+        },
+        "history": {
+          "title": "History",
+          "type": "string"
+        },
+        "visibility_filters": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Visibility Filters",
+          "type": "array"
+        }
+      },
+      "required": [
+        "metric",
+        "order_by",
+        "on_gap",
+        "history"
+      ],
+      "title": "CumulativeOut",
+      "type": "object"
+    },
+    "DecomposeMethodName": {
+      "description": "How the change was attributed, chosen by the binding kind.",
+      "enum": [
+        "additive",
+        "ratio_shift_share",
+        "ratio_parts"
+      ],
+      "title": "DecomposeMethodName",
+      "type": "string"
+    },
+    "DecomposePeriod": {
+      "description": "The two compared values of one time dimension. Their order only sets the sign.",
+      "properties": {
+        "dimension": {
+          "title": "Dimension",
+          "type": "string"
+        },
+        "base": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "integer"
+            }
+          ],
+          "title": "Base"
+        },
+        "compare": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "integer"
+            }
+          ],
+          "title": "Compare"
+        }
+      },
+      "required": [
+        "dimension",
+        "base",
+        "compare"
+      ],
+      "title": "DecomposePeriod",
+      "type": "object"
+    },
+    "DenominatorBreakdown": {
+      "description": "The denominator by member. These rows do not sum to the metric change.",
+      "properties": {
+        "units": {
+          "const": "denominator",
+          "default": "denominator",
+          "title": "Units",
+          "type": "string"
+        },
+        "rows": {
+          "items": {
+            "$ref": "#/$defs/DenominatorRow"
+          },
+          "title": "Rows",
+          "type": "array"
+        }
+      },
+      "required": [
+        "rows"
+      ],
+      "title": "DenominatorBreakdown",
+      "type": "object"
+    },
+    "DenominatorRow": {
+      "description": "Where the denominator moved, in the denominator's own units.",
+      "properties": {
+        "member": {
+          "title": "Member"
+        },
+        "base": {
+          "title": "Base",
+          "type": "number"
+        },
+        "compare": {
+          "title": "Compare",
+          "type": "number"
+        },
+        "delta": {
+          "title": "Delta",
+          "type": "number"
+        },
+        "rest": {
+          "default": false,
+          "title": "Rest",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "member",
+        "base",
+        "compare",
+        "delta"
+      ],
+      "title": "DenominatorRow",
+      "type": "object"
+    },
+    "Effect": {
+      "description": "One overall effect of a ratio change, in the metric's units.\n\n``metric`` is the numerator, the denominator or the part the effect belongs to, and\n``base``/``compare`` are that metric's own values.",
+      "properties": {
+        "effect": {
+          "$ref": "#/$defs/EffectKind"
+        },
+        "metric": {
+          "title": "Metric",
+          "type": "string"
+        },
+        "base": {
+          "title": "Base",
+          "type": "number"
+        },
+        "compare": {
+          "title": "Compare",
+          "type": "number"
+        },
+        "contribution": {
+          "title": "Contribution",
+          "type": "number"
+        }
+      },
+      "required": [
+        "effect",
+        "metric",
+        "base",
+        "compare",
+        "contribution"
+      ],
+      "title": "Effect",
+      "type": "object"
+    },
+    "EffectKind": {
+      "description": "One overall effect of a ratio change.",
+      "enum": [
+        "numerator",
+        "denominator",
+        "part"
+      ],
+      "title": "EffectKind",
+      "type": "string"
+    },
+    "FinalityOut": {
+      "description": "Finality metadata block in a query response (SPEC-E5-E15 stage 8).",
+      "properties": {
+        "watermark": {
+          "title": "Watermark",
+          "type": "string"
+        },
+        "sources_used": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Sources Used",
+          "type": "array"
+        },
+        "final_rows": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Final Rows"
+        },
+        "provisional_rows": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Provisional Rows"
+        }
+      },
+      "required": [
+        "watermark",
+        "sources_used"
+      ],
+      "title": "FinalityOut",
+      "type": "object"
+    },
+    "FiredGuardrailOut": {
+      "description": "A guardrail that fired during compilation (mirrors compiler ``FiredGuardrail``).\n\n``predicate`` is the filter or constraint it applied. ``knowledge_refs`` are the ids of the\nknowledge pages that explain it, readable with ``read_knowledge_page``.",
+      "properties": {
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "kind": {
+          "title": "Kind",
+          "type": "string"
+        },
+        "severity": {
+          "default": "error",
+          "title": "Severity",
+          "type": "string"
+        },
+        "predicate": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Predicate"
+        },
+        "knowledge_refs": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Knowledge Refs",
+          "type": "array"
+        }
+      },
+      "required": [
+        "id",
+        "kind"
+      ],
+      "title": "FiredGuardrailOut",
+      "type": "object"
+    },
+    "PartBreakdown": {
+      "description": "One numerator part's effect split by member. ``residual`` is against the part effect.",
+      "properties": {
+        "rows": {
+          "items": {
+            "$ref": "#/$defs/AdditiveRow"
+          },
+          "title": "Rows",
+          "type": "array"
+        },
+        "residual": {
+          "title": "Residual",
+          "type": "number"
+        }
+      },
+      "required": [
+        "rows",
+        "residual"
+      ],
+      "title": "PartBreakdown",
+      "type": "object"
+    },
+    "PartsBreakdown": {
+      "description": "A ratio change with numerator parts, split by the members of one dimension.",
+      "properties": {
+        "parts": {
+          "additionalProperties": {
+            "$ref": "#/$defs/PartBreakdown"
+          },
+          "title": "Parts",
+          "type": "object"
+        },
+        "denominator": {
+          "$ref": "#/$defs/DenominatorBreakdown"
+        }
+      },
+      "required": [
+        "parts",
+        "denominator"
+      ],
+      "title": "PartsBreakdown",
+      "type": "object"
+    },
+    "Presence": {
+      "description": "In which of the two periods a member has a denominator.",
+      "enum": [
+        "both",
+        "base_only",
+        "compare_only"
+      ],
+      "title": "Presence",
+      "type": "string"
+    },
+    "QueryMetadata": {
+      "description": "The E5 compiler metadata block carried alongside a result (SPEC \u00a72.2).",
+      "properties": {
+        "resolved": {
+          "additionalProperties": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object"
+          },
+          "title": "Resolved",
+          "type": "object"
+        },
+        "guardrails_fired": {
+          "items": {
+            "$ref": "#/$defs/FiredGuardrailOut"
+          },
+          "title": "Guardrails Fired",
+          "type": "array"
+        },
+        "freshness": {
+          "items": {
+            "$ref": "#/$defs/SourceFreshnessOut"
+          },
+          "title": "Freshness",
+          "type": "array"
+        },
+        "warnings": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Warnings",
+          "type": "array"
+        },
+        "contract_schema": {
+          "default": "3.11",
+          "title": "Contract Schema",
+          "type": "string"
+        },
+        "finality": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/FinalityOut"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "related": {
+          "$ref": "#/$defs/RelatedOut",
+          "default": {
+            "unused_dimensions": [],
+            "sibling_metrics": []
+          }
+        },
+        "trust_score": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TrustScoreOut"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "scope": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ScopeOut"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "cumulative": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CumulativeOut"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "composition": {
+          "additionalProperties": {
+            "$ref": "#/$defs/CompositionOut"
+          },
+          "default": {},
+          "title": "Composition",
+          "type": "object"
+        },
+        "project_fingerprint": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Project Fingerprint"
+        }
+      },
+      "required": [
+        "resolved",
+        "guardrails_fired",
+        "freshness"
+      ],
+      "title": "QueryMetadata",
+      "type": "object"
+    },
+    "RelatedDimensionOut": {
+      "description": "An unused queryable dimension surfaced in ``metadata.related`` (SPEC-E7/E8 \u00a72.2).",
+      "properties": {
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "source": {
+          "title": "Source",
+          "type": "string"
+        },
+        "label": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Label"
+        }
+      },
+      "required": [
+        "name",
+        "source"
+      ],
+      "title": "RelatedDimensionOut",
+      "type": "object"
+    },
+    "RelatedMetricOut": {
+      "description": "An active sibling metric surfaced in ``metadata.related`` (SPEC-E7/E8 \u00a72.2).",
+      "properties": {
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "source": {
+          "title": "Source",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "source"
+      ],
+      "title": "RelatedMetricOut",
+      "type": "object"
+    },
+    "RelatedOut": {
+      "description": "The ``metadata.related`` block: unused dimensions and sibling metrics (SPEC-E7/E8 \u00a72.2).",
+      "properties": {
+        "unused_dimensions": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/RelatedDimensionOut"
+          },
+          "title": "Unused Dimensions",
+          "type": "array"
+        },
+        "sibling_metrics": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/RelatedMetricOut"
+          },
+          "title": "Sibling Metrics",
+          "type": "array"
+        }
+      },
+      "title": "RelatedOut",
+      "type": "object"
+    },
+    "ScopeOut": {
+      "description": "The ``metadata.scope`` block: tenant/role scoping (SPEC-E12 \u00a73 stage 8, S16 AC3).",
+      "properties": {
+        "tenant": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "string"
+            },
+            {
+              "items": {
+                "anyOf": [
+                  {
+                    "type": "integer"
+                  },
+                  {
+                    "type": "string"
+                  }
+                ]
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Tenant"
+        },
+        "scoped_sources": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Scoped Sources",
+          "type": "array"
+        },
+        "shared_sources": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Shared Sources",
+          "type": "array"
+        },
+        "roles": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Roles",
+          "type": "array"
+        },
+        "tenancy_exempt": {
+          "default": false,
+          "title": "Tenancy Exempt",
+          "type": "boolean"
+        }
+      },
+      "title": "ScopeOut",
+      "type": "object"
+    },
+    "ShiftShareBreakdown": {
+      "description": "A ratio change split by the members of one dimension into mix and rate.",
+      "properties": {
+        "rows": {
+          "items": {
+            "$ref": "#/$defs/ShiftShareRow"
+          },
+          "title": "Rows",
+          "type": "array"
+        },
+        "residual": {
+          "title": "Residual",
+          "type": "number"
+        }
+      },
+      "required": [
+        "rows",
+        "residual"
+      ],
+      "title": "ShiftShareBreakdown",
+      "type": "object"
+    },
+    "ShiftShareRow": {
+      "description": "One member of a ratio split by shift-share.\n\n``share`` is the member's part of the denominator and ``rate`` its own ratio. ``mix`` is the\ncontribution from the share moving, ``rate`` (the effect) from the member's ratio moving.\nA member without a denominator in one period has no rate there (``null``), its whole term\ncounts as mix, and ``presence`` says which period it is in. A rest row carries the summed\nshares and effects, but no rates and no presence.",
+      "properties": {
+        "member": {
+          "title": "Member"
+        },
+        "share_base": {
+          "title": "Share Base",
+          "type": "number"
+        },
+        "share_compare": {
+          "title": "Share Compare",
+          "type": "number"
+        },
+        "rate_base": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Rate Base"
+        },
+        "rate_compare": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Rate Compare"
+        },
+        "mix": {
+          "title": "Mix",
+          "type": "number"
+        },
+        "rate": {
+          "title": "Rate",
+          "type": "number"
+        },
+        "contribution": {
+          "title": "Contribution",
+          "type": "number"
+        },
+        "presence": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Presence"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "rest": {
+          "default": false,
+          "title": "Rest",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "member",
+        "share_base",
+        "share_compare",
+        "rate_base",
+        "rate_compare",
+        "mix",
+        "rate",
+        "contribution",
+        "presence"
+      ],
+      "title": "ShiftShareRow",
+      "type": "object"
+    },
+    "SourceFreshnessOut": {
+      "description": "Per-source freshness metadata (mirrors compiler ``SourceFreshness``).",
+      "properties": {
+        "source": {
+          "title": "Source",
+          "type": "string"
+        },
+        "last_validated_at": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Last Validated At"
+        },
+        "stale": {
+          "default": false,
+          "title": "Stale",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "source"
+      ],
+      "title": "SourceFreshnessOut",
+      "type": "object"
+    },
+    "Total": {
+      "description": "The metric in both periods and its change.",
+      "properties": {
+        "base": {
+          "title": "Base",
+          "type": "number"
+        },
+        "compare": {
+          "title": "Compare",
+          "type": "number"
+        },
+        "delta": {
+          "title": "Delta",
+          "type": "number"
+        }
+      },
+      "required": [
+        "base",
+        "compare",
+        "delta"
+      ],
+      "title": "Total",
+      "type": "object"
+    },
+    "TrustScoreOut": {
+      "description": "The ``metadata.trust_score`` block: tier + capping reasons (SPEC-E14 \u00a73, \u00a76).",
+      "properties": {
+        "tier": {
+          "title": "Tier",
+          "type": "string"
+        },
+        "reasons": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Reasons",
+          "type": "array"
+        }
+      },
+      "required": [
+        "tier"
+      ],
+      "title": "TrustScoreOut",
+      "type": "object"
+    }
+  },
+  "description": "The response of ``decompose``: the change, its effects and its split by member.\n\n``effects`` is empty for ``additive``. ``by`` has one entry per requested split dimension,\nin request order, shaped by ``method``. ``metadata`` merges the metadata of every statement\nthe call ran.",
+  "properties": {
+    "metric": {
+      "title": "Metric",
+      "type": "string"
+    },
+    "kind": {
+      "title": "Kind",
+      "type": "string"
+    },
+    "method": {
+      "$ref": "#/$defs/DecomposeMethodName"
+    },
+    "period": {
+      "$ref": "#/$defs/DecomposePeriod"
+    },
+    "total": {
+      "$ref": "#/$defs/Total"
+    },
+    "effects": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/Effect"
+      },
+      "title": "Effects",
+      "type": "array"
+    },
+    "by": {
+      "additionalProperties": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/AdditiveBreakdown"
+          },
+          {
+            "$ref": "#/$defs/ShiftShareBreakdown"
+          },
+          {
+            "$ref": "#/$defs/PartsBreakdown"
+          }
+        ]
+      },
+      "default": {},
+      "title": "By",
+      "type": "object"
+    },
+    "metadata": {
+      "$ref": "#/$defs/QueryMetadata"
+    }
+  },
+  "required": [
+    "metric",
+    "kind",
+    "method",
+    "period",
+    "total",
+    "metadata"
+  ],
+  "title": "DecomposeResult",
+  "type": "object"
+}

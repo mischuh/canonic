@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 import time
 import uuid
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, cast
 
@@ -44,6 +44,22 @@ def _event_user(caller: Caller | None) -> str | AnswerEventUser | None:
     if caller.acted_via is None:
         return caller.id
     return AnswerEventUser(subject=caller.id, acted_via=caller.acted_via)
+
+
+@dataclass(slots=True)
+class QueryRun:
+    """What one execution of a semantic query produced so far, also when it failed midway.
+
+    The answer event is written from it, so it records the compiled query even when the
+    warehouse call fails.
+    """
+
+    compiled: CompileResult | None = None
+    connection_id: str | None = None
+    result: ResultSet | None = None
+    probes: ProbeValues | None = None
+    outcome_history: BindingOutcomeHistory | None = None
+    assertion_history: AssertionHistory | None = None
 
 
 class QueryService:
@@ -126,13 +142,8 @@ class QueryService:
         scoping (SPEC-E12).
         """
         started = time.perf_counter()
-        compiled: CompileResult | None = None
-        connection_id: str | None = None
-        result: ResultSet | None = None
+        run = QueryRun()
         error_code: str | None = None
-        outcome_history: BindingOutcomeHistory | None = None
-        assertion_history: AssertionHistory | None = None
-        probes: ProbeValues | None = None
         qid_token = query_id_var.set(uuid.uuid4().hex[:8])
         logger.info(
             "query received: metrics=%s dimensions=%d",
@@ -140,27 +151,7 @@ class QueryService:
             len(query.dimensions),
         )
         try:
-            compiled = self._compile(query, principal)
-            connection_id = self._ctx.connection_for_sql(compiled)
-            if connection_id is not None:
-                logger.info("connection selected: id=%s", connection_id)
-            else:
-                logger.info(
-                    "connection selected: id=%s (project default; no source-level match)",
-                    self._ctx.config.project.default_connection,
-                )
-            result, probes = await self._ctx.execute_compiled(compiled, connection_id)
-            outcome_history = self._load_outcome_history()
-            assertion_history = self._load_assertion_history()
-            query_result = QueryResult.from_parts(
-                compiled,
-                result,
-                outcome_history=outcome_history,
-                outcome_window_days=self._ctx.config.feedback.trust_cap_window_days,
-                assertion_history=assertion_history,
-                now=self._serving_clock(query),
-                probes=probes,
-            )
+            query_result = await self.execute(query, principal=principal, run=run)
             await self._assertions.check_query_assertions(query, harness=harness)
             return query_result
         except CanonicError as err:
@@ -168,24 +159,63 @@ class QueryService:
             raise
         finally:
             latency_ms = round((time.perf_counter() - started) * 1000)
-            if result is not None:
-                logger.info("query completed: latency_ms=%d rows=%d", latency_ms, len(result.rows))
+            if run.result is not None:
+                logger.info(
+                    "query completed: latency_ms=%d rows=%d", latency_ms, len(run.result.rows)
+                )
             self._emit_answer_event(
                 query,
-                compiled,
-                connection_id,
-                result,
+                run.compiled,
+                run.connection_id,
+                run.result,
                 latency_ms,
                 error_code,
-                outcome_history,
-                assertion_history,
+                run.outcome_history,
+                run.assertion_history,
                 caller=caller,
                 principal=principal,
-                probes=probes,
+                probes=run.probes,
             )
             query_id_var.reset(qid_token)
 
-    def _serving_clock(self, query: SemanticQuery) -> datetime | None:
+    async def execute(
+        self,
+        query: SemanticQuery,
+        *,
+        principal: Principal | None = None,
+        run: QueryRun | None = None,
+        compiled: CompileResult | None = None,
+    ) -> QueryResult:
+        """Compile and execute one semantic query, without assertions and without an event.
+
+        The building block of :meth:`query` and of capabilities that run several statements
+        for one answer and write one event for all of them. ``run`` is filled as the steps
+        complete. ``compiled`` skips compiling when the caller already did.
+        """
+        run = run if run is not None else QueryRun()
+        run.compiled = compiled if compiled is not None else self._compile(query, principal)
+        run.connection_id = self._ctx.connection_for_sql(run.compiled)
+        if run.connection_id is not None:
+            logger.info("connection selected: id=%s", run.connection_id)
+        else:
+            logger.info(
+                "connection selected: id=%s (project default; no source-level match)",
+                self._ctx.config.project.default_connection,
+            )
+        run.result, run.probes = await self._ctx.execute_compiled(run.compiled, run.connection_id)
+        run.outcome_history = self._load_outcome_history()
+        run.assertion_history = self._load_assertion_history()
+        return QueryResult.from_parts(
+            run.compiled,
+            run.result,
+            outcome_history=run.outcome_history,
+            outcome_window_days=self._ctx.config.feedback.trust_cap_window_days,
+            assertion_history=run.assertion_history,
+            now=self.serving_clock(query.as_of),
+            probes=run.probes,
+        )
+
+    def serving_clock(self, as_of: datetime | None) -> datetime | None:
         """The instant a period must have ended by, or ``None`` when the check is switched off.
 
         A query pinned with ``as_of`` is judged at that instant, so a replay gives the same
@@ -193,7 +223,7 @@ class QueryService:
         """
         if not self._ctx.config.trust.flag_open_periods:
             return None
-        return query.as_of if query.as_of is not None else datetime.now(UTC)
+        return as_of if as_of is not None else datetime.now(UTC)
 
     def _load_outcome_history(self) -> BindingOutcomeHistory | None:
         """Load the current per-binding outcome history, or None with no project root.
@@ -336,7 +366,7 @@ class QueryService:
                     outcome_history=outcome_history,
                     outcome_window_days=self._ctx.config.feedback.trust_cap_window_days,
                     assertion_history=assertion_history,
-                    now=self._serving_clock(query),
+                    now=self.serving_clock(query.as_of),
                     probes=probes,
                 ).tier.value
                 if compiled is not None
@@ -374,6 +404,7 @@ class QueryService:
             event = AnswerEvent(
                 ts=datetime.now(UTC).isoformat(),
                 contract_schema=CONTRACT_SCHEMA,
+                capability="run_sql",
                 query_hash=_sha256_json({"sql": sql}),
                 compiled_sql_hash=None,
                 connection=connection_id,

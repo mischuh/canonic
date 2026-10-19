@@ -46,6 +46,11 @@
       "default": null,
       "title": "Cache Hit"
     },
+    "capability": {
+      "default": "query",
+      "title": "Capability",
+      "type": "string"
+    },
     "compiled_sql_hash": {
       "anyOf": [
         {
@@ -125,6 +130,18 @@
     "latency_ms": {
       "title": "Latency Ms",
       "type": "integer"
+    },
+    "method": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Method"
     },
     "over_limit_blocked": {
       "anyOf": [
