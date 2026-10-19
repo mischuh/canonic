@@ -529,8 +529,8 @@ class McpTasksBackend(StrEnum):
 
 
 class McpTasksConfig(BaseModel):
-    """Background-task execution for ``query``/``run_sql``/``run_report`` on ``http``
-    transport (AMENDMENT-fastmcp4-adoption §4, S22).
+    """Background-task execution for ``query``/``decompose_change``/``run_sql``/``run_report``
+    on ``http`` transport (AMENDMENT-fastmcp4-adoption §4, S22).
 
     A task-enabled tool still answers synchronously for a client that doesn't opt in
     (FastMCP's ``task=True`` is "optional", not "required"); enabling this only lets a

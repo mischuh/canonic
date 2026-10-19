@@ -179,7 +179,7 @@ In `proxy` mode, the daemon keeps its OAuth client registrations and signing key
 
 ### Background tasks for long-running queries
 
-`query`, `run_sql` and `run_report` can run as background tasks on `--transport http`, so a client that supports the MCP tasks extension can poll a slow query instead of holding the connection open for its full duration:
+`query`, `decompose_change`, `run_sql` and `run_report` can run as background tasks on `--transport http`, so a client that supports the MCP tasks extension can poll a slow query instead of holding the connection open for its full duration:
 
 ```yaml
 # canonic.yaml

@@ -231,8 +231,8 @@ def build_server(
     carry before the request fails with ``tenant_limit_exceeded``.
 
     ``tasks`` (``mcp.tasks.enabled``) registers the ``io.modelcontextprotocol/tasks``
-    extension and runs ``query``, ``run_sql`` and ``run_report`` as optionally-async
-    tools, so a client that declares the tasks capability can poll a long-running query
+    extension and runs ``query``, ``decompose_change``, ``run_sql`` and ``run_report`` as
+    optionally-async tools, so a client that declares the tasks capability can poll a long-running query
     instead of holding the request open. ``tasks_url`` is ``mcp.tasks.url`` (the Docket
     backend URL), used only when ``mcp.tasks.backend`` is ``redis``; ``None`` falls back
     to FastMCP's in-memory backend. Never set from ``stdio`` (S22 AC4): a local
