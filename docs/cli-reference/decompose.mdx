@@ -17,7 +17,7 @@ canonic decompose --file request.json --json
 | `--period-dimension` | The time dimension the two periods belong to. It needs a period grain: `time_grain`, or a `granularity` of hour, day, week, month, quarter or year. |
 | `--base` | The earlier period, e.g. `2026-08`, `2026-Q3`, `2026-W34` or `2026`. |
 | `--compare` | The later period. Swapping `--base` and `--compare` negates every contribution. |
-| `--by` | Split dimension(s): comma-separated and/or repeatable, at most `decompose.max_by`. Without it only the overall effects are returned. |
+| `--by` | Split dimension(s): comma-separated and/or repeatable, at most `decompose.max_by`. Without it only the overall effects are returned. Qualify a name that is `ambiguous` as `alias.dimension`, as in `canonic query`. |
 | `--filter` | A filter as `field=value` or `field:op:value` (repeatable), applied to both periods, as in `canonic query`. A filter on the period dimension is rejected. |
 | `--via` | Join-path alias prefix (comma-separated and/or repeatable), as in `canonic query`. |
 | `--top-n` | Members listed per dimension. The rest are merged into one row. Defaults to `decompose.top_n`, capped at `decompose.max_top_n`. |
