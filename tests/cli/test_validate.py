@@ -178,3 +178,39 @@ def test_validate_json_lists_warnings_only_when_there_are_some(
     payload = json.loads(runner.invoke(app, ["--json", "validate"]).output)
     assert payload["status"] == "ok"
     assert len(payload["warnings"]) == 1
+
+
+def _write_guardrail_with_knowledge_ref(project_dir: Path, ref: str) -> None:
+    (project_dir / "contracts" / "guardrails").mkdir(parents=True)
+    (project_dir / "contracts" / "guardrails" / "positive.yaml").write_text(
+        "id: positive\napplies_to: {source: orders, measure: total}\n"
+        "kind: mandatory_filter\nfilter: 'val > 0'\nrationale: Positive only.\n"
+        f"knowledge_refs: [{ref}]\n"
+    )
+
+
+def test_validate_warns_about_a_guardrail_ref_without_a_page_and_still_passes(
+    runner: CliRunner, project_dir: Path
+) -> None:
+    _write_valid_orders_project(project_dir)
+    _write_guardrail_with_knowledge_ref(project_dir, "no-such-page")
+
+    result = runner.invoke(app, ["validate"])
+
+    assert result.exit_code == 0, result.output
+    assert "warning" in result.output
+    assert "no-such-page" in result.output
+
+
+def test_validate_json_carries_the_guardrail_ref_warning(
+    runner: CliRunner, project_dir: Path
+) -> None:
+    _write_valid_orders_project(project_dir)
+    _write_guardrail_with_knowledge_ref(project_dir, "no-such-page")
+
+    payload = json.loads(runner.invoke(app, ["--json", "validate"]).output)
+
+    assert payload["status"] == "ok"
+    (warning,) = payload["warnings"]
+    assert "positive" in warning
+    assert "no-such-page" in warning

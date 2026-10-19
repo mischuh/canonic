@@ -25,7 +25,7 @@ Validate every contract against the project's semantic sources, read-only, no co
 canonic validate
 ```
 
-Checks that every metric binding's `canonical.source`/`measure`, every guardrail's `applies_to`, every finality rule, and every assertion resolve against `semantics/` and `contracts/`. These are the same cross-surface checks `canonic ingest` already runs before writing a diff. `canonic validate` makes them available as a standalone check, so a broken contract (for example a `semi_additive` binding whose source `grain` column isn't declared as a dimension) is caught before it reaches a query instead of failing the next time an agent asks for that metric. Exits non-zero with a structured error (`--json` supported) on the first violation found.
+Checks that every metric binding's `canonical.source`/`measure`, every guardrail's `applies_to`, every finality rule, and every assertion resolve against `semantics/` and `contracts/`. These are the same cross-surface checks `canonic ingest` already runs before writing a diff. `canonic validate` makes them available as a standalone check, so a broken contract (for example a `semi_additive` binding whose source `grain` column isn't declared as a dimension) is caught before it reaches a query instead of failing the next time an agent asks for that metric. Exits non-zero with a structured error (`--json` supported) on the first violation found. It also checks the links between metrics and knowledge pages: a metric's `knowledge_refs` must name global pages, and a page's `metrics` must name active metrics. Declarations that are accepted but have no effect are reported as warnings and do not fail the run, among them a guardrail's `knowledge_refs` id that is not a global page.
 
 ## `canonic audit`
 

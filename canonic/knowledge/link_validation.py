@@ -7,13 +7,29 @@ from typing import TYPE_CHECKING
 from canonic.contracts.loader import load_metric_bindings
 from canonic.contracts.models import Status
 from canonic.exc import ContractError
-from canonic.knowledge.loader import load_knowledge_page
+from canonic.knowledge.loader import load_knowledge_page, scope_from_path, slug_from_path
 from canonic.knowledge.models import KnowledgeScope
 
 if TYPE_CHECKING:
     from pathlib import Path
 
-__all__ = ["validate_knowledge_links"]
+__all__ = ["global_page_ids", "validate_knowledge_links"]
+
+
+def global_page_ids(project_root: Path) -> set[str]:
+    """The ids of the global knowledge pages, read from the file names without parsing a page.
+
+    A broken page still counts, so a caller that only needs to know whether an id exists is not
+    stopped by an unrelated page it cannot load.
+    """
+    knowledge_root = project_root / "knowledge"
+    if not knowledge_root.is_dir():
+        return set()
+    return {
+        slug_from_path(path)
+        for path in knowledge_root.rglob("*.md")
+        if scope_from_path(path) is KnowledgeScope.GLOBAL
+    }
 
 
 def validate_knowledge_links(project_root: Path) -> None:

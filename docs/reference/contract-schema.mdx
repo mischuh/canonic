@@ -172,7 +172,7 @@ rationale: "Refunds are reversals, not revenue."
 | `severity` | `Severity` | `error` | `error` blocks the query. `warn` lets it through with a `warnings[]` entry instead. See below for how this applies per `kind`. |
 | `rationale` | `str` | n/a (required) | Why the rule exists, surfaced to the caller. |
 | `phase` | `str \| null` | `null` | Optional compiler-pipeline phase hint. |
-| `knowledge_refs` | `list[str]` | `[]` | Ids of the knowledge pages that explain this guardrail. When set, these are returned with the fired guardrail and replace the pages otherwise inferred from their `sl_refs`, see [Guardrails and knowledge](#guardrails-and-knowledge). |
+| `knowledge_refs` | `list[str]` | `[]` | Ids of the knowledge pages that explain this guardrail. When set, these are returned with the fired guardrail and replace the pages otherwise inferred from their `sl_refs`, see [Guardrails and knowledge](#guardrails-and-knowledge). An id that is not a global page is left out when the guardrail fires, and `canonic validate` and `canonic mcp start` warn about it without failing. |
 
 | `kind` | Behavior | Status |
 | --- | --- | --- |

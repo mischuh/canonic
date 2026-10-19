@@ -94,3 +94,79 @@ def test_board_only_final_with_restrict_source_is_not_reported(tmp_path: Path) -
     path = tmp_path / "contracts" / "guardrails" / "board-final-only.yaml"
     path.write_text(_RESTRICT)
     assert inert_declaration_warnings(tmp_path) == []
+
+
+_REFUND = """\
+id: refunds-excluded
+applies_to: {{ source: orders, measure: total }}
+kind: mandatory_filter
+filter: "val > 0"
+rationale: "Refunds are reversals."
+knowledge_refs: {refs}
+"""
+
+
+def _write_guardrail(root: Path, refs: str) -> None:
+    path = root / "contracts" / "guardrails" / "refunds-excluded.yaml"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(_REFUND.format(refs=refs))
+
+
+def _write_page(root: Path, page_id: str, scope: str = "global") -> None:
+    location = "global" if scope == "global" else "user/me"
+    path = root / "knowledge" / location / f"{page_id}.md"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("---\nsummary: x\n---\nBody.\n")
+
+
+def test_a_guardrail_ref_that_names_a_global_page_is_not_reported(tmp_path: Path) -> None:
+    _write_guardrail(tmp_path, "[refund-policy]")
+    _write_page(tmp_path, "refund-policy")
+
+    assert inert_declaration_warnings(tmp_path) == []
+
+
+def test_a_guardrail_ref_without_a_page_is_reported(tmp_path: Path) -> None:
+    _write_guardrail(tmp_path, "[refund-polcy]")
+    _write_page(tmp_path, "refund-policy")
+
+    (warning,) = inert_declaration_warnings(tmp_path)
+
+    assert "refunds-excluded" in warning
+    assert "'refund-polcy'" in warning
+    assert "left out" in warning
+
+
+def test_a_guardrail_ref_in_a_project_without_pages_is_reported(tmp_path: Path) -> None:
+    _write_guardrail(tmp_path, "[refund-policy]")
+
+    (warning,) = inert_declaration_warnings(tmp_path)
+
+    assert "'refund-policy'" in warning
+
+
+def test_a_guardrail_ref_that_names_a_personal_page_is_reported(tmp_path: Path) -> None:
+    _write_guardrail(tmp_path, "[mine]")
+    _write_page(tmp_path, "mine", scope="user")
+
+    (warning,) = inert_declaration_warnings(tmp_path)
+
+    assert "'mine'" in warning
+
+
+def test_each_missing_ref_is_reported_once(tmp_path: Path) -> None:
+    _write_guardrail(tmp_path, "[a, b, c]")
+    _write_page(tmp_path, "b")
+
+    warnings = inert_declaration_warnings(tmp_path)
+
+    assert [("'a'" in w, "'c'" in w) for w in warnings] == [(True, False), (False, True)]
+
+
+def test_a_page_that_cannot_be_parsed_still_counts_as_existing(tmp_path: Path) -> None:
+    _write_guardrail(tmp_path, "[broken]")
+    path = tmp_path / "knowledge" / "global" / "broken.md"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("---\nnot: [valid\n---\nBody.\n")
+
+    assert inert_declaration_warnings(tmp_path) == []

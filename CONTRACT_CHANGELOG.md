@@ -86,6 +86,14 @@ A change listed here was reviewed against the classification rules and did not b
   of free text that names the failing file. Reloading is off by default since the
   `project.reload` setting (feat(core) #440), see 3.8.
 
+### Warning for a guardrail's `knowledge_refs` without a page (fix(contracts) #444)
+
+- ADR/PR: this PR (fix(contracts): warn when a guardrail's knowledge_refs names a page that does not exist)
+- Decision: no bump. `canonic validate` and `canonic mcp start` report a guardrail `knowledge_refs`
+  id that is not a global knowledge page as a warning, next to the other declarations that have no
+  effect. No field, type or response changes, and the run still passes, so a project with a
+  dangling id is not broken by it.
+
 ## History
 
 ## 3.9 (2026-10-19) - MINOR
