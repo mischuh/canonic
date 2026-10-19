@@ -1,0 +1,15 @@
+# Gross result over revenue. The numerator contains the denominator: gross_result is
+# revenue + cogs, so the rate is 1 + cogs / revenue in disguise. Declaring the parts lets
+# decompose attribute a change to the cost of goods sold and to revenue separately, instead
+# of counting the revenue increase on both sides of the division.
+metric: gross_margin_rate
+canonical:
+  kind: ratio
+  numerator: gross_result
+  denominator: revenue
+  numerator_parts: [revenue, cogs]
+  on_zero_denominator: null
+provenance: human_curated
+aliases: ["gross margin", "margin rate"]
+knowledge_refs: [gross-margin-rate]
+status: active

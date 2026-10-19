@@ -192,7 +192,7 @@ class DecomposeService:
             query_id_var.reset(qid_token)
 
     def _check_enabled(self) -> None:
-        if not self._ctx.config.decompose.enabled:
+        if not self._ctx.decompose_enabled:
             raise CapabilityDisabled(
                 "the decompose capability is disabled; set decompose.enabled: true in "
                 "canonic.yaml to use it"

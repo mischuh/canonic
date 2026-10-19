@@ -15,13 +15,16 @@ from typing import TYPE_CHECKING, Any
 
 from fastmcp import FastMCP
 from fastmcp.server.dependencies import get_access_token
+from pydantic import ValidationError
 from starlette.responses import JSONResponse
 
 from canonic import __version__ as CANONIC_VERSION
 from canonic.compiler.query import SemanticQuery
 from canonic.contract import CONTRACT_SCHEMA
 from canonic.contracts.principal import DEFAULT_MAX_TENANTS
+from canonic.core.decompose_models import DecomposeRequest
 from canonic.core.models import BindingOut, CompileOutput
+from canonic.exc import ValidationFailed
 from canonic.mcp.auth import caller_from_token, principal_from_token
 from canonic.mcp.errors import canonic_error_response
 from canonic.mcp.extensions import ContractExtension
@@ -146,6 +149,10 @@ _INSTRUCTIONS = (
     "different from an 'unreachable' error, where re-issuing with the corrected canonical "
     "name from 'candidates' is fine without asking, since that is a naming fix, not a "
     "business decision.\n\n"
+    "WHY DID IT CHANGE — for 'why did X change', 'what drove the drop in X' or any comparison "
+    "of a metric between two periods, call decompose_change() instead of querying both periods "
+    "and subtracting yourself, when that tool is available. It picks the method that adds up "
+    "for the metric's kind. Read 'method' before describing 'effects'.\n\n"
     "NEVER return a result you have identified as suspicious — inconsistent with a prior "
     "answer, an implausible magnitude, or produced by a join/aggregation you are unsure is "
     "correct. Do not present it as the final answer. Instead say explicitly that the number "
@@ -486,6 +493,48 @@ def build_server(
             if s:
                 response["suggestions"] = s
         return response
+
+    if service.decompose_enabled:
+
+        @mcp.tool(
+            description=(
+                "Explain why a metric changed between two periods: attributes the change of one "
+                "metric overall and by member of up to a few split dimensions. Call it for "
+                "'why did X change' questions instead of querying both periods and subtracting "
+                "yourself, because for a ratio per-member differences do not add up. "
+                "Accepts a dict with keys: metric (str), period ({dimension, base, compare}: a "
+                'time dimension and two of its values, e.g. {"dimension": "order_month", '
+                '"base": "2026-08", "compare": "2026-09"}), by (list[str], split '
+                "dimensions), filters (list[str], applied to both periods, never on the period "
+                "dimension), via, context, as_of, top_n (int), allow_open_period (bool). "
+                "Read 'method' before describing the result: 'additive' splits the change by "
+                "member; 'ratio_shift_share' reports a numerator and a denominator effect, and "
+                "per member 'mix' (its share of the denominator moved) and 'rate' (its own "
+                "ratio moved); 'ratio_parts' reports one effect per numerator part and lists "
+                "the denominator per member in its own units, which do not sum to the change. "
+                "Contributions sum to total.delta. To drill into one member, call again with a "
+                "filter on it and the next dimension in 'by'. "
+                "A 'period_open' error means a period has not ended: tell the user, and only "
+                "retry with allow_open_period when they accept partial figures. "
+                "'unsupported_measure' means the metric's kind has no exact attribution: say so "
+                "rather than computing one yourself."
+            ),
+            task=tasks,
+        )
+        @canonic_error_response
+        async def decompose_change(request: dict[str, Any]) -> dict[str, Any]:
+            try:
+                parsed = DecomposeRequest.model_validate(request)
+            except ValidationError as exc:
+                raise ValidationFailed(f"invalid decompose request: {exc}") from exc
+            result = await service.decompose(
+                parsed,
+                caller=_caller(),
+                principal=_principal(
+                    service.resolver, session_principal, claim_mapping, max_tenants
+                ),
+            )
+            return result.model_dump(mode="json")
 
     # ------------------------------------------------------------------
     # Tool: run_sql

@@ -1,0 +1,9 @@
+# Revenue plus the (negative) cost of goods sold, per line.
+metric: gross_result
+canonical:
+  kind: single
+  source: order_items
+  measure: gross_result
+provenance: human_curated
+aliases: ["gross profit"]
+status: active

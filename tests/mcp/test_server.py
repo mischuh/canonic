@@ -534,6 +534,7 @@ class TestClaimMappingWiring:
             "resolve_metric",
             "compile_query",
             "query",
+            "decompose_change",
             "run_sql",
             "search_knowledge",
             "read_knowledge_page",

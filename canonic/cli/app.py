@@ -17,6 +17,7 @@ from canonic.cli.commands import (
     audit,
     completion,
     connection,
+    decompose,
     evaluate,
     gc,
     ingest,
@@ -102,6 +103,7 @@ app.command("setup")(setup.setup)
 app.command("review")(review.review)
 app.command("apply")(apply.apply)
 app.command("query")(query.query)
+app.command("decompose")(decompose.decompose)
 app.command("assert")(assertions.assert_)
 app.command("sql")(sql.sql)
 app.command("status")(status.status)

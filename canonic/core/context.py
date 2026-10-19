@@ -67,6 +67,7 @@ class ServiceContext:
         project_root: Path | None,
         event_log: AnswerEventLog,
         reloader: ProjectReloader | None = None,
+        decompose: bool | None = None,
     ) -> None:
         self._state = ProjectState(
             config=config,
@@ -77,6 +78,7 @@ class ServiceContext:
             source_by_name={s.name: s for s in sources},
         )
         self._reloader = reloader
+        self._decompose = decompose
         self.project_root = project_root
         self.event_log = event_log
 
@@ -111,6 +113,11 @@ class ServiceContext:
     @property
     def project_fingerprint(self) -> str | None:
         return self.state.fingerprint
+
+    @property
+    def decompose_enabled(self) -> bool:
+        """Whether ``decompose`` is offered: the server's override, else ``decompose.enabled``."""
+        return self._decompose if self._decompose is not None else self.config.decompose.enabled
 
     @property
     def reload_mode(self) -> ProjectReload:

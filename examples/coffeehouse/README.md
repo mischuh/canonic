@@ -16,6 +16,8 @@ cd examples/coffeehouse        # canonic commands must run from here
 canonic query --metrics average_order_value --dimensions order_month
 canonic query --metrics active_customers
 canonic assert                 # 4/4 assertions pass
+canonic decompose --metric gross_margin_rate --period-dimension order_month \
+  --base 2026-01 --compare 2026-02 --by category   # why the margin fell
 bash scripts/compare.sh        # dbt MetricFlow and canonic side by side
 ```
 
@@ -33,15 +35,16 @@ bash scripts/compare.sh        # dbt MetricFlow and canonic side by side
 
 ```
 canonic.yaml                  ← project config + DuckDB connection
-coffeehouse.duckdb            ← bundled warehouse (4 tables, Q1 2026), rebuilt by scripts/build.sh
+coffeehouse.duckdb            ← bundled warehouse (4 tables, Q1 2026, with line costs), rebuilt by scripts/build.sh
 setup.sql                     ← DDL + seed data
 semantics/coffeehouse_duckdb/ ← customers, products, orders, order_items
 contracts/metrics/            ← revenue, units_sold, order_count, average_order_value,
-                                 active_customers, revenue_per_customer
+                                 active_customers, revenue_per_customer, cogs, gross_result,
+                                 gross_margin_rate, revenue_per_unit
 contracts/guardrails/         ← 4 mandatory filters: completed orders only, no test customers
 contracts/assertions/         ← 4 hand-checked expected values
-knowledge/global/             ← what counts as a sale, AOV and active-customer definitions,
-                                 2 caveats
+knowledge/global/             ← what counts as a sale, AOV, active-customer and gross margin
+                                 definitions, 2 caveats
 dbt/                          ← dbt project with MetricFlow semantic models and metrics
 scripts/compare.sh            ← asks dbt and canonic the same questions
 ```

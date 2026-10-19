@@ -1,0 +1,9 @@
+# Cost of goods sold, booked negative like in the ledger: a cost lowers the gross result.
+metric: cogs
+canonical:
+  kind: single
+  source: order_items
+  measure: cogs
+provenance: human_curated
+aliases: ["cost of goods sold", "cost of sales"]
+status: active

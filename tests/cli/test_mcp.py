@@ -72,7 +72,7 @@ def test_start_explicit_project_resolves(runner: CliRunner, tmp_path: Path) -> N
         )
 
     assert result.exit_code == 0, result.output
-    mock_cls.from_project.assert_called_once_with(tmp_path.resolve(), reload=None)
+    mock_cls.from_project.assert_called_once_with(tmp_path.resolve(), reload=None, decompose=None)
 
 
 @pytest.mark.parametrize(
@@ -97,8 +97,35 @@ def test_start_reload_flag_overrides_the_config(
         )
 
     assert result.exit_code == 0, result.output
-    mock_cls.from_project.assert_called_once_with(tmp_path.resolve(), reload=expected)
+    mock_cls.from_project.assert_called_once_with(
+        tmp_path.resolve(), reload=expected, decompose=None
+    )
     assert mock_start_http.call_args.kwargs["reload"] is (expected is ProjectReload.AUTO)
+
+
+@pytest.mark.parametrize(("flag", "expected"), [("--decompose", True), ("--no-decompose", False)])
+def test_start_decompose_flag_overrides_the_config(
+    runner: CliRunner, tmp_path: Path, flag: str, expected: bool
+) -> None:
+    """--decompose/--no-decompose reaches the service, and the detached http child."""
+    (tmp_path / "canonic.yaml").write_text(_VALID_CONFIG)
+
+    with (
+        patch(_PATCH_SERVICE) as mock_cls,
+        patch(_PATCH_START_HTTP) as mock_start_http,
+        patch(_PATCH_BUILD_VERIFIER, return_value=MagicMock()),
+        patch("canonic.cli.commands.mcp._save_last_project"),
+    ):
+        mock_cls.from_project.return_value = _mock_service()
+        result = runner.invoke(
+            app, ["mcp", "start", "--transport", "http", "--project", str(tmp_path), flag]
+        )
+
+    assert result.exit_code == 0, result.output
+    mock_cls.from_project.assert_called_once_with(
+        tmp_path.resolve(), reload=None, decompose=expected
+    )
+    assert mock_start_http.call_args.kwargs["decompose"] is expected
 
 
 def test_start_explicit_project_missing_yaml(runner: CliRunner, tmp_path: Path) -> None:
@@ -150,7 +177,7 @@ def test_last_project_fallback_used_when_no_cwd_match(
         result = runner.invoke(app, ["mcp", "start", "--transport", "http"])
 
     assert result.exit_code == 0, result.output
-    mock_cls.from_project.assert_called_once_with(tmp_path, reload=None)
+    mock_cls.from_project.assert_called_once_with(tmp_path, reload=None, decompose=None)
 
 
 def test_no_project_anywhere_exits_with_error(
