@@ -51,6 +51,11 @@ class ErrorCode(StrEnum):
     TENANT_SCOPE_MISSING = "tenant_scope_missing"
     TENANT_FORBIDDEN = "tenant_forbidden"
     TENANT_LIMIT_EXCEEDED = "tenant_limit_exceeded"
+    # Change decomposition: a compared period has not ended, or declared numerator parts
+    # do not sum to the numerator. A capability switched off in the project config.
+    PERIOD_OPEN = "period_open"
+    DECOMPOSITION_INCONSISTENT = "decomposition_inconsistent"
+    CAPABILITY_DISABLED = "capability_disabled"
 
 
 EXIT_CODES: dict[ErrorCode, int] = {
@@ -78,6 +83,9 @@ EXIT_CODES: dict[ErrorCode, int] = {
     ErrorCode.TENANT_SCOPE_MISSING: 23,
     ErrorCode.TENANT_FORBIDDEN: 24,
     ErrorCode.TENANT_LIMIT_EXCEEDED: 25,
+    ErrorCode.PERIOD_OPEN: 26,
+    ErrorCode.DECOMPOSITION_INCONSISTENT: 27,
+    ErrorCode.CAPABILITY_DISABLED: 28,
 }
 
 
@@ -394,6 +402,33 @@ class TenantLimitExceeded(CanonicError):
     """
 
     code = ErrorCode.TENANT_LIMIT_EXCEEDED
+
+
+class PeriodOpen(CanonicError):
+    """A period compared by ``decompose`` has not ended at the serving clock.
+
+    A change against a partly booked period is almost always misleading, so it is refused
+    unless the request sets ``allow_open_period``.
+    """
+
+    code = ErrorCode.PERIOD_OPEN
+
+
+class DecompositionInconsistent(CanonicError):
+    """The declared ``numerator_parts`` of a metric do not sum to its numerator.
+
+    The declaration cannot be proven from the contract, so ``decompose`` checks it on the
+    fetched values. A mismatch is a contract bug, and attributing a change on top of it would
+    hide it.
+    """
+
+    code = ErrorCode.DECOMPOSITION_INCONSISTENT
+
+
+class CapabilityDisabled(CanonicError):
+    """A core capability was called that the project config switches off."""
+
+    code = ErrorCode.CAPABILITY_DISABLED
 
 
 class EmbeddingUnavailable(CanonicError):

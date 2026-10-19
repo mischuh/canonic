@@ -141,7 +141,7 @@ class TestServedMetadata:
 
 class TestServingClock:
     def test_on_by_default_and_judged_now(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        clock = _service(monkeypatch)._query._serving_clock(SemanticQuery(metrics=["revenue"]))
+        clock = _service(monkeypatch)._query.serving_clock(None)
 
         assert clock is not None
         assert abs((datetime.now(UTC) - clock).total_seconds()) < 60
@@ -150,12 +150,12 @@ class TestServingClock:
         pinned = datetime(2026, 3, 1, tzinfo=UTC)
         query = SemanticQuery(metrics=["revenue"], as_of=pinned)
 
-        assert _service(monkeypatch)._query._serving_clock(query) == pinned
+        assert _service(monkeypatch)._query.serving_clock(query.as_of) == pinned
 
     def test_config_switches_the_check_off(self, monkeypatch: pytest.MonkeyPatch) -> None:
         service = _service(monkeypatch, flag_open_periods=False)
 
-        assert service._query._serving_clock(SemanticQuery(metrics=["revenue"])) is None
+        assert service._query.serving_clock(None) is None
 
 
 class _FakeConnector(ConnectorBase):

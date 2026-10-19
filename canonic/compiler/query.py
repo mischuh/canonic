@@ -13,7 +13,7 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, field_validator
 
-__all__ = ["SemanticQuery", "parse_filter_flag"]
+__all__ = ["SemanticQuery", "coerce_filters", "parse_filter_flag"]
 
 _OPERATOR_MAP: dict[str, str] = {
     "EQUALS": "=",
@@ -122,6 +122,21 @@ def parse_filter_flag(raw: str) -> str:
     )
 
 
+def coerce_filters(v: Any) -> list[str]:
+    """Normalize a filter list: predicate strings pass through, dicts become predicates."""
+    if not isinstance(v, list):
+        raise ValueError("filters must be a list")
+    result: list[str] = []
+    for item in v:
+        if isinstance(item, str):
+            result.append(item)
+        elif isinstance(item, dict):
+            result.append(_dict_to_predicate(item))
+        else:
+            raise ValueError(f"filter items must be str or dict, got {type(item).__name__}")
+    return result
+
+
 class SemanticQuery(BaseModel):
     """A resolved-by-name request the compiler turns into dialect-correct SQL (§3)."""
 
@@ -138,14 +153,4 @@ class SemanticQuery(BaseModel):
     @field_validator("filters", mode="before")
     @classmethod
     def _coerce_filters(cls, v: Any) -> list[str]:
-        if not isinstance(v, list):
-            raise ValueError("filters must be a list")
-        result: list[str] = []
-        for item in v:
-            if isinstance(item, str):
-                result.append(item)
-            elif isinstance(item, dict):
-                result.append(_dict_to_predicate(item))
-            else:
-                raise ValueError(f"filter items must be str or dict, got {type(item).__name__}")
-        return result
+        return coerce_filters(v)

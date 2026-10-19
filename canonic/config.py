@@ -239,6 +239,31 @@ class TrustConfig(BaseModel):
     flag_open_periods: bool = True
 
 
+class DecomposeConfig(BaseModel):
+    """The ``decompose`` capability, which attributes a metric's change between two periods.
+
+    ``enabled`` (on by default) registers the capability on every surface. The limits bound the
+    cost of one call: ``max_by`` split dimensions, ``top_n`` rows per dimension unless the
+    request asks for more, and never more than ``max_top_n``. ``parts_tolerance`` is the relative
+    difference allowed between the declared ``numerator_parts`` and the numerator.
+    """
+
+    enabled: bool = True
+    max_by: int = Field(default=3, ge=1)
+    top_n: int = Field(default=10, ge=1)
+    max_top_n: int = Field(default=50, ge=1)
+    parts_tolerance: float = Field(default=1e-9, ge=0)
+
+    @model_validator(mode="after")
+    def _validate_top_n(self) -> DecomposeConfig:
+        if self.top_n > self.max_top_n:
+            raise ValueError(
+                f"decompose.top_n ({self.top_n}) must not exceed decompose.max_top_n "
+                f"({self.max_top_n})"
+            )
+        return self
+
+
 class TelemetryConfig(BaseModel):
     """Opt-in aggregate telemetry (SPEC-E16 §8/§12).
 
@@ -606,6 +631,7 @@ class CanonicConfig(BaseSettings):
     embeddings: EmbeddingConfig = EmbeddingConfig()
     knowledge: KnowledgeConfig = KnowledgeConfig()
     trust: TrustConfig = TrustConfig()
+    decompose: DecomposeConfig = DecomposeConfig()
     telemetry: TelemetryConfig = TelemetryConfig()
     reconcile: ReconcileConfig = ReconcileConfig()
     feedback: FeedbackConfig = FeedbackConfig()

@@ -73,6 +73,11 @@ class AnswerEvent(BaseModel):
     ts: str
     kind: Literal["served_answer"] = "served_answer"
     contract_schema: str
+    # The capability that served the answer: ``query``, ``run_sql`` or ``decompose``. One
+    # ``decompose`` call runs several statements and records one event, with ``query_hash``
+    # over the request and ``method`` naming how the change was attributed.
+    capability: str = "query"
+    method: str | None = None
     query_hash: str
     compiled_sql_hash: str | None
     connection: str | None

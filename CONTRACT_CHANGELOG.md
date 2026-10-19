@@ -96,6 +96,18 @@ A change listed here was reviewed against the classification rules and did not b
 
 ## History
 
+## 3.11 (2026-10-19) - MINOR
+
+- ADR/PR: this PR (feat(core): decompose the change of a metric between two periods)
+- Summary: a new core capability `decompose` attributes the change of one metric between two
+  periods of one time dimension, overall and by member of up to `decompose.max_by` split
+  dimensions. It returns the new response type `DecomposeResult` with `method` (`additive`,
+  `ratio_shift_share` or `ratio_parts`), `total`, `effects`, `by` and the merged `metadata`
+  block. The error registry gains `period_open` (26), `decomposition_inconsistent` (27) and
+  `capability_disabled` (28). `canonic.yaml` gains the `decompose` block. `AnswerEvent` gains
+  `capability` (`query`, `run_sql` or `decompose`, default `query`) and `method`. A consumer
+  that ignores unknown fields and codes is unaffected.
+
 ## 3.10 (2026-10-19) - MINOR
 
 - ADR/PR: this PR (feat(contracts): declare numerator_parts on ratio and weighted_avg metrics)
