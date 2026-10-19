@@ -112,6 +112,21 @@ _METRICS = {
     "price": "canonical: {kind: ratio, numerator: revenue, denominator: units}",
     "plain_rate": "canonical: {kind: ratio, numerator: net_result, denominator: revenue}",
     "echo_rate": "canonical: {kind: ratio, numerator: revenue_echo, denominator: revenue}",
+    "web_revenue": (
+        "canonical: {source: sales, measure: revenue, population_filter: \"channel = 'web'\"}"
+    ),
+    "web_north_revenue": (
+        "canonical:\n  source: sales\n  measure: revenue\n"
+        "  population_filter: \"(channel = 'web') AND region_code = 'north'\""
+    ),
+    "store_revenue": (
+        "canonical: {source: sales, measure: revenue, population_filter: \"channel = 'store'\"}"
+    ),
+    "web_share": "canonical: {kind: ratio, numerator: web_revenue, denominator: revenue}",
+    "web_north_share": (
+        "canonical: {kind: ratio, numerator: web_north_revenue, denominator: web_revenue}"
+    ),
+    "store_per_web": "canonical: {kind: ratio, numerator: store_revenue, denominator: web_revenue}",
     "result_rate": (
         "canonical:\n  kind: ratio\n  numerator: net_result\n  denominator: revenue\n"
         "  numerator_parts: [revenue, costs]"
@@ -305,6 +320,17 @@ class TestRatio:
             "components of echo_rate share source and measure; if the numerator contains the "
             "denominator, declare numerator_parts"
         ) in result.metadata.warnings
+
+    @pytest.mark.parametrize(
+        ("metric", "warns"),
+        [("web_share", False), ("web_north_share", False), ("store_per_web", True)],
+    )
+    async def test_a_narrower_numerator_population_does_not_warn(
+        self, service: CanonicService, metric: str, warns: bool
+    ) -> None:
+        result = await service.decompose(_request(metric, ["region"]))
+        assert result.method is DecomposeMethodName.RATIO_SHIFT_SHARE
+        assert any("share source and measure" in w for w in result.metadata.warnings) is warns
 
 
 class TestUnsupported:
