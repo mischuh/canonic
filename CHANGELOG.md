@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.43.2](https://github.com/mischuh/canonic/compare/v0.43.1...v0.43.2) (2026-10-19)
+
+
+### Bug Fixes
+
+* **core:** sharpen decompose guidance for shares and ratio parts ([#461](https://github.com/mischuh/canonic/issues/461)) ([08b2b72](https://github.com/mischuh/canonic/commit/08b2b72907a8bdad9023e7187f9c3847870b044b))
+
 ## [0.43.1](https://github.com/mischuh/canonic/compare/v0.43.0...v0.43.1) (2026-10-19)
 
 
