@@ -381,7 +381,9 @@ class TestOpenPeriod:
         result = await service.decompose(
             _request("revenue", ["channel"], as_of=self._AS_OF, allow_open_period=True)
         )
-        assert any("2025-09 has not ended" in w for w in result.metadata.warnings)
+        assert [w for w in result.metadata.warnings if "has not ended" in w] == [
+            "sale_month: the month 2025-09 has not ended, so its figures are incomplete"
+        ]
         assert result.metadata.trust_score is not None
         assert result.metadata.trust_score.tier in {"provisional", "caution"}
 

@@ -60,7 +60,11 @@ def latest_period_probes(
 
     A dimension is probed on a plain additive leaf, either on the metric's own source or on a
     joined source that does not multiply the metric's rows. A dimension behind a join that fans
-    out, and one that reads a JSON key, are left unchecked.
+    out, and one that reads a JSON key, are left unchecked. Neither is a dimension on the same
+    column as a grouped time dimension: the result already shows its periods, and a filter on
+    the shared column (``order_date`` under ``order_month``) would otherwise probe every other
+    grain declared on it. A latest day that has not ended lies in a latest month that has not
+    ended, and a month that has not ended says nothing about complete days.
     """
     anchor = next(
         (leaf for leaf in leaves if leaf.key.strategy == "single" and leaf.finality is None),
@@ -70,6 +74,7 @@ def latest_period_probes(
         return [], [], []
     owner = anchor.key.source
     alias_to_source = build_alias_tree(owner, sources_by_name)
+    grouped_columns = _grouped_columns(query, grouped, owner, sources_by_name, alias_to_source)
     probe_leaves: list[LeafPlan] = []
     plans: list[MetricPlan] = []
     probes: list[ProbeColumn] = []
@@ -84,6 +89,7 @@ def latest_period_probes(
             or expression is None
             or subject in grouped
             or dimension.name in grouped
+            or (alias, dimension.column) in grouped_columns
             or (alias != owner and anchor.fanout)
         ):
             continue
@@ -119,6 +125,27 @@ def latest_period_probes(
             ProbeColumn(column=column, kind=PROBE_LATEST_PERIOD, subject=subject, grain=grain)
         )
     return probe_leaves, plans, probes
+
+
+def _grouped_columns(
+    query: SemanticQuery,
+    grouped: set[str],
+    owner: str,
+    sources_by_name: dict[str, SemanticSource],
+    alias_to_source: dict[str, str],
+) -> set[tuple[str, str]]:
+    """The ``(alias, column)`` pairs behind the grouped time dimensions that read a column."""
+    columns: set[tuple[str, str]] = set()
+    for name in query.dimensions:
+        if name not in grouped and name.rsplit(".", 1)[-1] not in grouped:
+            continue
+        try:
+            found = _find_dimension(name, sources_by_name, owner, alias_to_source)
+        except Ambiguous:
+            continue
+        if found is not None and found[1].column is not None and found[1].json_path is None:
+            columns.add((found[0], found[1].column))
+    return columns
 
 
 def _filtered_time_dimensions(
