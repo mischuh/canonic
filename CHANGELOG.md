@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.43.1](https://github.com/mischuh/canonic/compare/v0.43.0...v0.43.1) (2026-10-19)
+
+
+### Bug Fixes
+
+* **core:** read qualified and aliased dimensions in decompose by their result column ([#458](https://github.com/mischuh/canonic/issues/458)) ([282d7c3](https://github.com/mischuh/canonic/commit/282d7c3a853ada571bfc4ab88634896ae6bb64dd))
+
 ## [0.43.0](https://github.com/mischuh/canonic/compare/v0.42.0...v0.43.0) (2026-10-19)
 
 
