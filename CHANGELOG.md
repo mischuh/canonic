@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.42.0](https://github.com/mischuh/canonic/compare/v0.41.0...v0.42.0) (2026-10-19)
+
+
+### Features
+
+* **compiler:** warn about a zero denominator only when a returned row has one ([#436](https://github.com/mischuh/canonic/issues/436)) ([d848ee4](https://github.com/mischuh/canonic/commit/d848ee4271e6570466e4cde8b5cc27aac1eaa617))
+* **core:** make reloading project files opt-in and report drift when it is off ([#441](https://github.com/mischuh/canonic/issues/441)) ([d61da27](https://github.com/mischuh/canonic/commit/d61da27a7bc53d6436c40a42c2c7f99e515ecd72))
+* **mcp:** expose a fingerprint of the loaded project state ([#439](https://github.com/mischuh/canonic/issues/439)) ([3180406](https://github.com/mischuh/canonic/commit/3180406a75b570db638d8a563d4c880a5ae95fa8))
+* **mcp:** return the knowledge pages that define a metric in describe_metric ([#443](https://github.com/mischuh/canonic/issues/443)) ([0ce96e6](https://github.com/mischuh/canonic/commit/0ce96e6c4618c41d19a72d24bcfce071569a4f57))
+
+
+### Bug Fixes
+
+* **contracts:** warn when a guardrail's knowledge_refs names a page that does not exist ([#445](https://github.com/mischuh/canonic/issues/445)) ([836c668](https://github.com/mischuh/canonic/commit/836c668fc2ce64088b311cde483d9cb037495bfe))
+* **core:** reload contracts and semantics when project files change ([#438](https://github.com/mischuh/canonic/issues/438)) ([9388f9a](https://github.com/mischuh/canonic/commit/9388f9ad37efa37fff8a56221d165e6858d13053))
+
 ## [0.41.0](https://github.com/mischuh/canonic/compare/v0.40.1...v0.41.0) (2026-10-18)
 
 
