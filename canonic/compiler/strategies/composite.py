@@ -213,6 +213,7 @@ def plan_metric(
                 _composition_component(components.numerator, composite_pop_filter),
                 _composition_component(components.denominator, composite_pop_filter),
             ),
+            numerator_parts=tuple(composite.binding.canonical.numerator_parts or ()),
         ),
         warnings=zero_warnings,
     )

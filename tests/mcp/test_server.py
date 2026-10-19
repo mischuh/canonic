@@ -288,6 +288,7 @@ async def test_resolve_metric_composite_returns_kind_and_components(
             "numerator": "revenue",
             "denominator": "order_count",
             "on_zero_denominator": "zero",
+            "numerator_parts": None,
         },
         "population_filter": "status = 'completed'",
     }

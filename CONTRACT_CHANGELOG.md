@@ -96,6 +96,17 @@ A change listed here was reviewed against the classification rules and did not b
 
 ## History
 
+## 3.10 (2026-10-19) - MINOR
+
+- ADR/PR: this PR (feat(contracts): declare numerator_parts on ratio and weighted_avg metrics)
+- Summary: a `ratio` or `weighted_avg` binding may declare `numerator_parts`, at least two
+  disjoint `single` metrics whose sum is the numerator (or `weighted_sum`). `canonic validate`
+  rejects parts that do not resolve to an active `single` metric, repeat, or read a source not
+  reachable from the numerator's source. `resolve_metric` and `describe_metric` return it in
+  `components.numerator_parts`, and `metadata.composition.<metric>.numerator_parts` carries it in
+  `query` and `compile_query`. Both are `null` when nothing is declared. A consumer that ignores
+  unknown fields is unaffected.
+
 ## 3.9 (2026-10-19) - MINOR
 
 - ADR/PR: this PR (feat(mcp): return the knowledge pages that define a metric in describe_metric)

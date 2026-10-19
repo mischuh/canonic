@@ -145,6 +145,8 @@ class CompositionMetadata:
     Consumed by E14 (trust scoring) and E16 (event log) to record that division
     was applied post-aggregation, not row-by-row. ``components`` is the numerator then the
     denominator, with their resolved bindings and the populations they were compiled over.
+    ``numerator_parts`` is the declared split of the numerator into disjoint metrics, empty
+    when none is declared.
     """
 
     kind: str
@@ -152,6 +154,7 @@ class CompositionMetadata:
     denominator: str
     on_zero_denominator: str
     components: tuple[CompositionComponent, CompositionComponent]
+    numerator_parts: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)

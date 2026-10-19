@@ -89,6 +89,58 @@ def _validate_composite_binding(
     _check_composite_cycle(binding.metric, active_by_name, path=[binding.metric])
 
 
+def _validate_numerator_parts(
+    binding: MetricBinding,
+    active_by_name: dict[str, MetricBinding],
+    sources_by_name: dict[str, SemanticSource],
+) -> None:
+    """Validate ``numerator_parts`` on a ratio/weighted_avg binding.
+
+    Checks: every part resolves to an active ``single`` metric, and every part's source is
+    reachable from a source the numerator reads. Count and uniqueness of the parts are
+    enforced by ``CanonicalRef`` itself. That the parts really sum to the numerator cannot be
+    proven here, it is checked when a change is decomposed.
+    """
+    from canonic.compiler.joins import build_alias_tree
+
+    ref = binding.canonical
+    if ref.numerator_parts is None:
+        return
+    spec = spec_for(ref.kind)
+    assert spec.component_attrs is not None  # noqa: S101 — only composite kinds allow parts
+    numerator_name = spec.component_names(ref)[0]
+    label = spec.component_attrs[0]
+    assert numerator_name is not None  # noqa: S101 — enforced by CanonicalRef model_validator
+
+    numerator = active_by_name.get(numerator_name)
+    numerator_sources = _leaf_sources(numerator, active_by_name) if numerator else set()
+    reachable = {
+        reached
+        for source in numerator_sources
+        for reached in build_alias_tree(source, sources_by_name).values()
+    }
+
+    for part in ref.numerator_parts:
+        part_binding = active_by_name.get(part)
+        if part_binding is None:
+            raise ContractError(
+                f"metric {binding.metric!r}: numerator_parts entry {part!r} does not resolve "
+                f"to an active metric binding"
+            )
+        part_ref = part_binding.canonical
+        if part_ref.kind is not BindingKind.SINGLE:
+            raise ContractError(
+                f"metric {binding.metric!r}: numerator_parts entry {part!r} has kind "
+                f"{part_ref.kind.value}; every part must be a metric of kind single"
+            )
+        if part_ref.source not in reachable:
+            raise ContractError(
+                f"metric {binding.metric!r}: numerator_parts entry {part!r} reads source "
+                f"{part_ref.source!r}, which is not reachable from the source of {label} "
+                f"{numerator_name!r}"
+            )
+
+
 def _check_composite_cycle(
     metric: str,
     active_by_name: dict[str, MetricBinding],
@@ -576,6 +628,7 @@ def validate_contracts(project_root: Path) -> None:
             _validate_cumulative_binding(binding, sources_by_name)
         else:
             _validate_composite_binding(binding, bindings, source_measures)
+            _validate_numerator_parts(binding, active_by_name, sources_by_name)
         _validate_population_filter(binding, active_by_name, source_columns, source_dims)
 
     guardrails = load_guardrails(project_root)

@@ -71,6 +71,7 @@ Full field list on `CanonicalRef`:
 | `measure` | `str \| null` | `null` | `single`, `semi_additive`, `opaque`, `cumulative`. |
 | `numerator` / `denominator` | `str \| null` | `null` | `ratio` (both are metric names). |
 | `weighted_sum` / `weight` | `str \| null` | `null` | `weighted_avg` (both are metric names). |
+| `numerator_parts` | `list[str] \| null` | `null` | `ratio`/`weighted_avg`: the disjoint metrics whose sum is the `numerator` (or `weighted_sum`). See [Numerator parts](#numerator-parts). |
 | `on_zero_denominator` | `OnZeroDenominator` | `null` (coerced) | `ratio`/`weighted_avg`: `null` \| `zero` \| `error` when the denominator is zero. Under `null` a `query` warns only when a returned row had a zero denominator, and names how many. `compile_query` has no result, so it always states the policy. `zero` never warns. The count is in `metadata.composition.<metric>.zero_denominator_rows`. |
 | `collapse_dimension` | `str \| null` | `null` | `semi_additive`: the dimension that collapses (typically time). |
 | `collapse_agg` | `CollapseAgg \| null` | `null` | `semi_additive`: `last` \| `first` \| `avg` \| `min` \| `max`. |
@@ -81,6 +82,30 @@ Full field list on `CanonicalRef`:
 | `order_by` | `list[str] \| null` | `null` | `cumulative`: dimensions to accumulate along, sorted lexicographically in list order. |
 | `on_gap` | `OnGap` | `skip` | `cumulative`: `skip` \| `fill_observed`, see [Cumulative metrics](#cumulative-metrics). |
 | `population_filter` | `str \| null` | `null` | All `kind`s: SQL predicate AND-ed into every leaf query's `WHERE` before aggregation, defining the population the metric is *about* (e.g. excluding test accounts). |
+
+### Numerator parts
+
+A ratio may declare the disjoint metrics that sum up to its numerator. This matters when the numerator contains the denominator, such as a result rate where costs are booked negative:
+
+```yaml
+metric: result_rate
+canonical:
+  kind: ratio
+  numerator: net_result          # revenue + costs, costs booked negative
+  denominator: revenue
+  numerator_parts: [revenue, costs]
+```
+
+The declaration states a fact about the metric: the numerator equals the sum of the listed metrics, and those metrics count disjoint rows. A reader of the contract sees that `result_rate` is `1 + costs / revenue` in disguise. canonic never derives this overlap from the data or the contract structure. `numerator_parts` is allowed on `ratio` (parts of `numerator`) and `weighted_avg` (parts of `weighted_sum`), and is returned by `resolve_metric`, `describe_metric` and the `composition` block of a query.
+
+Validation rejects a declaration when:
+
+- it is set on a kind other than `ratio` or `weighted_avg`,
+- it lists fewer than two parts, or one part twice,
+- a part does not resolve to an active metric of `kind: single`,
+- a part reads a source that is not reachable from the source of the numerator.
+
+That the parts really sum to the numerator cannot be proven from the contract.
 
 ### Cumulative metrics
 
