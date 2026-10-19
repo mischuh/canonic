@@ -5,6 +5,7 @@ sl_refs:
 - retail_db.customer_profiles
 - retail_db.customers
 refs: []
+metrics: []
 usage_mode: reference
 meta:
   provenance: inferred

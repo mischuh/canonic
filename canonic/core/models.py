@@ -223,6 +223,8 @@ class MetricSummary(BaseModel):
 
     For composite kinds (ratio, weighted_avg), ``source`` and ``measure`` are None;
     ``components`` holds the ordered component metric names [numerator, denominator].
+    ``knowledge_refs`` are the ids of the knowledge pages that define or qualify the metric, as in
+    :class:`MetricDetail`.
     """
 
     model_config = ConfigDict(frozen=True)
@@ -235,6 +237,7 @@ class MetricSummary(BaseModel):
     aliases: list[str] = []
     components: list[str] | None = None
     dimensions: list[DimensionInfo] = []
+    knowledge_refs: list[str] = []
 
 
 class ComponentsOut(BaseModel):
@@ -292,6 +295,11 @@ class MetricDetail(BaseModel):
     ``kind``, ``components`` and ``population_filter`` say how the metric is built, as in
     :class:`BindingOut`. For a composite, ``measures`` lists the measures its components read
     and ``grain`` is the shared grain when both components sit on one source, otherwise empty.
+
+    ``knowledge_refs`` are the ids of the visible knowledge pages that define or qualify the
+    metric, sorted: the ids its contract declares, otherwise the pages that name it, otherwise the
+    definition and caveat pages that touch the columns of its filter. A composite gets its own
+    list, the pages of its components are not merged in.
     """
 
     model_config = ConfigDict(frozen=True)
@@ -308,6 +316,7 @@ class MetricDetail(BaseModel):
     aliases: list[str] = []
     freshness: SourceFreshnessOut | None = None
     examples: list[Example] = []
+    knowledge_refs: list[str] = []
 
 
 class MetricRef(BaseModel):

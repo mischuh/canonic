@@ -4,6 +4,7 @@ tags: []
 sl_refs:
 - retail_db.order_items.revenue
 refs: []
+metrics: []
 usage_mode: reference
 meta:
   provenance: inferred

@@ -3,6 +3,7 @@ summary: Average order value is revenue divided by the number of orders.
 tags: []
 sl_refs: []
 refs: []
+metrics: []
 usage_mode: reference
 meta:
   provenance: inferred

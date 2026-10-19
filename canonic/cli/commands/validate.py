@@ -12,6 +12,7 @@ from canonic.cli.commands import load_service
 from canonic.config import find_project_root
 from canonic.contracts.inert import inert_declaration_warnings
 from canonic.contracts.validate import validate_contracts
+from canonic.knowledge.link_validation import validate_knowledge_links
 
 _console = Console(soft_wrap=True)
 
@@ -33,6 +34,9 @@ def validate(ctx: typer.Context) -> None:
     resolve to an existing knowledge page (AMENDMENT-curated-reports S18) -- so
     renaming a metric a report depends on is caught in the same run, the same PR.
 
+    Also checks the links between metrics and knowledge pages: a metric's ``knowledge_refs`` must
+    name global pages, and a page's ``metrics`` must name active metrics by canonical name.
+
     Declarations the compiler accepts but does not act on (named ``filters``, ``segments``,
     an unevaluated finality ``coalescing``, ``board_only_final`` without a ``restrict_source``
     guardrail) are reported as warnings and do not fail the run.
@@ -48,6 +52,7 @@ def validate(ctx: typer.Context) -> None:
         raise typer.Exit(1)
 
     validate_contracts(root)
+    validate_knowledge_links(root)
     load_service(ctx).validate_reports()
     warnings = inert_declaration_warnings(root)
 

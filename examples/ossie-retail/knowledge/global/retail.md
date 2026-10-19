@@ -4,6 +4,7 @@ summary: Use this model for sales questions. Revenue is the sum of line item
 tags: []
 sl_refs: []
 refs: []
+metrics: []
 usage_mode: reference
 meta:
   provenance: inferred

@@ -5,6 +5,7 @@ tags: []
 sl_refs:
 - retail_db.orders
 refs: []
+metrics: []
 usage_mode: reference
 meta:
   provenance: inferred

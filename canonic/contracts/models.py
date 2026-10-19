@@ -344,6 +344,9 @@ class MetricBinding(BaseModel):
     deprecated_alternatives: list[DeprecatedAlternative] = []
     examples: list[Example] = []
     status: Status = Status.ACTIVE
+    #: Ids of the knowledge pages that define or qualify this metric. When set, these are
+    #: returned with the metric as they are and replace the pages found by any other means.
+    knowledge_refs: list[str] = []
     #: Which context pack installed this binding (AMENDMENT-context-packs §2.3); None
     #: for a hand-written binding.
     pack_source: PackSourceMeta | None = None

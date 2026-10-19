@@ -21,6 +21,7 @@ sl_refs:                         # → semantic entities, fully qualified
   - warehouse_pg.customers
   - warehouse_pg.orders.total_revenue
 refs: [test-account-policy]      # → other pages by id/slug
+metrics: [active_customers]      # → metrics this page defines or qualifies, by canonical name
 usage_mode: caveat                # reference | caveat | policy | definition
 meta:                             # system-managed, not hand-edited
   provenance: human_curated
@@ -58,6 +59,10 @@ When embeddings aren't installed, search runs lexical-only and degrades graceful
 Each hit's `score` is the RRF-fused value, not a relevance percentage. See [`canonic knowledge search`](/cli-reference/knowledge#reading-score) for how to read it.
 
 Page vectors are cached under `.canonic/knowledge-index/`, keyed by a content fingerprint per page: a search only re-embeds pages whose `summary`/`body` changed since the last run, not the whole knowledge base every time. A model swap is detected the same way (via the embedder's identity fingerprint) and triggers a full rebuild rather than mixing vectors from two models.
+
+## Pages for a metric
+
+`describe_metric` and `list_metrics` return `knowledge_refs` for each metric: the ids of the pages that define or qualify it. That is where an agent picking between a broad and a narrow variant of one measure finds the page that tells them apart, without having to search and hope the right page ranks first. A page points at a metric with its `metrics:` list, a metric can name its pages itself with `knowledge_refs` in its contract, and failing both, the `definition` and `caveat` pages that touch the columns of the metric's filter are used. See [`describe_metric`](/mcp-integration/tools-reference#describe_metricname-str) for the order. `canonic validate` checks that every name in a page's `metrics` is an active metric and every declared `knowledge_refs` id is a global page.
 
 ## Graph traversal
 
