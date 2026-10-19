@@ -367,6 +367,7 @@ class RatioPartsMethod:
             DenominatorRow(member=member, base=d0, compare=d1, delta=d1 - d0)
             for member, values in members.items()
             for d0, d1 in [_value(values, self._ratio.denominator)]
+            if d0 or d1
         ]
         ranked = _ranked(denominator_rows, lambda r: r.delta, lambda r: r.member)
         return PartsBreakdown(

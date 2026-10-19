@@ -129,6 +129,18 @@ class TestRatioParts:
             ("south", 100.0),
         ]
 
+    def test_a_member_without_a_denominator_has_no_denominator_row(self) -> None:
+        # A member that only moves a part, like an expense category without income.
+        members = {
+            **_REGIONS,
+            "fees": {"net_result": (-5.0, -8.0), "revenue": (0.0, 0.0), "costs": (-5.0, -8.0)},
+        }
+        split = _parts().split(_OVERALL, members, 10)
+
+        assert isinstance(split, PartsBreakdown)
+        assert "fees" in {r.member for r in split.parts["costs"].rows}
+        assert [r.member for r in split.denominator.rows] == ["north", "south"]
+
     def test_effects_sum_to_the_total_change(self) -> None:
         method = _parts()
         assert sum(e.contribution for e in method.effects(_OVERALL)) == pytest.approx(

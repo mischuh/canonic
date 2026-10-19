@@ -13,7 +13,7 @@ import time
 import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 import sqlglot
 from sqlglot import exp
@@ -22,6 +22,7 @@ from sqlglot.errors import ParseError
 from canonic.compiler import SemanticQuery
 from canonic.compiler._helpers import _dimension_output_names, _find_dimension
 from canonic.compiler.joins import build_alias_tree
+from canonic.compiler.leaf import _conjuncts, _render
 from canonic.contract import CONTRACT_SCHEMA
 from canonic.contracts.kinds import spec_for
 from canonic.contracts.models import BindingKind
@@ -276,7 +277,7 @@ class DecomposeService:
         if (components.numerator.source, components.numerator.measure) == (
             components.denominator.source,
             components.denominator.measure,
-        ):
+        ) and not _narrows(components.numerator, components.denominator):
             warnings.append(
                 f"components of {binding.metric} share source and measure; if the numerator "
                 f"contains the denominator, declare numerator_parts"
@@ -470,6 +471,30 @@ def _check_filters(request: DecomposeRequest, period: _Period) -> None:
                 f"filter {predicate!r} restricts the period dimension {period.dimension!r}; "
                 f"decompose sets the two periods itself"
             )
+
+
+def _narrows(numerator: Binding, denominator: Binding) -> bool:
+    """Whether the numerator counts a strict subset of the denominator's rows.
+
+    That holds when the numerator's ``population_filter`` ANDs every condition of the
+    denominator's with at least one more. A share like this is what shift-share is for, so the
+    hint to declare ``numerator_parts`` does not apply. Conditions compare in their rendered
+    form, so a subset written differently is not recognized and keeps the hint.
+    """
+    narrower = _filter_conditions(numerator.binding.canonical.population_filter)
+    wider = _filter_conditions(denominator.binding.canonical.population_filter)
+    return narrower is not None and wider is not None and wider < narrower
+
+
+def _filter_conditions(population_filter: str | None) -> frozenset[str] | None:
+    """The conditions a ``population_filter`` ANDs together, or ``None`` when it does not parse."""
+    if population_filter is None:
+        return frozenset()
+    try:
+        condition = cast("exp.Expression", sqlglot.parse_one(population_filter))
+    except ParseError:
+        return None
+    return frozenset(_render(conjunct) for conjunct in _conjuncts(condition))
 
 
 def _bytes_scanned(results: Sequence[ResultSet]) -> int | None:
