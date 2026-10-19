@@ -158,6 +158,14 @@ class TestProbeIsPlanned:
         assert "_leaf_1" not in compiled.sql, "the probe fuses into the metric's CTE"
         assert "'test'" in compiled.sql
 
+    def test_grouping_by_another_column_keeps_the_probe(self) -> None:
+        source = _orders(Dimension(name="order_day", column="created_at", granularity="day"))
+        compiled = _compile(
+            filters=["created_at >= '2026-10-01'"], dimensions=["booked_month"], source=source
+        )
+
+        assert [p.subject for p in compiled.probe_columns] == ["order_month", "order_day"]
+
     def test_single_metric_stays_a_bare_statement(self) -> None:
         compiled = _compile(filters=["order_month >= '2026-10-01'"])
 
@@ -181,6 +189,22 @@ class TestProbeIsSkipped:
         compiled = _compile(**kwargs)  # type: ignore[arg-type]
 
         assert all(p.kind != PROBE_LATEST_PERIOD for p in compiled.probe_columns)
+        assert "_canonic_latest_period" not in compiled.sql
+
+    @pytest.mark.parametrize(
+        ("dimensions", "filters"),
+        [
+            pytest.param(["order_month"], ["created_at >= '2026-10-01'"], id="day-under-month"),
+            pytest.param(["order_day"], ["order_month >= '2026-10-01'"], id="month-under-day"),
+        ],
+    )
+    def test_no_probe_on_the_column_of_a_grouped_time_dimension(
+        self, dimensions: list[str], filters: list[str]
+    ) -> None:
+        source = _orders(Dimension(name="order_day", column="created_at", granularity="day"))
+        compiled = _compile(filters=filters, dimensions=dimensions, source=source)
+
+        assert not compiled.probe_columns
         assert "_canonic_latest_period" not in compiled.sql
 
     def test_json_key_dimension_is_not_probed(self) -> None:
