@@ -19,6 +19,7 @@ from canonic.core.decompose_models import (
 )
 from canonic.core.service import CanonicService
 from canonic.exc import (
+    Ambiguous,
     CapabilityDisabled,
     DecompositionInconsistent,
     PeriodOpen,
@@ -66,7 +67,7 @@ measures:
 dimensions:
   - {name: sale_date, column: sale_date, granularity: day}
   - {name: sale_month, column: sale_date, granularity: month}
-  - {name: channel, column: channel}
+  - {name: channel, column: channel, aliases: ["sales channel"]}
   - {name: status, column: status}
 joins:
   - {to: regions, on: "sales.region_code = regions.region_code", relationship: many_to_one}
@@ -331,6 +332,53 @@ class TestUnsupported:
         assert result.total.compare == pytest.approx(1200 / 4)
         assert sum(e.contribution for e in result.effects) == pytest.approx(result.total.delta)
         assert result.by == {}
+
+
+class TestDimensionNames:
+    """A requested dimension may be an alias or qualified, the result column is named by it."""
+
+    async def test_a_qualified_split_dimension(self, service: CanonicService) -> None:
+        plain = await service.decompose(_request("result_rate", ["region"]))
+        qualified = await service.decompose(_request("result_rate", ["regions.region"]))
+
+        assert list(qualified.by) == ["regions.region"]
+        assert qualified.by["regions.region"] == plain.by["region"]
+
+    async def test_an_alias_as_split_dimension(self, service: CanonicService) -> None:
+        plain = await service.decompose(_request("revenue", ["channel"]))
+        aliased = await service.decompose(_request("revenue", ["sales channel"]))
+
+        assert aliased.by["sales channel"] == plain.by["channel"]
+
+    async def test_a_qualified_period_dimension(self, service: CanonicService) -> None:
+        period = {"dimension": "sales.sale_month", "base": "2025-08", "compare": "2025-09"}
+        result = await service.decompose(_request("revenue", ["channel"], period=period))
+
+        assert (result.total.base, result.total.compare) == (1000.0, 1200.0)
+
+    async def test_an_ambiguous_dimension_names_the_qualified_candidates(
+        self, decompose_project: Path
+    ) -> None:
+        semantics = decompose_project / "semantics" / "warehouse_duckdb"
+        sales = semantics / "sales.yaml"
+        sales.write_text(
+            sales.read_text()
+            + '  - {to: districts, on: "sales.region_code = districts.code", '
+            + "relationship: many_to_one}\n"
+        )
+        (semantics / "districts.yaml").write_text(
+            "name: districts\nconnection: warehouse_duckdb\ntable: districts\ngrain: [code]\n"
+            "columns:\n  - {name: code, type: string, nullable: false}\n"
+            "  - {name: name, type: string, nullable: false}\n"
+            "dimensions:\n  - {name: region, column: name}\n"
+        )
+        service = CanonicService.from_project(decompose_project)
+
+        with pytest.raises(Ambiguous) as excinfo:
+            await service.decompose(_request("revenue", ["region"]))
+        assert "regions.region" in excinfo.value.candidates
+        result = await service.decompose(_request("revenue", ["regions.region"]))
+        assert {r.member for r in result.by["regions.region"].rows} == {"North", "South"}
 
 
 class TestValidation:

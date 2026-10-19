@@ -20,7 +20,7 @@ from sqlglot import exp
 from sqlglot.errors import ParseError
 
 from canonic.compiler import SemanticQuery
-from canonic.compiler._helpers import _find_dimension
+from canonic.compiler._helpers import _dimension_output_names, _find_dimension
 from canonic.compiler.joins import build_alias_tree
 from canonic.contract import CONTRACT_SCHEMA
 from canonic.contracts.kinds import spec_for
@@ -148,7 +148,8 @@ class DecomposeService:
             overall = await self._query.execute(
                 overall_query, principal=principal, run=runs[-1], compiled=overall_compiled
             )
-            overall_values = _overall_values(overall.result, period, leaves)
+            (period_column,) = self._output_columns([period.dimension], leaves, principal)
+            overall_values = _overall_values(overall.result, period, period_column, leaves)
             method.check(overall_values)
 
             top_n = self._top_n(request)
@@ -162,7 +163,12 @@ class DecomposeService:
                     run=runs[-1],
                 )
                 metadata_blocks.append(split.metadata)
-                members = _member_values(split.result, period, dimension, leaves)
+                period_split_column, member_column = self._output_columns(
+                    [period.dimension, dimension], leaves, principal
+                )
+                members = _member_values(
+                    split.result, period, period_split_column, member_column, leaves
+                )
                 breakdowns[dimension] = method.split(overall_values, members, top_n)
 
             result = DecomposeResult(
@@ -328,6 +334,16 @@ class DecomposeService:
                 f"{leaf!r}"
             )
         return found
+
+    def _output_columns(
+        self, names: Sequence[str], leaves: Sequence[str], principal: Principal | None
+    ) -> list[str]:
+        """The result columns the compiler names the dimensions ``names`` by, in order.
+
+        A requested name may be an alias or qualified by its join alias (``pickup.city``), and
+        the column is named by the dimension itself, qualified only when two of them share it.
+        """
+        return _dimension_output_names([self._find(name, leaves[0], principal) for name in names])
 
     def _check_reachable(
         self, request: DecomposeRequest, leaves: Sequence[str], principal: Principal | None
@@ -527,26 +543,32 @@ def _accumulate(
         target.setdefault(leaf, [0.0, 0.0])[index] += _number(row[columns[leaf]])
 
 
-def _overall_values(result: ResultSet, period: _Period, leaves: Sequence[str]) -> LeafValues:
+def _overall_values(
+    result: ResultSet, period: _Period, period_column: str, leaves: Sequence[str]
+) -> LeafValues:
     columns = {c.name: i for i, c in enumerate(result.columns)}
     values: dict[str, list[float]] = {leaf: [0.0, 0.0] for leaf in leaves}
     for row in result.rows:
-        index = _period_index(row[columns[period.dimension]], period)
+        index = _period_index(row[columns[period_column]], period)
         if index is not None:
             _accumulate(values, row, columns, leaves, index)
     return {leaf: (pair[0], pair[1]) for leaf, pair in values.items()}
 
 
 def _member_values(
-    result: ResultSet, period: _Period, dimension: str, leaves: Sequence[str]
+    result: ResultSet,
+    period: _Period,
+    period_column: str,
+    member_column: str,
+    leaves: Sequence[str],
 ) -> MemberValues:
     columns = {c.name: i for i, c in enumerate(result.columns)}
     members: dict[Any, dict[str, list[float]]] = {}
     for row in result.rows:
-        index = _period_index(row[columns[period.dimension]], period)
+        index = _period_index(row[columns[period_column]], period)
         if index is not None:
             _accumulate(
-                members.setdefault(row[columns[dimension]], {}), row, columns, leaves, index
+                members.setdefault(row[columns[member_column]], {}), row, columns, leaves, index
             )
     return {
         member: {leaf: (pair[0], pair[1]) for leaf, pair in values.items()}

@@ -120,7 +120,7 @@ Attributes the change of one metric between two periods of one time dimension, o
 
 - `metric` (`str`): a metric name or alias
 - `period` (`{dimension, base, compare}`): a time dimension with a period grain (`time_grain`, or a `granularity` of hour, day, week, month, quarter or year) and two distinct values of it, such as `{"dimension": "order_month", "base": "2026-08", "compare": "2026-09"}`
-- `by` (`list[str]`): split dimensions, at most `decompose.max_by`. Empty returns the overall effects only
+- `by` (`list[str]`): split dimensions, at most `decompose.max_by`. Empty returns the overall effects only. Names work as in `query`: a canonical name, an alias, or `alias.dimension` when a name is on several join-reachable sources and fails with `ambiguous`. Each entry of `by` in the result is keyed by the name as requested
 - `filters`, `via`, `context`, `as_of`: as in `query`, applied to both periods. A filter on the period dimension is rejected with `validation_failed`
 - `top_n` (`int`): members listed per dimension, default `decompose.top_n`, capped at `decompose.max_top_n`
 - `allow_open_period` (`bool`, default `false`)
