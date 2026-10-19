@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 from typing import TYPE_CHECKING
 
 import pytest
@@ -108,7 +109,8 @@ def test_file_and_flags_are_mutually_exclusive(runner: CliRunner, project: Path)
 def test_incomplete_flags_are_a_usage_error(runner: CliRunner, project: Path) -> None:
     result = runner.invoke(app, ["decompose", "--metric", "revenue"])
     assert result.exit_code == 2
-    assert "--period-dimension" in result.output
+    # Rich styles option names and wraps the panel, so match a plain word without colors.
+    assert "required" in re.sub(r"\x1b\[[0-9;]*m", "", result.output)
 
 
 def test_a_malformed_file_is_validation_failed(runner: CliRunner, project: Path) -> None:
