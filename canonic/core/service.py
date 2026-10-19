@@ -100,6 +100,7 @@ class CanonicService:
         project_root: Path | None = None,
         event_log: AnswerEventLog | None = None,
         reloader: ProjectReloader | None = None,
+        decompose: bool | None = None,
     ) -> None:
         self._event_log: AnswerEventLog = (
             event_log if event_log is not None else NullAnswerEventLog()
@@ -113,6 +114,7 @@ class CanonicService:
             project_root=project_root,
             event_log=self._event_log,
             reloader=reloader,
+            decompose=decompose,
         )
         ctx = self._ctx
         self._assertions = AssertionService(ctx)
@@ -121,6 +123,11 @@ class CanonicService:
         self._query = QueryService(ctx, self._assertions, self._knowledge)
         self._decompose = DecomposeService(ctx, self._query)
         self._reports = ReportService(ctx, self._query, self._knowledge)
+
+    @property
+    def decompose_enabled(self) -> bool:
+        """Whether ``decompose`` is offered, after any per-server override of the config."""
+        return self._ctx.decompose_enabled
 
     @property
     def resolver(self) -> ContractResolver:
@@ -148,7 +155,9 @@ class CanonicService:
         )
 
     @classmethod
-    def from_project(cls, root: Path, *, reload: ProjectReload | None = None) -> CanonicService:
+    def from_project(
+        cls, root: Path, *, reload: ProjectReload | None = None, decompose: bool | None = None
+    ) -> CanonicService:
         """Load config, resolver, and semantic sources from a project root.
 
         ``reload`` overrides ``project.reload`` from ``canonic.yaml``. Under ``off`` (the
@@ -158,6 +167,9 @@ class CanonicService:
         one of them changed, and keeps serving the previous state when the new files do not
         validate. A service constructed directly has no files to follow and serves what it
         was given.
+
+        ``decompose`` overrides ``decompose.enabled`` for this service, for a server started
+        with ``--decompose`` or ``--no-decompose``.
         """
         state = ProjectState.load(root)
         return cls(
@@ -169,6 +181,7 @@ class CanonicService:
             reloader=ProjectReloader(
                 root, state, reload if reload is not None else state.config.project.reload
             ),
+            decompose=decompose,
         )
 
     # ------------------------------------------------------------------

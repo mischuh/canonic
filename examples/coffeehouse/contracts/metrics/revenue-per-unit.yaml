@@ -1,0 +1,11 @@
+# Revenue over units sold, both aggregated first. It moves when prices move and when the mix
+# of products moves, which decompose tells apart as rate and mix.
+metric: revenue_per_unit
+canonical:
+  kind: ratio
+  numerator: revenue
+  denominator: units_sold
+  on_zero_denominator: null
+provenance: human_curated
+aliases: ["average unit price", "price per unit"]
+status: active

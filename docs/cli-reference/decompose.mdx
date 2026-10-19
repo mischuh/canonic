@@ -1,0 +1,30 @@
+---
+title: "canonic decompose"
+description: "Explain why a metric changed between two periods."
+---
+
+`canonic decompose` attributes the change of one metric between two periods of one time dimension, overall and by member of one or more split dimensions. It is the CLI form of the MCP tool [`decompose_change`](/mcp-integration/tools-reference#decompose_change-request-dict), which describes the methods and the result in full.
+
+```bash
+canonic decompose --metric margin --period-dimension order_month --base 2026-08 --compare 2026-09 --by region,channel
+canonic decompose --metric margin --period-dimension order_month --base 2026-08 --compare 2026-09 --by channel --filter "region=north"
+canonic decompose --file request.json --json
+```
+
+| Flag | Description |
+| --- | --- |
+| `--metric` | Metric name or alias. |
+| `--period-dimension` | The time dimension the two periods belong to. It needs a period grain: `time_grain`, or a `granularity` of hour, day, week, month, quarter or year. |
+| `--base` | The earlier period, e.g. `2026-08`, `2026-Q3`, `2026-W34` or `2026`. |
+| `--compare` | The later period. Swapping `--base` and `--compare` negates every contribution. |
+| `--by` | Split dimension(s): comma-separated and/or repeatable, at most `decompose.max_by`. Without it only the overall effects are returned. |
+| `--filter` | A filter as `field=value` or `field:op:value` (repeatable), applied to both periods, as in `canonic query`. A filter on the period dimension is rejected. |
+| `--via` | Join-path alias prefix (comma-separated and/or repeatable), as in `canonic query`. |
+| `--top-n` | Members listed per dimension. The rest are merged into one row. Defaults to `decompose.top_n`, capped at `decompose.max_top_n`. |
+| `--allow-open-period` | Decompose even when a period has not ended. The result then carries a warning and a trust tier of at most `provisional`. |
+| `--file`, `-f` | A request JSON file: `{"metric": ..., "period": {"dimension": ..., "base": ..., "compare": ...}, "by": [...], "filters": [...]}`. |
+| `--tenant` | Repeatable, or comma-separated for several tenants. Bind a fixed, roleless principal for local development / platform-operator use. Always logs a warning. See [Tenancy & access control](/concepts/tenancy-and-access-control#--tenant-cli-override). |
+
+`-f` and the inline flags are mutually exclusive. Inline, `--metric`, `--period-dimension`, `--base` and `--compare` are all required. Without `--json` the result is printed as a summary line, a table of effects, and one table per split dimension. With `--json`, the output matches the MCP `decompose_change` tool's payload byte-for-byte.
+
+To drill into one member, run it again with a filter on that member and the next dimension in `--by`. A period that has not ended fails with `period_open` (exit `26`), parts that do not sum to the numerator with `decomposition_inconsistent` (exit `27`), and a project with `decompose.enabled: false` with `capability_disabled` (exit `28`). See [Error codes](/reference/error-codes).

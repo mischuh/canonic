@@ -50,6 +50,7 @@
           "cli-reference/ingest",
           "cli-reference/review-apply",
           "cli-reference/query-sql-assert",
+          "cli-reference/decompose",
           "cli-reference/status-report",
           "cli-reference/report",
           "cli-reference/completion"

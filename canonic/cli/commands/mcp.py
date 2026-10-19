@@ -117,6 +117,16 @@ def start(
             ),
         ),
     ] = None,
+    decompose: Annotated[
+        bool | None,
+        typer.Option(
+            "--decompose/--no-decompose",
+            help=(
+                "Offer the decompose_change tool, or hide it, overriding decompose.enabled in "
+                "canonic.yaml (default on)."
+            ),
+        ),
+    ] = None,
     child: Annotated[
         bool,
         typer.Option(
@@ -183,7 +193,7 @@ def start(
 
     reload_mode = None if reload is None else ProjectReload.AUTO if reload else ProjectReload.OFF
     try:
-        service = CanonicService.from_project(root, reload=reload_mode)
+        service = CanonicService.from_project(root, reload=reload_mode, decompose=decompose)
     except Exception as exc:
         msg = f"failed to load project context: {exc}"
         if json_output:
@@ -209,7 +219,7 @@ def start(
             if count:
                 if not json_output:
                     _console.print(f"[dim]auto-generated {count} inferred metric contract(s)[/dim]")
-                service = CanonicService.from_project(root, reload=reload_mode)
+                service = CanonicService.from_project(root, reload=reload_mode, decompose=decompose)
 
     try:
         if transport == "http":
@@ -281,6 +291,7 @@ def start(
                 token_ref=token_ref,
                 auth_mechanisms=auth_mechanisms,
                 reload=reload,
+                decompose=decompose,
             )
             if json_output:
                 typer.echo(

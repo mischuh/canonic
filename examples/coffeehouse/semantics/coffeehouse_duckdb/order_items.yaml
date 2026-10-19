@@ -5,7 +5,8 @@ grain: [order_id, line_number]
 description: >
   One row per order line. An order with four products is four rows here, so anything
   measured per order must be counted over distinct order_id, never over rows.
-  See [[average-order-value]].
+  See [[average-order-value]]. The cost of goods sold of each line is booked negative,
+  see [[gross-margin-rate]].
 
 columns:
   - { name: order_id,    type: int,     nullable: false }
@@ -13,6 +14,7 @@ columns:
   - { name: product_id,  type: int,     nullable: false }
   - { name: quantity,    type: int,     nullable: false }
   - { name: amount,      type: decimal, nullable: false }
+  - { name: cost,        type: decimal, nullable: false }
 
 measures:
   - name: revenue
@@ -20,6 +22,12 @@ measures:
     additivity: additive
   - name: units_sold
     expr: "sum(quantity)"
+    additivity: additive
+  - name: cogs
+    expr: "sum(cost)"
+    additivity: additive
+  - name: gross_result
+    expr: "sum(amount + cost)"
     additivity: additive
   - name: line_count
     expr: "count(*)"

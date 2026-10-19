@@ -3,7 +3,7 @@ title: "MCP tools reference"
 description: "The tools canonic's MCP server registers, grouped by purpose."
 ---
 
-The MCP server (`canonic/mcp/server.py`) registers 13 tools. Each does transport translation only: parse arguments, call the same core service the CLI calls, serialize the result. No resolution, compilation, or execution logic lives in the MCP layer itself.
+The MCP server (`canonic/mcp/server.py`) registers 14 tools, 13 of them always and `decompose_change` unless it is switched off. Each does transport translation only: parse arguments, call the same core service the CLI calls, serialize the result. No resolution, compilation, or execution logic lives in the MCP layer itself.
 
 | Tool | What it's for |
 | --- | --- |
@@ -15,6 +15,7 @@ The MCP server (`canonic/mcp/server.py`) registers 13 tools. Each does transport
 | `resolve_metric` | Resolve a name or alias to its canonical binding. |
 | `compile_query` | Compile a semantic query to SQL + metadata without executing it. |
 | `query` | Compile and execute a semantic query read-only. |
+| `decompose_change` | Explain why a metric changed between two periods, overall and by member. |
 | `run_sql` | Read-only SQL escape hatch. |
 | `search_knowledge` | Search knowledge pages for business context. |
 | `read_knowledge_page` | Read the full content of one knowledge page. |
@@ -112,6 +113,59 @@ On an `ambiguous_join_path` error, inspect the returned candidates (each has a `
 ### `query(query: dict)`
 
 Same `query` shape as `compile_query`, but compiles **and executes** read-only. Returns rows, with the dimension columns first and then one column per requested metric, named after that metric, plus compiler metadata: resolved bindings, guardrails fired, freshness, `project_fingerprint` (the project state that produced the answer, the same value `contract_info` returns) and `trust_score` (tier plus reasons, see [Trust score](/concepts/contracts-and-guardrails#trust-score)). A query with a [cumulative metric](/reference/contract-schema#cumulative-metrics) also carries `cumulative`: the metric, its `order_by`, the `partition_by` resolved for this query, `on_gap`, `history`, and, under `history: include`, the `visibility_filters` that only chose which rows are shown. Each entry of `guardrails_fired` carries the `predicate` the guardrail applied and `knowledge_refs`, the ids of the knowledge pages that explain it, which `read_knowledge_page` returns in full, see [Guardrails and knowledge](/reference/contract-schema#guardrails-and-knowledge). A query with a composite metric (`ratio`, `weighted_avg`) also carries `composition`: one entry per composite, keyed by the requested metric name, with its `kind`, the `numerator` and `denominator` (each with `metric`, `resolved` and the `population_filter` it counts over), `on_zero_denominator` and `numerator_parts` (`null` unless declared). Under `on_zero_denominator: zero` a row with a zero denominator is returned as `0` without a warning, so this is where a caller reads that the policy applies. `zero_denominator_rows` counts how many rows of the returned result were such rows and got the policy's value (`NULL` or `0`), so a real zero can be told from a substituted one. It is `null` when nothing was counted: from `compile_query`, which has no result, and under `on_zero_denominator: error`. The compiled SQL of a ratio carries one extra column for this count, `_canonic_zero_denominator_<metric>`, and the SQL of a query that filters on a time dimension carries `_canonic_latest_period_<dimension>`. `query` removes both from the result. This is the main path: with `--json`/over MCP, the payload is identical to `canonic query --json`.
+
+### `decompose_change(request: dict)`
+
+Attributes the change of one metric between two periods of one time dimension, overall and by member of one or more split dimensions. Use it for "why did X change" questions instead of querying both periods and subtracting: for a ratio, per-member differences do not add up to the total change. `request` accepts:
+
+- `metric` (`str`): a metric name or alias
+- `period` (`{dimension, base, compare}`): a time dimension with a period grain (`time_grain`, or a `granularity` of hour, day, week, month, quarter or year) and two distinct values of it, such as `{"dimension": "order_month", "base": "2026-08", "compare": "2026-09"}`
+- `by` (`list[str]`): split dimensions, at most `decompose.max_by`. Empty returns the overall effects only
+- `filters`, `via`, `context`, `as_of`: as in `query`, applied to both periods. A filter on the period dimension is rejected with `validation_failed`
+- `top_n` (`int`): members listed per dimension, default `decompose.top_n`, capped at `decompose.max_top_n`
+- `allow_open_period` (`bool`, default `false`)
+
+```json
+{
+  "metric": "result_rate",
+  "kind": "ratio",
+  "method": "ratio_parts",
+  "period": {"dimension": "order_month", "base": "2026-08", "compare": "2026-09"},
+  "total": {"base": 0.12, "compare": 0.175, "delta": 0.055},
+  "effects": [
+    {"effect": "part", "metric": "costs", "base": -880, "compare": -990, "contribution": -0.1008},
+    {"effect": "denominator", "metric": "revenue", "base": 1000, "compare": 1200, "contribution": 0.1558}
+  ],
+  "by": {
+    "region": {
+      "parts": {"costs": {"rows": [{"member": "north", "base": -500, "compare": -560, "contribution": -0.055, "rest": false}], "residual": 0.0}},
+      "denominator": {"units": "denominator", "rows": [{"member": "north", "base": 600, "compare": 700, "delta": 100, "rest": false}]}
+    }
+  },
+  "metadata": {"...": "the metadata block of query, merged over every statement"}
+}
+```
+
+`method` follows the metric's kind, and every method is exact: contributions sum to `total.delta`, and swapping `base` and `compare` negates each of them.
+
+| `method` | Used for | `effects` | `by.<dimension>` |
+| --- | --- | --- | --- |
+| `additive` | `single` | none | `rows` with `base`, `compare` and `contribution` per member |
+| `ratio_shift_share` | `ratio`, `weighted_avg` | `numerator` and `denominator` | `rows` with the member's `share_base`/`share_compare` of the denominator, its own `rate_base`/`rate_compare`, `mix` (its share moved), `rate` (its own ratio moved), `contribution` and `presence` |
+| `ratio_parts` | `ratio`, `weighted_avg` with [`numerator_parts`](/reference/contract-schema#numerator-parts) | one `part` per part, plus one `denominator` | `parts.<part>.rows` split each part effect by member. `denominator.rows` list the members' denominator moves in the denominator's own units, which do not sum to the change |
+
+A member without a denominator in one period has no rate there. Its whole term counts as mix, and `presence` is `base_only` or `compare_only`. Rows are sorted by absolute contribution, then by member with `NULL` last. Members beyond `top_n` are merged into one row with `member: null` and `rest: true`. `residual` is what the listed rows miss of the total, `0` up to rounding. A part that is the denominator itself is the constant `1` and has no effect. A ratio whose numerator and denominator read the same source and measure, without `numerator_parts`, carries a warning to declare them.
+
+To drill into one member, call again with a filter on it and the next dimension in `by`, for example `filters: ["region = 'north'"], by: ["channel"]`. Each call runs one statement for the overall values and one per split dimension, through the same path as `query`, so guardrails, tenancy, population filters and finality apply unchanged.
+
+Errors:
+
+- `period_open`: the base or the compare period has not ended at the serving clock (or `as_of`). With `allow_open_period: true` the decomposition runs, warns, and caps the trust tier at `provisional`. A finality rule governing the query takes precedence, and with `trust.flag_open_periods: false` nothing is checked.
+- `unsupported_measure`: the metric is `semi_additive`, `distinct_count`, `percentile`, `opaque` or `cumulative`, or a ratio with a composite component. A ratio with a `distinct_count` component returns its overall effects, but not a split by member, because one entity can count in several members.
+- `decomposition_inconsistent`: the declared `numerator_parts` do not sum to the numerator, within `decompose.parts_tolerance`.
+- `validation_failed`: a malformed request, a dimension without a period grain, equal periods, a filter on the period dimension, or more than `decompose.max_by` split dimensions.
+
+The tool is registered while `decompose.enabled` is `true` (the default, see [`decompose`](/reference/config-schema#decompose)). `canonic mcp start --decompose` or `--no-decompose` overrides that for one server. With `--json`, the payload is identical to `canonic decompose --json`.
 
 ### `run_sql(sql: str, connection: str | None = None)`
 

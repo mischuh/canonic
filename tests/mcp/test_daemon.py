@@ -303,3 +303,33 @@ class TestStartStdioTenancyGuard:
         with pytest.raises(AttributeError):
             start_stdio(service, project_root, principal=Principal(tenants=("4711",)))
         assert called.get("built") is True
+
+
+class TestStartHttpChildCommand:
+    """The detached child is relaunched with the CLI overrides, so it serves the same way."""
+
+    @pytest.mark.parametrize(
+        ("decompose", "flag"), [(True, "--decompose"), (False, "--no-decompose"), (None, None)]
+    )
+    def test_decompose_override_reaches_the_child(
+        self,
+        project_root: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        decompose: bool | None,
+        flag: str | None,
+    ) -> None:
+        from unittest.mock import MagicMock
+
+        import canonic.mcp.daemon as daemon
+
+        popen = MagicMock()
+        monkeypatch.setattr(daemon.subprocess, "Popen", popen)
+        monkeypatch.setattr(daemon, "_wait_for_daemon_ready", MagicMock())
+        monkeypatch.setattr(daemon, "_write_state", MagicMock(), raising=False)
+        daemon.start_http(MagicMock(), project_root, auth=MagicMock(), decompose=decompose)
+
+        cmd = popen.call_args.args[0]
+        assert ("--decompose" in cmd, "--no-decompose" in cmd) == (
+            flag == "--decompose",
+            flag == "--no-decompose",
+        )

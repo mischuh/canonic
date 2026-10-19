@@ -24,11 +24,11 @@ None of this is a MetricFlow bug. MetricFlow computes exactly what the definitio
 ```
 DIMENSIONS
   customers     customer_id · name · country · segment · is_test
-  products      product_id · name · category · unit_price
+  products      product_id · name · category · unit_price · unit_cost
 
 FACTS
   orders        order_id · customer_id · order_date · status · channel
-  order_items   (order_id, line_number) · product_id · quantity · amount
+  order_items   (order_id, line_number) · product_id · quantity · amount · cost
 ```
 
 Seed data: 19 orders in Q1 2026 with 31 order lines, 5 customers plus one QA test customer, 5 products. 15 orders count as sales: two are refunded, one is cancelled and one belongs to the test customer. Revenue is 780.00, small enough to check every number by hand.
@@ -244,7 +244,7 @@ Neither is wrong. What dbt lacks is a rule that is attached to the data and enfo
 
 ## Knowledge
 
-Five pages under `knowledge/global/`: a policy for what counts as a sale, definitions for average order value and active customers, and two caveats. A search for either metric returns its definition, and the caveats bound to the same sources ride along:
+Six pages under `knowledge/global/`: a policy for what counts as a sale, definitions for average order value, active customers and the gross margin rate, and two caveats. A search for either metric returns its definition, and the caveats bound to the same sources ride along:
 
 ```bash
 canonic knowledge search "average order value"
@@ -287,6 +287,51 @@ error assertion_failed: accuracy 75.0% below target 100.0% (3/4 assertions passe
 Assertions also feed the trust tier every answer carries. A metric without one is reported as `provisional` with the reason `untested (no assertion)`, so an agent knows to caveat it.
 
 dbt tests check tables and columns: uniqueness, not-null, accepted values, or a custom SQL query. A singular test can recompute an AOV in SQL, but that tests the SQL in the test, not the metric as MetricFlow serves it. dbt Core has no built-in way to say "`average_order_value` for January is 59.00" against the semantic layer and fail the build when it is not.
+
+## Why did it change?
+
+The question after "what is the number" is "why did it move". Answering it by querying two months and subtracting works for revenue, but not for a ratio: per-category differences of a rate do not add up to the change of the rate. `canonic decompose` attributes the change for you and picks the method from the metric's kind.
+
+Every order line also carries its cost of goods sold, booked negative, so the gross result is revenue plus cost. The gross margin rate is the gross result over revenue:
+
+```yaml
+# contracts/metrics/gross-margin-rate.yaml
+metric: gross_margin_rate
+canonical:
+  kind: ratio
+  numerator: gross_result        # revenue + cogs
+  denominator: revenue
+  numerator_parts: [revenue, cogs]
+```
+
+The numerator contains the denominator, so the rate is `1 + cogs / revenue`. `numerator_parts` declares that. Without it, a revenue increase would show up on both sides of the division with opposite signs.
+
+```bash
+canonic decompose --metric gross_margin_rate --period-dimension order_month \
+  --base 2026-01 --compare 2026-02 --by category
+```
+
+| 2026 | Revenue | Cost of goods sold | Gross margin rate |
+| --- | --- | --- | --- |
+| January | 295.00 | -122.00 | 58.6% |
+| February | 370.00 | -176.00 | 52.4% |
+
+The rate fell by 6.2 points. The higher cost of goods sold accounts for -16.4 points, of which -11.9 come from equipment: two hand grinders in February against one in January, and a grinder keeps 35% of its price. The higher revenue spreads the cost over more sales and gives back +10.2 points. The denominator rows list where revenue moved, +60.00 in equipment and +15.00 in accessories, in revenue's own units.
+
+Revenue per unit tells a different story. It rose from 9.83 to 13.70, and `decompose` splits that into mix and rate per category:
+
+```bash
+canonic decompose --metric revenue_per_unit --period-dimension order_month \
+  --base 2026-01 --compare 2026-02 --by category
+```
+
+| Category | Share of units | Revenue per unit | Mix | Rate |
+| --- | --- | --- | --- | --- |
+| equipment | 3.3% → 7.4% | 60.00 → 60.00 | +2.44 | 0.00 |
+| accessories | 50.0% → 44.4% | 5.00 → 7.50 | -0.35 | +1.18 |
+| coffee | 46.7% → 48.1% | 11.43 → 12.31 | +0.18 | +0.42 |
+
+No grinder got more expensive. Most of the increase is mix: a larger share of the units sold were grinders. Over MCP the same result comes from `decompose_change`, and the agent is told to call it instead of subtracting two queries. Average order value has a distinct count in its denominator, and one order can contain several categories, so it is decomposed overall but not by category.
 
 ## And Apache Ossie?
 

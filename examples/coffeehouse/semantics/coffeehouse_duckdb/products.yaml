@@ -9,6 +9,7 @@ columns:
   - { name: name,       type: string,  nullable: false }
   - { name: category,   type: string,  nullable: false }
   - { name: unit_price, type: decimal, nullable: false }
+  - { name: unit_cost,  type: decimal, nullable: false }
 
 dimensions:
   - { name: product_name, column: name,     label: "Product" }
