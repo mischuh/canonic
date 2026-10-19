@@ -9,7 +9,9 @@ them. A reader of the YAML would reasonably assume otherwise, so ``canonic valid
 - a finality rule's ``coalescing`` that is not the canonical window expression: source
   selection follows the watermark alone, so any other expression cannot be honored,
 - ``board_only_final: true`` without a ``restrict_source`` guardrail for the metric: final-only
-  is enforced by that guardrail, the flag itself does nothing.
+  is enforced by that guardrail, the flag itself does nothing,
+- a guardrail's ``knowledge_refs`` id that is not a global knowledge page: the id is dropped
+  when the guardrail fires.
 """
 
 from __future__ import annotations
@@ -18,6 +20,7 @@ from typing import TYPE_CHECKING
 
 from canonic.contracts.loader import load_finality, load_guardrails
 from canonic.contracts.models import GuardrailKind
+from canonic.knowledge.link_validation import global_page_ids
 from canonic.semantic.loader import list_semantic_sources
 
 if TYPE_CHECKING:
@@ -47,7 +50,22 @@ def inert_declaration_warnings(project_root: Path) -> list[str]:
     guardrails = load_guardrails(project_root)
     for rule in load_finality(project_root):
         warnings.extend(_finality_warnings(rule, guardrails))
+    warnings.extend(_knowledge_ref_warnings(guardrails, project_root))
     return warnings
+
+
+def _knowledge_ref_warnings(guardrails: list[Guardrail], project_root: Path) -> list[str]:
+    declared = [g for g in guardrails if g.knowledge_refs]
+    if not declared:
+        return []
+    pages = global_page_ids(project_root)
+    return [
+        f"guardrail {g.id!r}: knowledge_refs names {ref!r}, which is not a global knowledge "
+        "page, so it is left out when the guardrail fires"
+        for g in declared
+        for ref in g.knowledge_refs
+        if ref not in pages
+    ]
 
 
 def _finality_warnings(rule: FinalityRule, guardrails: list[Guardrail]) -> list[str]:
