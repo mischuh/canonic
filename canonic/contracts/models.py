@@ -142,6 +142,10 @@ class CanonicalRef(BaseModel):
     ``skip`` and ``history`` to ``exclude``. The partition is not declared: it is every requested dimension that is not an
     order dimension.
 
+    ``numerator_parts`` is optional on ``ratio`` (parts of ``numerator``) and ``weighted_avg``
+    (parts of ``weighted_sum``). It lists at least two disjoint metrics whose sum is that
+    component, so a change of the metric can be attributed to the parts.
+
     ``population_filter`` is an optional SQL predicate (§4.5) valid for every ``kind``. It defines
     the population the metric is *about* and is AND-ed into the WHERE of every leaf query before
     aggregation and before per-leaf guardrails.
@@ -156,6 +160,7 @@ class CanonicalRef(BaseModel):
     denominator: str | None = None
     weighted_sum: str | None = None
     weight: str | None = None
+    numerator_parts: list[str] | None = None
     on_zero_denominator: OnZeroDenominator = OnZeroDenominator.NULL
     collapse_dimension: str | None = None
     collapse_agg: CollapseAgg | None = None
@@ -269,7 +274,27 @@ class CanonicalRef(BaseModel):
                 raise ContractValidationError(
                     ("order_by",), f"cumulative binding lists {duplicates} more than once"
                 )
+        self._validate_numerator_parts()
         return self
+
+    def _validate_numerator_parts(self) -> None:
+        parts = self.numerator_parts
+        if parts is None:
+            return
+        if self.kind not in (BindingKind.RATIO, BindingKind.WEIGHTED_AVG):
+            raise ContractValidationError(
+                ("numerator_parts",),
+                f"numerator_parts is only allowed on ratio and weighted_avg, not {self.kind.value}",
+            )
+        if len(parts) < 2:
+            raise ContractValidationError(
+                ("numerator_parts",), "numerator_parts requires at least two parts"
+            )
+        duplicates = sorted({p for p in parts if parts.count(p) > 1})
+        if duplicates:
+            raise ContractValidationError(
+                ("numerator_parts",), f"numerator_parts lists {duplicates} more than once"
+            )
 
 
 class DeprecatedAlternative(BaseModel):

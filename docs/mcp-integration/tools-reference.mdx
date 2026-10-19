@@ -27,7 +27,7 @@ A client that supports MCP server extensions (SEP-2133) does not need either too
 
 ```json
 {
-  "app.getcanonic/contract": {"schema": "3.9", "major": 3, "minor": 9}
+  "app.getcanonic/contract": {"schema": "3.10", "major": 3, "minor": 10}
 }
 ```
 
@@ -39,7 +39,7 @@ Returns the serving contract version this daemon implements, the canonic version
 
 ```json
 {
-  "contract_schema": "3.9",
+  "contract_schema": "3.10",
   "canonic_version": "0.41.0",
   "project_fingerprint": "3f9a1c6e0b24d871",
   "project_loaded_at": "2026-10-18T14:02:11.482913+00:00",
@@ -76,7 +76,7 @@ Returns grain, dimensions, measures, and freshness for one metric, plus how it i
 
 A composite metric gets its own list. The pages of its components are not merged in: call `describe_metric` on a component when you need them. Only global pages are listed.
 
-For a composite metric (`ratio`, `weighted_avg`) `source` and `measure` are `null`, `components` names the numerator and denominator metrics, `measures` lists the measures those components read, and `grain` is the shared grain when both components sit on one source (empty otherwise).
+For a composite metric (`ratio`, `weighted_avg`) `source` and `measure` are `null`, `components` names the numerator and denominator metrics (plus `numerator_parts` when the binding declares them, see [Numerator parts](/reference/contract-schema#numerator-parts)), `measures` lists the measures those components read, and `grain` is the shared grain when both components sit on one source (empty otherwise).
 
 ### `resolve_metric(name: str, context: str | None = None)`
 
@@ -93,7 +93,7 @@ Resolves a metric name or alias to its canonical binding. Returns the binding on
 }
 ```
 
-`source` and `measure` are set for a single-source metric and `null` for a composite. `components` is `null` unless the metric is a composite. `on_zero_denominator` is `null`, `zero` or `error`.
+`source` and `measure` are set for a single-source metric and `null` for a composite. `components` is `null` unless the metric is a composite. `components.numerator_parts` lists the declared parts of the numerator and is `null` when none are declared. `on_zero_denominator` is `null`, `zero` or `error`.
 
 ## Query execution
 
@@ -111,7 +111,7 @@ On an `ambiguous_join_path` error, inspect the returned candidates (each has a `
 
 ### `query(query: dict)`
 
-Same `query` shape as `compile_query`, but compiles **and executes** read-only. Returns rows, with the dimension columns first and then one column per requested metric, named after that metric, plus compiler metadata: resolved bindings, guardrails fired, freshness, `project_fingerprint` (the project state that produced the answer, the same value `contract_info` returns) and `trust_score` (tier plus reasons, see [Trust score](/concepts/contracts-and-guardrails#trust-score)). A query with a [cumulative metric](/reference/contract-schema#cumulative-metrics) also carries `cumulative`: the metric, its `order_by`, the `partition_by` resolved for this query, `on_gap`, `history`, and, under `history: include`, the `visibility_filters` that only chose which rows are shown. Each entry of `guardrails_fired` carries the `predicate` the guardrail applied and `knowledge_refs`, the ids of the knowledge pages that explain it, which `read_knowledge_page` returns in full, see [Guardrails and knowledge](/reference/contract-schema#guardrails-and-knowledge). A query with a composite metric (`ratio`, `weighted_avg`) also carries `composition`: one entry per composite, keyed by the requested metric name, with its `kind`, the `numerator` and `denominator` (each with `metric`, `resolved` and the `population_filter` it counts over) and `on_zero_denominator`. Under `on_zero_denominator: zero` a row with a zero denominator is returned as `0` without a warning, so this is where a caller reads that the policy applies. `zero_denominator_rows` counts how many rows of the returned result were such rows and got the policy's value (`NULL` or `0`), so a real zero can be told from a substituted one. It is `null` when nothing was counted: from `compile_query`, which has no result, and under `on_zero_denominator: error`. The compiled SQL of a ratio carries one extra column for this count, `_canonic_zero_denominator_<metric>`, and the SQL of a query that filters on a time dimension carries `_canonic_latest_period_<dimension>`. `query` removes both from the result. This is the main path: with `--json`/over MCP, the payload is identical to `canonic query --json`.
+Same `query` shape as `compile_query`, but compiles **and executes** read-only. Returns rows, with the dimension columns first and then one column per requested metric, named after that metric, plus compiler metadata: resolved bindings, guardrails fired, freshness, `project_fingerprint` (the project state that produced the answer, the same value `contract_info` returns) and `trust_score` (tier plus reasons, see [Trust score](/concepts/contracts-and-guardrails#trust-score)). A query with a [cumulative metric](/reference/contract-schema#cumulative-metrics) also carries `cumulative`: the metric, its `order_by`, the `partition_by` resolved for this query, `on_gap`, `history`, and, under `history: include`, the `visibility_filters` that only chose which rows are shown. Each entry of `guardrails_fired` carries the `predicate` the guardrail applied and `knowledge_refs`, the ids of the knowledge pages that explain it, which `read_knowledge_page` returns in full, see [Guardrails and knowledge](/reference/contract-schema#guardrails-and-knowledge). A query with a composite metric (`ratio`, `weighted_avg`) also carries `composition`: one entry per composite, keyed by the requested metric name, with its `kind`, the `numerator` and `denominator` (each with `metric`, `resolved` and the `population_filter` it counts over), `on_zero_denominator` and `numerator_parts` (`null` unless declared). Under `on_zero_denominator: zero` a row with a zero denominator is returned as `0` without a warning, so this is where a caller reads that the policy applies. `zero_denominator_rows` counts how many rows of the returned result were such rows and got the policy's value (`NULL` or `0`), so a real zero can be told from a substituted one. It is `null` when nothing was counted: from `compile_query`, which has no result, and under `on_zero_denominator: error`. The compiled SQL of a ratio carries one extra column for this count, `_canonic_zero_denominator_<metric>`, and the SQL of a query that filters on a time dimension carries `_canonic_latest_period_<dimension>`. `query` removes both from the result. This is the main path: with `--json`/over MCP, the payload is identical to `canonic query --json`.
 
 ### `run_sql(sql: str, connection: str | None = None)`
 

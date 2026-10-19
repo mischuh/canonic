@@ -122,6 +122,8 @@ class CompositionOut(BaseModel):
     real zero from a substituted one. ``zero_denominator_rows`` is how many rows of the returned
     result had a zero denominator and were given the policy's value. It is ``None`` when it was
     not counted: without an executed result, and under ``on_zero_denominator: error``.
+    ``numerator_parts`` lists the disjoint metrics declared to sum to the numerator, ``None``
+    when none are declared.
     """
 
     model_config = ConfigDict(frozen=True)
@@ -131,6 +133,7 @@ class CompositionOut(BaseModel):
     denominator: CompositionComponentOut
     on_zero_denominator: str
     zero_denominator_rows: int | None = None
+    numerator_parts: list[str] | None = None
 
 
 class CumulativeOut(BaseModel):
@@ -241,13 +244,18 @@ class MetricSummary(BaseModel):
 
 
 class ComponentsOut(BaseModel):
-    """The building blocks of a composite metric (``ratio``, ``weighted_avg``)."""
+    """The building blocks of a composite metric (``ratio``, ``weighted_avg``).
+
+    ``numerator_parts`` lists the disjoint metrics declared to sum to the numerator, ``None``
+    when none are declared.
+    """
 
     model_config = ConfigDict(frozen=True)
 
     numerator: str
     denominator: str
     on_zero_denominator: str
+    numerator_parts: list[str] | None = None
 
     @classmethod
     def from_binding(cls, binding: Binding) -> ComponentsOut | None:
@@ -258,6 +266,7 @@ class ComponentsOut(BaseModel):
             numerator=binding.components.numerator.metric,
             denominator=binding.components.denominator.metric,
             on_zero_denominator=str(binding.components.on_zero_denominator),
+            numerator_parts=binding.binding.canonical.numerator_parts,
         )
 
 
@@ -529,6 +538,7 @@ def _composition_out(
         denominator=denominator,
         on_zero_denominator=str(composition.on_zero_denominator),
         zero_denominator_rows=zero_denominator_rows,
+        numerator_parts=list(composition.numerator_parts) or None,
     )
 
 

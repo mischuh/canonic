@@ -58,7 +58,7 @@
       "type": "object"
     },
     "CompositionOut": {
-      "description": "How one composite metric (``ratio``, ``weighted_avg``) was formed for this query.\n\n``on_zero_denominator`` is the policy applied to a row with a zero denominator. Under\n``zero`` that row becomes ``0`` without any warning, so a caller needs it here to tell a\nreal zero from a substituted one. ``zero_denominator_rows`` is how many rows of the returned\nresult had a zero denominator and were given the policy's value. It is ``None`` when it was\nnot counted: without an executed result, and under ``on_zero_denominator: error``.",
+      "description": "How one composite metric (``ratio``, ``weighted_avg``) was formed for this query.\n\n``on_zero_denominator`` is the policy applied to a row with a zero denominator. Under\n``zero`` that row becomes ``0`` without any warning, so a caller needs it here to tell a\nreal zero from a substituted one. ``zero_denominator_rows`` is how many rows of the returned\nresult had a zero denominator and were given the policy's value. It is ``None`` when it was\nnot counted: without an executed result, and under ``on_zero_denominator: error``.\n``numerator_parts`` lists the disjoint metrics declared to sum to the numerator, ``None``\nwhen none are declared.",
       "properties": {
         "kind": {
           "title": "Kind",
@@ -85,6 +85,21 @@
           ],
           "default": null,
           "title": "Zero Denominator Rows"
+        },
+        "numerator_parts": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Numerator Parts"
         }
       },
       "required": [
@@ -270,7 +285,7 @@
           "type": "array"
         },
         "contract_schema": {
-          "default": "3.9",
+          "default": "3.10",
           "title": "Contract Schema",
           "type": "string"
         },
