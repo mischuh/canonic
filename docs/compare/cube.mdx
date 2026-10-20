@@ -1,0 +1,56 @@
+---
+title: "canonic and Cube"
+description: "How Cube and canonic differ in role, what each one enforces, and where they could sit side by side."
+---
+
+Cube and canonic both put a governed layer between consumers and a warehouse, but they are built for different jobs. Cube is a semantic layer that serves many consumers at speed. canonic is a context layer that decides how a question has to be answered and says how far the answer can be trusted.
+
+<Note>Last verified against Cube's public documentation in October 2026.</Note>
+
+## What each one is
+
+**Cube** models data as cubes and views with measures, dimensions and joins, written in YAML or JavaScript. Cube Core is open source (the backend under Apache 2.0, the client under MIT) and exposes the model through SQL, REST and GraphQL APIs, with a built-in caching engine and pre-aggregations for low-latency queries. Cube documents a hosted MCP server in Cube Cloud with tools to search the data model, run queries and, for permitted roles, edit the model and manage pre-aggregations.
+
+**canonic** is a local-first context layer. It compiles a semantic query (metric names, dimensions, filters) into SQL, applies the guardrails that belong to the data, and returns the answer with the definition used and a trust tier. It is read-only against the warehouse, has no LLM in the answer path and serves agents over MCP.
+
+## Where they differ
+
+| | Cube | canonic |
+| --- | --- | --- |
+| Main job | Serve governed metrics fast to BI tools, apps and agents | Answer an agent's question correctly and say how far to trust it |
+| Performance | Caching and pre-aggregations | None, canonic queries the warehouse directly |
+| How a measure rolls up | The measure type the modeler chose. Types such as `count_distinct` are non-additive, which Cube takes into account when matching pre-aggregations | Fixed by the binding `kind`, recomputed from base rows at every grain |
+| Joins and fanout | Joins are directed and every cube needs a primary key, which Cube uses to avoid fanouts. Ambiguous paths are resolved with `join_path` in views | A planned join graph with fanout and additivity analysis. An ambiguous route returns the candidates, and `via` picks one |
+| Business rules | Filters on a measure, row-level filters in access policies | `mandatory_filter` and other guardrails attached to a source and applied to every measure on it |
+| Access control | Access policies for member-level and row-level access plus data masking. User attributes are a Cube Cloud feature, Cube Core uses the security context | Roles with metric and dimension allow lists, row scoping per tenant and column masking, enforced in the compiler |
+| What the caller gets back | Rows | Rows plus definition used, guardrails fired, freshness and a trust tier |
+| Authoring | Written by hand, or edited by an agent through the MCP server | Drafted from schema, manifests and usage evidence, applied as a reviewed diff |
+| Checking results | Not part of the documented model | Assertions on served metrics, run as a CI gate |
+
+Cube and canonic make different trade-offs on the first row of that table. If a hundred dashboards hit the same metric every minute, you want what Cube is good at. If an agent asks a one-off question and a silently wrong number is the expensive failure, you want what canonic is good at.
+
+## Using them together
+
+canonic has no Cube connector today, so metrics defined in a Cube data model are not imported. There are two honest ways to combine the tools:
+
+- **Side by side.** Cube keeps serving dashboards and applications. canonic serves agents from the same warehouse, with its own reviewed definitions. The risk is two definitions of one metric, so bind the canonical ones in canonic from the start and use assertions to compare their numbers with what the dashboards show.
+- **One model, two consumers.** Keep Cube as the place your team already maintains. Draft the canonic project from the live schema and from your dbt manifest, then review the proposals against the Cube model by hand.
+
+If you only need a fast, cached metrics API for BI tools and people, Cube is enough. canonic starts to earn its place when an agent is the consumer.
+
+<CardGroup cols={2}>
+  <Card title="canonic and other tools" icon="scale-balanced" href="/compare/overview">
+    The roles and a side-by-side table for dbt, Cube, LookML and Ossie.
+  </Card>
+  <Card title="Contracts and guardrails" icon="shield-halved" href="/concepts/contracts-and-guardrails">
+    How rules are attached to the data instead of to each metric.
+  </Card>
+</CardGroup>
+
+## Sources
+
+- Cube, [Cube Core repository](https://github.com/cube-js/cube)
+- Cube, [MCP server](https://docs.cube.dev/docs/integrations/mcp-server)
+- Cube, [Measures](https://docs.cube.dev/docs/data-modeling/measures) and [Joins](https://docs.cube.dev/docs/data-modeling/joins)
+- Cube, [Data access policies](https://docs.cube.dev/docs/data-modeling/data-access-policies)
+- Cube, [Additive and non-additive measures](https://cube.dev/docs/schema/fundamentals/concepts)

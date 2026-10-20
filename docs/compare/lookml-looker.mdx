@@ -1,0 +1,63 @@
+---
+title: "canonic and LookML / Looker"
+description: "How LookML and canonic differ, what Looker already guards against, and how canonic reads Looker as evidence."
+---
+
+LookML is a modeling language inside a BI tool. canonic is not a BI tool. The two meet in one place: canonic can read your saved Looks as evidence about which definitions people actually use.
+
+<Note>Last verified against Google's public Looker documentation in October 2026.</Note>
+
+## What each one is
+
+**LookML** describes views, explores, dimensions and measures for Looker. Looker is a commercial BI product, and the model lives in a Looker project. Looker protects against two classic problems inside the tool:
+
+- **Fanout.** Symmetric aggregates keep sums, averages and counts correct when a join repeats rows, by counting each fact once through the primary key defined in the model.
+- **Rules and access.** `sql_always_where` and `access_filter` apply filters that users cannot see or change. `always_filter` requires a filter with a default value that users can change but not remove.
+
+For agents, Google offers Looker through the open-source MCP Toolbox and a managed MCP server that is in preview, as well as Conversational Analytics, which is powered by Gemini.
+
+**canonic** is a local-first context layer next to the warehouse. It is not a dashboard tool and has no LLM in the answer path. It serves governed answers to agents over MCP and to people through the CLI.
+
+## Where they differ
+
+| | LookML / Looker | canonic |
+| --- | --- | --- |
+| Main job | Model data for dashboards and explores | Answer an agent's question correctly and say how far to trust it |
+| Where the model lives | A Looker project | `semantics/`, `contracts/` and `knowledge/` in git |
+| Fanout | Symmetric aggregates correct the aggregate through the primary key | Fanout and additivity analysis in the compiler. An unsafe query fails with `FANOUT_UNSAFE` instead of being corrected silently |
+| How a measure rolls up | The measure type the modeler chose | Fixed by the binding `kind`, recomputed from base rows at every grain |
+| Business rules | `sql_always_where`, `access_filter`, `always_filter` per explore | `mandatory_filter` and other guardrails attached to a source and applied to every measure on it |
+| What the caller gets back | Rows in the tool | Rows plus definition used, guardrails fired, freshness and a trust tier |
+| Authoring | Written by hand, with an AI assistant for LookML in preview | Drafted from schema, manifests and usage evidence, applied as a reviewed diff |
+| Works without the BI tool | No | Yes |
+
+Both tools care about fanout. They take opposite routes. A correcting mechanism returns a number whatever the query. canonic refuses when it cannot prove the number is right and tells the caller what to change.
+
+## How canonic uses Looker
+
+The `looker` connector is an evidence connector. It reads saved Looks through the Looker REST API 4.0 and turns each one into usage evidence, with a role derived from the Look's visibility and view count. A public, frequently viewed Look becomes a trusted example. A private or rarely viewed one becomes an alternative. Evidence never becomes a canonical definition on its own.
+
+canonic does not parse LookML files today, and it never runs the SQL of a Look. If a Looker-encoded metric is adopted, it is recompiled through the deterministic compiler like any other definition. See [connectors](/concepts/connectors) for how evidence is normalized and [ingestion and reconciliation](/concepts/ingestion-and-reconciliation) for how a proposal becomes part of the project.
+
+## Using them together
+
+1. Keep LookML for the dashboards people already use.
+2. Add a `looker` connection so that the metrics your teams actually look at show up as evidence when canonic drafts definitions.
+3. Review the proposals, bind the canonical definition once, and let the agent ask canonic instead of guessing from the schema.
+4. If you want Looker's own agents to see the same numbers, compare them with assertions on the canonic side.
+
+<CardGroup cols={2}>
+  <Card title="canonic and other tools" icon="scale-balanced" href="/compare/overview">
+    The roles and a side-by-side table for dbt, Cube, LookML and Ossie.
+  </Card>
+  <Card title="Connectors" icon="plug" href="/concepts/connectors">
+    How warehouse, definition and evidence connectors differ.
+  </Card>
+</CardGroup>
+
+## Sources
+
+- Google Cloud, [Understanding symmetric aggregates](https://docs.cloud.google.com/looker/docs/best-practices/understanding-symmetric-aggregates)
+- Google Cloud, [`always_filter`, `sql_always_where` and `access_filter`](https://docs.cloud.google.com/looker/docs/reference/param-explore-always-filter)
+- Google Cloud, [Use Looker with MCP, Gemini CLI and other agents](https://docs.cloud.google.com/looker/docs/connect-ide-to-looker-using-mcp-toolbox)
+- Google Cloud, [Looker updates for agentic BI](https://cloud.google.com/blog/products/business-intelligence/looker-updates-for-agentic-bi-at-next26)

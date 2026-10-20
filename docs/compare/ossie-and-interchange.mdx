@@ -1,0 +1,67 @@
+---
+title: "canonic and Apache Ossie"
+description: "Apache Ossie is a format for exchanging semantic models. canonic is an engine that can import one. What each does and what the format cannot say."
+---
+
+Apache Ossie and canonic do not compete. Ossie describes a semantic model so that tools can exchange it. canonic runs a model, enforces rules on it and reports how far an answer can be trusted. canonic can import an Ossie model, and that is the intended way to use the two together.
+
+<Note>Last verified against the Apache Ossie project site in October 2026. The project is young and its specification is still changing.</Note>
+
+## What each one is
+
+**Apache Ossie** is an effort to standardize how semantic metadata is exchanged, formerly known as Open Semantic Interchange. It is incubating at the Apache Software Foundation and licensed under Apache 2.0. A semantic model is a top-level container with datasets, fields, dimensions, relationships and metrics. Metrics can span datasets and carry expressions in one or more SQL dialects, and a model can carry `ai_context` with instructions for agents.
+
+**canonic** is a local-first context layer. It reads definitions from several places, including an Ossie model, and compiles queries against its own semantics, contracts and knowledge files.
+
+## Format versus engine
+
+| | Apache Ossie | canonic |
+| --- | --- | --- |
+| What it is | A specification and a set of converters | An engine with a CLI and an MCP server |
+| What a metric is | A SQL expression with a description and `ai_context` | A binding with a `kind` that decides how it compiles |
+| Who executes it | The consuming tool decides | canonic compiles it to SQL and runs it read-only |
+| Additivity | Not part of the expression, so a consumer has to infer it | Part of the measure, used by the compiler at every grain |
+| Business rules | Instructions in `ai_context` as prose | Guardrails the compiler enforces and reports on the answer |
+| Checking results | Not part of the format | Assertions on served metrics, run as a CI gate |
+| Result metadata | Not applicable | Definition used, guardrails fired, freshness and a trust tier |
+
+None of that is a weakness of a format. A format that tried to carry execution semantics for every tool would stop being portable. The cost is that a portable metric loses what only an engine can decide. The [coffeehouse guide](/guides/coffeehouse#and-apache-ossie) shows a concrete example: an average order value written as `SUM(amount) / COUNT(order_id)` counts order lines on a line-grain table, and nothing in the expression says so.
+
+## What canonic does with an Ossie model
+
+The `ossie` connector reads Ossie files and drafts canonic semantics, bindings and knowledge pages from them. Ossie has no notion of a connection, so you name the target connection that holds the data.
+
+| Ossie object | Drafted as |
+| --- | --- |
+| Dataset | A semantic source with grain and description. Query-sourced datasets are recorded as unmappable |
+| Field | A column dimension, with synonyms as `aliases` |
+| `SUM`, `COUNT` metric | An additive measure |
+| `COUNT(DISTINCT)` metric | A non-additive measure plus a `distinct_count` binding |
+| `SUM / COUNT` metric | A `ratio` binding over two independently planned metrics |
+| `AVG` metric | A non-additive measure, flagged `avg_suggests_ratio` for review |
+| Relationship | A join with predicate and cardinality |
+| `ai_context` instructions | Knowledge pages bound to the entities they describe |
+
+What the connector cannot map, such as a metric with only an MDX expression, is named in a warning instead of being dropped. Everything it proposes enters at the `inferred` level and becomes part of the project only through review. A strict ingest run fails when a changed Ossie metric contradicts a human-curated measure. The [ossie-retail guide](/guides/ossie-retail) walks through the whole flow.
+
+canonic does not export a model to Ossie today.
+
+## Using them together
+
+1. Keep the Ossie model as the exchange format with the tools that speak it.
+2. Import it into canonic with the `ossie` connector and review the proposals.
+3. Add what the format cannot hold: guardrails on the data, binding kinds for non-additive metrics, and assertions for the values you have checked by hand.
+4. Re-run ingest when the Ossie model changes and let the strict run catch contradictions with curated facts.
+
+<CardGroup cols={2}>
+  <Card title="canonic and other tools" icon="scale-balanced" href="/compare/overview">
+    The roles and a side-by-side table for dbt, Cube, LookML and Ossie.
+  </Card>
+  <Card title="Guide: Apache Ossie import" icon="file-import" href="/guides/ossie-retail">
+    A project drafted entirely from an Ossie model.
+  </Card>
+</CardGroup>
+
+## Sources
+
+- Apache Ossie, [project site](https://ossie.apache.org/)
