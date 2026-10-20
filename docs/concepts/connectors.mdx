@@ -57,10 +57,32 @@ Implement `extract_definitions`: feed the semantic layer and canonical-binding c
 
 | Type | Notes |
 | --- | --- |
-| `dbt` | Parses a compiled `manifest.json`: models → typed columns/grain, measures, joins, descriptions. `sum`, `count`, `min`, `max` are additive. `count_distinct` is non-additive plus a `distinct_count` binding candidate. `average` is non-additive and flagged for review. A MetricFlow `cumulative` metric becomes a `cumulative` binding candidate along its measure's `agg_time_dimension`. One with a `window`, a `grain_to_date` or a `filter` is skipped, since it has no equivalent yet. |
+| `dbt` | Parses a compiled `manifest.json`: models → typed columns/grain, measures, joins, descriptions. `sum`, `count`, `min`, `max` are additive. `count_distinct` is non-additive plus a `distinct_count` binding candidate. `average` is non-additive and flagged for review. MetricFlow metrics become binding candidates, see [dbt metric mapping](#dbt-metric-mapping). |
 | `ossie` | Parses [Apache Ossie](https://ossie.apache.org/) semantic model files (spec `0.1.x` and `0.2.0.dev0`) into datasets, dimensions, measures, joins and `ai_context` doc evidence. See [Ossie mapping](#ossie-mapping). |
 
 A definition connector is its own connection entry (own `id`) but describes tables that live in a *different*, queryable connection. `params.target_connection` names that connection's id, so the evidence is attributed to it rather than to the definition connector's own id: this is what lets its `RelationSchema` proposals land on the same `semantics/<connection>/<name>.yaml` target as that connection's live introspection and reconcile against it (see the [worked example](/concepts/ingestion-and-reconciliation#example-adding-a-definition-connector-after-an-initial-apply)), instead of colliding on the project-wide unique source `name`. Omitting it falls back to the definition connector's own id, fine for a definitions-only project with no paired physical connection, but such sources can never actually be queried (no `run_read_only_sql`). An `ossie` connection has no such fallback. Ossie has no notion of a connection, so `target_connection` is required and must name a queryable connection.
+
+#### dbt metric mapping
+
+Each MetricFlow metric type maps to a binding candidate. The measure it reads is placed on its source like any other dbt measure.
+
+| MetricFlow | Becomes |
+| --- | --- |
+| `simple` | `single`, or `distinct_count` for a `count_distinct` measure |
+| `ratio` | `ratio` of the two named metrics |
+| `cumulative` | `cumulative` along the measure's `agg_time_dimension`. A `window` and a `grain_to_date` carry over. `period_agg` is always written, as `first` when MetricFlow leaves it unset, which is MetricFlow's own default |
+| `derived` | `derived` with MetricFlow's `expr` and `metrics` as `inputs`. An input with `offset_window` becomes an extra `offset` metric named `<input>_offset_<count>_<unit>` on the input measure's `agg_time_dimension`, which the `derived` metric reads |
+| `conversion` | `conversion`, with the entity column each semantic model declares, each measure's `agg_time_dimension` as its time, and `window`, `calculation` and `constant_properties` as written. A metric is proposed for each of the two measures |
+
+A metric is skipped, with the reason logged, rather than proposed as a binding that would return another number, when:
+
+- the metric or one of its measures or inputs has a `filter`, which is Jinja over MetricFlow dimensions,
+- an input uses `offset_to_grain`, which has no equivalent yet,
+- a `window` or `offset_window` is shorter than a day, except on a `conversion`, where it must be a duration,
+- a `derived` expression uses anything but input names, numbers, `+ - * /`, parentheses and `COALESCE`, `NULLIF`, `ABS`, `ROUND`, `LEAST`, `GREATEST`,
+- the measure has no `agg_time_dimension`, or a `conversion` entity is not declared on both semantic models.
+
+Like every candidate, these are proposals only. They enter reconciliation at `inferred` and never auto-apply.
 
 #### Ossie mapping
 
