@@ -107,6 +107,7 @@ class QueryService:
             self._ctx.sources,
             connection_dialects=self._ctx.connection_dialects,
             principal=principal,
+            assertion_history=self._load_assertion_history(),
         )
         compiled = apply_staleness_policy(compiled, self._ctx.config.trust.stale_after_days)
         compiled = replace(compiled, project_fingerprint=self._ctx.state.fingerprint)

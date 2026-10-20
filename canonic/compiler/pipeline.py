@@ -56,6 +56,7 @@ if TYPE_CHECKING:
     from canonic.compiler.query import SemanticQuery
     from canonic.contracts.principal import EffectivePolicy
     from canonic.contracts.resolver import ContractResolver
+    from canonic.feedback.assertion_history import AssertionHistory
     from canonic.semantic.models import SemanticSource
 
 from canonic.compiler.strategies import (
@@ -126,11 +127,14 @@ def _enforce_min_trust(
     resolver: ContractResolver,
     context: str | None,
     trust_inputs: list[TrustInput],
+    assertion_history: AssertionHistory | None = None,
 ) -> list[str]:
     """Stage 6b: block or warn when a min_trust guardrail's floor is not met (SPEC-E14 §7).
 
-    Enforced from the static signal set only (provenance, assertion coverage) — the signals
-    known before SQL is generated. A metric with a single resolved (source, measure) is matched
+    Enforced from the signals known before SQL is generated: provenance, assertion coverage
+    and, when the caller passes it, the persisted assertion-harness verdicts. Without that
+    history no metric can reach ``trusted``, so a ``trusted`` floor would refuse even a
+    metric whose assertion passed. A metric with a single resolved (source, measure) is matched
     directly (SINGLE/SEMI_ADDITIVE/OPAQUE/CUMULATIVE kinds). A composite (ratio/weighted_avg) is
     matched through the (source, measure) of its components, so a ratio cannot pass a floor its
     numerator fails: ``trust_inputs`` already carry the components' signals, and the floor is
@@ -142,7 +146,7 @@ def _enforce_min_trust(
     warnings: list[str] = []
     if context is None:
         return warnings
-    score = TrustScorer.score(static_signals_for(trust_inputs))
+    score = TrustScorer.score(static_signals_for(trust_inputs, assertion_history))
     for _name, binding in raw_bindings:
         for source, measure in _source_measure_pairs(binding):
             for guardrail in resolver.min_trust_for(source, measure, context):
@@ -292,6 +296,7 @@ def compile(  # noqa: A001 — the public verb for this capability is "compile"
     *,
     connection_dialects: Mapping[str, str] | None = None,
     principal: Principal | None = None,
+    assertion_history: AssertionHistory | None = None,
     _dedup_leaves: bool = True,
 ) -> CompileResult:
     """Compile a semantic query to read-only SQL and result metadata (SPEC §4).
@@ -302,6 +307,10 @@ def compile(  # noqa: A001 — the public verb for this capability is "compile"
     compiler input, never a query field"). ``None`` behaves as an anonymous principal with no
     tenant and no roles; against a project with no tenancy/role policy loaded this is a no-op
     and existing single-tenant behavior is unchanged.
+
+    ``assertion_history`` is the persisted ``canonic assert`` snapshot. It lets a ``min_trust``
+    guardrail count a passing assertion, the same signal the served trust score uses. The
+    compiler never reads it from disk itself, so a compile stays a pure function of its inputs.
 
     ``_dedup_leaves`` is private and exists for one test. Leaf deduplication is an
     optimisation, so the numbers must be identical with it disabled (AMENDMENT §3.2,
@@ -360,7 +369,7 @@ def compile(  # noqa: A001 — the public verb for this capability is "compile"
     trust_inputs = _trust_inputs_for(raw_bindings, resolver)
     pipeline_warnings = (
         stage0_warnings
-        + _enforce_min_trust(raw_bindings, resolver, query.context, trust_inputs)
+        + _enforce_min_trust(raw_bindings, resolver, query.context, trust_inputs, assertion_history)
         + _enforce_required_dimension(query, raw_bindings, resolver, sources_by_name)
     )
 

@@ -1,7 +1,7 @@
 name: fct_mrr_snapshot
 connection: saas_duckdb
 table: fct_mrr_snapshot
-grain: [snapshot_id]
+grain: [customer_id, snapshot_month]
 description: >
   Monthly MRR position. One row per customer per month carrying the recurring
   revenue on the books at month end. This is a SNAPSHOT fact: MRR is semi-additive —

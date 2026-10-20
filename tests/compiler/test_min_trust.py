@@ -7,9 +7,17 @@ from typing import TYPE_CHECKING
 import pytest
 
 from canonic.compiler import SemanticQuery, compile
-from canonic.contracts.models import AppliesTo, Guardrail, GuardrailKind, Severity
+from canonic.contracts.models import (
+    AppliesTo,
+    Assertion,
+    AssertionExpect,
+    Guardrail,
+    GuardrailKind,
+    Severity,
+)
 from canonic.contracts.resolver import ContractResolver
 from canonic.exc import GuardrailBlock
+from canonic.feedback.assertion_history import AssertionHistory, AssertionRecord
 
 if TYPE_CHECKING:
     from canonic.contracts.models import MetricBinding
@@ -54,6 +62,73 @@ class TestMinTrustAllowsMetFloor:
             sources,
         )
         assert result.sql
+
+
+class TestMinTrustCountsAssertionHistory:
+    """A metric whose assertion passed in the harness meets a ``trusted`` floor.
+
+    Regression: the floor was checked without the persisted verdicts, so every metric
+    scored ``provisional`` there and a ``trusted`` floor refused even metrics the served
+    trust score already reported as ``trusted``.
+    """
+
+    @pytest.fixture
+    def asserted_resolver(
+        self,
+        revenue_binding: MetricBinding,
+        refund_guardrail: Guardrail,
+        min_trust_trusted_guardrail: Guardrail,
+    ) -> ContractResolver:
+        return ContractResolver(
+            bindings=[revenue_binding],
+            guardrails=[refund_guardrail, min_trust_trusted_guardrail],
+            assertions=[
+                Assertion(
+                    id="revenue-q1",
+                    query={"metrics": ["revenue"]},
+                    expect=AssertionExpect(rows=1, values={"revenue": 100}),
+                )
+            ],
+        )
+
+    @staticmethod
+    def _history(passed: bool) -> AssertionHistory:
+        record = AssertionRecord(
+            ts="2026-10-01T00:00:00Z", assertion_id="revenue-q1", passed=passed
+        )
+        return AssertionHistory({"orders.total_revenue": record})
+
+    def test_passing_assertion_meets_the_floor(
+        self, asserted_resolver: ContractResolver, sources: list[SemanticSource]
+    ) -> None:
+        result = compile(
+            SemanticQuery(metrics=["revenue"], context="board_reporting"),
+            asserted_resolver,
+            sources,
+            assertion_history=self._history(passed=True),
+        )
+        assert result.sql
+
+    def test_failing_assertion_still_blocks(
+        self, asserted_resolver: ContractResolver, sources: list[SemanticSource]
+    ) -> None:
+        with pytest.raises(GuardrailBlock):
+            compile(
+                SemanticQuery(metrics=["revenue"], context="board_reporting"),
+                asserted_resolver,
+                sources,
+                assertion_history=self._history(passed=False),
+            )
+
+    def test_without_history_the_assertion_is_unverified(
+        self, asserted_resolver: ContractResolver, sources: list[SemanticSource]
+    ) -> None:
+        with pytest.raises(GuardrailBlock):
+            compile(
+                SemanticQuery(metrics=["revenue"], context="board_reporting"),
+                asserted_resolver,
+                sources,
+            )
 
 
 class TestMinTrustNoop:

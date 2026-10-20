@@ -251,7 +251,7 @@ def board_resolver(
 
 @pytest.fixture
 def min_trust_trusted_guardrail() -> Guardrail:
-    """SPEC-E14 §7: floor unreachable in v1 (no assertion-pass/outcome signal exists yet)."""
+    """SPEC-E14 §7: a trusted floor, unreachable without a passing assertion verdict."""
     return Guardrail(
         id="board-reporting-trusted-only",
         applies_to=AppliesTo(metric="revenue"),
