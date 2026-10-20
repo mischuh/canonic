@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.44.0](https://github.com/mischuh/canonic/compare/v0.43.2...v0.44.0) (2026-10-20)
+
+
+### Features
+
+* **semantic:** declare how a label dimension spells its periods ([#465](https://github.com/mischuh/canonic/issues/465)) ([a65341f](https://github.com/mischuh/canonic/commit/a65341fb8697bb9e79bd60a7c36d74ee40214f7c))
+
 ## [0.43.2](https://github.com/mischuh/canonic/compare/v0.43.1...v0.43.2) (2026-10-19)
 
 
