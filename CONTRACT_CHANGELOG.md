@@ -107,6 +107,17 @@ A change listed here was reviewed against the classification rules and did not b
 
 ## History
 
+## 3.13 (2026-10-20) - MINOR
+
+- ADR/PR: this PR (feat(compiler): offset and derived metrics for period-over-period comparisons)
+- Summary: query results gain `metadata.offset`, one entry per offset metric with its `base`,
+  `time_dimension`, `offset` and the `shifted_filters` evaluated in output time, and
+  `metadata.derived`, one entry per derived metric with its `expr`, `inputs` (`alias`, `metric`,
+  `resolved`) and `on_zero_denominator`. `resolve_metric` and `describe_metric` gain an `offset`
+  and a `derived` block, `null` for other kinds. The new binding kinds `offset` and `derived`
+  live in the contract file format, which does not bump the schema on its own. A consumer that
+  ignores unknown fields is unaffected.
+
 ## 3.12 (2026-10-20) - MINOR
 
 - ADR/PR: this PR (feat(compiler): trailing windows, period-to-date totals and typed time ranges)

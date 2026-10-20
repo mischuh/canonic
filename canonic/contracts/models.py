@@ -5,7 +5,9 @@ from __future__ import annotations
 from enum import StrEnum
 from typing import Any, Literal
 
+import sqlglot
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from sqlglot import exp
 
 from canonic.exc import ContractValidationError
 from canonic.semantic.duration import DurationField, DurationUnit
@@ -21,6 +23,7 @@ __all__ = [
     "CanonicalRef",
     "CollapseAgg",
     "DeprecatedAlternative",
+    "DerivedInput",
     "Example",
     "ExampleOriginKind",
     "ExampleQuery",
@@ -82,6 +85,8 @@ class BindingKind(StrEnum):
     PERCENTILE = "percentile"
     OPAQUE = "opaque"
     CUMULATIVE = "cumulative"
+    OFFSET = "offset"
+    DERIVED = "derived"
 
 
 class CollapseAgg(StrEnum):
@@ -138,6 +143,69 @@ class PeriodAgg(StrEnum):
     AVERAGE = "average"
 
 
+class DerivedInput(BaseModel):
+    """One metric a ``derived`` binding reads, under the name its ``expr`` uses for it."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    metric: str
+    alias: str | None = None
+
+    @property
+    def name(self) -> str:
+        """The name ``expr`` refers to this input by: its alias, else the metric name."""
+        return self.alias or self.metric
+
+
+#: The functions a ``derived`` expression may call, beside the four arithmetic operators.
+DERIVED_FUNCTIONS: tuple[type[exp.Expression], ...] = (
+    exp.Coalesce,
+    exp.Nullif,
+    exp.Abs,
+    exp.Round,
+    exp.Least,
+    exp.Greatest,
+)
+_DERIVED_OPERATORS: tuple[type[exp.Expression], ...] = (
+    exp.Add,
+    exp.Sub,
+    exp.Mul,
+    exp.Div,
+    exp.Neg,
+    exp.Paren,
+)
+
+
+def derived_input_names(expr: str) -> list[str]:
+    """The input names a ``derived`` expression reads, in order of first use.
+
+    Raises :class:`ValueError` for an expression that is not plain arithmetic over input
+    names: a qualified column, a string, a comparison, ``CASE`` or any other function.
+    """
+    try:
+        parsed = sqlglot.parse_one(expr, read="postgres")
+    except sqlglot.errors.ParseError as exc:
+        raise ValueError(f"expr {expr!r} is not valid SQL: {exc}") from exc
+    names: list[str] = []
+    for node in parsed.walk():
+        if isinstance(node, exp.Column):
+            if node.table:
+                raise ValueError(f"expr may name inputs only, not the column {node.sql()!r}")
+            if node.name not in names:
+                names.append(node.name)
+        elif isinstance(node, exp.Identifier) and isinstance(node.parent, exp.Column):
+            continue
+        elif isinstance(node, exp.Literal):
+            if node.is_string:
+                raise ValueError(f"expr may not contain the string {node.sql()!r}")
+        elif not isinstance(node, (*_DERIVED_OPERATORS, *DERIVED_FUNCTIONS)):
+            raise ValueError(
+                f"expr may only use + - * /, numbers, parentheses and "
+                f"COALESCE, NULLIF, ABS, ROUND, LEAST, GREATEST, not {node.sql()!r}"
+            )
+    return names
+
+
 class CanonicalRef(BaseModel):
     """The canonical binding for a metric — either a single source+measure or a composite (§3).
 
@@ -151,6 +219,10 @@ class CanonicalRef(BaseModel):
     For ``kind=opaque``, ``source``, ``measure``, and ``native_grain`` (non-empty list of
     dimension column names) are required. Served only at its declared native grain; any
     other grain returns UNSUPPORTED_MEASURE (§4.4).
+    For ``kind=offset``, ``base`` (a metric name), ``time_dimension`` and ``offset`` (a duration
+    of a day or longer) are required. The base is read shifted back by the offset.
+    For ``kind=derived``, ``expr`` and a non-empty ``inputs`` are required. ``expr`` is
+    arithmetic over the inputs' names, every division following ``on_zero_denominator``.
     For ``kind=cumulative``, ``source``, ``measure`` and a non-empty ``order_by`` (dimension
     names, accumulated lexicographically in list order) are required. ``on_gap`` defaults to
     ``skip`` and ``history`` to ``exclude``. The partition is not declared: it is every
@@ -190,6 +262,11 @@ class CanonicalRef(BaseModel):
     window: DurationField | None = None
     grain_to_date: DurationUnit | None = None
     period_agg: PeriodAgg = PeriodAgg.LAST
+    base: str | None = None
+    time_dimension: str | None = None
+    offset: DurationField | None = None
+    expr: str | None = None
+    inputs: list[DerivedInput] | None = None
     population_filter: str | None = None
 
     @field_validator("on_zero_denominator", mode="before")
@@ -310,9 +387,65 @@ class CanonicalRef(BaseModel):
                 raise ContractValidationError(
                     ("order_by",), f"cumulative binding lists {duplicates} more than once"
                 )
+        elif self.kind is BindingKind.OFFSET:
+            self._validate_offset()
+        elif self.kind is BindingKind.DERIVED:
+            self._validate_derived()
+        self._validate_kind_fields()
         self._validate_frame()
         self._validate_numerator_parts()
         return self
+
+    def _validate_offset(self) -> None:
+        for name in ("base", "time_dimension", "offset"):
+            if getattr(self, name) is None:
+                raise ContractValidationError((name,), f"offset binding requires {name!r}")
+        assert self.offset is not None  # noqa: S101 — checked above
+        if self.offset.unit.rank < DurationUnit.DAY.rank:
+            raise ContractValidationError(
+                ("offset",), f"offset must be a day or longer, got {self.offset}"
+            )
+
+    def _validate_derived(self) -> None:
+        if self.expr is None:
+            raise ContractValidationError(("expr",), "derived binding requires 'expr'")
+        if not self.inputs:
+            raise ContractValidationError(
+                ("inputs",), "derived binding requires non-empty 'inputs'"
+            )
+        declared = [i.name for i in self.inputs]
+        duplicates = sorted({n for n in declared if declared.count(n) > 1})
+        if duplicates:
+            raise ContractValidationError(
+                ("inputs",), f"derived binding names {duplicates} more than once"
+            )
+        try:
+            used = derived_input_names(self.expr)
+        except ValueError as exc:
+            raise ContractValidationError(("expr",), str(exc)) from exc
+        unknown = [n for n in used if n not in declared]
+        if unknown:
+            raise ContractValidationError(
+                ("expr",), f"expr reads {unknown}, which are not inputs; declare them in 'inputs'"
+            )
+        unused = [n for n in declared if n not in used]
+        if unused:
+            raise ContractValidationError(("inputs",), f"inputs {unused} are not used in expr")
+
+    def _validate_kind_fields(self) -> None:
+        """Fields that belong to one kind are refused on every other."""
+        owners = {
+            "base": BindingKind.OFFSET,
+            "time_dimension": BindingKind.OFFSET,
+            "offset": BindingKind.OFFSET,
+            "expr": BindingKind.DERIVED,
+            "inputs": BindingKind.DERIVED,
+        }
+        for name, kind in owners.items():
+            if getattr(self, name) is not None and self.kind is not kind:
+                raise ContractValidationError(
+                    (name,), f"{name} is only allowed on {kind.value}, not {self.kind.value}"
+                )
 
     def _validate_frame(self) -> None:
         """The shape rules of a bounded cumulative frame that need no semantic source."""

@@ -9,6 +9,7 @@ from typing import Any
 from canonic.config import ReconcileConfig, scaffold_project
 from canonic.connectors.base import (
     AcquisitionTier,
+    CandidateInput,
     CandidateKind,
     Capability,
     ColumnInfo,
@@ -393,3 +394,52 @@ async def test_pipeline_run_with_an_existing_binding_does_not_fail(tmp_path: Pat
     revenue = next(e for e in result.report.entries if e.target == "contracts/metrics/revenue.yaml")
     assert revenue.decision is ReconciliationDecision.NO_OP
     assert existing.read_text() == before
+
+
+async def test_a_derived_candidate_waits_for_the_metrics_it_reads() -> None:
+    """Listed before the ratio it reads, a derived candidate is still decided after it."""
+    derived = ContractCandidate(
+        kind=CandidateKind.DERIVED,
+        measures=[],
+        expr="revenue_per_customer * 100",
+        inputs=[CandidateInput(metric="revenue_per_customer")],
+    )
+    definitions = [
+        _definition(
+            entity="revenue_per_customer_pct",
+            entity_type=DefinitionEntityType.METRIC,
+            contract_candidate=derived,
+        ),
+        *_shop_definitions(),
+    ]
+    result = await _proposals(definitions)
+    report = ReconciliationEngine().reconcile(result.proposals, InMemoryAcceptedStore(()))
+    entries = {e.target: e for e in report.entries if e.target.startswith("contracts/")}
+    entry = entries["contracts/metrics/revenue_per_customer_pct.yaml"]
+    assert entry.decision is ReconciliationDecision.ADD
+    assert entry.proposal.content["canonical"] == {
+        "kind": "derived",
+        "expr": "revenue_per_customer * 100",
+        "inputs": [{"metric": "revenue_per_customer"}],
+    }
+
+
+async def test_an_offset_on_a_dimension_that_will_not_exist_is_not_proposed() -> None:
+    offset = ContractCandidate(
+        kind=CandidateKind.OFFSET,
+        measures=[],
+        base="revenue",
+        time_dimension="order_day",
+        offset="1 year",
+    )
+    definitions = [
+        *_shop_definitions(),
+        _definition(
+            entity="revenue_py", entity_type=DefinitionEntityType.METRIC, contract_candidate=offset
+        ),
+    ]
+    result = await _proposals(definitions)
+    report = ReconciliationEngine().reconcile(result.proposals, InMemoryAcceptedStore(()))
+    entry = next(e for e in report.entries if e.target == "contracts/metrics/revenue_py.yaml")
+    assert entry.decision is ReconciliationDecision.NO_OP
+    assert "dimension 'order_day' will not exist" in (entry.recommended_action or "")

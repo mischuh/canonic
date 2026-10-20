@@ -67,7 +67,14 @@ def latest_period_probes(
     ended, and a month that has not ended says nothing about complete days.
     """
     anchor = next(
-        (leaf for leaf in leaves if leaf.key.strategy == "single" and leaf.finality is None),
+        (
+            leaf
+            for leaf in leaves
+            if leaf.key.strategy == "single"
+            and leaf.finality is None
+            # A shifted leaf's rows are from another period than the one it is shown in.
+            and not any(name == "time_shift" for name, _ in leaf.key.strategy_params)
+        ),
         None,
     )
     if anchor is None or not query.filters:

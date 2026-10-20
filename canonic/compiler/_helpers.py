@@ -49,6 +49,7 @@ if TYPE_CHECKING:
     from canonic.contracts.models import FinalityRule, Guardrail, MaskingRule
     from canonic.contracts.principal import EffectivePolicy, TenantValue
     from canonic.contracts.resolver import ContractResolver
+    from canonic.semantic.duration import Duration
     from canonic.semantic.models import Dimension, SemanticSource
 
     #: Alias/column -> masking strategy, resolved against one leaf's join tree
@@ -131,6 +132,131 @@ def parse_dialect(dialect: str) -> Iterator[None]:
         yield
     finally:
         _PARSE_DIALECT.reset(token)
+
+
+@dataclass(frozen=True, slots=True)
+class TimeShift:
+    """One offset a metric is planned under: ``time_dimension`` moved forward by ``offset``.
+
+    ``prefilters`` are predicates over the stored column, applied unshifted: a ``time_range``
+    on the shifted column moved back by the offset, which keeps the scan as narrow as the
+    unshifted query's.
+    """
+
+    time_dimension: str
+    offset: Duration
+    prefilters: tuple[str, ...] = ()
+
+
+#: The offsets the metric being planned sits under, outermost first. Set by the offset
+#: strategy around planning its base.
+_TIME_SHIFTS: ContextVar[tuple[TimeShift, ...]] = ContextVar("canonic_time_shifts", default=())
+#: The same offsets resolved for the leaf being built: ``(alias, column)`` to the offsets that
+#: move it. Read where a dimension's value and a query filter are built, and nowhere else.
+_SHIFTED: ContextVar[Mapping[tuple[str, str], _ShiftedColumn] | None] = ContextVar(
+    "canonic_shifted_columns", default=None
+)
+
+
+@dataclass(frozen=True, slots=True)
+class _ShiftedColumn:
+    """The offsets one column of a leaf moves by, and whether it holds dates or timestamps."""
+
+    offsets: tuple[Duration, ...]
+    is_date: bool
+
+
+@contextmanager
+def time_shift(shift: TimeShift) -> Iterator[None]:
+    """Plan everything inside the block shifted by ``shift``, on top of any enclosing one."""
+    token = _TIME_SHIFTS.set((*_TIME_SHIFTS.get(), shift))
+    try:
+        yield
+    finally:
+        _TIME_SHIFTS.reset(token)
+
+
+def current_time_shifts() -> tuple[TimeShift, ...]:
+    """The offsets the metric being planned sits under, for a leaf to capture when planned."""
+    return _TIME_SHIFTS.get()
+
+
+@contextmanager
+def shifted_columns(
+    shifts: Sequence[TimeShift],
+    owner: str,
+    sources_by_name: dict[str, SemanticSource],
+    alias_to_source: dict[str, str],
+) -> Iterator[None]:
+    """Resolve ``shifts`` against one leaf's join tree and apply them inside the block.
+
+    Each offset's ``time_dimension`` is resolved from ``owner`` the way a requested dimension
+    is, so each leaf of a ratio shifts its own column of that name. A dimension that does not
+    resolve is reported like an unknown requested dimension.
+    """
+    token = _SHIFTED.set(_resolve_shifts(shifts, owner, sources_by_name, alias_to_source))
+    try:
+        yield
+    finally:
+        _SHIFTED.reset(token)
+
+
+def _resolve_shifts(
+    shifts: Sequence[TimeShift],
+    owner: str,
+    sources_by_name: dict[str, SemanticSource],
+    alias_to_source: dict[str, str],
+) -> dict[tuple[str, str], _ShiftedColumn]:
+    resolved: dict[tuple[str, str], _ShiftedColumn] = {}
+    for shift in shifts:
+        found = _find_dimension(shift.time_dimension, sources_by_name, owner, alias_to_source)
+        if found is None:
+            raise UnreachableError(
+                f"offset time_dimension {shift.time_dimension!r} is not declared on any "
+                f"reachable source"
+            )
+        alias, dim = found
+        source = sources_by_name[alias_to_source.get(alias, alias)]
+        for column in dim.backing_columns():
+            column_type = next((c.type for c in source.columns if c.name == column), None)
+            earlier = resolved.get((alias, column))
+            resolved[(alias, column)] = _ShiftedColumn(
+                offsets=(*(earlier.offsets if earlier else ()), shift.offset),
+                is_date=column_type is not NormalizedType.TIMESTAMP,
+            )
+    return resolved
+
+
+@contextmanager
+def unshifted() -> Iterator[None]:
+    """Build the block on the stored columns, for predicates that describe rows, not periods."""
+    token = _SHIFTED.set(None)
+    try:
+        yield
+    finally:
+        _SHIFTED.reset(token)
+
+
+def _shift(expr: exp.Expression) -> exp.Expression:
+    """``expr`` with every shifted column moved forward by its offsets."""
+    shifted = _SHIFTED.get()
+    if not shifted:
+        return expr
+
+    def transform(node: exp.Expression) -> exp.Expression:
+        if not isinstance(node, exp.Column):
+            return node
+        column = shifted.get((node.table, node.name))
+        if column is None:
+            return node
+        moved: exp.Expression = node.copy()
+        for offset in column.offsets:
+            moved = _active_adapter().date_add(
+                moved, offset.count, offset.unit, as_date=column.is_date
+            )
+        return moved
+
+    return expr.transform(transform)
 
 
 def _active_adapter() -> DialectAdapter:
@@ -250,7 +376,7 @@ def _bind_filters(
             alias = col.table
             if (((alias_to_source or {}).get(alias, alias)), col.name) in denied:
                 raise UnreachableError(f"filter references unknown name {col.name!r}")
-        conditions.append(bound)
+        conditions.append(_shift(bound))
         used |= sources
     return conditions, used
 
@@ -609,13 +735,13 @@ def _dimension_base_expr(source: str, dim: Dimension) -> exp.Expression:
     is built from sqlglot nodes by the dialect adapter, from key segments rather than text.
     """
     if dim.expr is not None:
-        return _qualify_to(_parse(dim.expr), source)
+        return _shift(_qualify_to(_parse(dim.expr), source))
     assert dim.column is not None  # noqa: S101 — Dimension guarantees column xor expr
     column = exp.column(dim.column, table=source)
     if dim.json_path is not None:
         assert dim.type is not None  # noqa: S101
         return _active_adapter().json_value(column, dim.json_path, dim.type)
-    return column
+    return _shift(column)
 
 
 def _dimension_expr(
@@ -1106,6 +1232,7 @@ def _build_finality_union(
     original_owner: str,
     measure_aliases: list[str] | None = None,
     masking: tuple[MaskingRule, ...] = (),
+    shifts: Sequence[TimeShift] = (),
 ) -> exp.Expression:
     """Build a UNION ALL over finality realizations (SPEC-E5-E15 stage 5).
 
@@ -1161,6 +1288,12 @@ def _build_finality_union(
         # Resolve dimensions with join-awareness (dimensions may live on joined sources).
         branch_alias_to_source = build_alias_tree(src_name, sources_by_name)
         branch_dim_mask = _resolve_dim_mask(branch_alias_to_source, masking)
+        # An offset moves this branch's own column of the time dimension, not the owner's.
+        shift_token = (
+            _SHIFTED.set(_resolve_shifts(shifts, src_name, sources_by_name, branch_alias_to_source))
+            if shifts
+            else None
+        )
         branch_dims: list[tuple[str, Dimension]] = []
         for _orig, dim in dimensions:
             resolved = _find_dimension(
@@ -1194,7 +1327,9 @@ def _build_finality_union(
         gate_col: exp.Expression | None = None
         for _src, dim in branch_dims:
             if dim.name == time_dim_name:
-                gate_col = _dimension_base_expr(src_name, dim)
+                # The watermark describes stored rows, so it is compared before any offset.
+                with unshifted():
+                    gate_col = _dimension_base_expr(src_name, dim)
                 break
         if gate_col is None:
             raise UnreachableError(
@@ -1276,6 +1411,8 @@ def _build_finality_union(
         if group_exprs:
             select = select.group_by(*group_exprs)
         branches.append(select)
+        if shift_token is not None:
+            _SHIFTED.reset(shift_token)
 
     if not branches:
         raise UnreachableError("finality rule has no realizations to build from")

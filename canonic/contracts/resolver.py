@@ -133,6 +133,24 @@ class CumulativeBinding:
 
 
 @dataclass(frozen=True, slots=True)
+class OffsetBinding:
+    """A metric read shifted back along one time dimension: ``base`` at ``offset`` earlier."""
+
+    base: Binding
+    time_dimension: str
+    offset: Duration
+
+
+@dataclass(frozen=True, slots=True)
+class DerivedBinding:
+    """Arithmetic over other metrics: ``inputs`` pairs each name ``expr`` uses with its metric."""
+
+    expr: str
+    inputs: tuple[tuple[str, Binding], ...]
+    on_zero_denominator: OnZeroDenominator
+
+
+@dataclass(frozen=True, slots=True)
 class Binding:
     """A metric name resolved to its canonical definition.
 
@@ -155,6 +173,25 @@ class Binding:
     recompute_at_grain: RecomputeAtGrainBinding | None = None
     opaque: OpaqueBinding | None = None
     cumulative: CumulativeBinding | None = None
+    offset: OffsetBinding | None = None
+    derived: DerivedBinding | None = None
+
+    def dependencies(self) -> tuple[Binding, ...]:
+        """The resolved metrics this one is computed from, empty for a source-bound kind."""
+        if self.components is not None:
+            return (self.components.numerator, self.components.denominator)
+        if self.offset is not None:
+            return (self.offset.base,)
+        if self.derived is not None:
+            return tuple(binding for _name, binding in self.derived.inputs)
+        return ()
+
+    def leaves(self) -> tuple[Binding, ...]:
+        """The source-bound metrics this one reads, through every level of composition."""
+        dependencies = self.dependencies()
+        if not dependencies:
+            return (self,)
+        return tuple(leaf for d in dependencies for leaf in d.leaves())
 
     @property
     def resolved_key(self) -> str | None:
@@ -171,6 +208,11 @@ class Binding:
             num_name = self.components.numerator.metric
             den_name = self.components.denominator.metric
             return f"{prefix}({num_name}, {den_name})"
+        if self.offset is not None:
+            base = self.offset.base.resolved_key or self.offset.base.metric
+            return f"offset({base}, {self.offset.time_dimension}, {self.offset.offset})"
+        if self.derived is not None:
+            return f"derived({self.derived.expr})"
         if self.source is None or self.measure is None:
             return None
         if self.kind is BindingKind.OPAQUE:
@@ -499,6 +541,44 @@ class ContractResolver:
                 binding=binding,
                 kind=BindingKind.OPAQUE,
                 opaque=OpaqueBinding(native_grain=list(canonical.native_grain)),
+            )
+
+        if canonical.kind is BindingKind.OFFSET:
+            assert canonical.base is not None and canonical.time_dimension is not None  # noqa: S101
+            assert canonical.offset is not None  # noqa: S101 — enforced by model_validator
+            base = self._resolve_component(canonical.base, seen)
+            if not isinstance(base, Binding):
+                return base
+            return Binding(
+                metric=binding.metric,
+                source=None,
+                measure=None,
+                binding=binding,
+                kind=BindingKind.OFFSET,
+                offset=OffsetBinding(
+                    base=base, time_dimension=canonical.time_dimension, offset=canonical.offset
+                ),
+            )
+
+        if canonical.kind is BindingKind.DERIVED:
+            assert canonical.expr is not None and canonical.inputs  # noqa: S101 — model_validator
+            inputs: list[tuple[str, Binding]] = []
+            for item in canonical.inputs:
+                resolved = self._resolve_component(item.metric, seen)
+                if not isinstance(resolved, Binding):
+                    return resolved
+                inputs.append((item.name, resolved))
+            return Binding(
+                metric=binding.metric,
+                source=None,
+                measure=None,
+                binding=binding,
+                kind=BindingKind.DERIVED,
+                derived=DerivedBinding(
+                    expr=canonical.expr,
+                    inputs=tuple(inputs),
+                    on_zero_denominator=canonical.on_zero_denominator,
+                ),
             )
 
         # Composite (ratio / weighted_avg): first component → numerator, second → denominator.

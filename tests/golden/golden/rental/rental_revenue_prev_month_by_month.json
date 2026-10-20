@@ -1,0 +1,92 @@
+{
+  "case": "rental_revenue_prev_month_by_month",
+  "columns": [
+    {
+      "name": "payment_month",
+      "type": "string"
+    },
+    {
+      "name": "rental_revenue",
+      "type": "float"
+    },
+    {
+      "name": "rental_revenue_prev_month",
+      "type": "float"
+    }
+  ],
+  "dialect": "sqlite",
+  "finality": null,
+  "guardrails_fired": [],
+  "project": "rental",
+  "resolved": {
+    "metrics": {
+      "rental_revenue": "payments.total_paid",
+      "rental_revenue_prev_month": "offset(payments.total_paid, payment_date, 1 month)"
+    }
+  },
+  "row_count": 12,
+  "rows": [
+    [
+      "2024-01-01",
+      1609.83,
+      null
+    ],
+    [
+      "2024-02-01",
+      1379.86,
+      1609.83
+    ],
+    [
+      "2024-03-01",
+      2029.81,
+      1379.86
+    ],
+    [
+      "2024-04-01",
+      1479.83,
+      2029.81
+    ],
+    [
+      "2024-05-01",
+      1389.82,
+      1479.83
+    ],
+    [
+      "2024-06-01",
+      1779.84,
+      1389.82
+    ],
+    [
+      "2024-07-01",
+      1989.81,
+      1779.84
+    ],
+    [
+      "2024-08-01",
+      1849.84,
+      1989.81
+    ],
+    [
+      "2024-09-01",
+      1549.82,
+      1849.84
+    ],
+    [
+      "2024-10-01",
+      1079.84,
+      1549.82
+    ],
+    [
+      "2024-11-01",
+      1329.89,
+      1079.84
+    ],
+    [
+      "2024-12-01",
+      null,
+      1329.89
+    ]
+  ],
+  "trust_tier": "provisional",
+  "warnings": []
+}

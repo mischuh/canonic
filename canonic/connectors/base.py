@@ -267,6 +267,18 @@ class CandidateKind(StrEnum):
     RATIO = "ratio"
     DISTINCT_COUNT = "distinct_count"
     CUMULATIVE = "cumulative"
+    SINGLE = "single"
+    OFFSET = "offset"
+    DERIVED = "derived"
+
+
+class CandidateInput(BaseModel):
+    """One input of a ``derived`` candidate: a metric, and the name its expression uses."""
+
+    model_config = ConfigDict(frozen=True)
+
+    metric: str
+    alias: str | None = None
 
 
 class ContractCandidate(BaseModel):
@@ -277,6 +289,10 @@ class ContractCandidate(BaseModel):
     dimensions a ``cumulative`` candidate accumulates along, and is empty for every other
     kind. ``window``, ``grain_to_date`` and ``period_agg`` carry a bounded ``cumulative``
     frame and which day represents a coarser bucket, in the contract's own spelling.
+
+    A candidate built from other metrics names them instead of measures: ``metrics`` holds a
+    ``ratio``'s numerator and denominator metric, ``base``, ``time_dimension`` and ``offset``
+    an ``offset``, and ``expr`` and ``inputs`` a ``derived`` metric.
     """
 
     model_config = ConfigDict(frozen=True)
@@ -287,6 +303,12 @@ class ContractCandidate(BaseModel):
     window: str | None = None
     grain_to_date: str | None = None
     period_agg: str | None = None
+    metrics: list[str] = []
+    base: str | None = None
+    time_dimension: str | None = None
+    offset: str | None = None
+    expr: str | None = None
+    inputs: list[CandidateInput] = []
 
 
 class DefinitionEvidence(BaseModel):

@@ -199,6 +199,8 @@ class TestSlResolveCommand:
             "components",
             "population_filter",
             "cumulative",
+            "offset",
+            "derived",
         }
 
     def test_unresolved_exits_2(self, runner: CliRunner, project_dir: Path) -> None:

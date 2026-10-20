@@ -1,0 +1,77 @@
+{
+  "case": "rental_revenue_growth_mom_by_month",
+  "columns": [
+    {
+      "name": "payment_month",
+      "type": "string"
+    },
+    {
+      "name": "rental_revenue_growth_mom",
+      "type": "float"
+    }
+  ],
+  "dialect": "sqlite",
+  "finality": null,
+  "guardrails_fired": [],
+  "project": "rental",
+  "resolved": {
+    "metrics": {
+      "rental_revenue_growth_mom": "derived((rental_revenue - previous) / previous)"
+    }
+  },
+  "row_count": 12,
+  "rows": [
+    [
+      "2024-01-01",
+      null
+    ],
+    [
+      "2024-02-01",
+      -0.142853593237
+    ],
+    [
+      "2024-03-01",
+      0.471026046121
+    ],
+    [
+      "2024-04-01",
+      -0.270951468364
+    ],
+    [
+      "2024-05-01",
+      -0.0608245541718
+    ],
+    [
+      "2024-06-01",
+      0.28062626815
+    ],
+    [
+      "2024-07-01",
+      0.117971278317
+    ],
+    [
+      "2024-08-01",
+      -0.0703433996211
+    ],
+    [
+      "2024-09-01",
+      -0.162186999957
+    ],
+    [
+      "2024-10-01",
+      -0.303248119136
+    ],
+    [
+      "2024-11-01",
+      0.231562083272
+    ],
+    [
+      "2024-12-01",
+      null
+    ]
+  ],
+  "trust_tier": "provisional",
+  "warnings": [
+    "zero denominator for metric 'rental_revenue_growth_mom' yields NULL (on_zero_denominator=null)"
+  ]
+}

@@ -15,11 +15,13 @@ from canonic.contracts.resolver import Binding as ResolverBinding
 from canonic.core.models import (
     ComponentsOut,
     CumulativeDefinitionOut,
+    DerivedDefinitionOut,
     DimensionInfo,
     DomainGroup,
     MetricDetail,
     MetricRef,
     MetricSummary,
+    OffsetDefinitionOut,
     OverviewResult,
     SourceFreshnessOut,
 )
@@ -44,35 +46,33 @@ if TYPE_CHECKING:
 def _get_domain(binding: MetricBinding, resolver: ContractResolver) -> str:
     """Return the domain (owning source name) for *binding*.
 
-    For source-bound kinds the canonical source is the domain.
-    For composite kinds (ratio/weighted_avg) we walk the numerator's resolved binding.
-    Falls back to the metric name when nothing resolves.
+    For source-bound kinds the canonical source is the domain. A kind composed of other
+    metrics takes the domain of the first one it names (the numerator, an offset's base, a
+    derived metric's first input), walked down to a source. Falls back to the metric name when
+    nothing resolves.
     """
+    return _domain_source(binding, resolver, frozenset()) or str(binding.metric)
+
+
+def _domain_source(
+    binding: MetricBinding, resolver: ContractResolver, seen: frozenset[str]
+) -> str | None:
     ref = binding.canonical
     spec = spec_for(ref.kind)
-    metric: str = str(binding.metric)
     if spec.is_source_bound:
-        return ref.source if ref.source is not None else metric
-    # Composite kinds: walk the first component (numerator / weighted_sum) to its source.
-    num = spec.component_names(ref)[0]
-    if num is None:
-        return metric
-    candidates = resolver.bindings_for(num)
-    if candidates:
-        src: str | None = candidates[0].canonical.source
-        if src is not None:
-            return src
-    return metric
+        return ref.source
+    first = next(iter(spec.dependency_names(ref)), None)
+    if first is None or first in seen:
+        return None
+    candidates = resolver.bindings_for(first)
+    if not candidates:
+        return None
+    return _domain_source(candidates[0], resolver, seen | {binding.metric})
 
 
 def _leaf_bindings(binding: ResolverBinding) -> list[ResolverBinding]:
-    """The source-bound bindings a metric reads, walking nested composites, in order."""
-    if binding.components is None:
-        return [binding]
-    return [
-        *_leaf_bindings(binding.components.numerator),
-        *_leaf_bindings(binding.components.denominator),
-    ]
+    """The source-bound bindings a metric reads, walking every level of composition, in order."""
+    return list(binding.leaves())
 
 
 def _filter_entities_of(
@@ -87,11 +87,11 @@ def _filter_entities_of(
     """
     own = binding.binding.canonical.population_filter
     filters = (*inherited, own) if own else inherited
-    if binding.components is not None:
+    if binding.dependencies():
         return tuple(
             dict.fromkeys(
                 entity
-                for component in (binding.components.numerator, binding.components.denominator)
+                for component in binding.dependencies()
                 for entity in _filter_entities_of(component, sources_by_name, filters)
             )
         )
@@ -157,11 +157,9 @@ class DiscoveryService:
             components: list[str] | None
             if spec.is_describable:
                 source, measure, components = canonical.source, spec.column_field(canonical), None
-            elif spec.is_composite:
+            elif spec.dependency_names(canonical):
                 source, measure = None, None
-                first, second = spec.component_names(canonical)
-                assert first is not None and second is not None  # noqa: S101 — model_validator
-                components = [first, second]
+                components = list(spec.dependency_names(canonical))
             else:
                 continue  # OPAQUE and future kinds not surfaced in summary
             summaries.append(
@@ -245,35 +243,16 @@ class DiscoveryService:
         )
         spec = spec_for(binding.kind)
         knowledge_refs = self._knowledge_refs(binding, self._knowledge.linker(principal))
-        if spec.is_composite:
-            assert binding.components is not None  # noqa: S101
-            all_dims: list[DimensionInfo] = []
-            all_measures: list[str] = []
-
-            num_dims_by_name = {}
-            denom_dims_by_name = {}
-
-            if binding.components.numerator.source is not None:
-                num_dims_by_name = {
-                    d.name: d
-                    for d in self._reachable_dimensions(
-                        binding.components.numerator.source, effective_policy
-                    )
-                }
-
-            if binding.components.denominator.source is not None:
-                denom_dims_by_name = {
-                    d.name: d
-                    for d in self._reachable_dimensions(
-                        binding.components.denominator.source, effective_policy
-                    )
-                }
-
-            common_dim_names = set(num_dims_by_name.keys()) & set(denom_dims_by_name.keys())
-            for dim_name in common_dim_names:
-                all_dims.append(num_dims_by_name[dim_name])
-
+        if binding.dependencies():
             leaves = _leaf_bindings(binding)
+            dims_per_leaf = [
+                self._reachable_dimensions(leaf.source, effective_policy) if leaf.source else []
+                for leaf in leaves
+            ]
+            # A dimension is offered only where every metric underneath can be grouped by it.
+            common = set.intersection(*({d.name for d in dims} for dims in dims_per_leaf))
+            all_dims: list[DimensionInfo] = [d for d in dims_per_leaf[0] if d.name in common]
+            all_measures: list[str] = []
             for leaf in leaves:
                 if leaf.measure is not None and leaf.measure not in all_measures:
                     all_measures.append(leaf.measure)
@@ -286,6 +265,8 @@ class DiscoveryService:
                 measure=None,
                 components=ComponentsOut.from_binding(binding),
                 population_filter=binding.binding.canonical.population_filter,
+                offset=OffsetDefinitionOut.from_binding(binding),
+                derived=DerivedDefinitionOut.from_binding(binding),
                 grain=list(shared.grain) if shared is not None and len(leaf_sources) == 1 else [],
                 dimensions=all_dims,
                 measures=all_measures,

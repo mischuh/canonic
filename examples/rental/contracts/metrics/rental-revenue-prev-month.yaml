@@ -1,0 +1,10 @@
+metric: rental_revenue_prev_month
+canonical:
+  kind: offset
+  base: rental_revenue
+  time_dimension: payment_date
+  offset: 1 month
+provenance: human_curated
+label: "Rental Revenue, Previous Month"
+aliases: ["revenue last month", "prior month revenue"]
+status: active

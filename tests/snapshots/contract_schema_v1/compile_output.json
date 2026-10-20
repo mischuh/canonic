@@ -200,6 +200,64 @@
       "title": "CumulativeOut",
       "type": "object"
     },
+    "DerivedDefinitionOut": {
+      "description": "How a derived metric is computed: ``expr`` over its ``inputs``, per output row.",
+      "properties": {
+        "expr": {
+          "title": "Expr",
+          "type": "string"
+        },
+        "inputs": {
+          "items": {
+            "$ref": "#/$defs/DerivedInputOut"
+          },
+          "title": "Inputs",
+          "type": "array"
+        },
+        "on_zero_denominator": {
+          "title": "On Zero Denominator",
+          "type": "string"
+        }
+      },
+      "required": [
+        "expr",
+        "inputs",
+        "on_zero_denominator"
+      ],
+      "title": "DerivedDefinitionOut",
+      "type": "object"
+    },
+    "DerivedInputOut": {
+      "description": "One input of a derived metric: the name ``expr`` uses, and the metric behind it.",
+      "properties": {
+        "alias": {
+          "title": "Alias",
+          "type": "string"
+        },
+        "metric": {
+          "title": "Metric",
+          "type": "string"
+        },
+        "resolved": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Resolved"
+        }
+      },
+      "required": [
+        "alias",
+        "metric"
+      ],
+      "title": "DerivedInputOut",
+      "type": "object"
+    },
     "FinalityOut": {
       "description": "Finality metadata block in a query response (SPEC-E5-E15 stage 8).",
       "properties": {
@@ -290,6 +348,38 @@
       "title": "FiredGuardrailOut",
       "type": "object"
     },
+    "OffsetOut": {
+      "description": "How one offset metric was shifted for this query.\n\n``shifted_filters`` are the query filters evaluated on the shifted column, in output time.",
+      "properties": {
+        "base": {
+          "title": "Base",
+          "type": "string"
+        },
+        "time_dimension": {
+          "title": "Time Dimension",
+          "type": "string"
+        },
+        "offset": {
+          "title": "Offset",
+          "type": "string"
+        },
+        "shifted_filters": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Shifted Filters",
+          "type": "array"
+        }
+      },
+      "required": [
+        "base",
+        "time_dimension",
+        "offset"
+      ],
+      "title": "OffsetOut",
+      "type": "object"
+    },
     "QueryMetadata": {
       "description": "The E5 compiler metadata block carried alongside a result (SPEC \u00a72.2).",
       "properties": {
@@ -326,7 +416,7 @@
           "type": "array"
         },
         "contract_schema": {
-          "default": "3.12",
+          "default": "3.13",
           "title": "Contract Schema",
           "type": "string"
         },
@@ -391,6 +481,22 @@
             }
           ],
           "default": null
+        },
+        "offset": {
+          "additionalProperties": {
+            "$ref": "#/$defs/OffsetOut"
+          },
+          "default": {},
+          "title": "Offset",
+          "type": "object"
+        },
+        "derived": {
+          "additionalProperties": {
+            "$ref": "#/$defs/DerivedDefinitionOut"
+          },
+          "default": {},
+          "title": "Derived",
+          "type": "object"
         },
         "composition": {
           "additionalProperties": {

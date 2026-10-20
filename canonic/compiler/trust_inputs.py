@@ -42,10 +42,8 @@ def _input(
 
 
 def _component_inputs(owner: str, binding: Binding, resolver: ContractResolver) -> list[TrustInput]:
-    if binding.components is None:
-        return []
     inputs: list[TrustInput] = []
-    for component in (binding.components.numerator, binding.components.denominator):
+    for component in binding.dependencies():
         inputs.append(_input(component.metric, component, resolver, owner=owner))
         inputs.extend(_component_inputs(owner, component, resolver))
     return inputs
