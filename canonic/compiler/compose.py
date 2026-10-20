@@ -47,6 +47,7 @@ from canonic.exc import UnsupportedMeasure
 if TYPE_CHECKING:
     from canonic.compiler.result import (
         CompositionMetadata,
+        ConversionMetadata,
         CumulativeMetadata,
         DerivedMetadata,
         OffsetMetadata,
@@ -179,9 +180,11 @@ class MetricLeaves:
     recompute_at_grain: RecomputeAtGrainMetadata | None = None
     opaque: OpaqueMetadata | None = None
     cumulative: CumulativeMetadata | None = None
-    #: Offset and derived metrics planned for this one, its own included, nested ones too.
+    #: Offset, derived and conversion metrics planned for this one, its own included, nested
+    #: ones too.
     offsets: tuple[OffsetMetadata, ...] = ()
     derived: tuple[DerivedMetadata, ...] = ()
+    conversions: tuple[ConversionMetadata, ...] = ()
     warnings: tuple[str, ...] = ()
 
     def offset(self, by: int) -> MetricPlan:

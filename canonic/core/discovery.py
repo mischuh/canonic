@@ -14,6 +14,7 @@ from canonic.contracts.principal import Principal
 from canonic.contracts.resolver import Binding as ResolverBinding
 from canonic.core.models import (
     ComponentsOut,
+    ConversionDefinitionOut,
     CumulativeDefinitionOut,
     DerivedDefinitionOut,
     DimensionInfo,
@@ -247,7 +248,7 @@ class DiscoveryService:
             leaves = _leaf_bindings(binding)
             dims_per_leaf = [
                 self._reachable_dimensions(leaf.source, effective_policy) if leaf.source else []
-                for leaf in leaves
+                for leaf in binding.grouped_leaves()
             ]
             # A dimension is offered only where every metric underneath can be grouped by it.
             common = set.intersection(*({d.name for d in dims} for dims in dims_per_leaf))
@@ -267,6 +268,7 @@ class DiscoveryService:
                 population_filter=binding.binding.canonical.population_filter,
                 offset=OffsetDefinitionOut.from_binding(binding),
                 derived=DerivedDefinitionOut.from_binding(binding),
+                conversion=ConversionDefinitionOut.from_binding(binding),
                 grain=list(shared.grain) if shared is not None and len(leaf_sources) == 1 else [],
                 dimensions=all_dims,
                 measures=all_measures,

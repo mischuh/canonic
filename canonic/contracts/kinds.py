@@ -72,7 +72,8 @@ class BindingKindSpec:
     def dependency_names(self, ref: CanonicalRef) -> tuple[str, ...]:
         """Every metric this binding is computed from, empty for a source-bound kind.
 
-        A composite's two components, an offset's base, a derived metric's inputs. Cycle
+        A composite's two components, an offset's base, a derived metric's inputs, a conversion
+        metric's base and conversion metric. Cycle
         checks, trust and discovery walk this instead of the numerator and denominator, so a
         kind that composes other metrics joins them without its own branch there.
         """
@@ -80,6 +81,8 @@ class BindingKindSpec:
             return tuple(name for name in self.component_names(ref) if name is not None)
         if ref.base is not None:
             return (ref.base,)
+        if ref.base_metric is not None and ref.conversion_metric is not None:
+            return (ref.base_metric, ref.conversion_metric)
         return tuple(i.metric for i in ref.inputs or ())
 
 
@@ -195,7 +198,7 @@ register(
     )
 )
 
-for _kind in (BindingKind.OFFSET, BindingKind.DERIVED):
+for _kind in (BindingKind.OFFSET, BindingKind.DERIVED, BindingKind.CONVERSION):
     register(
         BindingKindSpec(
             _kind,

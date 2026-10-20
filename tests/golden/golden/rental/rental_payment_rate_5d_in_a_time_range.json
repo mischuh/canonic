@@ -1,0 +1,34 @@
+{
+  "case": "rental_payment_rate_5d_in_a_time_range",
+  "columns": [
+    {
+      "name": "payment_rate_5d",
+      "type": "float"
+    },
+    {
+      "name": "rental_count",
+      "type": "int"
+    }
+  ],
+  "dialect": "sqlite",
+  "finality": null,
+  "guardrails_fired": [],
+  "project": "rental",
+  "resolved": {
+    "metrics": {
+      "payment_rate_5d": "conversion(rentals.completed_rental_count, paid_rentals, conversion_rate, window=5 days)",
+      "rental_count": "rentals.completed_rental_count"
+    }
+  },
+  "row_count": 1,
+  "rows": [
+    [
+      0.444444444444,
+      9
+    ]
+  ],
+  "trust_tier": "provisional",
+  "warnings": [
+    "zero denominator for metric 'payment_rate_5d' yields NULL (on_zero_denominator=null)"
+  ]
+}

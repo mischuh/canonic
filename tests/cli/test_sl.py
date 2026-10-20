@@ -201,6 +201,7 @@ class TestSlResolveCommand:
             "cumulative",
             "offset",
             "derived",
+            "conversion",
         }
 
     def test_unresolved_exits_2(self, runner: CliRunner, project_dir: Path) -> None:

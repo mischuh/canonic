@@ -111,6 +111,88 @@
       "title": "CompositionOut",
       "type": "object"
     },
+    "ConversionDefinitionOut": {
+      "description": "How a conversion metric matches conversion events to the base events of its entity.\n\nEach conversion event counts for the latest base event of the same ``entity`` at or before\nit, within ``window`` when one is set, and is reported under that base event's dimensions.",
+      "properties": {
+        "base_metric": {
+          "title": "Base Metric",
+          "type": "string"
+        },
+        "conversion_metric": {
+          "title": "Conversion Metric",
+          "type": "string"
+        },
+        "entity": {
+          "$ref": "#/$defs/ConversionPairOut"
+        },
+        "base_time": {
+          "title": "Base Time",
+          "type": "string"
+        },
+        "conversion_time": {
+          "title": "Conversion Time",
+          "type": "string"
+        },
+        "window": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Window"
+        },
+        "calculation": {
+          "title": "Calculation",
+          "type": "string"
+        },
+        "constant_properties": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/ConversionPairOut"
+          },
+          "title": "Constant Properties",
+          "type": "array"
+        },
+        "attribution": {
+          "default": "last_touch",
+          "title": "Attribution",
+          "type": "string"
+        }
+      },
+      "required": [
+        "base_metric",
+        "conversion_metric",
+        "entity",
+        "base_time",
+        "conversion_time",
+        "calculation"
+      ],
+      "title": "ConversionDefinitionOut",
+      "type": "object"
+    },
+    "ConversionPairOut": {
+      "description": "A column of a conversion metric, named on the base and on the conversion side.",
+      "properties": {
+        "base": {
+          "title": "Base",
+          "type": "string"
+        },
+        "conversion": {
+          "title": "Conversion",
+          "type": "string"
+        }
+      },
+      "required": [
+        "base",
+        "conversion"
+      ],
+      "title": "ConversionPairOut",
+      "type": "object"
+    },
     "CumulativeOut": {
       "description": "How a cumulative metric's running total was formed for this query.\n\n``partition_by`` is every requested dimension that is not an order dimension, so it\ndiffers per query. Under ``history: exclude`` the total starts at zero at the first row\nthat passes the query's filters. Under ``include`` it runs from the first row of data, and\n``visibility_filters`` only chose which order tuples are shown.",
       "properties": {
@@ -416,7 +498,7 @@
           "type": "array"
         },
         "contract_schema": {
-          "default": "3.13",
+          "default": "3.14",
           "title": "Contract Schema",
           "type": "string"
         },
@@ -496,6 +578,14 @@
           },
           "default": {},
           "title": "Derived",
+          "type": "object"
+        },
+        "conversion": {
+          "additionalProperties": {
+            "$ref": "#/$defs/ConversionDefinitionOut"
+          },
+          "default": {},
+          "title": "Conversion",
           "type": "object"
         },
         "composition": {

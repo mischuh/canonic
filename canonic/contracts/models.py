@@ -22,6 +22,8 @@ __all__ = [
     "BindingKind",
     "CanonicalRef",
     "CollapseAgg",
+    "ConversionCalculation",
+    "ConversionPair",
     "DeprecatedAlternative",
     "DerivedInput",
     "Example",
@@ -87,6 +89,7 @@ class BindingKind(StrEnum):
     CUMULATIVE = "cumulative"
     OFFSET = "offset"
     DERIVED = "derived"
+    CONVERSION = "conversion"
 
 
 class CollapseAgg(StrEnum):
@@ -141,6 +144,32 @@ class PeriodAgg(StrEnum):
     FIRST = "first"
     LAST = "last"
     AVERAGE = "average"
+
+
+class ConversionCalculation(StrEnum):
+    """What a ``conversion`` metric returns: the converted count or its share of the base."""
+
+    CONVERSION_RATE = "conversion_rate"
+    CONVERSIONS = "conversions"
+
+
+class ConversionPair(BaseModel):
+    """A column named on the base and on the conversion side of a ``conversion`` metric.
+
+    Written as a string when both sides use the same name, ``{base, conversion}`` otherwise.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    base: str
+    conversion: str
+
+    @model_validator(mode="before")
+    @classmethod
+    def _from_name(cls, value: object) -> object:
+        if isinstance(value, str):
+            return {"base": value, "conversion": value}
+        return value
 
 
 class DerivedInput(BaseModel):
@@ -223,6 +252,10 @@ class CanonicalRef(BaseModel):
     of a day or longer) are required. The base is read shifted back by the offset.
     For ``kind=derived``, ``expr`` and a non-empty ``inputs`` are required. ``expr`` is
     arithmetic over the inputs' names, every division following ``on_zero_denominator``.
+    For ``kind=conversion``, ``base_metric``, ``conversion_metric``, ``entity``, ``base_time``
+    and ``conversion_time`` are required. Each conversion event counts for the latest base event
+    of the same entity at or before it, within ``window`` when one is set. ``calculation`` picks
+    the count of conversions or, by default, its rate over the base metric.
     For ``kind=cumulative``, ``source``, ``measure`` and a non-empty ``order_by`` (dimension
     names, accumulated lexicographically in list order) are required. ``on_gap`` defaults to
     ``skip`` and ``history`` to ``exclude``. The partition is not declared: it is every
@@ -267,6 +300,13 @@ class CanonicalRef(BaseModel):
     offset: DurationField | None = None
     expr: str | None = None
     inputs: list[DerivedInput] | None = None
+    base_metric: str | None = None
+    conversion_metric: str | None = None
+    entity: ConversionPair | None = None
+    base_time: str | None = None
+    conversion_time: str | None = None
+    calculation: ConversionCalculation | None = None
+    constant_properties: list[ConversionPair] | None = None
     population_filter: str | None = None
 
     @field_validator("on_zero_denominator", mode="before")
@@ -391,6 +431,8 @@ class CanonicalRef(BaseModel):
             self._validate_offset()
         elif self.kind is BindingKind.DERIVED:
             self._validate_derived()
+        elif self.kind is BindingKind.CONVERSION:
+            self._validate_conversion()
         self._validate_kind_fields()
         self._validate_frame()
         self._validate_numerator_parts()
@@ -432,6 +474,17 @@ class CanonicalRef(BaseModel):
         if unused:
             raise ContractValidationError(("inputs",), f"inputs {unused} are not used in expr")
 
+    def _validate_conversion(self) -> None:
+        for name in ("base_metric", "conversion_metric", "entity", "base_time", "conversion_time"):
+            if getattr(self, name) is None:
+                raise ContractValidationError((name,), f"conversion binding requires {name!r}")
+        if self.population_filter is not None:
+            raise ContractValidationError(
+                ("population_filter",),
+                "a conversion binding takes no population_filter; set it on base_metric or "
+                "conversion_metric, whose events it narrows",
+            )
+
     def _validate_kind_fields(self) -> None:
         """Fields that belong to one kind are refused on every other."""
         owners = {
@@ -440,6 +493,13 @@ class CanonicalRef(BaseModel):
             "offset": BindingKind.OFFSET,
             "expr": BindingKind.DERIVED,
             "inputs": BindingKind.DERIVED,
+            "base_metric": BindingKind.CONVERSION,
+            "conversion_metric": BindingKind.CONVERSION,
+            "entity": BindingKind.CONVERSION,
+            "base_time": BindingKind.CONVERSION,
+            "conversion_time": BindingKind.CONVERSION,
+            "calculation": BindingKind.CONVERSION,
+            "constant_properties": BindingKind.CONVERSION,
         }
         for name, kind in owners.items():
             if getattr(self, name) is not None and self.kind is not kind:
@@ -459,6 +519,8 @@ class CanonicalRef(BaseModel):
             if is_set
         ]
         if not frame_fields:
+            return
+        if self.kind is BindingKind.CONVERSION and frame_fields == ["window"]:
             return
         if self.kind is not BindingKind.CUMULATIVE:
             raise ContractValidationError(

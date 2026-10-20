@@ -28,6 +28,7 @@ from canonic.contracts.models import (
     BindingKind,
     CanonicalRef,
     CollapseAgg,
+    ConversionCalculation,
     FinalityRule,
     Guardrail,
     GuardrailKind,
@@ -61,6 +62,7 @@ __all__ = [
     "Binding",
     "ComponentBindings",
     "ContractResolver",
+    "ConversionBinding",
     "CumulativeBinding",
     "MetricResolution",
     "OpaqueBinding",
@@ -151,6 +153,34 @@ class DerivedBinding:
 
 
 @dataclass(frozen=True, slots=True)
+class ConversionBinding:
+    """Conversion events attributed to the latest earlier base event of the same entity.
+
+    ``entity`` and each entry of ``constant_properties`` pair the base side's column name
+    with the conversion side's. ``window`` bounds how long after its base event a conversion
+    still counts, unbounded when ``None``.
+    """
+
+    base: Binding
+    conversion: Binding
+    entity: tuple[str, str]
+    base_time: str
+    conversion_time: str
+    window: Duration | None
+    calculation: ConversionCalculation
+    constant_properties: tuple[tuple[str, str], ...]
+    on_zero_denominator: OnZeroDenominator
+
+    @property
+    def key(self) -> str:
+        """The conversion as it appears in the resolved key."""
+        base = self.base.resolved_key or self.base.metric
+        conversion = self.conversion.resolved_key or self.conversion.metric
+        window = f", window={self.window}" if self.window is not None else ""
+        return f"conversion({base}, {conversion}, {self.calculation.value}{window})"
+
+
+@dataclass(frozen=True, slots=True)
 class Binding:
     """A metric name resolved to its canonical definition.
 
@@ -175,6 +205,7 @@ class Binding:
     cumulative: CumulativeBinding | None = None
     offset: OffsetBinding | None = None
     derived: DerivedBinding | None = None
+    conversion: ConversionBinding | None = None
 
     def dependencies(self) -> tuple[Binding, ...]:
         """The resolved metrics this one is computed from, empty for a source-bound kind."""
@@ -184,6 +215,8 @@ class Binding:
             return (self.offset.base,)
         if self.derived is not None:
             return tuple(binding for _name, binding in self.derived.inputs)
+        if self.conversion is not None:
+            return (self.conversion.base, self.conversion.conversion)
         return ()
 
     def leaves(self) -> tuple[Binding, ...]:
@@ -192,6 +225,19 @@ class Binding:
         if not dependencies:
             return (self,)
         return tuple(leaf for d in dependencies for leaf in d.leaves())
+
+    def grouped_leaves(self) -> tuple[Binding, ...]:
+        """The source-bound metrics a requested dimension groups, through every level.
+
+        Every leaf, except the conversion side of a conversion metric: its events are reported
+        under the dimension values of the base events they are attributed to.
+        """
+        if self.conversion is not None:
+            return self.conversion.base.grouped_leaves()
+        dependencies = self.dependencies()
+        if not dependencies:
+            return (self,)
+        return tuple(leaf for d in dependencies for leaf in d.grouped_leaves())
 
     @property
     def resolved_key(self) -> str | None:
@@ -213,6 +259,8 @@ class Binding:
             return f"offset({base}, {self.offset.time_dimension}, {self.offset.offset})"
         if self.derived is not None:
             return f"derived({self.derived.expr})"
+        if self.conversion is not None:
+            return self.conversion.key
         if self.source is None or self.measure is None:
             return None
         if self.kind is BindingKind.OPAQUE:
@@ -581,6 +629,9 @@ class ContractResolver:
                 ),
             )
 
+        if canonical.kind is BindingKind.CONVERSION:
+            return self._resolve_conversion(binding, seen)
+
         # Composite (ratio / weighted_avg): first component → numerator, second → denominator.
         num_name, den_name = spec_for(canonical.kind).component_names(canonical)
 
@@ -603,6 +654,44 @@ class ContractResolver:
             components=ComponentBindings(
                 numerator=num_result,
                 denominator=den_result,
+                on_zero_denominator=canonical.on_zero_denominator,
+            ),
+        )
+
+    def _resolve_conversion(
+        self, binding: MetricBinding, seen: frozenset[str]
+    ) -> Binding | Ambiguous | Unresolved:
+        canonical = binding.canonical
+        assert (  # noqa: S101 — enforced by model_validator
+            canonical.base_metric is not None
+            and canonical.conversion_metric is not None
+            and canonical.entity is not None
+            and canonical.base_time is not None
+            and canonical.conversion_time is not None
+        )
+        base = self._resolve_component(canonical.base_metric, seen)
+        if not isinstance(base, Binding):
+            return base
+        conversion = self._resolve_component(canonical.conversion_metric, seen)
+        if not isinstance(conversion, Binding):
+            return conversion
+        return Binding(
+            metric=binding.metric,
+            source=None,
+            measure=None,
+            binding=binding,
+            kind=BindingKind.CONVERSION,
+            conversion=ConversionBinding(
+                base=base,
+                conversion=conversion,
+                entity=(canonical.entity.base, canonical.entity.conversion),
+                base_time=canonical.base_time,
+                conversion_time=canonical.conversion_time,
+                window=canonical.window,
+                calculation=canonical.calculation or ConversionCalculation.CONVERSION_RATE,
+                constant_properties=tuple(
+                    (p.base, p.conversion) for p in canonical.constant_properties or ()
+                ),
                 on_zero_denominator=canonical.on_zero_denominator,
             ),
         )

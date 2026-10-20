@@ -31,6 +31,7 @@ from canonic.contracts.models import (
     UndeclaredSource,
 )
 from canonic.exc import Ambiguous, ContractError
+from canonic.semantic.duration import DurationUnit
 from canonic.semantic.loader import list_semantic_sources
 from canonic.semantic.models import PERIOD_GRAINS, Additivity, NormalizedType
 
@@ -85,7 +86,11 @@ def _validate_composite_binding(
                 f"metric {binding.metric!r}: {label} {name!r} has kind cumulative; "
                 f"a running total cannot be used as a component in a composite metric"
             )
-        if active_by_name[name].canonical.kind in (BindingKind.OFFSET, BindingKind.DERIVED):
+        if active_by_name[name].canonical.kind in (
+            BindingKind.OFFSET,
+            BindingKind.DERIVED,
+            BindingKind.CONVERSION,
+        ):
             raise ContractError(
                 f"metric {binding.metric!r}: {label} {name!r} has kind "
                 f"{active_by_name[name].canonical.kind.value}; write the ratio as a derived "
@@ -227,6 +232,11 @@ def _validate_offset_binding(
             f"metric {binding.metric!r}: base {ref.base!r} has kind opaque, which is served only "
             f"at its native grain and cannot be shifted"
         )
+    if base.canonical.kind is BindingKind.CONVERSION:
+        raise ContractError(
+            f"metric {binding.metric!r}: base {ref.base!r} has kind conversion, which cannot be "
+            f"shifted yet"
+        )
     if base.canonical.kind is BindingKind.CUMULATIVE and base.canonical.needs_day_spine:
         raise ContractError(
             f"metric {binding.metric!r}: base {ref.base!r} is a cumulative metric evaluated per "
@@ -276,6 +286,108 @@ def _validate_derived_binding(
     for item in ref.inputs or ():
         _require_active(binding, "input", item.metric, active_by_name)
     _check_composite_cycle(binding.metric, active_by_name, path=[binding.metric])
+
+
+#: The aggregates a ``single`` conversion metric may use, for which no conversion means ``0``.
+_COUNTING_AGGREGATES = (exp.Sum, exp.Count)
+
+
+def _validate_conversion_binding(
+    binding: MetricBinding,
+    active_by_name: dict[str, MetricBinding],
+    sources_by_name: dict[str, SemanticSource],
+) -> None:
+    """Validate a conversion binding.
+
+    Checks: both metrics resolve to active ``single`` or ``distinct_count`` metrics, a
+    ``single`` conversion metric counts or sums, the entity, the times and the constant
+    properties name columns of their side's own source, the times are dates or timestamps, and
+    a window shorter than a day compares two timestamps. A metric whose source or measure does
+    not exist is left to that metric's own check.
+    """
+    ref = binding.canonical
+    assert ref.base_metric is not None and ref.conversion_metric is not None  # noqa: S101
+    assert ref.entity is not None  # noqa: S101 — enforced by model_validator
+    assert ref.base_time is not None and ref.conversion_time is not None  # noqa: S101
+    sides = (
+        ("base_metric", ref.base_metric, "base", ref.entity.base, ref.base_time),
+        (
+            "conversion_metric",
+            ref.conversion_metric,
+            "conversion",
+            ref.entity.conversion,
+            ref.conversion_time,
+        ),
+    )
+    time_types: list[NormalizedType] = []
+    for label, name, side, entity, time in sides:
+        metric = _require_active(binding, label, name, active_by_name)
+        kind = metric.canonical.kind
+        if kind not in (BindingKind.SINGLE, BindingKind.DISTINCT_COUNT):
+            raise ContractError(
+                f"metric {binding.metric!r}: {label} {name!r} has kind {kind.value}; a conversion "
+                f"reads metrics of kind single or distinct_count"
+            )
+        source = sources_by_name.get(metric.canonical.source or "")
+        if source is None:
+            return
+        if side == "conversion" and kind is BindingKind.SINGLE:
+            measure = next((m for m in source.measures if m.name == metric.canonical.measure), None)
+            if measure is None:
+                return
+            if measure.additivity is not Additivity.ADDITIVE or not _counts(measure.expr):
+                raise ContractError(
+                    f"metric {binding.metric!r}: conversion_metric {name!r} must sum or count an "
+                    f"additive measure, for which no conversion is 0"
+                )
+        if side == "conversion" and kind is BindingKind.DISTINCT_COUNT:
+            distinct_on = metric.canonical.distinct_on or ""
+            if source.own_column(distinct_on) is None:
+                raise ContractError(
+                    f"metric {binding.metric!r}: conversion_metric {name!r} counts "
+                    f"{distinct_on!r}, which is not a column of source {source.name!r}"
+                )
+        properties = [
+            (f"constant_properties {side}", pair.base if side == "base" else pair.conversion)
+            for pair in ref.constant_properties or ()
+        ]
+        for field_name, column_name in [
+            (f"entity {side}", entity),
+            (f"{side}_time", time),
+            *properties,
+        ]:
+            if source.own_column(column_name) is None:
+                raise ContractError(
+                    f"metric {binding.metric!r}: {field_name} {column_name!r} is not a column, or "
+                    f"a dimension backed by one column, of source {source.name!r}"
+                )
+        time_column = source.own_column(time)
+        assert time_column is not None  # noqa: S101 — checked above
+        if time_column.type not in {NormalizedType.DATE, NormalizedType.TIMESTAMP}:
+            raise ContractError(
+                f"metric {binding.metric!r}: {side}_time {time!r} must be a date or timestamp "
+                f"column"
+            )
+        time_types.append(time_column.type)
+    window = ref.window
+    if (
+        window is not None
+        and window.unit.rank < DurationUnit.DAY.rank
+        and NormalizedType.DATE in time_types
+    ):
+        raise ContractError(
+            f"metric {binding.metric!r}: a window of {window} needs timestamps on both sides, "
+            f"and a time column is a date"
+        )
+
+
+def _counts(measure_expr: str) -> bool:
+    """Whether a measure expression is a ``SUM`` or ``COUNT`` at its top."""
+    try:
+        parsed = sqlglot.parse_one(measure_expr, dialect="postgres")
+    except ParseError:
+        return False
+    return isinstance(parsed, _COUNTING_AGGREGATES)
 
 
 def _validate_semi_additive_binding(
@@ -776,6 +888,8 @@ def validate_contracts(project_root: Path) -> None:
             _validate_offset_binding(binding, active_by_name, sources_by_name)
         elif ref.kind is BindingKind.DERIVED:
             _validate_derived_binding(binding, active_by_name)
+        elif ref.kind is BindingKind.CONVERSION:
+            _validate_conversion_binding(binding, active_by_name, sources_by_name)
         else:
             _validate_composite_binding(binding, bindings, source_measures)
             _validate_numerator_parts(binding, active_by_name, sources_by_name)

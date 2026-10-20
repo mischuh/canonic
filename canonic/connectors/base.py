@@ -270,6 +270,7 @@ class CandidateKind(StrEnum):
     SINGLE = "single"
     OFFSET = "offset"
     DERIVED = "derived"
+    CONVERSION = "conversion"
 
 
 class CandidateInput(BaseModel):
@@ -293,6 +294,10 @@ class ContractCandidate(BaseModel):
     A candidate built from other metrics names them instead of measures: ``metrics`` holds a
     ``ratio``'s numerator and denominator metric, ``base``, ``time_dimension`` and ``offset``
     an ``offset``, and ``expr`` and ``inputs`` a ``derived`` metric.
+
+    A ``conversion`` candidate names its base and conversion measure in ``measures``, in that
+    order, and the columns it matches on in ``entity``, ``base_time``, ``conversion_time`` and
+    ``constant_properties``, each pair as ``{"base": ..., "conversion": ...}``.
     """
 
     model_config = ConfigDict(frozen=True)
@@ -309,6 +314,11 @@ class ContractCandidate(BaseModel):
     offset: str | None = None
     expr: str | None = None
     inputs: list[CandidateInput] = []
+    entity: dict[str, str] | None = None
+    base_time: str | None = None
+    conversion_time: str | None = None
+    calculation: str | None = None
+    constant_properties: list[dict[str, str]] = []
 
 
 class DefinitionEvidence(BaseModel):

@@ -62,6 +62,7 @@ if TYPE_CHECKING:
 
 from canonic.compiler.strategies import (
     plan_composite,
+    plan_conversion,
     plan_cumulative,
     plan_derived,
     plan_offset,
@@ -124,10 +125,10 @@ def _source_measure_pairs(binding: ResolverBinding) -> list[tuple[str, str]]:
 def _matched_alone(binding: ResolverBinding) -> list[ResolverBinding]:
     """The bindings a per-metric guardrail matches for ``binding``.
 
-    An offset or derived metric is matched the way its inputs are when queried alone. Any
-    other kind, a ratio included, is matched as itself.
+    An offset, derived or conversion metric is matched the way its inputs are when queried
+    alone. Any other kind, a ratio included, is matched as itself.
     """
-    if binding.offset is None and binding.derived is None:
+    if binding.offset is None and binding.derived is None and binding.conversion is None:
         return [binding]
     return [m for d in binding.dependencies() for m in _matched_alone(d)]
 
@@ -367,7 +368,9 @@ def compile(  # noqa: A001 — the public verb for this capability is "compile"
 
     # Compute related metadata once here using resolved bindings (all paths get it via
     # dataclasses.replace or direct constructor argument below).
-    queried_sources = {leaf.source for _, b in raw_bindings for leaf in b.leaves() if leaf.source}
+    queried_sources = {
+        leaf.source for _, b in raw_bindings for leaf in b.grouped_leaves() if leaf.source
+    }
     queried_metric_names = {name for name, _ in raw_bindings}
     related = _related(
         queried_sources, queried_metric_names, query, resolver, sources_by_name, effective_policy
@@ -488,6 +491,7 @@ def compile(  # noqa: A001 — the public verb for this capability is "compile"
         time_range=time_range.metadata() if time_range is not None else None,
         offsets={o.metric: o for metric_leaves in planned for o in metric_leaves.offsets},
         derived={d.metric: d for metric_leaves in planned for d in metric_leaves.derived},
+        conversions={c.metric: c for metric_leaves in planned for c in metric_leaves.conversions},
         scope=ScopeMetadata(
             tenant=bound_principal.tenant_scope,
             scoped_sources=sorted(composed.scoped_sources),
@@ -533,6 +537,17 @@ def _plan_metric(
         )
     if binding.kind is BindingKind.DERIVED:
         return plan_derived(name, binding, plan_input=plan_other)
+    if binding.kind is BindingKind.CONVERSION:
+        return plan_conversion(
+            query,
+            name,
+            binding,
+            resolver,
+            sources_by_name,
+            principal=principal,
+            effective_policy=effective_policy,
+            plan_base=plan_other,
+        )
     if binding.kind in {BindingKind.RATIO, BindingKind.WEIGHTED_AVG}:
         return plan_composite(
             query,

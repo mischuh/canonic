@@ -16,6 +16,7 @@ if TYPE_CHECKING:
 __all__ = [
     "CompileResult",
     "CompositionMetadata",
+    "ConversionMetadata",
     "CumulativeMetadata",
     "DerivedInput",
     "DerivedMetadata",
@@ -243,6 +244,26 @@ class DerivedMetadata:
 
 
 @dataclass(frozen=True, slots=True)
+class ConversionMetadata:
+    """How a conversion metric matched conversion events to base events.
+
+    ``entity`` and each entry of ``constant_properties`` map ``base`` and ``conversion`` to the
+    column read on that side. ``window`` is ``None`` when every later conversion counts.
+    """
+
+    metric: str
+    base_metric: str
+    conversion_metric: str
+    entity: dict[str, str]
+    base_time: str
+    conversion_time: str
+    window: str | None
+    calculation: str
+    constant_properties: list[dict[str, str]] = field(default_factory=list)
+    attribution: str = "last_touch"
+
+
+@dataclass(frozen=True, slots=True)
 class TimeRangeMetadata:
     """The query's ``time_range`` resolved to dates.
 
@@ -379,6 +400,8 @@ class CompileResult:
     offsets: dict[str, OffsetMetadata] = field(default_factory=dict)
     #: Every derived metric of the query, also one nested in another, by name.
     derived: dict[str, DerivedMetadata] = field(default_factory=dict)
+    #: Every conversion metric of the query, also one reached through a derived metric, by name.
+    conversions: dict[str, ConversionMetadata] = field(default_factory=dict)
     trust_inputs: list[TrustInput] = field(default_factory=list)
     time_dimensions: tuple[TimeDimension, ...] = ()
     #: Columns added to ``sql`` that the serving layer strips again, see :class:`ProbeColumn`.

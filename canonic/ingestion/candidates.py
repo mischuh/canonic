@@ -192,6 +192,31 @@ def build_candidate_proposals(
                 anchor,
             )
             continue
+        if candidate.kind is CandidateKind.CONVERSION:
+            sides = [measure_binding(m) for m in candidate.measures]
+            problem = next((c for c in sides if isinstance(c, str)), None)
+            if problem is not None:
+                unexpressible.append((source, f"{label}: {problem}"))
+                continue
+            for name, canonical in zip(candidate.measures, sides, strict=True):
+                assert isinstance(canonical, dict)  # noqa: S101 — checked above
+                propose(name, canonical, index.measure_aliases(name), anchor)
+            base_metric, conversion_metric = candidate.measures
+            conversion: dict[str, Any] = {
+                "kind": "conversion",
+                "base_metric": base_metric,
+                "conversion_metric": conversion_metric,
+                "entity": candidate.entity,
+                "base_time": candidate.base_time,
+                "conversion_time": candidate.conversion_time,
+                "calculation": candidate.calculation,
+            }
+            if candidate.window is not None:
+                conversion["window"] = candidate.window
+            if candidate.constant_properties:
+                conversion["constant_properties"] = list(candidate.constant_properties)
+            propose(definition.entity, conversion, list(definition.aliases), anchor)
+            continue
         if candidate.kind is CandidateKind.RATIO and candidate.metrics:
             numerator, denominator = candidate.metrics
             propose(
@@ -339,6 +364,17 @@ class CandidateResolver:
             return f"metric {missing[0]!r} has no binding"
         if kind == "derived":
             return None
+        if kind == "conversion":
+            names = {
+                name
+                for source in self._sources.values()
+                for entry in (*source.get("columns", []), *source.get("dimensions", []))
+                if (name := entry.get("name"))
+            }
+            for field in ("base_time", "conversion_time"):
+                if canonical[field] not in names:
+                    return f"dimension {canonical[field]!r} will not exist"
+            return None
         if kind == "offset":
             dimensions = {
                 d.get("name")
@@ -377,4 +413,6 @@ def _metric_references(canonical: dict[str, Any]) -> set[str]:
         return {canonical["base"]}
     if kind == "derived":
         return {i["metric"] for i in canonical["inputs"]}
+    if kind == "conversion":
+        return {canonical["base_metric"], canonical["conversion_metric"]}
     return set()

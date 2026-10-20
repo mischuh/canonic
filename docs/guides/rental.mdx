@@ -38,7 +38,7 @@ canonic status
 # project root:   .../examples/rental
 # config version: 1
 # .canonic/:        absent
-# contract:       3.13
+# contract:       3.14
 # project:        <fingerprint>
 ```
 
@@ -57,7 +57,7 @@ canonic eval baseline \                    # (optional) grain-inference accuracy
 
 ## Metrics
 
-`contracts/metrics/` ships **14** metric contracts. Three are the canonical showcase bindings. The rest support the guardrail's caveats and other reporting cuts.
+`contracts/metrics/` ships **17** metric contracts. Three are the canonical showcase bindings. The rest support the guardrail's caveats and other reporting cuts.
 
 | Metric | Source · measure | Canonical for |
 | --- | --- | --- |
@@ -72,6 +72,9 @@ canonic eval baseline \                    # (optional) grain-inference accuracy
 | `rental_revenue_month_to_date` | cumulative: `payments.total_paid`, `grain_to_date: month` | Settled revenue from the first of the month, restarting every month |
 | `rental_revenue_prev_month` | offset: `rental_revenue`, `1 month` along `payment_date` | The previous month's settled revenue, next to this month's |
 | `rental_revenue_growth_mom` | derived: `(rental_revenue - previous) / previous` | Month-over-month growth of settled revenue |
+| `paid_rentals` | distinct count on `payments.rental_id` | Rentals with at least one payment |
+| `payment_rate_5d` | conversion: `rental_count` to `paid_rentals` on `rental_id`, `window: 5 days` | Share of completed rentals paid within five days of pickup. A payment after the queried range still counts for a rental inside it |
+| `revenue_paid_within_5d` | conversion: `rental_count` to `rental_revenue`, `calculation: conversions` | Settled revenue paid within five days of pickup, grouped by the rental's dimensions |
 | `damage_count` / `total_repair_cost` / `avg_repair_costs` | `damages.*` | Damage-claim reporting |
 
 ## Guardrail
@@ -88,7 +91,7 @@ canonic eval baseline \                    # (optional) grain-inference accuracy
 canonic.yaml                    ← SQLite connection, LLM, reconcile settings
 setup.sql                       ← DDL + seed data
 semantics/rental_db/            ← 5 dimensions + 4 facts (incl. vehicle_inventory)
-contracts/metrics/              ← 14 metric contracts (see Metrics above)
+contracts/metrics/              ← 17 metric contracts (see Metrics above)
 contracts/guardrails/           ← completed-rentals-only.yaml
 knowledge/global/               ← 5 pages: rental-revenue, rental-duration, active-customers,
                                    avg-repair-costs, ending-inventory definitions/notes

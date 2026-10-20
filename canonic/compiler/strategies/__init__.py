@@ -8,6 +8,7 @@ deduplicated, named, joined and merged is the same for all of them and lives in
 """
 
 from canonic.compiler.strategies.composite import plan_metric as plan_composite
+from canonic.compiler.strategies.conversion import plan_metric as plan_conversion
 from canonic.compiler.strategies.cumulative import plan_metric as plan_cumulative
 from canonic.compiler.strategies.derived import plan_metric as plan_derived
 from canonic.compiler.strategies.offset import plan_metric as plan_offset
@@ -19,6 +20,7 @@ from canonic.compiler.strategies.simple_additive import plan_metric as plan_simp
 
 __all__ = [
     "plan_composite",
+    "plan_conversion",
     "plan_cumulative",
     "plan_derived",
     "plan_offset",

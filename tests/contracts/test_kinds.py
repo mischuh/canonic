@@ -68,7 +68,7 @@ def test_category_sets_match_expected_membership() -> None:
 def test_source_bound_and_composite_are_disjoint_and_total() -> None:
     """Every kind reads a source, or is computed from other metrics, never both."""
     assert SOURCE_BOUND_KINDS.isdisjoint(COMPOSITE_KINDS)
-    composed = {BindingKind.OFFSET, BindingKind.DERIVED}
+    composed = {BindingKind.OFFSET, BindingKind.DERIVED, BindingKind.CONVERSION}
     assert set(BindingKind) == SOURCE_BOUND_KINDS | COMPOSITE_KINDS | composed
     assert composed.isdisjoint(SOURCE_BOUND_KINDS | COMPOSITE_KINDS)
 
@@ -83,7 +83,16 @@ def test_dependency_names_cover_every_kind_built_from_metrics() -> None:
         expr="a - b",
         inputs=[{"metric": "a"}, {"metric": "c", "alias": "b"}],
     )
+    conversion = CanonicalRef(
+        kind=BindingKind.CONVERSION,
+        base_metric="visits",
+        conversion_metric="purchases",
+        entity="user_id",
+        base_time="visited_at",
+        conversion_time="purchased_at",
+    )
     single = CanonicalRef(source="orders", measure="revenue")
+    assert spec_for(conversion.kind).dependency_names(conversion) == ("visits", "purchases")
     assert spec_for(ratio.kind).dependency_names(ratio) == ("a", "b")
     assert spec_for(offset.kind).dependency_names(offset) == ("a",)
     assert spec_for(derived.kind).dependency_names(derived) == ("a", "c")
