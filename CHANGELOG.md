@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.45.1](https://github.com/mischuh/canonic/compare/v0.45.0...v0.45.1) (2026-10-20)
+
+
+### Bug Fixes
+
+* **compiler:** count zero denominators of derived and conversion metrics ([#487](https://github.com/mischuh/canonic/issues/487)) ([cb1d510](https://github.com/mischuh/canonic/commit/cb1d510efc7b870b2c1c5e08bbb90412d254231d))
+
+
+### Documentation
+
+* **compare:** add Cube, LookML and Ossie comparison pages ([#484](https://github.com/mischuh/canonic/issues/484)) ([dbe3593](https://github.com/mischuh/canonic/commit/dbe35935fad0f3f845ebd931ca960c89ddd767a8))
+* **compare:** add overview and dbt MetricFlow comparison pages ([#482](https://github.com/mischuh/canonic/issues/482)) ([750a205](https://github.com/mischuh/canonic/commit/750a205be0b2b6a170627035c1109d98504d1124))
+* **compare:** add warehouse-native semantic layers and notes on other tools ([#488](https://github.com/mischuh/canonic/issues/488)) ([9c0f6ff](https://github.com/mischuh/canonic/commit/9c0f6ff35be3a5143de5674ac47c7c87123680f8))
+
 ## [0.45.0](https://github.com/mischuh/canonic/compare/v0.44.1...v0.45.0) (2026-10-20)
 
 
