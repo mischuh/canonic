@@ -16,6 +16,7 @@ from canonic.compiler.result import (
 )
 from canonic.connectors.base import ResultColumn, ResultSet
 from canonic.semantic.models import Dimension
+from canonic.semantic.time_format import TimeFormat
 from canonic.trust.models import TrustTier
 from canonic.trust.periods import floor_to_grain, open_periods, parse_period_start, period_end
 from canonic.trust.scorer import trust_for_compiled
@@ -79,6 +80,32 @@ class TestParsePeriodStart:
     def test_unreadable_values_are_left_alone(self, value: object) -> None:
         assert parse_period_start(value, "month") is None
 
+    @pytest.mark.parametrize(
+        ("value", "start"),
+        [
+            ("2026-43", datetime(2026, 10, 19)),
+            ("2026-05", datetime(2026, 1, 26)),
+            ("2026-W05", datetime(2026, 1, 26)),
+        ],
+    )
+    def test_a_week_label_without_w_is_the_iso_week(self, value: str, start: datetime) -> None:
+        assert parse_period_start(value, "week") == start
+
+    def test_the_same_label_is_a_month_on_a_month_grain(self) -> None:
+        assert parse_period_start("2026-05", "month") == datetime(2026, 5, 1)
+
+    def test_a_time_format_is_the_only_form_read(self) -> None:
+        time_format = TimeFormat.compile("%V/%G", "week")
+
+        assert parse_period_start("43/2026", "week", time_format) == datetime(2026, 10, 19)
+        assert parse_period_start("2026-W43", "week", time_format) is None
+        assert parse_period_start(date(2026, 10, 19), "week", time_format) == datetime(2026, 10, 19)
+
+    def test_an_integer_label_is_read_with_the_time_format(self) -> None:
+        time_format = TimeFormat.compile("%Y%m", "month")
+
+        assert parse_period_start(202610, "month", time_format) == datetime(2026, 10, 1)
+
 
 class TestOpenPeriods:
     def test_latest_period_not_ended_is_open(self) -> None:
@@ -120,6 +147,16 @@ class TestOpenPeriods:
 
         assert open_periods(compiled, _result("month_label", "2026-09", "2026-10"), NOW)
         assert not open_periods(compiled, _result("month_label", "2026-08", "2026-09"), NOW)
+
+    def test_a_label_is_read_and_named_with_the_time_format(self) -> None:
+        time_format = TimeFormat.compile("%G-%V", "week")
+        compiled = _compiled(TimeDimension("year_week", "week", time_format))
+
+        (period,) = open_periods(compiled, _result("year_week", "2026-41", "2026-42"), NOW)
+        assert period.start == datetime(2026, 10, 12)
+        assert period.warning == (
+            "year_week: the week 2026-42 has not ended, so its figures are incomplete"
+        )
 
     def test_unreadable_labels_leave_the_check_inactive(self) -> None:
         compiled = _compiled(TimeDimension("month_label", "month"))

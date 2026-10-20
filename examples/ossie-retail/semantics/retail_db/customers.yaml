@@ -29,6 +29,7 @@ dimensions:
   type:
   granularity:
   time_grain:
+  time_format:
   label:
   description:
   aliases: []
@@ -39,6 +40,7 @@ dimensions:
   type:
   granularity:
   time_grain:
+  time_format:
   label:
   description:
   aliases: []
@@ -49,6 +51,7 @@ dimensions:
   type:
   granularity:
   time_grain:
+  time_format:
   label:
   description: consumer or business
   aliases:

@@ -17,6 +17,8 @@ columns:
 dimensions:
   - { name: order_date,  column: order_date, label: "Order Date",  granularity: day }
   - { name: order_month, column: order_date, label: "Order Month", granularity: month }
+  - { name: order_week,  expr: "strftime(order_date, '%G-%V')", type: string, label: "Order Week",
+      time_grain: week, time_format: "%G-%V" }
   - { name: status,      column: status,     label: "Order Status" }
   - { name: channel,     column: channel,    label: "Channel", aliases: ["sales channel"] }
 

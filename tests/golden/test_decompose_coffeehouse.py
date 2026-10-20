@@ -1,4 +1,4 @@
-"""``decompose`` on the shipped coffeehouse example, one case per method.
+"""``decompose`` on the shipped coffeehouse example, one case per method and one by week label.
 
 The expected numbers are checked by hand against ``examples/coffeehouse/setup.sql``. January to
 February 2026, completed orders of real customers only: revenue 295.00 to 370.00, cost of goods
@@ -30,12 +30,16 @@ pytestmark = pytest.mark.release_gate
 
 
 async def _decompose(
-    services: dict[str, CanonicService], metric: str, by: list[str]
+    services: dict[str, CanonicService],
+    metric: str,
+    by: list[str],
+    period: dict[str, str] | None = None,
 ) -> DecomposeResult:
     request = DecomposeRequest.model_validate(
         {
             "metric": metric,
-            "period": {"dimension": "order_month", "base": "2026-01", "compare": "2026-02"},
+            "period": period
+            or {"dimension": "order_month", "base": "2026-01", "compare": "2026-02"},
             "by": by,
         }
     )
@@ -105,3 +109,21 @@ async def test_average_order_value_has_overall_effects_only(
     assert sum(e.contribution for e in result.effects) == pytest.approx(15.0)
     with pytest.raises(UnsupportedMeasure, match="order_count' has kind distinct_count"):
         await _decompose(golden_services, "average_order_value", ["category"])
+
+
+async def test_revenue_by_week_label(golden_services: dict[str, CanonicService]) -> None:
+    # order_week is a label in the form 2026-05 with time_format %G-%V. ISO week 5 runs from
+    # 26 January to 1 February: orders 6 and 7. Week 6 holds orders 8 to 10. Without the format,
+    # 2026-05 would be read as May.
+    week = {"dimension": "order_week", "base": "2026-05", "compare": "2026-06"}
+    result = await _decompose(golden_services, "revenue", ["category"], week)
+    split = result.by["category"]
+
+    assert (result.total.base, result.total.compare) == (45.0, 345.0)
+    assert isinstance(split, AdditiveBreakdown)
+    assert {r.member: r.contribution for r in split.rows} == {
+        "equipment": 120.0,
+        "coffee": 105.0,
+        "accessories": 75.0,
+    }
+    assert not any("not checked" in w for w in result.metadata.warnings)

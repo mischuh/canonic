@@ -39,6 +39,7 @@ dimensions:
   type:
   granularity:
   time_grain:
+  time_format:
   label:
   description: Fulfilment status of the order
   aliases:
@@ -51,6 +52,7 @@ dimensions:
   type:
   granularity:
   time_grain:
+  time_format:
   label:
   description: Where the order was placed, online or in a store
   aliases:
@@ -62,6 +64,7 @@ dimensions:
   type:
   granularity:
   time_grain:
+  time_format:
   label:
   description:
   aliases: []
@@ -72,6 +75,7 @@ dimensions:
   type: string
   granularity:
   time_grain:
+  time_format:
   label:
   description: Calendar month of the order as YYYY-MM
   aliases: []

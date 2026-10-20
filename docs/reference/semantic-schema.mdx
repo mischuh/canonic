@@ -82,11 +82,78 @@ dimensions:
 | `type` | `str \| null` | `null` | Required with `expr` or `json_path`, one of the normalized column types. Ignored with a plain `column`. |
 | `granularity` | `str \| null` | `null` | Time bucketing, e.g. `day`, `month`. With `expr`, `type` must be `date` or `timestamp`. |
 | `time_grain` | `str \| null` | `null` | The period one value stands for: `hour`, `day`, `week`, `month`, `quarter` or `year`. Takes precedence over `granularity`. Set it on a dimension that is not bucketed by `granularity`, such as a month label, so a served result can be checked for a period that has not ended. |
+| `time_format` | `str \| null` | `null` | How a label of `time_grain` spells its period, for example `%G-%V` for `2026-43`. Requires `time_grain`. See [Period labels](#period-labels). |
 | `label` | `str \| null` | `null` | Human-readable display name. |
 | `description` | `str \| null` | `null` | Free-text explanation. |
 | `aliases` | `list[str]` | `[]` | Alternate lookup names. |
 
-A dimension exposes a column for grouping or filtering. `column` must point at a column declared in `columns`, canonic won't infer or guess it. `granularity` only applies to time columns and controls how they get bucketed, for example `day` or `month`. Leave it `null` for non-time dimensions. `expr` derives a value from the source's own columns, for example `to_timestamp(created)` for an epoch-seconds column or `split_part(email, '@', 2)` for a domain. It is written in the dialect of the connection (canonic does not translate it), may only read columns declared on the same source, and has no column to infer a type from, so `type` is required. A role's masking rule on any column an `expr` reads masks the whole derived value. A filter can reference a derived dimension by name, which inlines the expression without time bucketing, so `charge_date >= '2025-01-01'` compares the converted timestamp. `distinct_on` and measure expressions still read raw columns only. `json_path` reads one key of a `json` column, such as a `jsonb` `properties` field. Give the key as a list of segments, one per nesting level. Each segment is one literal key, so `$current_url` and `a.b` are single keys and not path syntax. Segments must be non-empty and contain no quotes, backslashes or control characters. The value is text unless `type` says otherwise, in which case canonic casts it, so `type: int` makes `seats >= 3` a numeric comparison. A missing key gives `NULL`. Canonic renders the access in the connection's dialect, for example `->` and `->>` on Postgres, which works on both `json` and `jsonb`. A `json_path` dimension follows the same rules as `expr` for masking, filtering by name and `granularity`. `time_grain` does not change the SQL. A query that groups by a dimension whose period is known (`time_grain`, or a `granularity` of `hour`, `day`, `week`, `month`, `quarter` or `year`), or filters on one, is checked after it ran: if the latest period it reaches has not ended yet, the response carries a warning naming the period and the trust tier is capped at `provisional`, see [Trust score](/concepts/contracts-and-guardrails#trust-score). A label is read as `2026`, `2026-10`, `2026-Q4`, `2026-W43` or an ISO date, and a value in another form is not judged. `label` and `description` are for humans and agents reading the schema and don't affect compilation. `aliases` lets a dimension resolve under more than one name, useful when different teams call the same column by different names.
+A dimension exposes a column for grouping or filtering. `column` must point at a column declared in `columns`, canonic won't infer or guess it. `granularity` only applies to time columns and controls how they get bucketed, for example `day` or `month`. Leave it `null` for non-time dimensions. `expr` derives a value from the source's own columns, for example `to_timestamp(created)` for an epoch-seconds column or `split_part(email, '@', 2)` for a domain. It is written in the dialect of the connection (canonic does not translate it), may only read columns declared on the same source, and has no column to infer a type from, so `type` is required. A role's masking rule on any column an `expr` reads masks the whole derived value. A filter can reference a derived dimension by name, which inlines the expression without time bucketing, so `charge_date >= '2025-01-01'` compares the converted timestamp. `distinct_on` and measure expressions still read raw columns only. `json_path` reads one key of a `json` column, such as a `jsonb` `properties` field. Give the key as a list of segments, one per nesting level. Each segment is one literal key, so `$current_url` and `a.b` are single keys and not path syntax. Segments must be non-empty and contain no quotes, backslashes or control characters. The value is text unless `type` says otherwise, in which case canonic casts it, so `type: int` makes `seats >= 3` a numeric comparison. A missing key gives `NULL`. Canonic renders the access in the connection's dialect, for example `->` and `->>` on Postgres, which works on both `json` and `jsonb`. A `json_path` dimension follows the same rules as `expr` for masking, filtering by name and `granularity`. `time_grain` does not change the SQL. A query that groups by a dimension whose period is known (`time_grain`, or a `granularity` of `hour`, `day`, `week`, `month`, `quarter` or `year`), or filters on one, is checked after it ran: if the latest period it reaches has not ended yet, the response carries a warning naming the period and the trust tier is capped at `provisional`, see [Trust score](/concepts/contracts-and-guardrails#trust-score). How a label is read is described under [Period labels](#period-labels). `label` and `description` are for humans and agents reading the schema and don't affect compilation. `aliases` lets a dimension resolve under more than one name, useful when different teams call the same column by different names.
+
+### Period labels
+
+A label dimension holds text that names a period, such as `2026-43` for a week or `202610` for a month, instead of a date. `time_grain` says which period one value stands for. Canonic never changes the SQL for it: a query groups and filters by the label as it is. Canonic reads the label in two places after a query ran:
+
+- The open-period check of `query` and `decompose` reads the label as the start of its period, to tell whether the latest period has ended.
+- [`decompose`](/mcp-integration/tools-reference#decompose_change-request-dict) filters a label dimension by the two labels of the request and matches the result rows to them by their text. It only needs their start for the open-period check.
+
+`time_format` declares how the labels are written. Without it, canonic reads a label from common forms.
+
+#### `time_format`
+
+```yaml
+dimensions:
+  - { name: year_week, column: year_week_id, time_grain: week, time_format: "%G-%V" }    # 2026-43
+  - { name: year_month, column: year_month_id, time_grain: month, time_format: "%Y%m" }  # 202610
+  - { name: fiscal_quarter, column: fq, time_grain: quarter, time_format: "FY%Y Q%q" }    # FY2026 Q4
+```
+
+The format uses `strftime`-style placeholders. Everything else in it is literal text, and `%%` is a literal `%`. Each placeholder reads a fixed number of digits, so `2026-4` does not fit `%G-%V`, while `2026-04` does. The placeholders are the same for every warehouse, independent of the dialect that produced the label.
+
+| Placeholder | Reads | Example |
+| --- | --- | --- |
+| `%Y` | Calendar year, four digits | `2026` |
+| `%G` | ISO 8601 week-numbering year, four digits | `2026` |
+| `%q` | Quarter, one digit from 1 to 4 | `4` |
+| `%m` | Month, two digits | `10` |
+| `%V` | ISO 8601 week, two digits | `43` |
+| `%d` | Day of the month, two digits | `19` |
+| `%H` | Hour, two digits | `09` |
+
+A format must contain exactly the placeholders of its `time_grain`, each once and in any order:
+
+| `time_grain` | Placeholders |
+| --- | --- |
+| `year` | `%Y` |
+| `quarter` | `%Y`, `%q` |
+| `month` | `%Y`, `%m` |
+| `week` | `%G`, `%V` |
+| `day` | `%Y`, `%m`, `%d` |
+| `hour` | `%Y`, `%m`, `%d`, `%H` |
+
+A week always starts on Monday and is numbered as in ISO 8601, so `%G` is the ISO year and not the calendar year: the week from 29 December 2025 to 4 January 2026 is `2026-01`. A week label with the calendar year (`%Y` with `%V`) is rejected, because around New Year it names a different week. A format that does not fit its grain, an unknown placeholder or one used twice fails validation when the semantic file is loaded, like any other invalid field, and the message names the placeholders the grain needs.
+
+Common warehouse formats and their `time_format`:
+
+| Warehouse expression | Label | `time_format` |
+| --- | --- | --- |
+| Postgres, Snowflake `to_char(d, 'IYYY-IW')` | `2026-43` | `%G-%V` |
+| Postgres `to_char(d, 'IYYY-"W"IW')` | `2026-W43` | `%G-W%V` |
+| BigQuery `FORMAT_DATE('%G-%V', d)` | `2026-43` | `%G-%V` |
+| Postgres `to_char(d, 'YYYYMM')` | `202610` | `%Y%m` |
+| Postgres `to_char(d, 'YYYY-"Q"Q')` | `2026-Q4` | `%Y-Q%q` |
+
+With `time_format`, it is the only form canonic reads. A label that does not fit it is an error in `decompose`, and the message names the format with an example. The open-period check of `query` leaves such a value alone. A warning names a period the way the format spells it, for example `year_week: the week 2026-43 has not ended`.
+
+#### Without `time_format`
+
+Canonic reads a label as `2026`, `2026-10`, `2026-Q4`, `2026-W43`, `2026W43` or an ISO date. On a `week` grain, `2026-43` and `2026-05` are ISO weeks. On every other grain, `2026-05` is a month. A label in another form is not judged:
+
+- `query` does not flag its period as open.
+- `decompose` still decomposes the change, matched by the label text, and the result carries a warning that the open-period check of that period could not run. Declare `time_format` to have it checked.
+
+#### Latest period of a filtered label
+
+When a query only filters on a label dimension, the compiler finds its latest period as the largest label, see `flag_open_periods` in [config schema](/reference/config-schema#trust). That works only for labels that sort as text in the order of their periods. With a `time_format` whose placeholders do not run from year down to the smallest unit, such as `%V/%G` or `%m/%Y`, the filter-only check is skipped for that dimension, since `12/2025` would sort after `01/2026`. Grouping by the dimension is still checked, because then canonic reads every label of the result.
 
 ## `joins[]`
 

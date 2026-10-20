@@ -84,9 +84,12 @@ def latest_period_probes(
         subject = dimension.name if alias == owner else f"{alias}.{dimension.name}"
         grain = dimension.period_grain
         expression = _max_expression(dimension, alias)
+        time_format = dimension.period_format
         if (
             grain is None
             or expression is None
+            # MAX over a label is its latest period only when the labels sort by time
+            or (time_format is not None and not time_format.sorts_chronologically)
             or subject in grouped
             or dimension.name in grouped
             or (alias, dimension.column) in grouped_columns
@@ -122,7 +125,13 @@ def latest_period_probes(
             )
         )
         probes.append(
-            ProbeColumn(column=column, kind=PROBE_LATEST_PERIOD, subject=subject, grain=grain)
+            ProbeColumn(
+                column=column,
+                kind=PROBE_LATEST_PERIOD,
+                subject=subject,
+                grain=grain,
+                time_format=time_format,
+            )
         )
     return probe_leaves, plans, probes
 

@@ -94,6 +94,17 @@ A change listed here was reviewed against the classification rules and did not b
   effect. No field, type or response changes, and the run still passes, so a project with a
   dangling id is not broken by it.
 
+### `dimensions[].time_format` and label periods in `decompose`
+
+- ADR/PR: this PR (feat(semantic): declare how a label dimension spells its periods)
+- Decision: no bump. `time_format` is an optional field on the semantic-source file schema, like
+  `time_grain`, and does not change the shape of the semantic query, `QueryResult`, the compile
+  output, `DecomposeResult`, the error registry or the `ContractResolver` hooks. `decompose` now
+  matches the rows of a label dimension by their text and adds a free-text entry to `warnings`
+  when a label has no readable period. A label without `time_format` on a `week` grain, such as
+  `2026-05`, is now read as an ISO week rather than a month, which corrects the open-period
+  check without changing any field.
+
 ## History
 
 ## 3.11 (2026-10-19) - MINOR

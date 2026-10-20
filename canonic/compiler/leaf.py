@@ -639,7 +639,7 @@ def plan_leaf(
         shared_sources=tenant_scoping.shared_sources,
         fanout=fanout,
         time_dimensions=tuple(
-            TimeDimension(column=name, grain=dim.period_grain)
+            TimeDimension(column=name, grain=dim.period_grain, time_format=dim.period_format)
             for name, (_alias, dim) in zip(
                 _dimension_output_names(dimensions), dimensions, strict=True
             )
