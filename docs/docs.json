@@ -83,6 +83,13 @@
         ]
       },
       {
+        "group": "Compare",
+        "pages": [
+          "compare/overview",
+          "compare/dbt-metricflow"
+        ]
+      },
+      {
         "group": "Reference",
         "pages": [
           "reference/error-codes",

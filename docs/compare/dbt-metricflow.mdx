@@ -1,0 +1,61 @@
+---
+title: "canonic and dbt MetricFlow"
+description: "Where dbt MetricFlow and canonic overlap, what each is better at, and how to use them together."
+---
+
+dbt and canonic are neighbours, not rivals. dbt builds the tables. MetricFlow defines metrics on top of them inside the dbt project. canonic reads that project and adds the layer an agent needs when it asks a question: enforced rules, a fixed roll-up per metric, and a trust tier on the answer.
+
+<Note>Last verified against the vendors' public documentation in October 2026.</Note>
+
+## What each one is
+
+**MetricFlow** is the SQL generation engine behind the dbt Semantic Layer. dbt Labs released it under Apache 2.0 in October 2025. You describe semantic models and metrics in YAML (simple, ratio, cumulative, derived and conversion metrics), and MetricFlow builds the SQL. Joins follow the entities declared on each semantic model, which the dbt docs describe as a way to avoid fanout and chasm joins.
+
+**canonic** is a local-first context layer. Metrics are bound to a `kind` that decides the compilation strategy, guardrails are attached to the data, knowledge pages carry the business meaning, and every answer reports what was applied. It is read-only against the warehouse and has no LLM in the answer path.
+
+## Two ideas of a metric
+
+In dbt, a metric is an aggregation the modeler chose, and MetricFlow compiles that choice faithfully at any grain. In canonic, a metric is a contract with a compilation strategy: a `ratio` aggregates its parts first and divides last, a `distinct_count` is recomputed from base rows at every grain.
+
+Neither is a bug in the other. A MetricFlow definition can be written correctly for every grain, and canonic cannot make a wrong expression impossible. The difference is whether the definition itself says which of the two you have. The [coffeehouse guide](/guides/coffeehouse) runs the same questions through both on one DuckDB file, with the numbers checked by hand.
+
+| | dbt MetricFlow | canonic |
+| --- | --- | --- |
+| How a metric rolls up | Whatever the aggregate does at that grain | Fixed by the binding `kind` |
+| Business rules (refunds, test data) | A `filter` on each metric | A `mandatory_filter` guardrail on the source, applied to every measure on it |
+| Business meaning, caveats | `description` and `label` | Knowledge pages that are searched and attached to answers |
+| Checking a metric's result | Tests on tables and columns | Assertions on the served metric, run as a CI gate |
+| What the caller gets back | Rows | Rows plus the definition used, guardrails fired, freshness and a trust tier |
+| Several definitions of one thing | Can coexist under different names | One canonical binding, other names are aliases |
+| Authoring | Written by hand | Drafted from schema and manifests, applied as a reviewed diff |
+
+## What stays in dbt
+
+Keep dbt for everything it is good at:
+
+- **Transformations.** canonic does not build tables. It queries the ones you have.
+- **Table and column tests.** Uniqueness, not-null and accepted values stay in dbt. canonic assertions complement them by checking the value of a served metric.
+- **Lineage and documentation of models.** canonic reads the manifest and does not replace it.
+- **BI integrations that already speak the dbt Semantic Layer.** canonic does not cache or serve BI tools.
+
+## Using them together
+
+1. Point the `dbt` connector at your `manifest.json`. It proposes measures, joins and `count_distinct` binding candidates. See [connectors](/concepts/connectors) and the [jaffle-shop guide](/guides/jaffle-shop) for a full walk-through.
+2. Review the proposals with `canonic review` and `canonic apply`. Nothing is written without a reviewed diff, and human-curated facts are never overwritten.
+3. Add the rules dbt cannot hold: guardrails on the source, knowledge pages for the caveats and assertions for the values you have checked by hand.
+4. Connect your agent over [MCP](/mcp-integration/connecting-your-agent). Keep running `dbt build` as before.
+
+<Info>A dbt manifest is treated as definitions and evidence. An `average` measure is imported as non-additive and flagged for review, and each MetricFlow metric type maps to a binding candidate, see the [dbt metric mapping](/concepts/connectors#dbt-metric-mapping).</Info>
+
+## When MetricFlow alone is enough
+
+If your questions come from people in a BI tool, your metrics are few and well understood, and the dbt Semantic Layer integrations already cover your consumers, adding another layer may not pay for itself. canonic starts to earn its place when an agent is asking, when several teams define the same metric, or when a wrong number is expensive and you want the rules attached to the data instead of to each metric.
+
+<CardGroup cols={2}>
+  <Card title="canonic and other tools" icon="scale-balanced" href="/compare/overview">
+    The roles and a side-by-side table for dbt, Cube, LookML and Ossie.
+  </Card>
+  <Card title="Guide: Coffeehouse" icon="mug-hot" href="/guides/coffeehouse">
+    The worked comparison with real output.
+  </Card>
+</CardGroup>

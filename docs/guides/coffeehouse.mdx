@@ -5,6 +5,8 @@ description: "The same questions answered by dbt MetricFlow and by canonic, why 
 
 A small coffee shop in one bundled DuckDB file, with a dbt project and a canonic project on top of the same tables. Every dbt definition in this example reads as reasonable and runs without error. Three of them are correct for one grain only and return a wrong number for a month or a quarter. canonic answers each one correctly, and its guardrails, knowledge pages and assertions keep it that way.
 
+For the roles of both tools and how to use them together, see [canonic and dbt MetricFlow](/compare/dbt-metricflow).
+
 None of this is a MetricFlow bug. MetricFlow computes exactly what the definitions say, and this guide shows the dbt definition that would have been right wherever one exists. The point is a different one: a definition that is correct for some queries looks exactly like one that is correct for all of them. Nothing in dbt tells the modeler, the reviewer, or the agent asking the question which of the two they have.
 
 <Info>Full source: [`examples/coffeehouse/`](https://github.com/mischuh/canonic/tree/main/examples/coffeehouse)</Info>
