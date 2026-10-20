@@ -49,7 +49,7 @@ A metric binding is what turns a name like `revenue` into something the compiler
 
 ### `canonical` (`CanonicalRef`): one shape per `kind`
 
-`kind` selects a compilation strategy, and each kind needs a different subset of the fields below. Missing a required field for the chosen `kind` raises a located error at load time rather than failing later at query time. Most metrics are `single`, a direct pointer at one measure on one source. The other kinds exist for shapes a plain source-and-measure pair can't express on its own: `ratio` and `weighted_avg` combine two other metrics after they're each aggregated independently, `semi_additive` handles point-in-time values like balances that can't just be summed across every dimension, `distinct_count` and `percentile` recompute their value at whatever grain the query asks for instead of pre-aggregating, `cumulative` turns an additive measure into a running total, and `opaque` is the escape hatch for a measure that's only trustworthy at the exact grain it was computed at.
+`kind` selects a compilation strategy, and each kind needs a different subset of the fields below. Missing a required field for the chosen `kind` raises a located error at load time rather than failing later at query time. Most metrics are `single`, a direct pointer at one measure on one source. The other kinds exist for shapes a plain source-and-measure pair can't express on its own: `ratio` and `weighted_avg` combine two other metrics after they're each aggregated independently, `semi_additive` handles point-in-time values like balances that can't just be summed across every dimension, `distinct_count` and `percentile` recompute their value at whatever grain the query asks for instead of pre-aggregating, `cumulative` turns an additive measure into a running total, `offset` reads another metric at an earlier period, `derived` combines metrics with arithmetic, and `opaque` is the escape hatch for a measure that's only trustworthy at the exact grain it was computed at.
 
 | `kind` | Required fields | Compiles as |
 | --- | --- | --- |
@@ -61,6 +61,8 @@ A metric binding is what turns a name like `revenue` into something the compiler
 | `percentile` | `source`, `column`, `quantile` ∈ (0, 1) | Recompute the quantile at the requested grain from base rows. |
 | `opaque` | `source`, `measure`, `native_grain` (non-empty list of dimension columns) | Serve only at its declared native grain. Any other grain returns `UNSUPPORTED_MEASURE`. |
 | `cumulative` | `source`, `measure` (additive), `order_by` (non-empty list of dimensions) | Aggregate the measure to the requested grain, then sum it up along `order_by`, per partition of every other requested dimension. With `window` or `grain_to_date`, a trailing window or a period-to-date total per calendar day. See [Cumulative metrics](#cumulative-metrics). |
+| `offset` | `base` (metric name), `time_dimension`, `offset` (duration) | Plan the base by its own kind on rows whose time column is moved forward by the offset. See [Offset and derived metrics](#offset-and-derived-metrics). |
+| `derived` | `expr`, `inputs` (metrics, optional `alias`) | Aggregate every input at the requested grain, then apply the arithmetic per row. See [Offset and derived metrics](#offset-and-derived-metrics). |
 
 Full field list on `CanonicalRef`:
 
@@ -85,6 +87,11 @@ Full field list on `CanonicalRef`:
 | `window` | duration \| `null` | `null` | `cumulative`: a trailing window such as `7 days` or `1 month`, see [Trailing windows and period to date](#trailing-windows-and-period-to-date). |
 | `grain_to_date` | `day` \| `week` \| `month` \| `quarter` \| `year` \| `null` | `null` | `cumulative`: the period the total restarts at, such as `month` for month to date. |
 | `period_agg` | `first` \| `last` \| `average` | `last` | `cumulative`: which day of a coarser output bucket represents it. |
+| `base` | `str \| null` | `null` | `offset`: the metric to read at an earlier period. |
+| `time_dimension` | `str \| null` | `null` | `offset`: the dimension whose backing column is shifted. |
+| `offset` | duration \| `null` | `null` | `offset`: how far back, such as `1 year` or `1 month`, a day or longer. |
+| `expr` | `str \| null` | `null` | `derived`: arithmetic over the input names. |
+| `inputs` | `list[{metric, alias}] \| null` | `null` | `derived`: the metrics `expr` reads, under `alias` or their own name. |
 | `population_filter` | `str \| null` | `null` | All `kind`s: SQL predicate AND-ed into every leaf query's `WHERE` before aggregation, defining the population the metric is *about* (e.g. excluding test accounts). |
 
 ### Numerator parts
@@ -191,6 +198,39 @@ The value is computed per calendar day. `window: 7 days` covers the day and the 
 **Validation.** At write time, `measure` must be additive and use `sum`, `count`, `min` or `max`. Every `order_by` entry must resolve to a dimension reachable from `source`, of type `date`, `timestamp`, `int`, `decimal` or `float`. Strings are rejected, since their order depends on the engine's collation. Two order dimensions over the same column (`order_day` and `order_month` over `order_date`) are rejected too, since the finer one already decides the order. With `window`, `grain_to_date` or a `period_agg` other than `last`, `order_by` must name exactly one dimension backed by one `date` or `timestamp` column, the window must be a day or longer, `window` and `grain_to_date` exclude each other, and `grain_to_date` may not be finer than a grain the order dimension declares. A `cumulative` metric cannot be a `ratio` or `weighted_avg` component.
 
 **Out of scope for now:** a complete calendar series for the unbounded running total (`fill_calendar`), windows shorter than a day, and [finality](/concepts/contracts-and-guardrails#finality) on a cumulative metric. A query that combines a cumulative metric with a metric under a finality rule is rejected with `UNSUPPORTED_MEASURE`.
+
+### Offset and derived metrics
+
+An `offset` reads another metric at an earlier period. A `derived` metric combines metrics with arithmetic. Together they express period-over-period comparisons:
+
+```yaml
+metric: revenue_last_year
+canonical:
+  kind: offset
+  base: revenue
+  time_dimension: order_date
+  offset: 1 year            # a day or longer, months clamp to the end of the month
+```
+
+```yaml
+metric: revenue_growth_yoy
+canonical:
+  kind: derived
+  expr: "(revenue - revenue_py) / revenue_py"
+  inputs:
+    - metric: revenue
+    - metric: revenue_last_year
+      alias: revenue_py
+  on_zero_denominator: null # null | zero | error, for every division in expr
+```
+
+**The shift moves rows, not output periods.** Under an offset, every requested dimension and every query filter that reads the time column reads it moved forward by the offset. `order_month` shows the month the moved rows fall in, so a month, a week or a week label all compare like with like. A filter is read in output time: `order_date >= '2026-01-01'` on `revenue_last_year` selects the rows from `2025-01-01` on. `population_filter`, guardrails, tenant predicates and finality read the stored column, since they describe rows, not periods. The result lists the filters that were moved under `metadata.offset`, and warns when the query neither groups nor filters by the time column, since a total over all rows does not move.
+
+The base may be any kind except `opaque` and a cumulative metric with `window`, `grain_to_date` or `period_agg`. A shifted ratio shifts both components. `time_dimension` is resolved per source the base reads, the way a requested dimension is.
+
+**Derived arithmetic.** `expr` may use the input names, numbers, `+ - * /`, parentheses, and `COALESCE`, `NULLIF`, `ABS`, `ROUND`, `LEAST` and `GREATEST`. Each input is computed as if it were requested alone, including its own guardrails, and the arithmetic is applied to its finished value per output row: a ratio already divided, a running total already accumulated. An input with no row is `NULL` there, so write `COALESCE(costs, 0)` to read it as zero. Inputs may be of any kind, `derived` and `offset` included, which is also how a ratio of two ratios is written. A `ratio` component still has to be `single` or `distinct_count`.
+
+**Validation.** At write time, `base` and every input must resolve to an active metric, `expr` must read exactly its inputs and only what is listed above, there may be no cycle, and `time_dimension` must resolve to one `date` or `timestamp` column from every source the base reads. Two offsets combine only on the same column. `decompose` refuses both kinds.
 
 ### `deprecated_alternatives[]` (`DeprecatedAlternative`)
 

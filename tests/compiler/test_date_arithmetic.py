@@ -65,7 +65,8 @@ def test_date_add_matches_the_python_reference(
         ("snowflake", 'CAST(DATEADD(MONTH, -1, "t"."d") AS DATE)'),
         ("databricks", "CAST(DATEADD(MONTH, -1, `t`.`d`) AS DATE)"),
         ("mysql", "CAST(DATE_ADD(`t`.`d`, INTERVAL -1 MONTH) AS DATE)"),
-        ("clickhouse", 'CAST(DATE_ADD(MONTH, -1, "t"."d") AS Nullable(DATE))'),
+        # DATE_ADD keeps its input's type there, and a cast would make it Nullable.
+        ("clickhouse", 'DATE_ADD(MONTH, -1, "t"."d")'),
     ],
 )
 def test_date_add_uses_each_engines_native_month_arithmetic(dialect: str, expected: str) -> None:
@@ -127,3 +128,25 @@ def test_spine_keeps_the_latest_days_when_the_data_spans_more_than_it_holds(dial
     assert len(days) == MAX_SPINE_DAYS
     assert days[0] == (last - timedelta(days=MAX_SPINE_DAYS - 1)).isoformat()
     assert days[-1] == last.isoformat()
+
+
+def _timestamp(text: str) -> exp.Expression:
+    return exp.Cast(this=exp.Literal.string(text), to=exp.DataType.build("TIMESTAMP"))
+
+
+@pytest.mark.parametrize("dialect", ["sqlite", "duckdb"])
+@pytest.mark.parametrize(
+    ("moment", "amount", "unit", "expected"),
+    [
+        ("2026-01-31 13:45:00", 1, DurationUnit.MONTH, "2026-02-28 13:45:00"),
+        ("2026-03-01 08:00:00", -1, DurationUnit.DAY, "2026-02-28 08:00:00"),
+        ("2024-02-29 23:59:59", 1, DurationUnit.YEAR, "2025-02-28 23:59:59"),
+    ],
+)
+def test_a_timestamp_keeps_its_time_of_day(
+    dialect: str, moment: str, amount: int, unit: DurationUnit, expected: str
+) -> None:
+    adapter = DIALECT_ADAPTERS[dialect]
+    moved = adapter.date_add(_timestamp(moment), amount, unit, as_date=False)
+    value = _execute(dialect, adapter.emit(exp.select(exp.alias_(moved, "x"))))[0][0]
+    assert str(value).replace("T", " ") == expected

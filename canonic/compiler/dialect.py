@@ -154,22 +154,26 @@ class DialectAdapter(ABC):
         )
 
     def date_add(
-        self, day: exp.Expression, amount: int | exp.Expression, unit: DurationUnit
+        self,
+        day: exp.Expression,
+        amount: int | exp.Expression,
+        unit: DurationUnit,
+        *,
+        as_date: bool = True,
     ) -> exp.Expression:
-        """``day`` moved by ``amount`` units, as a ``DATE``. A negative amount moves back.
+        """``day`` moved by ``amount`` units. A negative amount moves back.
 
         Months, quarters and years clamp to the end of the target month, which is what every
         engine does natively except SQLite. A week is seven days. An ``amount`` that is an
         expression rather than a number is only supported in days, which is all the day spine
-        needs. The result is cast back to ``DATE``, since ``date + interval`` is a timestamp on
-        Postgres and DuckDB and would no longer compare equal to a plain date.
+        needs. With ``as_date`` the result is cast back to ``DATE``, since ``date + interval``
+        is a timestamp on Postgres and DuckDB and would no longer compare equal to a plain
+        date. A timestamp is moved without the cast, so it keeps its time of day.
         """
-        sql_unit, count = _normalize_date_step(amount, unit)
-        step = exp.Literal.number(count) if isinstance(count, int) else count
-        return exp.Cast(
-            this=exp.DateAdd(this=day, expression=step, unit=exp.Var(this=sql_unit)),
-            to=exp.DataType.build("DATE"),
-        )
+        added = _date_add_node(day, amount, unit)
+        if not as_date:
+            return added
+        return exp.Cast(this=added, to=exp.DataType.build("DATE"))
 
     def supports_percentile_cont(self) -> bool:
         """Whether the dialect has a native ordered-set aggregate for percentile queries.
@@ -180,6 +184,14 @@ class DialectAdapter(ABC):
         (SPEC §4.3 open question).
         """
         return True
+
+
+def _date_add_node(
+    day: exp.Expression, amount: int | exp.Expression, unit: DurationUnit
+) -> exp.Expression:
+    sql_unit, count = _normalize_date_step(amount, unit)
+    step = exp.Literal.number(count) if isinstance(count, int) else count
+    return exp.DateAdd(this=day, expression=step, unit=exp.Var(this=sql_unit))
 
 
 def _normalize_date_step(
@@ -387,22 +399,42 @@ class SQLiteDialectAdapter(_GenericDialectAdapter):
         return False
 
     def date_add(
-        self, day: exp.Expression, amount: int | exp.Expression, unit: DurationUnit
+        self,
+        day: exp.Expression,
+        amount: int | exp.Expression,
+        unit: DurationUnit,
+        *,
+        as_date: bool = True,
     ) -> exp.Expression:
         """SQLite ``DATE()`` arithmetic, with the month-end clamp SQLite does not do itself.
 
         ``DATE('2026-01-31', '+1 month')`` is ``2026-03-03`` in SQLite. A month step instead
         goes to the first of the target month, adds the day of the month, and takes the
-        earlier of that and the target month's last day.
+        earlier of that and the target month's last day. A timestamp is moved with
+        ``DATETIME()``, a month step by moving its date and keeping its time of day.
         """
+        function = "DATE" if as_date else "DATETIME"
         sql_unit, count = _normalize_date_step(amount, unit)
         if sql_unit == "DAY":
             if isinstance(count, int):
                 return cast(
                     "exp.Expression",
-                    exp.func("DATE", day, exp.Literal.string(f"{count:+d} days")),
+                    exp.func(function, day, exp.Literal.string(f"{count:+d} days")),
                 )
-            return cast("exp.Expression", exp.func("DATE", day, _sqlite_modifier(count, "days")))
+            return cast("exp.Expression", exp.func(function, day, _sqlite_modifier(count, "days")))
+        if not as_date:
+            moved_date = self.date_add(day.copy(), amount, unit)
+            time_of_day = exp.Anonymous(this="TIME", expressions=[day.copy()])
+            return cast(
+                "exp.Expression",
+                exp.func(
+                    "DATETIME",
+                    exp.DPipe(
+                        this=exp.DPipe(this=moved_date, expression=exp.Literal.string(" ")),
+                        expression=time_of_day,
+                    ),
+                ),
+            )
         assert isinstance(count, int)  # noqa: S101 — only a day step may be computed
         months = count
         day_of_month = exp.Cast(
@@ -517,6 +549,8 @@ class MySQLDialectAdapter(_GenericDialectAdapter):
         ast = ast.transform(_rewrite_date_trunc_for_mysql)
         ast = ast.transform(_strip_offset_from_timestamp_cast)
         ast = ast.transform(_widen_bare_decimal_for_mysql)
+        # A DECIMAL division keeps only four more digits than the dividend (div_precision_increment).
+        ast = ast.transform(_divide_as_float)
         return super().emit(ast, limit=limit)
 
     def supports_percentile_cont(self) -> bool:
@@ -569,14 +603,15 @@ def _parse_timestamp_literal_for_clickhouse(node: exp.Expression) -> exp.Express
     return exp.Anonymous(this="parseDateTimeBestEffort", expressions=[node.this.copy()])
 
 
-def _divide_as_float_for_clickhouse(node: exp.Expression) -> exp.Expression:
-    """Rewrite ``a / b`` into ``CAST(a AS Float64) / b``.
+def _divide_as_float(node: exp.Expression) -> exp.Expression:
+    """Rewrite ``a / b`` into ``CAST(a AS DOUBLE) / b``, so a decimal division keeps its digits.
 
     A ``Decimal`` division in ClickHouse keeps the scale of the dividend and truncates, so
-    ``SUM(repair_cost) / COUNT(*)`` on a ``Decimal(38, 2)`` column turns 2166.666... into 2166.66,
-    where Postgres keeps the fraction and SQLite divides as ``REAL``. Every ratio the compiler
-    emits is such a division. Integers and floats already divide as ``Float64``, so the cast only
-    changes the decimal case.
+    ``SUM(repair_cost) / COUNT(*)`` on a ``Decimal(38, 2)`` column turns 2166.666... into 2166.66.
+    MySQL keeps only four digits more than the dividend (``div_precision_increment``). Postgres
+    keeps the fraction and SQLite divides as ``REAL``. Every ratio and every division of a
+    derived metric is such a division. Integers and floats already divide as a float there, so
+    the cast only changes the decimal case.
     """
     if not isinstance(node, exp.Div):
         return node
@@ -617,11 +652,26 @@ class ClickHouseDialectAdapter(_GenericDialectAdapter):
     def __init__(self) -> None:
         super().__init__("clickhouse", _CLICKHOUSE_TYPE_MAP)
 
+    def date_add(
+        self,
+        day: exp.Expression,
+        amount: int | exp.Expression,
+        unit: DurationUnit,
+        *,
+        as_date: bool = True,
+    ) -> exp.Expression:
+        """``DATE_ADD`` keeps the type of its input in ClickHouse, so no cast is needed.
+
+        A cast would render as ``Nullable(DATE)`` and turn a column that is never NULL into
+        one that may be, after which a NULL-safe join on it has no join key ClickHouse accepts.
+        """
+        return _date_add_node(day, amount, unit)
+
     def emit(self, ast: exp.Expression, *, limit: int | None = None) -> str:
         ast = ast.transform(_rewrite_percentile_for_clickhouse)
         ast = ast.transform(_parse_timestamp_literal_for_clickhouse)
         ast = ast.transform(_widen_bare_decimal_for_clickhouse)
-        ast = ast.transform(_divide_as_float_for_clickhouse)
+        ast = ast.transform(_divide_as_float)
         if isinstance(ast, (exp.Select, exp.Union)) and ast.find(exp.Join) is not None:
             if isinstance(ast, exp.Union):
                 # SETTINGS belongs to a SELECT, so a UNION is wrapped to carry it.

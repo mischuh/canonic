@@ -79,6 +79,8 @@ _UNSUPPORTED: dict[BindingKind, str] = {
     BindingKind.PERCENTILE: "a quantile does not split into the members' quantiles",
     BindingKind.OPAQUE: "it is served only at its native grain",
     BindingKind.CUMULATIVE: "a running total carries every earlier period",
+    BindingKind.OFFSET: "it reads another period than the one it is shown in",
+    BindingKind.DERIVED: "its expression is not attributed per input yet",
 }
 
 _TIER_ORDER = list(TrustTier)

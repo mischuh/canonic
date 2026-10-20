@@ -1,0 +1,12 @@
+metric: rental_revenue_growth_mom
+canonical:
+  kind: derived
+  expr: "(rental_revenue - previous) / previous"
+  inputs:
+    - metric: rental_revenue
+    - metric: rental_revenue_prev_month
+      alias: previous
+provenance: human_curated
+label: "Rental Revenue Growth, Month over Month"
+aliases: ["mom growth", "month over month revenue growth"]
+status: active

@@ -85,6 +85,12 @@ def _validate_composite_binding(
                 f"metric {binding.metric!r}: {label} {name!r} has kind cumulative; "
                 f"a running total cannot be used as a component in a composite metric"
             )
+        if active_by_name[name].canonical.kind in (BindingKind.OFFSET, BindingKind.DERIVED):
+            raise ContractError(
+                f"metric {binding.metric!r}: {label} {name!r} has kind "
+                f"{active_by_name[name].canonical.kind.value}; write the ratio as a derived "
+                f"metric instead"
+            )
 
     _check_composite_cycle(binding.metric, active_by_name, path=[binding.metric])
 
@@ -151,21 +157,125 @@ def _check_composite_cycle(
     if binding is None:
         return
     ref = binding.canonical
-    if ref.kind is BindingKind.SINGLE:
-        return
-
-    # Non-composite kinds yield (None, None) and terminate the walk on the next iteration.
-    children = list(spec_for(ref.kind).component_names(ref))
-
-    for child in children:
-        if child is None:
-            continue
+    for child in spec_for(ref.kind).dependency_names(ref):
         if child in path:
             cycle_str = " → ".join(path + [child])
             raise ContractError(
                 f"composite metric {path[0]!r} has a cyclic dependency: {cycle_str}"
             )
         _check_composite_cycle(child, active_by_name, path + [child])
+
+
+def _require_active(
+    binding: MetricBinding, label: str, name: str, active_by_name: dict[str, MetricBinding]
+) -> MetricBinding:
+    found = active_by_name.get(name)
+    if found is None:
+        raise ContractError(
+            f"metric {binding.metric!r}: {label} {name!r} does not resolve to an active metric "
+            f"binding"
+        )
+    return found
+
+
+def _offset_columns(
+    binding: MetricBinding,
+    active_by_name: dict[str, MetricBinding],
+    sources_by_name: dict[str, SemanticSource],
+) -> set[tuple[str, str]]:
+    """The ``(source, column)`` pairs every offset at or under ``binding`` shifts."""
+    from canonic.compiler._helpers import _find_dimension
+    from canonic.compiler.joins import build_alias_tree
+
+    ref = binding.canonical
+    shifted: set[tuple[str, str]] = set()
+    if ref.kind is BindingKind.OFFSET and ref.time_dimension is not None:
+        for source in _leaf_sources(binding, active_by_name):
+            alias_to_source = build_alias_tree(source, sources_by_name)
+            found = _find_dimension(ref.time_dimension, sources_by_name, source, alias_to_source)
+            if found is not None:
+                alias, dim = found
+                owner = alias_to_source.get(alias, alias)
+                shifted |= {(owner, column) for column in dim.backing_columns()}
+    for name in spec_for(ref.kind).dependency_names(ref):
+        child = active_by_name.get(name)
+        if child is not None and child is not binding:
+            shifted |= _offset_columns(child, active_by_name, sources_by_name)
+    return shifted
+
+
+def _validate_offset_binding(
+    binding: MetricBinding,
+    active_by_name: dict[str, MetricBinding],
+    sources_by_name: dict[str, SemanticSource],
+) -> None:
+    """Validate an offset binding.
+
+    Checks: the base resolves to an active metric of a kind that can be shifted, there is no
+    cycle, ``time_dimension`` resolves to one date or timestamp column from every source the
+    base reads, and no offset under the base shifts a different column.
+    """
+    from canonic.compiler._helpers import _find_dimension
+    from canonic.compiler.joins import build_alias_tree
+
+    ref = binding.canonical
+    assert ref.base is not None and ref.time_dimension is not None  # noqa: S101 — model_validator
+    base = _require_active(binding, "base", ref.base, active_by_name)
+    _check_composite_cycle(binding.metric, active_by_name, path=[binding.metric])
+    if base.canonical.kind is BindingKind.OPAQUE:
+        raise ContractError(
+            f"metric {binding.metric!r}: base {ref.base!r} has kind opaque, which is served only "
+            f"at its native grain and cannot be shifted"
+        )
+    if base.canonical.kind is BindingKind.CUMULATIVE and base.canonical.needs_day_spine:
+        raise ContractError(
+            f"metric {binding.metric!r}: base {ref.base!r} is a cumulative metric evaluated per "
+            f"calendar day (window, grain_to_date or period_agg), which cannot be shifted yet"
+        )
+
+    own: set[tuple[str, str]] = set()
+    for source in sorted(_leaf_sources(base, active_by_name)):
+        alias_to_source = build_alias_tree(source, sources_by_name)
+        found = _find_dimension(ref.time_dimension, sources_by_name, source, alias_to_source)
+        if found is None:
+            raise ContractError(
+                f"metric {binding.metric!r}: time_dimension {ref.time_dimension!r} is not "
+                f"reachable from source {source!r}, which base {ref.base!r} reads"
+            )
+        alias, dim = found
+        owner = sources_by_name[alias_to_source.get(alias, alias)]
+        columns = dim.backing_columns()
+        column_type = (
+            next((c.type for c in owner.columns if c.name == next(iter(columns))), None)
+            if len(columns) == 1 and dim.json_path is None
+            else None
+        )
+        if column_type not in {NormalizedType.DATE, NormalizedType.TIMESTAMP}:
+            raise ContractError(
+                f"metric {binding.metric!r}: time_dimension {ref.time_dimension!r} must be "
+                f"backed by exactly one date or timestamp column"
+            )
+        own |= {(owner.name, column) for column in columns}
+
+    nested = _offset_columns(base, active_by_name, sources_by_name)
+    if nested - own:
+        raise ContractError(
+            f"metric {binding.metric!r}: base {ref.base!r} already contains an offset on another "
+            f"time column; two offsets can only be combined on the same column"
+        )
+
+
+def _validate_derived_binding(
+    binding: MetricBinding, active_by_name: dict[str, MetricBinding]
+) -> None:
+    """Validate a derived binding: every input resolves to an active metric, without a cycle.
+
+    The expression itself is checked by ``CanonicalRef``.
+    """
+    ref = binding.canonical
+    for item in ref.inputs or ():
+        _require_active(binding, "input", item.metric, active_by_name)
+    _check_composite_cycle(binding.metric, active_by_name, path=[binding.metric])
 
 
 def _validate_semi_additive_binding(
@@ -436,11 +546,9 @@ def _leaf_sources(
     if ref.kind in SOURCE_BOUND_KINDS:
         return {ref.source} if ref.source else set()
 
-    num_name, den_name = spec_for(ref.kind).component_names(ref)
-
     result: set[str] = set()
-    for name in (num_name, den_name):
-        if name and name in active_by_name:
+    for name in spec_for(ref.kind).dependency_names(ref):
+        if name in active_by_name:
             result |= _leaf_sources(active_by_name[name], active_by_name)
     return result
 
@@ -664,6 +772,10 @@ def validate_contracts(project_root: Path) -> None:
             _validate_opaque_binding(binding, source_measures, source_dims)
         elif ref.kind is BindingKind.CUMULATIVE:
             _validate_cumulative_binding(binding, sources_by_name)
+        elif ref.kind is BindingKind.OFFSET:
+            _validate_offset_binding(binding, active_by_name, sources_by_name)
+        elif ref.kind is BindingKind.DERIVED:
+            _validate_derived_binding(binding, active_by_name)
         else:
             _validate_composite_binding(binding, bindings, source_measures)
             _validate_numerator_parts(binding, active_by_name, sources_by_name)

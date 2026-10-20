@@ -17,8 +17,11 @@ __all__ = [
     "CompileResult",
     "CompositionMetadata",
     "CumulativeMetadata",
+    "DerivedInput",
+    "DerivedMetadata",
     "FinalityMetadata",
     "FiredGuardrail",
+    "OffsetMetadata",
     "OpaqueMetadata",
     "PartialAdditiveMetadata",
     "RecomputeAtGrainMetadata",
@@ -206,6 +209,40 @@ class CumulativeMetadata:
 
 
 @dataclass(frozen=True, slots=True)
+class OffsetMetadata:
+    """How an offset metric was shifted for this query.
+
+    ``shifted_filters`` are the query filters that read the shifted column, and were therefore
+    evaluated in output time: on the stored date moved forward by ``offset``.
+    """
+
+    metric: str
+    base: str
+    time_dimension: str
+    offset: str
+    shifted_filters: list[str] = field(default_factory=list)
+
+
+@dataclass(frozen=True, slots=True)
+class DerivedInput:
+    """One input of a derived metric: the name its expression uses, and what it resolved to."""
+
+    alias: str
+    metric: str
+    resolved: str | None
+
+
+@dataclass(frozen=True, slots=True)
+class DerivedMetadata:
+    """How a derived metric was computed: ``expr`` over its inputs' values per output row."""
+
+    metric: str
+    expr: str
+    inputs: list[DerivedInput]
+    on_zero_denominator: str
+
+
+@dataclass(frozen=True, slots=True)
 class TimeRangeMetadata:
     """The query's ``time_range`` resolved to dates.
 
@@ -338,6 +375,10 @@ class CompileResult:
     opaque: OpaqueMetadata | None = None
     cumulative: CumulativeMetadata | None = None
     time_range: TimeRangeMetadata | None = None
+    #: Every offset metric of the query, also one reached through a derived metric, by name.
+    offsets: dict[str, OffsetMetadata] = field(default_factory=dict)
+    #: Every derived metric of the query, also one nested in another, by name.
+    derived: dict[str, DerivedMetadata] = field(default_factory=dict)
     trust_inputs: list[TrustInput] = field(default_factory=list)
     time_dimensions: tuple[TimeDimension, ...] = ()
     #: Columns added to ``sql`` that the serving layer strips again, see :class:`ProbeColumn`.

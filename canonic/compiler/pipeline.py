@@ -63,6 +63,8 @@ if TYPE_CHECKING:
 from canonic.compiler.strategies import (
     plan_composite,
     plan_cumulative,
+    plan_derived,
+    plan_offset,
     plan_opaque,
     plan_recompute_at_grain,
     plan_rolling,
@@ -86,9 +88,7 @@ def _dialect_for_bindings(
     if not connection_dialects:
         return "postgres"
     for _, b in raw_bindings:
-        source_name = b.source
-        if source_name is None and b.components is not None:
-            source_name = b.components.numerator.source
+        source_name = next((leaf.source for leaf in b.leaves() if leaf.source), None)
         if source_name is None:
             continue
         src = sources_by_name.get(source_name)
@@ -113,15 +113,23 @@ def _trust_inputs_for(
 
 
 def _source_measure_pairs(binding: ResolverBinding) -> list[tuple[str, str]]:
-    """The (source, measure) pairs a binding reads: its own, or those of its components."""
-    if binding.source is not None and binding.measure is not None:
-        return [(binding.source, binding.measure)]
-    if binding.components is None:
-        return []
+    """The (source, measure) pairs a binding reads: its own, or those of every metric under it."""
     return [
-        *_source_measure_pairs(binding.components.numerator),
-        *_source_measure_pairs(binding.components.denominator),
+        (leaf.source, leaf.measure)
+        for leaf in binding.leaves()
+        if leaf.source is not None and leaf.measure is not None
     ]
+
+
+def _matched_alone(binding: ResolverBinding) -> list[ResolverBinding]:
+    """The bindings a per-metric guardrail matches for ``binding``.
+
+    An offset or derived metric is matched the way its inputs are when queried alone. Any
+    other kind, a ratio included, is matched as itself.
+    """
+    if binding.offset is None and binding.derived is None:
+        return [binding]
+    return [m for d in binding.dependencies() for m in _matched_alone(d)]
 
 
 def _enforce_min_trust(
@@ -187,7 +195,8 @@ def _enforce_required_dimension(
     used_dims = set(query.dimensions)
     filter_tokens = {tok for f in query.filters for tok in f.split()}
     seen: set[str] = set()
-    for _name, binding in raw_bindings:
+    matched = [m for _name, b in raw_bindings for m in _matched_alone(b)]
+    for binding in matched:
         if binding.source is None or binding.measure is None:
             continue
         for guardrail in resolver.required_dimension_for(
@@ -358,14 +367,7 @@ def compile(  # noqa: A001 — the public verb for this capability is "compile"
 
     # Compute related metadata once here using resolved bindings (all paths get it via
     # dataclasses.replace or direct constructor argument below).
-    queried_sources: set[str] = set()
-    for _, b in raw_bindings:
-        if b.source is not None:
-            queried_sources.add(b.source)
-        elif b.components is not None:
-            for component in (b.components.numerator, b.components.denominator):
-                if component.source is not None:
-                    queried_sources.add(component.source)
+    queried_sources = {leaf.source for _, b in raw_bindings for leaf in b.leaves() if leaf.source}
     queried_metric_names = {name for name, _ in raw_bindings}
     related = _related(
         queried_sources, queried_metric_names, query, resolver, sources_by_name, effective_policy
@@ -417,9 +419,10 @@ def compile(  # noqa: A001 — the public verb for this capability is "compile"
 
         # Stage 5b — restrict_source, for the metrics that resolve to a single source/measure.
         single_kind = [
-            _bind_metric(name, b, sources_by_name)
+            _bind_metric(m.metric if m is not b else name, m, sources_by_name)
             for name, b in raw_bindings
-            if b.kind in {BindingKind.SINGLE, BindingKind.CUMULATIVE}
+            for m in _matched_alone(b)
+            if m.kind in {BindingKind.SINGLE, BindingKind.CUMULATIVE}
         ]
         restrict_warnings = (
             _enforce_restrict_source(query, single_kind, resolver, None, sources_by_name)
@@ -483,6 +486,8 @@ def compile(  # noqa: A001 — the public verb for this capability is "compile"
         opaque=_first(planned, "opaque"),
         cumulative=_first(planned, "cumulative"),
         time_range=time_range.metadata() if time_range is not None else None,
+        offsets={o.metric: o for metric_leaves in planned for o in metric_leaves.offsets},
+        derived={d.metric: d for metric_leaves in planned for d in metric_leaves.derived},
         scope=ScopeMetadata(
             tenant=bound_principal.tenant_scope,
             scoped_sources=sorted(composed.scoped_sources),
@@ -504,6 +509,30 @@ def _plan_metric(
     effective_policy: EffectivePolicy,
 ) -> MetricLeaves:
     """Dispatch one metric to the planner for its kind (AMENDMENT §3.3)."""
+
+    def plan_other(other_name: str, other: ResolverBinding) -> MetricLeaves:
+        return _plan_metric(
+            other_name,
+            other,
+            query,
+            resolver,
+            sources_by_name,
+            dialect,
+            principal,
+            effective_policy,
+        )
+
+    if binding.kind is BindingKind.OFFSET:
+        return plan_offset(
+            query,
+            name,
+            binding,
+            sources_by_name,
+            effective_policy=effective_policy,
+            plan_base=plan_other,
+        )
+    if binding.kind is BindingKind.DERIVED:
+        return plan_derived(name, binding, plan_input=plan_other)
     if binding.kind in {BindingKind.RATIO, BindingKind.WEIGHTED_AVG}:
         return plan_composite(
             query,

@@ -43,6 +43,8 @@ __all__ = [
     "CompositionOut",
     "CumulativeDefinitionOut",
     "CumulativeOut",
+    "DerivedDefinitionOut",
+    "DerivedInputOut",
     "DimensionInfo",
     "DomainGroup",
     "FinalityOut",
@@ -64,6 +66,8 @@ __all__ = [
     "ReportSummary",
     "ScopeOut",
     "SourceFreshnessOut",
+    "OffsetDefinitionOut",
+    "OffsetOut",
     "TimeRangeOut",
     "TrustScoreOut",
 ]
@@ -325,6 +329,75 @@ class CumulativeDefinitionOut(BaseModel):
         )
 
 
+class OffsetDefinitionOut(BaseModel):
+    """How an offset metric is read: ``base`` shifted back by ``offset`` along ``time_dimension``."""
+
+    model_config = ConfigDict(frozen=True)
+
+    base: str
+    time_dimension: str
+    offset: str
+
+    @classmethod
+    def from_binding(cls, binding: Binding) -> OffsetDefinitionOut | None:
+        """The definition of an offset binding, ``None`` for any other kind."""
+        if binding.offset is None:
+            return None
+        return cls(
+            base=binding.offset.base.metric,
+            time_dimension=binding.offset.time_dimension,
+            offset=str(binding.offset.offset),
+        )
+
+
+class OffsetOut(BaseModel):
+    """How one offset metric was shifted for this query.
+
+    ``shifted_filters`` are the query filters evaluated on the shifted column, in output time.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    base: str
+    time_dimension: str
+    offset: str
+    shifted_filters: list[str] = []
+
+
+class DerivedInputOut(BaseModel):
+    """One input of a derived metric: the name ``expr`` uses, and the metric behind it."""
+
+    model_config = ConfigDict(frozen=True)
+
+    alias: str
+    metric: str
+    resolved: str | None = None
+
+
+class DerivedDefinitionOut(BaseModel):
+    """How a derived metric is computed: ``expr`` over its ``inputs``, per output row."""
+
+    model_config = ConfigDict(frozen=True)
+
+    expr: str
+    inputs: list[DerivedInputOut]
+    on_zero_denominator: str
+
+    @classmethod
+    def from_binding(cls, binding: Binding) -> DerivedDefinitionOut | None:
+        """The definition of a derived binding, ``None`` for any other kind."""
+        if binding.derived is None:
+            return None
+        return cls(
+            expr=binding.derived.expr,
+            inputs=[
+                DerivedInputOut(alias=alias, metric=b.metric, resolved=b.resolved_key)
+                for alias, b in binding.derived.inputs
+            ],
+            on_zero_denominator=str(binding.derived.on_zero_denominator),
+        )
+
+
 class BindingOut(BaseModel):
     """How a metric is built: the payload of ``resolve_metric`` (SPEC §4.1).
 
@@ -341,6 +414,8 @@ class BindingOut(BaseModel):
     components: ComponentsOut | None = None
     population_filter: str | None = None
     cumulative: CumulativeDefinitionOut | None = None
+    offset: OffsetDefinitionOut | None = None
+    derived: DerivedDefinitionOut | None = None
 
     @classmethod
     def from_binding(cls, binding: Binding) -> BindingOut:
@@ -352,6 +427,8 @@ class BindingOut(BaseModel):
             components=ComponentsOut.from_binding(binding),
             population_filter=binding.binding.canonical.population_filter,
             cumulative=CumulativeDefinitionOut.from_binding(binding),
+            offset=OffsetDefinitionOut.from_binding(binding),
+            derived=DerivedDefinitionOut.from_binding(binding),
         )
 
 
@@ -377,6 +454,8 @@ class MetricDetail(BaseModel):
     components: ComponentsOut | None = None
     population_filter: str | None = None
     cumulative: CumulativeDefinitionOut | None = None
+    offset: OffsetDefinitionOut | None = None
+    derived: DerivedDefinitionOut | None = None
     grain: list[str]
     dimensions: list[DimensionInfo]
     measures: list[str]
@@ -439,6 +518,8 @@ class QueryMetadata(BaseModel):
     scope: ScopeOut | None = None
     cumulative: CumulativeOut | None = None
     time_range: TimeRangeOut | None = None
+    offset: dict[str, OffsetOut] = {}
+    derived: dict[str, DerivedDefinitionOut] = {}
     composition: dict[str, CompositionOut] = {}
     project_fingerprint: str | None = None
 
@@ -568,6 +649,26 @@ class QueryMetadata(BaseModel):
                 if compiled.time_range is not None
                 else None
             ),
+            offset={
+                name: OffsetOut(
+                    base=o.base,
+                    time_dimension=o.time_dimension,
+                    offset=o.offset,
+                    shifted_filters=list(o.shifted_filters),
+                )
+                for name, o in compiled.offsets.items()
+            },
+            derived={
+                name: DerivedDefinitionOut(
+                    expr=d.expr,
+                    inputs=[
+                        DerivedInputOut(alias=i.alias, metric=i.metric, resolved=i.resolved)
+                        for i in d.inputs
+                    ],
+                    on_zero_denominator=d.on_zero_denominator,
+                )
+                for name, d in compiled.derived.items()
+            },
             composition={
                 name: _composition_out(
                     composition, (probes or {}).get((PROBE_ZERO_DENOMINATOR, name))

@@ -39,6 +39,9 @@ from canonic.compiler._helpers import (
     _resolve_dim_mask,
     _resolve_dimensions,
     _tenant_conditions,
+    current_time_shifts,
+    shifted_columns,
+    unshifted,
 )
 from canonic.compiler.joins import build_alias_tree, plan_joins
 from canonic.compiler.result import FinalityMetadata, TimeDimension
@@ -49,7 +52,7 @@ from canonic.semantic.models import Additivity
 if TYPE_CHECKING:
     from collections.abc import Iterator, Sequence
 
-    from canonic.compiler._helpers import DimMask, _ResolvedMetric
+    from canonic.compiler._helpers import DimMask, TimeShift, _ResolvedMetric
     from canonic.compiler.joins import JoinEdge
     from canonic.compiler.query import SemanticQuery
     from canonic.compiler.result import FiredGuardrail
@@ -329,6 +332,15 @@ def _apply_metric_scoping(
     return scoping
 
 
+def _shifted(
+    shifts: Sequence[TimeShift], owner: str, ctx: LeafContext, alias_to_source: dict[str, str]
+) -> contextlib.AbstractContextManager[None]:
+    """Apply ``shifts`` to this leaf's columns inside the block, or nothing without an offset."""
+    if not shifts:
+        return contextlib.nullcontext()
+    return shifted_columns(shifts, owner, ctx.sources_by_name, alias_to_source)
+
+
 @contextlib.contextmanager
 def _naming_the_leaf(metrics: Sequence[LeafMetric], owner: str) -> Iterator[None]:
     """Re-raise a binding failure with the leaf that could not bind it (AMENDMENT §5).
@@ -464,6 +476,15 @@ def plan_leaf(
     query, resolver, sources_by_name = ctx.query, ctx.resolver, ctx.sources_by_name
     resolved = [lm.resolved for lm in metrics]
     aliases = [_output_alias(lm) for lm in metrics]
+    # The offsets this leaf is planned under. Captured now, since compose rebuilds the leaf
+    # after planning has returned, and part of the identity, so a shifted leaf never fuses
+    # with an unshifted one.
+    shifts = current_time_shifts()
+    if shifts:
+        strategy_params = (
+            *strategy_params,
+            ("time_shift", "\x00".join(f"{s.time_dimension}+{s.offset}" for s in shifts)),
+        )
 
     # Stage 2 — dimensions and filters, relative to this leaf's own owner. A dimension or
     # filter that will not bind here fails the whole query rather than being applied to
@@ -471,12 +492,22 @@ def plan_leaf(
     # columns were computed over different populations, with nothing saying so (§5).
     alias_to_source = build_alias_tree(owner, sources_by_name)
     dim_mask = _resolve_dim_mask(alias_to_source, ctx.effective_policy.masking)
-    with _naming_the_leaf(metrics, owner):
+    with _naming_the_leaf(metrics, owner), _shifted(shifts, owner, ctx, alias_to_source):
         dimensions = _resolve_dimensions(query, sources_by_name, owner, alias_to_source)
         referenced = {alias for alias, _ in dimensions}
         where_conditions, filter_sources = _bind_filters(
             query.filters, sources_by_name, owner, alias_to_source, ctx.effective_policy
         )
+        with unshifted():
+            prefilters, prefilter_sources = _bind_filters(
+                [f for shift in shifts for f in shift.prefilters],
+                sources_by_name,
+                owner,
+                alias_to_source,
+                ctx.effective_policy,
+            )
+    where_conditions += prefilters
+    filter_sources |= prefilter_sources
     referenced |= filter_sources
     referenced |= {owner}
     referenced |= _guardrail_join_sources(
@@ -553,6 +584,7 @@ def plan_leaf(
         ) -> tuple[exp.Expression, tuple[AuxCte, ...]]:
             return (
                 _build_finality_union(
+                    shifts=shifts,
                     rule=rule,
                     query_metrics=[lm.resolved for lm in leaf_metrics],
                     dimensions=dimensions,
@@ -584,6 +616,12 @@ def plan_leaf(
         def build(
             leaf_metrics: Sequence[LeafMetric], name_prefix: str = ""
         ) -> tuple[exp.Expression, tuple[AuxCte, ...]]:
+            with _shifted(shifts, owner, ctx, alias_to_source):
+                return _emit(leaf_metrics, name_prefix)
+
+        def _emit(
+            leaf_metrics: Sequence[LeafMetric], name_prefix: str
+        ) -> tuple[exp.Expression, tuple[AuxCte, ...]]:
             return emit(
                 LeafInputs(
                     ctx=inputs.ctx,
@@ -603,14 +641,16 @@ def plan_leaf(
 
     select, aux = build(metrics, "")
 
+    with _shifted(shifts, owner, ctx, alias_to_source):
+        dimension_exprs = tuple(
+            _render(_dimension_expr(src, dim, _dim_mask_strategy(dim_mask, src, dim)))
+            for src, dim in dimensions
+        )
     key = LeafKey(
         source=owner,
         strategy=strategy,
         dimensions=tuple(_dimension_output_names(dimensions)),
-        dimension_exprs=tuple(
-            _render(_dimension_expr(src, dim, _dim_mask_strategy(dim_mask, src, dim)))
-            for src, dim in dimensions
-        ),
+        dimension_exprs=dimension_exprs,
         filters=_filter_key(scoping.where_conditions),
         join_path=tuple((e.from_alias, e.alias, e.on_sql) for e in join_edges),
         finality=finality_key,

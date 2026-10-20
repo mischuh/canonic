@@ -69,6 +69,19 @@ class BindingKindSpec:
         first, second = self.component_attrs
         return (getattr(ref, first), getattr(ref, second))
 
+    def dependency_names(self, ref: CanonicalRef) -> tuple[str, ...]:
+        """Every metric this binding is computed from, empty for a source-bound kind.
+
+        A composite's two components, an offset's base, a derived metric's inputs. Cycle
+        checks, trust and discovery walk this instead of the numerator and denominator, so a
+        kind that composes other metrics joins them without its own branch there.
+        """
+        if self.component_attrs is not None:
+            return tuple(name for name in self.component_names(ref) if name is not None)
+        if ref.base is not None:
+            return (ref.base,)
+        return tuple(i.metric for i in ref.inputs or ())
+
 
 _REGISTRY: dict[BindingKind, BindingKindSpec] = {}
 
@@ -181,6 +194,19 @@ register(
         component_attrs=("weighted_sum", "weight"),
     )
 )
+
+for _kind in (BindingKind.OFFSET, BindingKind.DERIVED):
+    register(
+        BindingKindSpec(
+            _kind,
+            is_source_bound=False,
+            is_composite=False,
+            is_recompute=False,
+            is_describable=False,
+            column_attr=None,
+            component_attrs=None,
+        )
+    )
 
 
 # Category sets derived from the registry so a newly registered kind joins them automatically.

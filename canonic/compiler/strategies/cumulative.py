@@ -31,6 +31,8 @@ from canonic.compiler._helpers import (
     _find_dimension,
     _from_and_joins,
     _resolve_dimensions,
+    current_time_shifts,
+    shifted_columns,
 )
 from canonic.compiler.compose import VISIBLE_CTE, Accumulate, LeafRef, MetricLeaves, MetricPlan
 from canonic.compiler.joins import build_alias_tree
@@ -100,24 +102,26 @@ def plan_metric(
 
     regular: list[str] = list(query.filters)
     visibility: list[str] = []
-    if cumulative.history is History.INCLUDE:
-        order_columns = {
-            (dimensions[i][0], column)
-            for i in order_dims
-            for column in dimensions[i][1].backing_columns()
-        }
-        regular, visibility = _split_filters(
-            queried_name,
-            query.filters,
-            order_columns,
-            sources_by_name,
-            owner,
-            alias_to_source,
-            effective_policy,
+    # Under an offset, a visibility filter is read in output time like every other filter.
+    with shifted_columns(current_time_shifts(), owner, sources_by_name, alias_to_source):
+        if cumulative.history is History.INCLUDE:
+            order_columns = {
+                (dimensions[i][0], column)
+                for i in order_dims
+                for column in dimensions[i][1].backing_columns()
+            }
+            regular, visibility = _split_filters(
+                queried_name,
+                query.filters,
+                order_columns,
+                sources_by_name,
+                owner,
+                alias_to_source,
+                effective_policy,
+            )
+        visibility_conditions, _ = _bind_filters(
+            visibility, sources_by_name, owner, alias_to_source, effective_policy
         )
-    visibility_conditions, _ = _bind_filters(
-        visibility, sources_by_name, owner, alias_to_source, effective_policy
-    )
 
     def build(
         inputs: LeafInputs, leaf_metrics: Sequence[LeafMetric]

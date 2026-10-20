@@ -159,6 +159,13 @@ _METRICS = {
     ),
     "buyer_rate": "canonical: {kind: ratio, numerator: revenue, denominator: buyers}",
     "nested_rate": "canonical: {kind: ratio, numerator: price, denominator: units}",
+    "revenue_pm": (
+        "canonical: {kind: offset, base: revenue, time_dimension: sale_date, offset: 1 month}"
+    ),
+    "revenue_growth": (
+        'canonical:\n  kind: derived\n  expr: "revenue / pm - 1"\n'
+        "  inputs: [{metric: revenue}, {metric: revenue_pm, alias: pm}]"
+    ),
 }
 
 
@@ -441,6 +448,8 @@ class TestUnsupported:
             ("buyers", [], "distinct_count cannot be attributed by member: members overlap"),
             ("buyer_rate", ["channel"], "denominator 'buyers' has kind distinct_count"),
             ("nested_rate", [], "numerator 'price' has kind ratio"),
+            ("revenue_pm", [], "offset cannot be attributed by member: it reads another period"),
+            ("revenue_growth", [], "derived cannot be attributed by member: its expression"),
         ],
     )
     async def test_raises_unsupported_measure(

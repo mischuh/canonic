@@ -22,6 +22,7 @@ from typing import Any
 
 from canonic.connectors.base import (
     AcquisitionTier,
+    CandidateInput,
     CandidateKind,
     Capability,
     ColumnInfo,
@@ -38,6 +39,7 @@ from canonic.connectors.base import (
     ReviewFlag,
     compute_fingerprint,
 )
+from canonic.contracts.models import derived_input_names
 from canonic.exc import UnsupportedSourceVersionError
 from canonic.semantic.duration import Duration, DurationUnit
 from canonic.semantic.models import Additivity, Relationship
@@ -215,6 +217,8 @@ class DbtConnector(ConnectorBase):
     def __init__(self, manifest_path: str | Path, *, source: str = "dbt") -> None:
         self._path = Path(manifest_path)
         self._source = source
+        #: MetricFlow simple metric name to its measure, filled when definitions are extracted.
+        self._metric_measures: dict[str, str] = {}
 
     def capabilities(self) -> list[Capability]:
         return [Capability.CAPABILITIES, Capability.TEST_CONNECTION, Capability.EXTRACT_DEFINITIONS]
@@ -282,6 +286,11 @@ class DbtConnector(ConnectorBase):
 
         # --- metrics → MEASURE evidence ---
         agg_time_dimensions = _agg_time_dimensions(semantic_models)
+        self._metric_measures = {
+            str(m.get("name", "")): _measure_name(m.get("type_params", {}))
+            for m in metrics.values()
+            if m.get("type") == "simple"
+        }
         for metric in metrics.values():
             self._extract_metric(metric, definitions, agg_time_dimensions)
 
@@ -558,13 +567,146 @@ class DbtConnector(ConnectorBase):
             )
         elif metric_type == "cumulative":
             self._extract_cumulative(metric, measure_ref, definitions, agg_time_dimensions or {})
-        elif metric_type in ("simple", "ratio", "derived", "conversion"):
-            # Known MetricFlow composite/reference types — not yet implemented; skip silently.
+        elif metric_type in ("simple", "ratio", "derived"):
+            self._extract_composed(metric, measure_ref, definitions, agg_time_dimensions or {})
+        elif metric_type == "conversion":
+            # Known MetricFlow type, not implemented yet; skip silently.
             logger.debug(
                 "skipping unimplemented MetricFlow metric type %r for %r", metric_type, name
             )
         else:
             logger.warning("unknown dbt metric type %r for metric %r; skipping", metric_type, name)
+
+    def _extract_composed(
+        self,
+        metric: dict[str, Any],
+        measure_ref: str,
+        definitions: list[DefinitionEvidence],
+        agg_time_dimensions: dict[str, str],
+    ) -> None:
+        """Propose a ``single``, ``ratio`` or ``derived`` binding for a MetricFlow metric.
+
+        A ``simple`` metric is its measure. A ``ratio`` divides two metrics. A ``derived`` metric
+        keeps MetricFlow's ``expr`` and inputs, and an input with ``offset_window`` becomes an
+        ``offset`` metric named ``<input>_offset_<count>_<unit>`` that the derived metric reads.
+        A metric whose ``filter``, ``offset_to_grain`` or expression cannot be carried over is
+        skipped, rather than proposed as a binding that would return a different number.
+        """
+        name: str = metric.get("name", "")
+        metric_type: str = metric.get("type", "")
+        type_params: dict[str, Any] = metric.get("type_params", {})
+        candidates: list[tuple[str, ContractCandidate]] = []
+        reason: str | None = None
+        if metric.get("filter"):
+            reason = "its filter cannot be carried over"
+        elif metric_type == "simple":
+            measure = type_params.get("measure")
+            if isinstance(measure, dict) and measure.get("filter"):
+                reason = "its measure filter cannot be carried over"
+            elif not measure_ref:
+                reason = "it names no measure"
+            else:
+                candidates.append(
+                    (name, ContractCandidate(kind=CandidateKind.SINGLE, measures=[measure_ref]))
+                )
+        elif metric_type == "ratio":
+            parts = [_metric_input(type_params.get(p)) for p in ("numerator", "denominator")]
+            if any(p is None or p.get("filter") for p in parts):
+                reason = "a ratio part has a filter or names no metric"
+            else:
+                candidates.append(
+                    (
+                        name,
+                        ContractCandidate(
+                            kind=CandidateKind.RATIO,
+                            measures=[],
+                            metrics=[str(p["name"]) for p in parts if p is not None],
+                        ),
+                    )
+                )
+        else:
+            reason, candidates = self._derived_candidates(name, type_params, agg_time_dimensions)
+        if reason is not None:
+            logger.info("skipping %s dbt metric %r: %s", metric_type, name, reason)
+            return
+        for entity, candidate in candidates:
+            definitions.append(
+                DefinitionEvidence(
+                    source=self._source,
+                    entity=entity,
+                    entity_type=DefinitionEntityType.METRIC,
+                    description=(metric.get("description") or None) if entity == name else None,
+                    contract_candidate=candidate,
+                    native_ref=metric.get("unique_id", ""),
+                    acquisition_tier=AcquisitionTier.MODELING,
+                    source_fingerprint=_definition_fingerprint(
+                        {
+                            "entity": entity,
+                            "entity_type": "metric",
+                            "candidate": candidate.model_dump(mode="json"),
+                        }
+                    ),
+                )
+            )
+
+    def _derived_candidates(
+        self, name: str, type_params: dict[str, Any], agg_time_dimensions: dict[str, str]
+    ) -> tuple[str | None, list[tuple[str, ContractCandidate]]]:
+        expr = str(type_params.get("expr") or "")
+        raw_inputs = [_metric_input(m) for m in type_params.get("metrics") or []]
+        if not expr or not raw_inputs or any(m is None for m in raw_inputs):
+            return "it names no expression or inputs", []
+        offsets: list[tuple[str, ContractCandidate]] = []
+        inputs: list[CandidateInput] = []
+        for raw in raw_inputs:
+            assert raw is not None  # noqa: S101 — checked above
+            input_name = str(raw["name"])
+            alias = raw.get("alias") or None
+            if raw.get("filter"):
+                return f"input {input_name!r} has a filter", []
+            if raw.get("offset_to_grain"):
+                return f"input {input_name!r} uses offset_to_grain", []
+            window = _metricflow_window(raw.get("offset_window"))
+            if window is None:
+                inputs.append(CandidateInput(metric=input_name, alias=alias))
+                continue
+            if not _is_day_or_longer(window):
+                return f"input {input_name!r} has an offset_window shorter than a day", []
+            measure = self._metric_measures.get(input_name)
+            time_dimension = agg_time_dimensions.get(measure or "")
+            if time_dimension is None:
+                return f"offset input {input_name!r} has no agg_time_dimension to shift", []
+            duration = Duration.parse(window)
+            offset_name = f"{input_name}_offset_{duration.count}_{duration.unit.value}"
+            offsets.append(
+                (
+                    offset_name,
+                    ContractCandidate(
+                        kind=CandidateKind.OFFSET,
+                        measures=[],
+                        base=input_name,
+                        time_dimension=time_dimension,
+                        offset=str(duration),
+                    ),
+                )
+            )
+            inputs.append(CandidateInput(metric=offset_name, alias=alias or input_name))
+        try:
+            used = derived_input_names(expr)
+        except ValueError as exc:
+            return f"its expression cannot be carried over: {exc}", []
+        names = [i.alias or i.metric for i in inputs]
+        if sorted(set(used)) != sorted(set(names)):
+            return "its expression does not read exactly its inputs", []
+        return None, [
+            *offsets,
+            (
+                name,
+                ContractCandidate(
+                    kind=CandidateKind.DERIVED, measures=[], expr=expr, inputs=inputs
+                ),
+            ),
+        ]
 
     def _extract_cumulative(
         self,
@@ -655,3 +797,19 @@ def _is_day_or_longer(window: str) -> bool:
     except ValueError:
         return False
     return duration.unit.rank >= DurationUnit.DAY.rank
+
+
+def _measure_name(type_params: dict[str, Any]) -> str:
+    measure = type_params.get("measure")
+    if isinstance(measure, dict):
+        return str(measure.get("name", ""))
+    return str(measure or "")
+
+
+def _metric_input(raw: object) -> dict[str, Any] | None:
+    """A MetricFlow metric reference as ``{"name": ..., ...}``, from its string or object form."""
+    if isinstance(raw, str) and raw:
+        return {"name": raw}
+    if isinstance(raw, dict) and raw.get("name"):
+        return raw
+    return None

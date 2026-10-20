@@ -12,6 +12,7 @@ if TYPE_CHECKING:
 
 from canonic.connectors.base import (
     AcquisitionTier,
+    CandidateInput,
     CandidateKind,
     Capability,
     ContractCandidate,
@@ -223,7 +224,12 @@ class TestExtractDefinitions:
     ) -> None:
         connector = DbtConnector(dbt_manifest_path)
         result = await connector.extract_definitions()
-        candidates = [d for d in result.definitions if d.contract_candidate is not None]
+        candidates = [
+            d
+            for d in result.definitions
+            if d.contract_candidate is not None
+            and d.contract_candidate.kind is CandidateKind.DISTINCT_COUNT
+        ]
         assert [d.entity for d in candidates] == ["unique_customers"]
         (candidate,) = candidates
         assert candidate.entity_type == DefinitionEntityType.METRIC
@@ -562,3 +568,123 @@ class TestCumulativeMetrics:
             },
         )
         assert await self._candidates(manifest) == {}
+
+
+class TestComposedMetrics:
+    """MetricFlow simple, ratio and derived metrics map to single, ratio, offset and derived."""
+
+    async def _candidates(self, path: Path) -> dict[str, ContractCandidate | None]:
+        extract = await DbtConnector(path).extract_definitions()
+        return {
+            d.entity: d.contract_candidate
+            for d in extract.definitions
+            if d.entity_type == DefinitionEntityType.METRIC
+        }
+
+    async def test_simple_and_ratio(self, tmp_path: Path) -> None:
+        manifest = _cumulative_manifest(
+            tmp_path / "m.json",
+            {"name": "total_revenue", "type": "simple", "type_params": {"measure": "revenue"}},
+            {"name": "total_shipped", "type": "simple", "type_params": {"measure": "shipped"}},
+            {
+                "name": "revenue_per_unit",
+                "type": "ratio",
+                "type_params": {
+                    "numerator": "total_revenue",
+                    "denominator": {"name": "total_shipped"},
+                },
+            },
+        )
+        assert await self._candidates(manifest) == {
+            "total_revenue": ContractCandidate(kind=CandidateKind.SINGLE, measures=["revenue"]),
+            "total_shipped": ContractCandidate(kind=CandidateKind.SINGLE, measures=["shipped"]),
+            "revenue_per_unit": ContractCandidate(
+                kind=CandidateKind.RATIO, measures=[], metrics=["total_revenue", "total_shipped"]
+            ),
+        }
+
+    async def test_derived_with_an_offset_window_proposes_an_offset(self, tmp_path: Path) -> None:
+        manifest = _cumulative_manifest(
+            tmp_path / "m.json",
+            {"name": "total_revenue", "type": "simple", "type_params": {"measure": "revenue"}},
+            {
+                "name": "revenue_yoy",
+                "type": "derived",
+                "type_params": {
+                    "expr": "(total_revenue - revenue_py) / revenue_py",
+                    "metrics": [
+                        {"name": "total_revenue"},
+                        {
+                            "name": "total_revenue",
+                            "alias": "revenue_py",
+                            "offset_window": {"count": 1, "granularity": "year"},
+                        },
+                    ],
+                },
+            },
+        )
+        candidates = await self._candidates(manifest)
+        assert candidates["total_revenue_offset_1_year"] == ContractCandidate(
+            kind=CandidateKind.OFFSET,
+            measures=[],
+            base="total_revenue",
+            time_dimension="order_date",
+            offset="1 year",
+        )
+        assert candidates["revenue_yoy"] == ContractCandidate(
+            kind=CandidateKind.DERIVED,
+            measures=[],
+            expr="(total_revenue - revenue_py) / revenue_py",
+            inputs=[
+                CandidateInput(metric="total_revenue"),
+                CandidateInput(metric="total_revenue_offset_1_year", alias="revenue_py"),
+            ],
+        )
+
+    @pytest.mark.parametrize(
+        "metric",
+        [
+            {
+                "name": "x",
+                "type": "derived",
+                "type_params": {
+                    "expr": "a",
+                    "metrics": [
+                        {"name": "total_revenue", "alias": "a", "offset_to_grain": "month"}
+                    ],
+                },
+            },
+            {
+                "name": "x",
+                "type": "derived",
+                "type_params": {
+                    "expr": "CASE WHEN a > 0 THEN 1 END",
+                    "metrics": [{"name": "total_revenue", "alias": "a"}],
+                },
+            },
+            {
+                "name": "x",
+                "type": "derived",
+                "type_params": {
+                    "expr": "a",
+                    "metrics": [{"name": "total_revenue", "alias": "a", "filter": "{{ x }}"}],
+                },
+            },
+            {"name": "x", "type": "ratio", "type_params": {"numerator": "total_revenue"}},
+            {
+                "name": "x",
+                "type": "simple",
+                "type_params": {"measure": "revenue"},
+                "filter": "{{ Dimension('order__status') }} = 'completed'",
+            },
+        ],
+    )
+    async def test_variants_without_an_equivalent_are_skipped(
+        self, tmp_path: Path, metric: dict[str, object]
+    ) -> None:
+        manifest = _cumulative_manifest(
+            tmp_path / "m.json",
+            {"name": "total_revenue", "type": "simple", "type_params": {"measure": "revenue"}},
+            metric,
+        )
+        assert "x" not in await self._candidates(manifest)

@@ -32,6 +32,7 @@ that window, never inside the leaf, or the total would restart at the first visi
 
 from __future__ import annotations
 
+import dataclasses
 from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import TYPE_CHECKING, cast
@@ -47,13 +48,15 @@ if TYPE_CHECKING:
     from canonic.compiler.result import (
         CompositionMetadata,
         CumulativeMetadata,
+        DerivedMetadata,
+        OffsetMetadata,
         OpaqueMetadata,
         PartialAdditiveMetadata,
         RecomputeAtGrainMetadata,
     )
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Callable, Iterator, Sequence
 
     from canonic.compiler.leaf import AuxCte, LeafMetric, LeafPlan
     from canonic.compiler.result import FiredGuardrail, SourceFreshness
@@ -94,6 +97,7 @@ class Combine(StrEnum):
     RATIO_NULL = "ratio_null"  # n / NULLIF(d, 0)
     RATIO_ZERO = "ratio_zero"  # COALESCE(n / NULLIF(d, 0), 0)
     RATIO_RAW = "ratio_raw"  # n / d, the engine raises on zero
+    DERIVED = "derived"  # arithmetic over the values of other metric plans
 
 
 @dataclass(frozen=True, slots=True)
@@ -132,6 +136,29 @@ class MetricPlan:
     #: A cumulative metric, also when its value is computed inside its leaf rather than by an
     #: ``accumulate`` step. Finality is not defined for one yet.
     cumulative: bool = False
+    #: For ``Combine.DERIVED``: the plans of the inputs, and the arithmetic over them, which
+    #: names input ``i`` as the column ``_op<i>`` and already guards every division.
+    operands: tuple[MetricPlan, ...] = ()
+    template: exp.Expression | None = None
+
+    def shifted(self, by: int) -> MetricPlan:
+        """This plan with every leaf reference, its operands' included, moved by ``by``."""
+        return dataclasses.replace(
+            self,
+            refs=tuple(LeafRef(leaf=r.leaf + by, column=r.column) for r in self.refs),
+            operands=tuple(op.shifted(by) for op in self.operands),
+        )
+
+    def walk(self) -> Iterator[MetricPlan]:
+        """This plan and every operand under it, depth first."""
+        yield self
+        for operand in self.operands:
+            yield from operand.walk()
+
+
+def operand_placeholder(index: int) -> str:
+    """The column name a derived template gives its ``index``-th input."""
+    return f"_op{index}"
 
 
 @dataclass(frozen=True, slots=True)
@@ -152,17 +179,14 @@ class MetricLeaves:
     recompute_at_grain: RecomputeAtGrainMetadata | None = None
     opaque: OpaqueMetadata | None = None
     cumulative: CumulativeMetadata | None = None
+    #: Offset and derived metrics planned for this one, its own included, nested ones too.
+    offsets: tuple[OffsetMetadata, ...] = ()
+    derived: tuple[DerivedMetadata, ...] = ()
     warnings: tuple[str, ...] = ()
 
     def offset(self, by: int) -> MetricPlan:
         """Re-point this metric's leaf references into the whole query's leaf list."""
-        return MetricPlan(
-            name=self.metric.name,
-            refs=tuple(LeafRef(leaf=r.leaf + by, column=r.column) for r in self.metric.refs),
-            combine=self.metric.combine,
-            accumulate=self.metric.accumulate,
-            cumulative=self.metric.cumulative,
-        )
+        return self.metric.shifted(by)
 
 
 @dataclass(frozen=True, slots=True)
@@ -283,12 +307,34 @@ def _zero_denominator_flag(denominator: exp.Expression, name: str) -> exp.Expres
     return _alias(cast("exp.Expression", flag.else_(exp.Literal.number(0))), name)
 
 
-def _combine_expr(metric: MetricPlan, columns: list[exp.Expression]) -> exp.Expression:
-    """Build one requested metric's output expression from its leaf column references."""
-    if metric.combine is Combine.DIRECT:
-        return columns[0]
-    numerator, denominator = columns
-    if metric.combine is Combine.RATIO_RAW:
+def _metric_value(
+    metric: MetricPlan, columns_of: Callable[[MetricPlan], list[exp.Expression]]
+) -> exp.Expression:
+    """One metric's value in the final SELECT: combined, accumulated, or derived from others."""
+    if metric.combine is Combine.DERIVED:
+        assert metric.template is not None  # noqa: S101 — set for every derived plan
+        values = {
+            operand_placeholder(i): _metric_value(operand, columns_of)
+            for i, operand in enumerate(metric.operands)
+        }
+
+        def substitute(node: exp.Expression) -> exp.Expression:
+            if isinstance(node, exp.Column) and not node.table and node.name in values:
+                return exp.Paren(this=values[node.name].copy())
+            return node
+
+        return metric.template.copy().transform(substitute)
+    value = _combine_expr(metric, columns_of(metric))
+    if metric.accumulate is not None:
+        value = _accumulate_expr(metric.accumulate, value)
+    return value
+
+
+def guard_division(
+    numerator: exp.Expression, denominator: exp.Expression, combine: Combine
+) -> exp.Expression:
+    """``numerator / denominator`` under a ratio's zero-denominator policy."""
+    if combine is Combine.RATIO_RAW:
         return cast("exp.Expression", exp.Div(this=numerator, expression=denominator))
     guarded = cast(
         "exp.Expression",
@@ -297,9 +343,17 @@ def _combine_expr(metric: MetricPlan, columns: list[exp.Expression]) -> exp.Expr
             expression=exp.func("NULLIF", denominator, exp.Literal.number(0)),
         ),
     )
-    if metric.combine is Combine.RATIO_ZERO:
+    if combine is Combine.RATIO_ZERO:
         return cast("exp.Expression", exp.func("COALESCE", guarded, exp.Literal.number(0)))
     return guarded
+
+
+def _combine_expr(metric: MetricPlan, columns: list[exp.Expression]) -> exp.Expression:
+    """Build one requested metric's output expression from its leaf column references."""
+    if metric.combine is Combine.DIRECT:
+        return columns[0]
+    numerator, denominator = columns
+    return guard_division(numerator, denominator, metric.combine)
 
 
 def _null_safe_join_on(spine: str, leaf: str, columns: Sequence[str]) -> exp.Expression:
@@ -420,8 +474,9 @@ def compose(
 
     dim_names = list(leaves[0].dim_names)
     with_is_final = any(p.projects_is_final for p in physical)
-    accumulating = [m for m in metrics if m.accumulate is not None]
-    cumulative = [m for m in metrics if m.accumulate is not None or m.cumulative]
+    every_plan = [plan for m in metrics for plan in m.walk()]
+    accumulating = [m for m in every_plan if m.accumulate is not None]
+    cumulative = [m for m in every_plan if m.accumulate is not None or m.cumulative]
     if cumulative and with_is_final:
         raise UnsupportedMeasure(
             f"cumulative metric {cumulative[0].name!r} cannot be combined with a metric "
@@ -458,14 +513,15 @@ def compose(
     projections: list[exp.Expression] = [
         _alias(cast("exp.Expression", exp.column(dim, table=dim_source)), dim) for dim in dim_names
     ]
-    for position, metric in enumerate(metrics):
-        columns = [
+
+    def columns_of(plan: MetricPlan) -> list[exp.Expression]:
+        return [
             cast("exp.Expression", exp.column(ref.column, table=names_by_index[owner_of[ref.leaf]]))
-            for ref in metric.refs
+            for ref in plan.refs
         ]
-        value = _combine_expr(metric, columns)
-        if metric.accumulate is not None:
-            value = _accumulate_expr(metric.accumulate, value)
+
+    for position, metric in enumerate(metrics):
+        value = _metric_value(metric, columns_of)
         projections.append(_alias(value, internal[position] if internal else metric.name))
     if with_is_final:
         projections.append(

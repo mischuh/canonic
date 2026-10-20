@@ -1,0 +1,57 @@
+{
+  "case": "rental_revenue_prev_month_in_a_time_range",
+  "columns": [
+    {
+      "name": "payment_date",
+      "type": "string"
+    },
+    {
+      "name": "rental_revenue",
+      "type": "float"
+    },
+    {
+      "name": "rental_revenue_prev_month",
+      "type": "float"
+    }
+  ],
+  "dialect": "sqlite",
+  "finality": null,
+  "guardrails_fired": [],
+  "project": "rental",
+  "resolved": {
+    "metrics": {
+      "rental_revenue": "payments.total_paid",
+      "rental_revenue_prev_month": "offset(payments.total_paid, payment_date, 1 month)"
+    }
+  },
+  "row_count": 5,
+  "rows": [
+    [
+      "2024-10-05",
+      null,
+      359.96
+    ],
+    [
+      "2024-10-08",
+      349.93,
+      null
+    ],
+    [
+      "2024-10-17",
+      629.93,
+      489.93
+    ],
+    [
+      "2024-10-22",
+      99.98,
+      null
+    ],
+    [
+      "2024-10-27",
+      null,
+      699.93
+    ]
+  ],
+  "trust_tier": "provisional",
+  "warnings": []
+}

@@ -157,6 +157,50 @@ def build_candidate_proposals(
                 running_total["period_agg"] = candidate.period_agg
             propose(definition.entity, running_total, list(definition.aliases), anchor)
             continue
+        if candidate.kind is CandidateKind.SINGLE:
+            canonical = measure_binding(candidate.measures[0])
+            if isinstance(canonical, str):
+                unexpressible.append((source, f"{label}: {canonical}"))
+                continue
+            propose(definition.entity, canonical, list(definition.aliases), anchor)
+            continue
+        if candidate.kind is CandidateKind.OFFSET:
+            propose(
+                definition.entity,
+                {
+                    "kind": "offset",
+                    "base": candidate.base,
+                    "time_dimension": candidate.time_dimension,
+                    "offset": candidate.offset,
+                },
+                list(definition.aliases),
+                anchor,
+            )
+            continue
+        if candidate.kind is CandidateKind.DERIVED:
+            propose(
+                definition.entity,
+                {
+                    "kind": "derived",
+                    "expr": candidate.expr,
+                    "inputs": [
+                        {"metric": i.metric, **({"alias": i.alias} if i.alias else {})}
+                        for i in candidate.inputs
+                    ],
+                },
+                list(definition.aliases),
+                anchor,
+            )
+            continue
+        if candidate.kind is CandidateKind.RATIO and candidate.metrics:
+            numerator, denominator = candidate.metrics
+            propose(
+                definition.entity,
+                {"kind": "ratio", "numerator": numerator, "denominator": denominator},
+                list(definition.aliases),
+                anchor,
+            )
+            continue
         if candidate.kind is CandidateKind.DISTINCT_COUNT:
             canonical = measure_binding(candidate.measures[0])
             if isinstance(canonical, str):
@@ -230,7 +274,29 @@ class CandidateResolver:
         }
 
     def resolve(self, candidates: list[Proposal]) -> list[ReconciliationEntry]:
-        """Decide every candidate, components before the ratios that reference them."""
+        """Decide every candidate, each one after the metrics it references.
+
+        A candidate whose referenced metric is itself a candidate later in the list waits for
+        it, so the list is passed over until a pass decides nothing new. What is still missing
+        then is reported.
+        """
+        pending = list(candidates)
+        decided: list[ReconciliationEntry] = []
+        while pending:
+            waiting = [p for p in pending if self._waits_for_another(p, pending)]
+            ready = [p for p in pending if p not in waiting]
+            if not ready:
+                ready, waiting = waiting, []
+            decided.extend(self._resolve_ready(ready))
+            pending = waiting
+        return decided
+
+    def _waits_for_another(self, proposal: Proposal, pending: list[Proposal]) -> bool:
+        """Whether ``proposal`` references a metric that another pending candidate adds."""
+        others = {str(p.content["metric"]) for p in pending if p is not proposal}
+        return bool(_metric_references(proposal.content["canonical"]) & others)
+
+    def _resolve_ready(self, candidates: list[Proposal]) -> list[ReconciliationEntry]:
         entries: list[ReconciliationEntry] = []
         for proposal in candidates:
             stripped = _strip(proposal)
@@ -268,6 +334,20 @@ class CandidateResolver:
                 if canonical[part] not in self._bound:
                     return f"{part} {canonical[part]!r} has no binding"
             return None
+        missing = sorted(_metric_references(canonical) - self._bound)
+        if missing:
+            return f"metric {missing[0]!r} has no binding"
+        if kind == "derived":
+            return None
+        if kind == "offset":
+            dimensions = {
+                d.get("name")
+                for source in self._sources.values()
+                for d in source.get("dimensions", [])
+            }
+            if canonical["time_dimension"] not in dimensions:
+                return f"dimension {canonical['time_dimension']!r} will not exist"
+            return None
         source = self._sources.get(canonical["source"])
         if source is None:
             return f"source {canonical['source']!r} will not exist"
@@ -286,3 +366,15 @@ class CandidateResolver:
         if canonical["distinct_on"] not in columns:
             return f"column {canonical['distinct_on']!r} will not exist on {canonical['source']!r}"
         return None
+
+
+def _metric_references(canonical: dict[str, Any]) -> set[str]:
+    """The metrics a proposed binding is computed from, empty for a source-bound one."""
+    kind = canonical["kind"]
+    if kind == "ratio":
+        return {canonical["numerator"], canonical["denominator"]}
+    if kind == "offset":
+        return {canonical["base"]}
+    if kind == "derived":
+        return {i["metric"] for i in canonical["inputs"]}
+    return set()
