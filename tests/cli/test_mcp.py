@@ -200,6 +200,47 @@ def test_no_project_anywhere_exits_with_error(
 # ---------------------------------------------------------------------------
 
 
+def test_start_keeps_curated_contracts_under_a_role_policy(
+    runner: CliRunner, project_dir: Path
+) -> None:
+    """A role policy hides every metric from a caller without a principal. That must not
+    read as an empty project: starting the daemon used to write an inferred contract for
+    every measure next to the curated ones.
+    """
+    semantics = project_dir / "semantics" / "db"
+    semantics.mkdir(parents=True)
+    (semantics / "orders.yaml").write_text(
+        "name: orders\nconnection: db\ntable: orders\ngrain: [order_id]\n"
+        "columns:\n"
+        "  - {name: order_id, type: int, nullable: false}\n"
+        "  - {name: amount, type: decimal, nullable: false}\n"
+        "measures:\n"
+        "  - {name: revenue_sum, expr: 'sum(amount)', additivity: additive}\n"
+        "  - {name: order_count, expr: 'count(order_id)', additivity: additive}\n"
+    )
+    contracts = project_dir / "contracts"
+    (contracts / "metrics").mkdir(parents=True)
+    (contracts / "metrics" / "revenue.yaml").write_text(
+        "metric: revenue\ncanonical:\n  source: orders\n  measure: revenue_sum\n"
+        "provenance: human_curated\nstatus: active\n"
+    )
+    (contracts / "policies").mkdir()
+    (contracts / "policies" / "roles.yaml").write_text(
+        "schema: roles/v1\nclaim: roles\nroles:\n  analyst:\n    metrics: { allow: [revenue] }\n"
+    )
+
+    with (
+        patch(_PATCH_START_HTTP),
+        patch(_PATCH_BUILD_VERIFIER, return_value=MagicMock()),
+        patch("canonic.cli.commands.mcp._save_last_project"),
+    ):
+        result = runner.invoke(app, ["mcp", "start", "--transport", "http"])
+
+    assert result.exit_code == 0, result.output
+    assert "auto-generated" not in result.output
+    assert sorted(p.name for p in (contracts / "metrics").iterdir()) == ["revenue.yaml"]
+
+
 def test_start_saves_last_project(runner: CliRunner, project_dir: Path) -> None:
     """Successful start writes the project root to the last-project file."""
     saved: list[Path] = []

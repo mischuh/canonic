@@ -209,7 +209,9 @@ def start(
     for warning in inert_declaration_warnings(root):
         logger.warning("contract has no effect: %s", warning)
 
-    if not service.list_metrics():
+    # Every active binding, not list_metrics(): discovery hides metrics from a caller
+    # without a principal once a role policy exists, which is not an empty project.
+    if not service.resolver.active_bindings():
         from canonic.contracts.bootstrap import write_inferred_contracts
         from canonic.semantic.loader import list_semantic_sources
 
