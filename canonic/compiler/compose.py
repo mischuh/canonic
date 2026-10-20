@@ -141,6 +141,9 @@ class MetricPlan:
     #: names input ``i`` as the column ``_op<i>`` and already guards every division.
     operands: tuple[MetricPlan, ...] = ()
     template: exp.Expression | None = None
+    #: For ``Combine.DERIVED``: the zero-denominator policy of the template's own divisions,
+    #: ``None`` when it does not divide.
+    division: Combine | None = None
 
     def shifted(self, by: int) -> MetricPlan:
         """This plan with every leaf reference, its operands' included, moved by ``by``."""
@@ -296,18 +299,92 @@ def zero_denominator_column(metric_name: str) -> str:
     return f"{_ZERO_DENOMINATOR_PREFIX}{metric_name}"
 
 
+def zero_denominator_policy(metric: MetricPlan) -> Combine | None:
+    """The zero-denominator policy of the divisions the metric itself performs, if any.
+
+    A ratio divides once. A derived or conversion metric divides wherever its template does,
+    and the divisions inside its inputs belong to those inputs.
+    """
+    if metric.accumulate is not None:
+        return None
+    if metric.combine is Combine.DERIVED:
+        return metric.division
+    return metric.combine if metric.combine is not Combine.DIRECT else None
+
+
 def substitutes_zero_denominator(metric: MetricPlan) -> bool:
-    """Whether the metric is a ratio that replaces a zero denominator instead of failing."""
-    return metric.combine in _SUBSTITUTING and metric.accumulate is None
+    """Whether the metric divides and replaces a zero denominator instead of failing."""
+    return zero_denominator_policy(metric) in _SUBSTITUTING
 
 
-def _zero_denominator_flag(denominator: exp.Expression, name: str) -> exp.Expression:
-    """``CASE WHEN <denominator> = 0 THEN 1 ELSE 0 END``, a 1 for each row to count."""
-    flag = exp.Case().when(
-        exp.EQ(this=denominator.copy(), expression=exp.Literal.number(0)),
-        exp.Literal.number(1),
+def nulls_zero_denominator(metric: MetricPlan) -> bool:
+    """Whether the metric, or an input under it, turns a zero denominator into ``NULL``.
+
+    A derived metric answers for its inputs, so their zero denominators are counted and
+    reported under its name.
+    """
+    return any(zero_denominator_policy(plan) is Combine.RATIO_NULL for plan in metric.walk())
+
+
+def counts_zero_denominator(metric: MetricPlan) -> bool:
+    """Whether the result carries a column that counts the metric's zero denominators."""
+    return substitutes_zero_denominator(metric) or nulls_zero_denominator(metric)
+
+
+def _zero_denominator_flag(denominators: list[exp.Expression], name: str) -> exp.Expression:
+    """``CASE WHEN <d1> = 0 OR ... THEN 1 ELSE 0 END``, a 1 for each row to count."""
+    condition = exp.or_(
+        *(exp.EQ(this=d.copy(), expression=exp.Literal.number(0)) for d in denominators)
     )
+    flag = exp.Case().when(condition, exp.Literal.number(1))
     return _alias(cast("exp.Expression", flag.else_(exp.Literal.number(0))), name)
+
+
+def _denominators(
+    metric: MetricPlan, columns_of: Callable[[MetricPlan], list[exp.Expression]]
+) -> list[exp.Expression]:
+    """The denominators of the divisions the metric itself performs, as output expressions."""
+    if metric.combine is not Combine.DERIVED:
+        return [columns_of(metric)[1]]
+    assert metric.template is not None  # noqa: S101 — set for every derived plan
+    substitute = _operand_substitution(metric, columns_of)
+    return [
+        div.expression.this.copy().transform(substitute)
+        for div in metric.template.find_all(exp.Div)
+        if isinstance(div.expression, exp.Nullif)
+    ]
+
+
+def _counted_denominators(
+    metric: MetricPlan, columns_of: Callable[[MetricPlan], list[exp.Expression]]
+) -> list[exp.Expression]:
+    """The metric's own denominators, and those of every input that turns zero into ``NULL``."""
+    own = _denominators(metric, columns_of) if substitutes_zero_denominator(metric) else []
+    nested = [
+        denominator
+        for operand in metric.operands
+        for plan in operand.walk()
+        if zero_denominator_policy(plan) is Combine.RATIO_NULL
+        for denominator in _denominators(plan, columns_of)
+    ]
+    return [*own, *nested]
+
+
+def _operand_substitution(
+    metric: MetricPlan, columns_of: Callable[[MetricPlan], list[exp.Expression]]
+) -> Callable[[exp.Expression], exp.Expression]:
+    """A transform that replaces each ``_op<i>`` placeholder with the value of input ``i``."""
+    values = {
+        operand_placeholder(i): _metric_value(operand, columns_of)
+        for i, operand in enumerate(metric.operands)
+    }
+
+    def substitute(node: exp.Expression) -> exp.Expression:
+        if isinstance(node, exp.Column) and not node.table and node.name in values:
+            return exp.Paren(this=values[node.name].copy())
+        return node
+
+    return substitute
 
 
 def _metric_value(
@@ -316,17 +393,7 @@ def _metric_value(
     """One metric's value in the final SELECT: combined, accumulated, or derived from others."""
     if metric.combine is Combine.DERIVED:
         assert metric.template is not None  # noqa: S101 — set for every derived plan
-        values = {
-            operand_placeholder(i): _metric_value(operand, columns_of)
-            for i, operand in enumerate(metric.operands)
-        }
-
-        def substitute(node: exp.Expression) -> exp.Expression:
-            if isinstance(node, exp.Column) and not node.table and node.name in values:
-                return exp.Paren(this=values[node.name].copy())
-            return node
-
-        return metric.template.copy().transform(substitute)
+        return metric.template.copy().transform(_operand_substitution(metric, columns_of))
     value = _combine_expr(metric, columns_of(metric))
     if metric.accumulate is not None:
         value = _accumulate_expr(metric.accumulate, value)
@@ -531,13 +598,10 @@ def compose(
             _alias(cast("exp.Expression", exp.column(_IS_FINAL, table=dim_source)), _IS_FINAL)
         )
     for metric in metrics:
-        if substitutes_zero_denominator(metric):
-            denominator = exp.column(
-                metric.refs[1].column, table=names_by_index[owner_of[metric.refs[1].leaf]]
-            )
+        if counts_zero_denominator(metric):
             projections.append(
                 _zero_denominator_flag(
-                    cast("exp.Expression", denominator), zero_denominator_column(metric.name)
+                    _counted_denominators(metric, columns_of), zero_denominator_column(metric.name)
                 )
             )
 

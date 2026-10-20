@@ -57,7 +57,5 @@
     ]
   ],
   "trust_tier": "provisional",
-  "warnings": [
-    "zero denominator for metric 'payment_rate_5d' yields NULL (on_zero_denominator=null)"
-  ]
+  "warnings": []
 }

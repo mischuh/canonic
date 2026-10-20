@@ -115,7 +115,10 @@ SELECT
       "_leaf_2"."rental_count"
     ) IS NULL THEN 0 END
   ) AS "revenue_paid_within_5d",
-  "_leaf_2"."rental_count" AS "rental_count"
+  "_leaf_2"."rental_count" AS "rental_count",
+  CASE WHEN (
+    "_leaf_2"."rental_count"
+  ) = 0 THEN 1 ELSE 0 END AS "_canonic_zero_denominator_payment_rate_5d"
 FROM "_grain"
 LEFT JOIN "_leaf_0"
   ON (

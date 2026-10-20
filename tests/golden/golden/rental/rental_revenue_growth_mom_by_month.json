@@ -71,7 +71,5 @@
     ]
   ],
   "trust_tier": "provisional",
-  "warnings": [
-    "zero denominator for metric 'rental_revenue_growth_mom' yields NULL (on_zero_denominator=null)"
-  ]
+  "warnings": []
 }

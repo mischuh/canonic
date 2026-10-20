@@ -53,7 +53,10 @@ SELECT
     )
   ) AS REAL) / NULLIF((
     "_leaf_1"."rental_revenue"
-  ), 0) AS "rental_revenue_growth_mom"
+  ), 0) AS "rental_revenue_growth_mom",
+  CASE WHEN (
+    "_leaf_1"."rental_revenue"
+  ) = 0 THEN 1 ELSE 0 END AS "_canonic_zero_denominator_rental_revenue_growth_mom"
 FROM "_grain"
 LEFT JOIN "_leaf_0"
   ON (

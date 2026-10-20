@@ -44,6 +44,9 @@ SELECT
   ), 0) AS REAL) / NULLIF((
     "_leaf_1"."rental_count"
   ), 0) AS "payment_rate_5d",
-  "_leaf_1"."rental_count" AS "rental_count"
+  "_leaf_1"."rental_count" AS "rental_count",
+  CASE WHEN (
+    "_leaf_1"."rental_count"
+  ) = 0 THEN 1 ELSE 0 END AS "_canonic_zero_denominator_payment_rate_5d"
 FROM "_leaf_0"
 CROSS JOIN "_leaf_1"

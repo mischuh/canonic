@@ -20,6 +20,7 @@ from canonic.compiler.compose import (
     MetricLeaves,
     MetricPlan,
     guard_division,
+    nulls_zero_denominator,
     operand_placeholder,
     zero_denominator_warning,
 )
@@ -63,8 +64,15 @@ def plan_metric(
     combine = _ZERO_POLICY[derived.on_zero_denominator]
     template = _template(derived.expr, [name for name, _ in derived.inputs], combine)
     divides = template.find(exp.Div) is not None
-    warnings = tuple(w for p in planned_inputs for w in p.warnings)
-    if divides and combine is Combine.RATIO_NULL:
+    # The zero denominators of the inputs are counted and reported under this metric's name,
+    # since an input that is not requested on its own never has its warning resolved.
+    input_zero_warnings = {
+        zero_denominator_warning(plan.name) for operand in operands for plan in operand.walk()
+    }
+    warnings = tuple(w for p in planned_inputs for w in p.warnings if w not in input_zero_warnings)
+    if (divides and combine is Combine.RATIO_NULL) or any(
+        nulls_zero_denominator(operand) for operand in operands
+    ):
         warnings = (*warnings, zero_denominator_warning(queried_name))
 
     return MetricLeaves(
@@ -75,6 +83,7 @@ def plan_metric(
             combine=Combine.DERIVED,
             operands=tuple(operands),
             template=template,
+            division=combine if divides else None,
         ),
         resolved=binding.resolved_key or queried_name,
         offsets=tuple(o for p in planned_inputs for o in p.offsets),
