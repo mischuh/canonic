@@ -20,6 +20,7 @@ from canonic.compiler._helpers import (
     _bind_filters,
     _find_dimension,
     _resolve_dimensions,
+    enclosing_population,
     time_shift,
 )
 from canonic.compiler.joins import build_alias_tree
@@ -70,7 +71,7 @@ def plan_metric(
         offset=offset.offset,
         prefilters=_prefilters(query, offset, owner, sources_by_name),
     )
-    with time_shift(shift):
+    with time_shift(shift), enclosing_population(binding.binding.canonical.population_filter):
         planned = plan_base(offset.base.metric, offset.base)
 
     warnings = planned.warnings

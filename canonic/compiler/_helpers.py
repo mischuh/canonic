@@ -181,6 +181,36 @@ def current_time_shifts() -> tuple[TimeShift, ...]:
     return _TIME_SHIFTS.get()
 
 
+#: The ``population_filter`` of every offset and derived metric the metric being planned sits
+#: under, outermost first. Every leaf planned inside honors them next to its own.
+_ENCLOSING_POPULATIONS: ContextVar[tuple[str, ...]] = ContextVar(
+    "canonic_enclosing_populations", default=()
+)
+
+
+@contextmanager
+def enclosing_population(population_filter: str | None) -> Iterator[None]:
+    """Plan everything inside the block within ``population_filter``, when there is one.
+
+    An offset or derived metric plans its base or inputs through the router, by their own kind,
+    so its population cannot be handed down as an argument the way a ratio hands it to its
+    components. Every leaf reads it from here instead, unshifted, like its own filter.
+    """
+    if population_filter is None:
+        yield
+        return
+    token = _ENCLOSING_POPULATIONS.set((*_ENCLOSING_POPULATIONS.get(), population_filter))
+    try:
+        yield
+    finally:
+        _ENCLOSING_POPULATIONS.reset(token)
+
+
+def current_enclosing_populations() -> tuple[str, ...]:
+    """The population filters of the offset and derived metrics being planned, outermost first."""
+    return _ENCLOSING_POPULATIONS.get()
+
+
 @contextmanager
 def shifted_columns(
     shifts: Sequence[TimeShift],
