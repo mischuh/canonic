@@ -1,0 +1,78 @@
+---
+title: "canonic and other tools"
+description: "What canonic is for, how it differs from dbt MetricFlow, Cube, LookML and Apache Ossie, and how to use them together."
+---
+
+Most tools people compare canonic with are not substitutes. They sit at different points of the data stack and answer different questions. This page maps the roles first, then compares them on the same axes, and ends with a short guide to what to pick when.
+
+<Note>Last verified against the vendors' public documentation in October 2026. Other tools change faster than this page. If you spot a claim that is out of date, please [open an issue](https://github.com/mischuh/canonic/issues).</Note>
+
+## Roles at a glance
+
+| Tool | What it is for | Where it sits |
+| --- | --- | --- |
+| **dbt MetricFlow** | Defining metrics next to the transformations that produce the tables | The transform stack, authored by analytics engineers |
+| **Cube** | Serving governed metrics to BI tools, apps and agents with caching and access control | A runtime between the warehouse and its consumers |
+| **LookML / Looker** | Modeling for one BI tool, with dashboards and explores built on top | Inside the BI tool |
+| **Apache Ossie** | Moving a semantic model from one tool to another | A file format, not an engine |
+| **canonic** | Giving an agent correct, governed answers with the context to explain them | A layer next to the warehouse, fed by the tools on this list |
+
+canonic is not a BI tool, not a transformation framework and not a chat interface. It is read-only against the warehouse and has no LLM in the answer path. What it adds to the picture is the part the other tools leave to the caller: which rules apply to this question, how the number rolls up at this grain, and how far to trust the result.
+
+## Side by side
+
+| | dbt MetricFlow | Cube | LookML / Looker | Apache Ossie | canonic |
+| --- | --- | --- | --- | --- | --- |
+| Primary role | Metric definitions in the transform stack | Semantic layer as a service | BI-coupled modeling | Interchange format | Context layer and compiler for agents |
+| Where definitions live | YAML in the dbt project | Data model files in the Cube project | LookML in a Looker project | YAML or JSON model files | `semantics/`, `contracts/` and `knowledge/` in git |
+| How a metric rolls up | The aggregate the modeler chose | The measure type the modeler chose | The measure type the modeler chose | A SQL expression, the consumer decides | Fixed by the binding `kind`, the same at every grain |
+| Business rules | A `filter` on each metric | Filters in the model, access rules in code | Filters and access grants in LookML | Prose in `ai_context` | `mandatory_filter` and other guardrails on the data, applied to every query |
+| Result metadata for the caller | Rows | Rows | Rows | Not applicable | Rows plus definition used, guardrails fired, freshness and a trust tier |
+| Checking a served metric | Table and column tests | Not built in | Not built in | Not built in | Assertions on the metric, run as a CI gate |
+| Authoring | Written by hand | Written by hand | Written by hand | Written by hand or converted | Drafted from schema, manifests and usage evidence, applied as a reviewed diff |
+| Agent interface | dbt MCP server | APIs and an MCP server documented for Cube Cloud | Looker MCP Toolbox, plus a managed MCP server in preview | None, it is a format | MCP server with 14 tools, same core as the CLI |
+| Execution | Generates SQL, run by the dbt platform or your own code | Cube runtime with caching | Looker | None | Generates SQL, runs it read-only against your warehouse |
+
+Read the table as a sketch of where the emphasis lies, not as a scorecard. Several cells say "the modeler chose" because that is a design decision, not a gap. A tool that lets you pick the aggregate gives you control, and a tool that fixes it by kind gives you a guarantee.
+
+## How they fit together
+
+canonic ingests rather than replaces. The connectors read what you already have and turn it into reviewable proposals:
+
+- **dbt.** A manifest becomes measures, joins and `count_distinct` binding candidates. See [connectors](/concepts/connectors) and the [jaffle-shop guide](/guides/jaffle-shop).
+- **Looker and other BI tools.** Dashboards, explores and usage become evidence about which definitions people actually rely on. BI-encoded SQL is only ever evidence and is never executed.
+- **Apache Ossie.** A model is imported as semantics and contracts. See the [ossie-retail guide](/guides/ossie-retail).
+
+In all three cases the source of truth for your transformations and dashboards stays where it is. canonic adds a layer that a person or an agent can ask.
+
+## Which one do you need
+
+| If you... | Then |
+| --- | --- |
+| Want metrics defined next to your models and tested with dbt | Use MetricFlow. Add canonic when an agent is asking the questions and you want rules enforced and a trust tier on every answer. |
+| Need a caching, multi-consumer serving layer for dashboards and apps | Look at Cube. canonic does not cache or serve BI tools. |
+| Live in Looker | Keep LookML for your dashboards. Let canonic read Looker as evidence. |
+| Need to move a model between tools | Use Apache Ossie as the format. canonic can import it. |
+| Want an agent to answer questions on your warehouse and refuse when it is not sure | Use canonic. |
+| Have no semantic layer yet and no time to hand-write one | Start with canonic's drafts from your live schema and review them. |
+
+## Detailed comparisons
+
+<CardGroup cols={2}>
+  <Card title="dbt MetricFlow" icon="code-compare" href="/compare/dbt-metricflow">
+    Two ideas of a metric, what stays in dbt and how to bring a dbt project into canonic.
+  </Card>
+  <Card title="Worked example: coffeehouse" icon="mug-hot" href="/guides/coffeehouse">
+    The same questions answered by both, with real output and hand-checked numbers.
+  </Card>
+</CardGroup>
+
+## Sources
+
+Claims about other tools are based on their public documentation at the time of writing:
+
+- dbt Labs, [MetricFlow is open source under Apache 2.0](https://www.getdbt.com/blog/open-source-metricflow-governed-metrics)
+- dbt Labs, [About MetricFlow](https://docs.getdbt.com/docs/build/about-metricflow)
+- Cube, [Cube Core repository](https://github.com/cube-js/cube) and [MCP server documentation](https://docs.cube.dev/docs/integrations/mcp-server)
+- Google Cloud, [Use Looker with MCP, Gemini CLI and other agents](https://docs.cloud.google.com/looker/docs/connect-ide-to-looker-using-mcp-toolbox)
+- Apache Ossie, [project site](https://ossie.apache.org/)
