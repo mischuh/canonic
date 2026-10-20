@@ -1,0 +1,62 @@
+---
+title: "canonic and warehouse-native semantic layers"
+description: "How Snowflake semantic views and Databricks metric views relate to canonic, with short notes on Malloy, Rill, Omni and the Boring Semantic Layer."
+---
+
+More and more warehouses ship their own semantic objects. They are the closest neighbours of canonic in one respect: they live next to the data and are meant to be queried by agents. This page covers the two large ones, then gives short notes on four smaller tools.
+
+<Note>Last verified against the vendors' public documentation and project pages in October 2026. These products change quickly, so check the linked sources for the current state.</Note>
+
+## Snowflake semantic views
+
+A semantic view is a schema-level Snowflake object. It defines logical tables and their relationships, facts, dimensions and metrics. SQL users can select from it, BI tools can use its metrics and dimensions, and Cortex Agents and the Cortex Analyst REST API read the definition to answer natural-language questions. Creating, querying and granting access to a semantic view are covered by Snowflake privileges.
+
+## Databricks metric views
+
+A metric view is a Unity Catalog object defined in YAML. It declares a source, dimensions, measures, filters and joins, including star and snowflake schemas. Users group by any available dimension and the engine generates the computation, instead of fixing the grouping at creation time as a standard view does. Metric views can be consumed from SQL editors, notebooks, dashboards, Genie Agents, alerts and external BI tools such as Power BI, Tableau and Sigma.
+
+## How they compare with canonic
+
+| | Snowflake semantic views | Databricks metric views | canonic |
+| --- | --- | --- | --- |
+| Where it lives | In the Snowflake schema | In Unity Catalog | Files in git, next to any supported warehouse |
+| Works across warehouses | No | No | Yes, eight SQL dialects |
+| Agent interface | Cortex Agents and the Cortex Analyst API | Genie Agents | MCP server, usable from any MCP client |
+| Who generates the SQL | Snowflake, from the definition | Databricks, from the definition | A deterministic compiler, with no LLM in the answer path |
+| How a metric rolls up | The aggregate in the metric definition | The aggregate in the measure definition | Fixed by the binding `kind`, recomputed from base rows at every grain |
+| Business rules | Filters in the definition, privileges on the object | Filters in the definition, Unity Catalog permissions | Guardrails attached to a source and applied to every measure on it |
+| Result metadata for the caller | Rows | Rows | Rows plus definition used, guardrails fired, freshness and a trust tier |
+| Authoring | Written by hand, with a Snowsight wizard | Written by hand, with a Catalog Explorer UI | Drafted from schema, manifests and usage evidence, applied as a reviewed diff |
+
+Read the first two rows as the real trade-off. A warehouse-native object is the shortest path if you run on one warehouse and want its own agent to use it. canonic is the better fit when you run on several, want the rules and the review history in git, or want the same answer from any agent.
+
+canonic does not read Snowflake semantic views or Databricks metric views today. Its Snowflake and Databricks connectors read the warehouse schema, not those objects. If you already maintain either, the two can sit side by side. Bind the canonical definitions in canonic, use assertions to compare their numbers with what the warehouse-native object returns, and treat any difference as a definition to resolve.
+
+## Short notes on other tools
+
+| Tool | What it is | Relation to canonic |
+| --- | --- | --- |
+| **Malloy** | An open-source (MIT) language that combines semantic modeling with querying and generates SQL for engines such as BigQuery, Snowflake, DuckDB, PostgreSQL and Databricks. A separate server, Publisher, exposes Malloy models over REST and MCP | A modeling language you write and maintain. canonic has no Malloy connector |
+| **Rill** | An open-source (Apache 2.0) BI tool on OLAP engines such as ClickHouse and DuckDB, with a YAML `metrics_view` semantic layer and an MCP server | A BI tool with its semantic layer built in. canonic is not a BI tool |
+| **Omni** | A commercial BI platform with a layered semantic model, defined in YAML or in the app, where metrics can be promoted from a workbook to a shared model | Coupled to the BI platform, like LookML. canonic can serve agents next to it |
+| **Boring Semantic Layer** | A lightweight open-source (MIT) Python package built on Ibis, described as MCP-friendly | A library you embed in Python code. canonic is a standalone layer with a CLI and MCP server |
+
+None of these entries is a verdict. Several are good choices if their shape fits your stack. The common thread with the tools on the other pages is the same one: a definition tells a tool how to compute a number, and canonic adds the rules, the review trail and the trust tier around it.
+
+<CardGroup cols={2}>
+  <Card title="canonic and other tools" icon="scale-balanced" href="/compare/overview">
+    The roles and a side-by-side table for dbt, Cube, LookML and Ossie.
+  </Card>
+  <Card title="Guide: Snowflake" icon="snowflake" href="/guides/snowflake">
+    Running canonic on a Snowflake warehouse.
+  </Card>
+</CardGroup>
+
+## Sources
+
+- Snowflake, [Overview of semantic views](https://docs.snowflake.com/en/user-guide/views-semantic/overview)
+- Databricks, [Unity Catalog metric views](https://docs.databricks.com/aws/en/metric-views)
+- Malloy, [project repository](https://github.com/malloydata/malloy)
+- Rill, [project repository](https://github.com/rilldata/rill)
+- Omni, [Modeling documentation](https://docs.omni.co/modeling)
+- Boring Semantic Layer, [project repository](https://github.com/boringdata/boring-semantic-layer)

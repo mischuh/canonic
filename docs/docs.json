@@ -89,7 +89,8 @@
           "compare/dbt-metricflow",
           "compare/cube",
           "compare/lookml-looker",
-          "compare/ossie-and-interchange"
+          "compare/ossie-and-interchange",
+          "compare/warehouse-native"
         ]
       },
       {
