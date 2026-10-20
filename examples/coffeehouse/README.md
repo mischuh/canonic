@@ -18,6 +18,8 @@ canonic query --metrics active_customers
 canonic assert                 # 4/4 assertions pass
 canonic decompose --metric gross_margin_rate --period-dimension order_month \
   --base 2026-01 --compare 2026-02 --by category   # why the margin fell
+canonic decompose --metric revenue --period-dimension order_week \
+  --base 2026-05 --compare 2026-06 --by category   # weeks as labels (time_format)
 bash scripts/compare.sh        # dbt MetricFlow and canonic side by side
 ```
 

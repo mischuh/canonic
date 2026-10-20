@@ -132,6 +132,25 @@ class TestProbeIsPlanned:
         (probe,) = compiled.probe_columns
         assert (probe.subject, probe.grain) == ("booked_month", "month")
 
+    def test_a_probe_carries_the_time_format(self) -> None:
+        source = _orders(
+            Dimension(name="booked_week", column="booked", time_grain="week", time_format="%G-%V")
+        )
+        compiled = _compile(filters=["booked_week >= '2026-40'"], source=source)
+
+        (probe,) = compiled.probe_columns
+        assert probe.time_format is not None
+        assert probe.time_format.format == "%G-%V"
+
+    def test_a_label_that_does_not_sort_by_time_is_not_probed(self) -> None:
+        # MAX('43/2025', '01/2026') is the older week, so the probe would name the wrong one.
+        source = _orders(
+            Dimension(name="booked_week", column="booked", time_grain="week", time_format="%V/%G")
+        )
+        compiled = _compile(filters=["booked_week IN ('01/2026')"], source=source)
+
+        assert compiled.probe_columns == ()
+
     def test_each_filtered_dimension_gets_its_own_probe(self) -> None:
         compiled = _compile(filters=["order_month >= '2026-01-01'", "booked_month >= '2026-01'"])
 

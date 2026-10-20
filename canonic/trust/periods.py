@@ -12,6 +12,7 @@ if TYPE_CHECKING:
 
     from canonic.compiler.result import CompileResult, TimeDimension
     from canonic.connectors.base import ResultSet
+    from canonic.semantic.time_format import TimeFormat
 
 __all__ = ["OpenPeriod", "floor_to_grain", "open_periods", "parse_period_start", "period_end"]
 
@@ -28,10 +29,14 @@ class OpenPeriod:
     dimension: str
     grain: str
     start: datetime
+    #: The dimension's declared label form. The period is then named as the data spells it.
+    time_format: TimeFormat | None = None
 
     @property
     def label(self) -> str:
         """The period as a short, stable label such as ``2026-10`` or ``2026-10-18``."""
+        if self.time_format is not None:
+            return self.time_format.render(self.start)
         if self.grain == "hour":
             return self.start.strftime("%Y-%m-%d %H:00")
         if self.grain == "month":
@@ -87,17 +92,25 @@ def floor_to_grain(moment: datetime, grain: str) -> datetime:
     return day.replace(month=1, day=1)
 
 
-def parse_period_start(value: Any, grain: str) -> datetime | None:
+def parse_period_start(
+    value: Any, grain: str, time_format: TimeFormat | None = None
+) -> datetime | None:
     """The instant a dimension value's period begins, as naive UTC, or ``None`` if unreadable.
 
-    A bucketed date or timestamp is already the start of its period. A label is read from the
-    forms ``2026``, ``2026-10``, ``2026-Q4``, ``2026-W43`` and ISO dates. A value that fits none
-    of them is left alone: the check is a signal, so it stays inactive instead of guessing.
+    A bucketed date or timestamp is already the start of its period. A label is read with the
+    dimension's ``time_format`` when it declares one, and only with it. Without one, a label is
+    read from the forms ``2026``, ``2026-10``, ``2026-Q4``, ``2026-W43`` and ISO dates, and on a
+    ``week`` grain ``2026-43`` is the ISO week, not a month. A value that fits none of them is
+    left alone: the check is a signal, so it stays inactive instead of guessing.
     """
     if isinstance(value, datetime):
         return value.astimezone(UTC).replace(tzinfo=None) if value.tzinfo else value
     if isinstance(value, date):
         return datetime(value.year, value.month, value.day)
+    if time_format is not None:
+        if isinstance(value, bool) or not isinstance(value, str | int):
+            return None
+        return time_format.parse(str(value))
     if isinstance(value, int) and not isinstance(value, bool) and grain == "year":
         return datetime(value, 1, 1) if 1 <= value <= 9999 else None
     if not isinstance(value, str):
@@ -107,6 +120,9 @@ def parse_period_start(value: Any, grain: str) -> datetime | None:
         if match := _YEAR.match(text):
             return datetime(int(match[1]), 1, 1)
         if match := _MONTH.match(text):
+            if grain == "week":
+                monday = date.fromisocalendar(int(match[1]), int(match[2]), 1)
+                return datetime(monday.year, monday.month, monday.day)
             return datetime(int(match[1]), int(match[2]), 1)
         if match := _QUARTER.match(text):
             return datetime(int(match[1]), 3 * (int(match[2]) - 1) + 1, 1)
@@ -147,12 +163,14 @@ def open_periods(
     for probe in compiled.probe_columns:
         if probe.kind != PROBE_LATEST_PERIOD or probe.grain is None:
             continue
-        latest = parse_period_start((probes or {}).get((probe.kind, probe.subject)), probe.grain)
+        latest = parse_period_start(
+            (probes or {}).get((probe.kind, probe.subject)), probe.grain, probe.time_format
+        )
         if latest is None:
             continue
         start = floor_to_grain(latest, probe.grain)
         if period_end(start, probe.grain) > now_utc:
-            found.append(OpenPeriod(probe.subject, probe.grain, start))
+            found.append(OpenPeriod(probe.subject, probe.grain, start, probe.time_format))
     return found
 
 
@@ -165,11 +183,18 @@ def _latest_open(
     starts = [
         start
         for row in rows
-        if (start := parse_period_start(row[index], time_dimension.grain)) is not None
+        if (
+            start := parse_period_start(
+                row[index], time_dimension.grain, time_dimension.time_format
+            )
+        )
+        is not None
     ]
     if not starts:
         return None
     latest = max(starts)
     if period_end(latest, time_dimension.grain) <= now:
         return None
-    return OpenPeriod(time_dimension.column, time_dimension.grain, latest)
+    return OpenPeriod(
+        time_dimension.column, time_dimension.grain, latest, time_dimension.time_format
+    )

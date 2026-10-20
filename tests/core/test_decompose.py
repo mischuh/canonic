@@ -101,12 +101,34 @@ dimensions:
   - {name: team, column: team}
 """
 
+# Weekly bookings with three spellings of one week: an ISO week without W and a declared
+# time_format, the same label without one, and a sprint code no known form reads.
+_WEEKLY_YAML = """\
+name: weekly
+connection: warehouse_duckdb
+table: weekly
+grain: [year_week, team]
+columns:
+  - {name: year_week, type: string, nullable: false}
+  - {name: sprint, type: string, nullable: false}
+  - {name: team, type: string, nullable: false}
+  - {name: amount, type: decimal, nullable: false}
+measures:
+  - {name: booked, expr: "sum(amount)", additivity: additive}
+dimensions:
+  - {name: booking_week, column: year_week, time_grain: week, time_format: "%G-%V"}
+  - {name: plain_week, column: year_week, time_grain: week}
+  - {name: sprint, column: sprint, time_grain: week}
+  - {name: crew, column: team}
+"""
+
 _METRICS = {
     "revenue": "canonical: {source: sales, measure: revenue}",
     "costs": "canonical: {source: sales, measure: costs}",
     "net_result": "canonical: {source: sales, measure: net_result}",
     "units": "canonical: {source: sales, measure: units}",
     "target": "canonical: {source: targets, measure: target}",
+    "booked": "canonical: {source: weekly, measure: booked}",
     "revenue_echo": "canonical: {source: sales, measure: revenue}",
     "buyers": "canonical: {kind: distinct_count, source: sales, distinct_on: sale_id}",
     "price": "canonical: {kind: ratio, numerator: revenue, denominator: units}",
@@ -159,6 +181,14 @@ def decompose_project(tmp_path: Path) -> Path:
         "INSERT INTO targets VALUES ('2025-08', 'a', 100), ('2025-08', 'b', 50), "
         "('2025-09', 'a', 120), ('2025-09', 'b', 40), ('2025-10', 'a', 999)"
     )
+    con.execute(
+        "CREATE TABLE weekly (year_week VARCHAR, sprint VARCHAR, team VARCHAR, "
+        "amount DECIMAL(12,2))"
+    )
+    con.execute(
+        "INSERT INTO weekly VALUES ('2025-42', 'S41', 'a', 10), ('2025-42', 'S41', 'b', 20), "
+        "('2025-43', 'S42', 'a', 15), ('2025-43', 'S42', 'b', 30), ('2025-44', 'S43', 'a', 99)"
+    )
     con.close()
 
     (tmp_path / "canonic.yaml").write_text(
@@ -172,6 +202,7 @@ def decompose_project(tmp_path: Path) -> Path:
     (semantics / "sales.yaml").write_text(_SALES_YAML)
     (semantics / "regions.yaml").write_text(_REGIONS_YAML)
     (semantics / "targets.yaml").write_text(_TARGETS_YAML)
+    (semantics / "weekly.yaml").write_text(_WEEKLY_YAML)
     metrics = tmp_path / "contracts" / "metrics"
     metrics.mkdir(parents=True)
     for name, canonical in _METRICS.items():
@@ -251,6 +282,76 @@ class TestAdditive:
         )
         assert (result.total.base, result.total.compare) == (150.0, 160.0)
         assert {r.member: r.contribution for r in result.by["team"].rows} == {"a": 20.0, "b": -10.0}
+
+
+class TestWeekLabels:
+    @staticmethod
+    def _week(dimension: str, base: str, compare: str, **extra: Any) -> DecomposeRequest:
+        return _request(
+            "booked",
+            ["crew"],
+            period={"dimension": dimension, "base": base, "compare": compare},
+            **extra,
+        )
+
+    @pytest.mark.parametrize("dimension", ["booking_week", "plain_week", "sprint"])
+    async def test_rows_are_matched_to_the_periods_by_their_label(
+        self, service: CanonicService, dimension: str
+    ) -> None:
+        base, compare = ("S41", "S42") if dimension == "sprint" else ("2025-42", "2025-43")
+        result = await service.decompose(self._week(dimension, base, compare))
+
+        assert (result.total.base, result.total.compare) == (30.0, 45.0)
+        assert {r.member: r.contribution for r in result.by["crew"].rows} == {
+            "a": 5.0,
+            "b": 10.0,
+        }
+
+    @pytest.mark.parametrize("dimension", ["booking_week", "plain_week"])
+    async def test_an_open_week_is_refused(self, service: CanonicService, dimension: str) -> None:
+        # 2025-10-22 is the Wednesday of ISO week 43.
+        as_of = datetime(2025, 10, 22, tzinfo=UTC)
+        with pytest.raises(PeriodOpen, match="the week 2025-43 has not ended"):
+            await service.decompose(self._week(dimension, "2025-42", "2025-43", as_of=as_of))
+
+    async def test_allow_open_period_names_the_week_as_the_data_spells_it(
+        self, service: CanonicService
+    ) -> None:
+        request = self._week(
+            "booking_week",
+            "2025-42",
+            "2025-43",
+            as_of=datetime(2025, 10, 22, tzinfo=UTC),
+            allow_open_period=True,
+        )
+        result = await service.decompose(request)
+
+        assert [w for w in result.metadata.warnings if "has not ended" in w] == [
+            "booking_week: the week 2025-43 has not ended, so its figures are incomplete"
+        ]
+
+    async def test_a_label_that_does_not_fit_the_time_format_is_rejected(
+        self, service: CanonicService
+    ) -> None:
+        with pytest.raises(ValidationFailed, match="does not fit the time_format '%G-%V'"):
+            await service.decompose(self._week("booking_week", "2025-W42", "2025-W43"))
+
+    async def test_an_unreadable_label_is_decomposed_with_a_warning(
+        self, service: CanonicService
+    ) -> None:
+        # S42 is no form canonic reads, so even a clock inside the sprint cannot refuse it.
+        as_of = datetime(2025, 10, 22, tzinfo=UTC)
+        result = await service.decompose(self._week("sprint", "S41", "S42", as_of=as_of))
+
+        assert result.total.delta == 15.0
+        assert (
+            "sprint: 'S41' is not a week label canonic can read, so whether its period has "
+            "ended was not checked; declare time_format on the dimension"
+        ) in result.metadata.warnings
+
+    async def test_the_same_label_twice_is_rejected(self, service: CanonicService) -> None:
+        with pytest.raises(ValidationFailed, match="same week"):
+            await service.decompose(self._week("sprint", "S41", " S41"))
 
 
 class TestRatio:

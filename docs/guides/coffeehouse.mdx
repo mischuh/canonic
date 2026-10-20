@@ -333,6 +333,31 @@ canonic decompose --metric revenue_per_unit --period-dimension order_month \
 
 No grinder got more expensive. Most of the increase is mix: a larger share of the units sold were grinders. Over MCP the same result comes from `decompose_change`, and the agent is told to call it instead of subtracting two queries. Average order value has a distinct count in its denominator, and one order can contain several categories, so it is decomposed overall but not by category.
 
+### Weeks as labels
+
+Many warehouses report weeks as text, such as `2026-05` from `to_char(order_date, 'IYYY-IW')`. The coffeehouse has one, `order_week`, derived from the order date:
+
+```yaml
+# semantics/coffeehouse_duckdb/orders.yaml
+- { name: order_week, expr: "strftime(order_date, '%G-%V')", type: string, label: "Order Week",
+    time_grain: week, time_format: "%G-%V" }
+```
+
+`time_grain` says that one value is a week, and `time_format` says how the label spells it: ISO year, a hyphen, ISO week. `decompose` takes the labels as they are in the data:
+
+```bash
+canonic decompose --metric revenue --period-dimension order_week \
+  --base 2026-05 --compare 2026-06 --by category
+```
+
+| Category | Week 2026-05 | Week 2026-06 | Contribution |
+| --- | --- | --- | --- |
+| equipment | 0.00 | 120.00 | +120.00 |
+| coffee | 30.00 | 135.00 | +105.00 |
+| accessories | 15.00 | 90.00 | +75.00 |
+
+ISO week 5 runs from 26 January to 1 February and holds orders 6 and 7. Week 6 holds orders 8 to 10, among them Ben's large store order. On a `week` grain canonic reads `2026-05` as an ISO week even without a format. `time_format` makes that explicit and makes it the only form: a label such as `2026-W05` is rejected with the expected format and an example, instead of being read some other way. See [Period labels](/reference/semantic-schema#period-labels) for the placeholders and the forms canonic reads without a format.
+
 ## And Apache Ossie?
 
 [Apache Ossie](https://ossie.apache.org/) is an interchange format for semantic models, not a query engine. A metric is a SQL expression with a description and `ai_context`, and a consumer decides how to execute it. The [ossie-retail example](/guides/ossie-retail) defines average order value the way most people would write it:

@@ -13,7 +13,8 @@ import sqlglot
 from pydantic import BaseModel, ConfigDict, model_validator
 from sqlglot import exp
 
-from canonic.exc import SemanticValidationError
+from canonic.exc import InvalidTimeFormat, SemanticValidationError
+from canonic.semantic.time_format import TimeFormat, compile_time_format
 
 __all__ = [
     "Additivity",
@@ -205,6 +206,9 @@ class Dimension(BaseModel):
     #: ``quarter`` or ``year``), for a dimension whose values are not bucketed by ``granularity``,
     #: such as a month label. It lets a served result be checked for a period that has not ended.
     time_grain: str | None = None
+    #: How a label of ``time_grain`` spells its period, with ``strftime``-style placeholders,
+    #: for example ``%G-%V`` for ``2026-43``. Without it, labels are read from common forms.
+    time_format: str | None = None
     label: str | None = None  # human-readable display name, e.g. "Product Type"
     description: str | None = None  # freetext explanation
     aliases: list[str] = []  # alternate lookup names, e.g. ["product_type"]
@@ -237,7 +241,24 @@ class Dimension(BaseModel):
                 f"dimension {self.name!r} sets time_grain {self.time_grain!r}; "
                 f"it must be one of {', '.join(PERIOD_GRAINS)}"
             )
+        if self.time_format is not None:
+            if self.time_grain is None:
+                raise ValueError(
+                    f"dimension {self.name!r} sets time_format without time_grain; the format "
+                    f"spells a label of a known period, so time_grain is required"
+                )
+            try:
+                compile_time_format(self.time_format, self.time_grain)
+            except InvalidTimeFormat as exc:
+                raise ValueError(f"dimension {self.name!r}: {exc}") from exc
         return self
+
+    @property
+    def period_format(self) -> TimeFormat | None:
+        """The compiled ``time_format``, or ``None`` when labels are read from common forms."""
+        if self.time_format is None or self.time_grain is None:
+            return None
+        return compile_time_format(self.time_format, self.time_grain)
 
     @property
     def period_grain(self) -> str | None:

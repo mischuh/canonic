@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from canonic.contracts.principal import TenantScope
+    from canonic.semantic.time_format import TimeFormat
 
 __all__ = [
     "CompileResult",
@@ -95,11 +96,13 @@ class TimeDimension:
     """A requested dimension whose values are periods of a known grain.
 
     ``column`` is the dimension's output column in the result. The serving layer reads the
-    latest period in that column to tell whether it has ended.
+    latest period in that column to tell whether it has ended. ``time_format`` is the
+    dimension's declared label form, ``None`` to read labels from common forms.
     """
 
     column: str
     grain: str
+    time_format: TimeFormat | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -116,6 +119,8 @@ class ProbeColumn:
     subject: str
     #: The period grain of the dimension a ``latest_period`` probe reads, else ``None``.
     grain: str | None = None
+    #: The declared label form of that dimension, ``None`` to read labels from common forms.
+    time_format: TimeFormat | None = None
 
 
 #: The probe that flags a row whose denominator is zero, one per ratio metric.

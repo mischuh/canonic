@@ -560,6 +560,13 @@ class KnowledgeValidationError(ValueError):
         super().__init__(message)
 
 
+class InvalidTimeFormat(ValueError):
+    """A dimension's ``time_format`` that canonic cannot read labels with.
+
+    Subclasses ValueError so Pydantic reports it as a validation error of the dimension.
+    """
+
+
 class SemanticValidationError(ValueError):
     """A cross-field validation failure that carries the YAML path it concerns.
 

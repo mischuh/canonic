@@ -91,10 +91,16 @@ class _Period:
     dimension: str
     names: frozenset[str]
     grain: str
-    base: datetime
-    compare: datetime
+    #: When the periods begin. ``None`` for a label no known form reads, which leaves the
+    #: open-period check of that period undone.
+    base: datetime | None
+    compare: datetime | None
     predicate: str
     labels: PeriodLabels
+    #: Whether rows are matched to the periods by their label text (a ``time_grain``
+    #: dimension) rather than by the period their date falls in.
+    by_label: bool = False
+    warnings: tuple[str, ...] = ()
 
 
 class DecomposeService:
@@ -184,7 +190,7 @@ class DecomposeService:
                     metadata_blocks,
                     composition=self._composition(binding, request, principal),
                     project_fingerprint=self._ctx.state.fingerprint,
-                    warnings=warnings,
+                    warnings=[*warnings, *period.warnings],
                 ),
             )
             return result
@@ -299,6 +305,9 @@ class DecomposeService:
                 f"dimension {name!r} has no period grain; decompose needs a time dimension "
                 f"with time_grain or a granularity of hour, day, week, month, quarter or year"
             )
+        names = frozenset({dimension.name, *dimension.aliases})
+        if dimension.time_grain is not None:
+            return self._resolve_label_period(request, alias, dimension, grain, names, labels)
         starts = []
         for value in (request.period.base, request.period.compare):
             start = parse_period_start(value, grain)
@@ -313,12 +322,64 @@ class DecomposeService:
             )
         return _Period(
             dimension=name,
-            names=frozenset({dimension.name, *dimension.aliases}),
+            names=names,
             grain=grain,
             base=base,
             compare=compare,
             predicate=_period_predicate(alias, dimension, request, grain, base, compare),
             labels=labels,
+        )
+
+    def _resolve_label_period(
+        self,
+        request: DecomposeRequest,
+        alias: str,
+        dimension: Dimension,
+        grain: str,
+        names: frozenset[str],
+        labels: PeriodLabels,
+    ) -> _Period:
+        """The two periods of a label dimension, which are filtered and matched by their text.
+
+        The labels' starts only serve the open-period check. With a ``time_format`` a label
+        that does not fit it is an error. Without one, a label no known form reads is still
+        decomposed, with a warning that its period was not checked.
+        """
+        name = request.period.dimension
+        if _label_key(request.period.base) == _label_key(request.period.compare):
+            raise ValidationFailed(
+                f"base {request.period.base!r} and compare {request.period.compare!r} are the "
+                f"same {grain}; decompose compares two distinct periods"
+            )
+        time_format = dimension.period_format
+        starts: list[datetime | None] = []
+        warnings: list[str] = []
+        for value in (request.period.base, request.period.compare):
+            start = parse_period_start(value, grain, time_format)
+            if start is None and time_format is not None:
+                example = time_format.render(floor_to_grain(datetime.now(UTC), grain))
+                raise ValidationFailed(
+                    f"{value!r} does not fit the time_format {time_format.format!r} of "
+                    f"dimension {name!r}, for example {example!r}"
+                )
+            if start is None:
+                warnings.append(
+                    f"{name}: {value!r} is not a {grain} label canonic can read, so whether "
+                    f"its period has ended was not checked; declare time_format on the "
+                    f"dimension"
+                )
+            starts.append(None if start is None else floor_to_grain(start, grain))
+        base, compare = starts
+        return _Period(
+            dimension=name,
+            names=names,
+            grain=grain,
+            base=base,
+            compare=compare,
+            predicate=_label_predicate(alias, dimension, request),
+            labels=labels,
+            by_label=True,
+            warnings=tuple(warnings),
         )
 
     def _find(self, name: str, leaf: str, principal: Principal | None) -> tuple[str, Dimension]:
@@ -367,7 +428,7 @@ class DecomposeService:
             (period.base, period.labels.base),
             (period.compare, period.labels.compare),
         ):
-            if period_end(start, period.grain) > now_utc:
+            if start is not None and period_end(start, period.grain) > now_utc:
                 raise PeriodOpen(
                     f"{period.dimension}: the {period.grain} {label} has not ended, so a change "
                     f"against it is misleading; set allow_open_period to decompose it anyway"
@@ -522,17 +583,13 @@ def _period_predicate(
     base: datetime,
     compare: datetime,
 ) -> str:
-    """The filter that keeps the rows of the two periods and nothing else.
+    """The filter that keeps the rows of the two periods of a bucketed time dimension.
 
-    A filter on a dimension name binds to its column without bucketing, so a bucketed time
-    dimension is filtered by range on its column. A label dimension (``time_grain``) is filtered
-    by the two values as given. A derived dimension is filtered by its name, which the compiler
+    A filter on a dimension name binds to its column without bucketing, so it is filtered by
+    range on its column. A derived dimension is filtered by its name, which the compiler
     inlines as its expression.
     """
-    target = dimension.name if dimension.is_derived else f"{alias}.{dimension.column}"
-    if dimension.time_grain is not None:
-        values = ", ".join(_literal(v) for v in (request.period.base, request.period.compare))
-        return f"{target} IN ({values})"
+    target = _target(alias, dimension)
     ranges = " OR ".join(
         f"({target} >= {_instant(start)} AND {target} < {_instant(period_end(start, grain))})"
         for start in (base, compare)
@@ -540,8 +597,25 @@ def _period_predicate(
     return f"({ranges})"
 
 
+def _label_predicate(alias: str, dimension: Dimension, request: DecomposeRequest) -> str:
+    """The filter that keeps the rows of the two periods of a label dimension, by their text."""
+    values = ", ".join(_literal(v) for v in (request.period.base, request.period.compare))
+    return f"{_target(alias, dimension)} IN ({values})"
+
+
+def _target(alias: str, dimension: Dimension) -> str:
+    return dimension.name if dimension.is_derived else f"{alias}.{dimension.column}"
+
+
 def _period_index(value: Any, period: _Period) -> int | None:
     """0 for a row of the base period, 1 for the compare period, ``None`` for neither."""
+    if period.by_label:
+        key = _label_key(value)
+        if key == _label_key(period.labels.base):
+            return 0
+        if key == _label_key(period.labels.compare):
+            return 1
+        return None
     start = parse_period_start(value, period.grain)
     if start is None:
         return None
@@ -551,6 +625,11 @@ def _period_index(value: Any, period: _Period) -> int | None:
     if start == period.compare:
         return 1
     return None
+
+
+def _label_key(value: Any) -> str | None:
+    """A label as text, so ``2026`` from the request matches ``2026`` read from the warehouse."""
+    return None if value is None else str(value).strip()
 
 
 def _number(value: Any) -> float:
