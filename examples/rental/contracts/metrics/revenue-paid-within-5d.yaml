@@ -1,0 +1,14 @@
+metric: revenue_paid_within_5d
+canonical:
+  kind: conversion
+  base_metric: rental_count
+  conversion_metric: rental_revenue
+  entity: rental_id
+  base_time: pickup_date
+  conversion_time: payment_date
+  window: 5 days
+  calculation: conversions
+provenance: human_curated
+label: "Revenue Paid Within 5 Days of Pickup"
+aliases: ["revenue settled within 5 days"]
+status: active

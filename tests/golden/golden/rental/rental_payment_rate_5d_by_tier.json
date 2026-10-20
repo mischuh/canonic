@@ -1,0 +1,63 @@
+{
+  "case": "rental_payment_rate_5d_by_tier",
+  "columns": [
+    {
+      "name": "membership_tier",
+      "type": "string"
+    },
+    {
+      "name": "payment_rate_5d",
+      "type": "float"
+    },
+    {
+      "name": "revenue_paid_within_5d",
+      "type": "float"
+    },
+    {
+      "name": "rental_count",
+      "type": "int"
+    }
+  ],
+  "dialect": "sqlite",
+  "finality": null,
+  "guardrails_fired": [],
+  "project": "rental",
+  "resolved": {
+    "metrics": {
+      "payment_rate_5d": "conversion(rentals.completed_rental_count, paid_rentals, conversion_rate, window=5 days)",
+      "rental_count": "rentals.completed_rental_count",
+      "revenue_paid_within_5d": "conversion(rentals.completed_rental_count, payments.total_paid, conversions, window=5 days)"
+    }
+  },
+  "row_count": 4,
+  "rows": [
+    [
+      "gold",
+      0.625,
+      1659.82,
+      8
+    ],
+    [
+      "platinum",
+      0.166666666667,
+      199.96,
+      6
+    ],
+    [
+      "silver",
+      0.444444444444,
+      939.86,
+      9
+    ],
+    [
+      "standard",
+      0.222222222222,
+      249.95,
+      9
+    ]
+  ],
+  "trust_tier": "provisional",
+  "warnings": [
+    "zero denominator for metric 'payment_rate_5d' yields NULL (on_zero_denominator=null)"
+  ]
+}

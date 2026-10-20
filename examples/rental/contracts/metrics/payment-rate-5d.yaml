@@ -1,0 +1,13 @@
+metric: payment_rate_5d
+canonical:
+  kind: conversion
+  base_metric: rental_count
+  conversion_metric: paid_rentals
+  entity: rental_id
+  base_time: pickup_date
+  conversion_time: payment_date
+  window: 5 days
+provenance: human_curated
+label: "Paid Within 5 Days of Pickup"
+aliases: ["payment conversion rate", "share of rentals paid within 5 days"]
+status: active

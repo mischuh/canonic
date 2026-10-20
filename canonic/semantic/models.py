@@ -447,6 +447,19 @@ class SemanticSource(BaseModel):
 
         return self
 
+    def own_column(self, name: str) -> Column | None:
+        """The column ``name`` refers to on this source, without following a join.
+
+        A dimension backed by one bare column names that column, any other name a column of
+        its own. A computed dimension names none.
+        """
+        dimension = next((d for d in self.dimensions if d.name == name), None)
+        if dimension is not None:
+            if dimension.column is None or dimension.json_path is not None:
+                return None
+            name = dimension.column
+        return next((c for c in self.columns if c.name == name), None)
+
     @staticmethod
     def _reject_duplicates(yaml_key: str, kind: str, names: list[str]) -> None:
         seen: set[str] = set()

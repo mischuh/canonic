@@ -339,6 +339,19 @@ def test_clickhouse_division_does_not_truncate_decimals() -> None:
     assert adapter_for("clickhouse").emit(neutral) == sql  # idempotent on a second render
 
 
+def test_clickhouse_joins_the_spine_with_is_not_distinct_from() -> None:
+    """ClickHouse finds no join key in the OR form once a second join follows."""
+    on = "(g.k = {t}.k OR g.k IS NULL AND {t}.k IS NULL)"
+    neutral = sqlglot.parse_one(
+        f"SELECT g.k FROM g LEFT JOIN a ON {on.format(t='a')} LEFT JOIN b ON {on.format(t='b')}"
+    )
+    sql = adapter_for("clickhouse").emit(neutral)
+    assert 'LEFT JOIN "a" ON isNotDistinctFrom("g"."k", "a"."k")' in sql
+    assert 'LEFT JOIN "b" ON isNotDistinctFrom("g"."k", "b"."k")' in sql
+    other = sqlglot.parse_one("SELECT 1 FROM t WHERE a = b OR a IS NULL AND c IS NULL")
+    assert "isNotDistinctFrom" not in adapter_for("clickhouse").emit(other)
+
+
 def test_clickhouse_watermark_is_parsed_by_best_effort_not_cast() -> None:
     """ClickHouse 25.8 turns ``CAST('<iso with offset>' AS DateTime)`` into NULL without an error."""
     neutral = sqlglot.parse_one(

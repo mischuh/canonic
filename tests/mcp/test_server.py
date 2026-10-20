@@ -294,6 +294,7 @@ async def test_resolve_metric_composite_returns_kind_and_components(
         "cumulative": None,
         "offset": None,
         "derived": None,
+        "conversion": None,
     }
 
 

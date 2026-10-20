@@ -164,7 +164,8 @@ class DialectAdapter(ABC):
         """``day`` moved by ``amount`` units. A negative amount moves back.
 
         Months, quarters and years clamp to the end of the target month, which is what every
-        engine does natively except SQLite. A week is seven days. An ``amount`` that is an
+        engine does natively except SQLite. A week is seven days. Minutes and hours move a
+        timestamp and are meant for ``as_date=False``. An ``amount`` that is an
         expression rather than a number is only supported in days, which is all the day spine
         needs. With ``as_date`` the result is cast back to ``DATE``, since ``date + interval``
         is a timestamp on Postgres and DuckDB and would no longer compare equal to a plain
@@ -197,13 +198,13 @@ def _date_add_node(
 def _normalize_date_step(
     amount: int | exp.Expression, unit: DurationUnit
 ) -> tuple[str, int | exp.Expression]:
-    """``(DAY | MONTH, amount)`` for a step of ``amount`` units."""
+    """``(MINUTE | HOUR | DAY | MONTH, amount)`` for a step of ``amount`` units."""
     if isinstance(amount, exp.Expression):
         if unit is not DurationUnit.DAY:
             raise ValueError(f"a computed date step must be in days, not {unit.value}")
         return "DAY", amount
-    if unit is DurationUnit.DAY:
-        return "DAY", amount
+    if unit in (DurationUnit.MINUTE, DurationUnit.HOUR, DurationUnit.DAY):
+        return unit.value.upper(), amount
     if unit is DurationUnit.WEEK:
         return "DAY", 7 * amount
     months = unit.months
@@ -415,6 +416,12 @@ class SQLiteDialectAdapter(_GenericDialectAdapter):
         """
         function = "DATE" if as_date else "DATETIME"
         sql_unit, count = _normalize_date_step(amount, unit)
+        if sql_unit in ("MINUTE", "HOUR"):
+            assert isinstance(count, int)  # noqa: S101 — only a day step may be computed
+            return cast(
+                "exp.Expression",
+                exp.func("DATETIME", day, exp.Literal.string(f"{count:+d} {sql_unit.lower()}s")),
+            )
         if sql_unit == "DAY":
             if isinstance(count, int):
                 return cast(
@@ -624,6 +631,29 @@ def _divide_as_float(node: exp.Expression) -> exp.Expression:
     )
 
 
+def _null_safe_equality_for_clickhouse(node: exp.Expression) -> exp.Expression:
+    """Rewrite ``a = b OR (a IS NULL AND b IS NULL)`` into ``isNotDistinctFrom(a, b)``.
+
+    The compiler joins every leaf to the spine with that condition. ClickHouse finds a join key
+    in it for one join, but not once a second join follows, so a query of two metrics grouped by
+    a dimension that may be NULL fails there. ``isNotDistinctFrom`` is the same comparison and is
+    a join key ClickHouse always accepts.
+    """
+    inner = node.this if isinstance(node, exp.Paren) else node
+    if not isinstance(inner, exp.Or):
+        return node
+    equal, both_null = inner.this, inner.expression
+    if not isinstance(equal, exp.EQ) or not isinstance(both_null, exp.And):
+        return node
+    left, right = equal.this, equal.expression
+    nulls = [both_null.this, both_null.expression]
+    if not all(isinstance(n, exp.Is) and isinstance(n.expression, exp.Null) for n in nulls):
+        return node
+    if [n.this for n in nulls] != [left, right]:
+        return node
+    return exp.Anonymous(this="isNotDistinctFrom", expressions=[left.copy(), right.copy()])
+
+
 def _widen_bare_decimal_for_clickhouse(node: exp.Expression) -> exp.Expression:
     """Give a parameterless ``CAST(x AS Decimal)`` an explicit precision and scale.
 
@@ -672,6 +702,7 @@ class ClickHouseDialectAdapter(_GenericDialectAdapter):
         ast = ast.transform(_parse_timestamp_literal_for_clickhouse)
         ast = ast.transform(_widen_bare_decimal_for_clickhouse)
         ast = ast.transform(_divide_as_float)
+        ast = ast.transform(_null_safe_equality_for_clickhouse)
         if isinstance(ast, (exp.Select, exp.Union)) and ast.find(exp.Join) is not None:
             if isinstance(ast, exp.Union):
                 # SETTINGS belongs to a SELECT, so a UNION is wrapped to carry it.

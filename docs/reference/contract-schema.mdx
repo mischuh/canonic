@@ -49,7 +49,7 @@ A metric binding is what turns a name like `revenue` into something the compiler
 
 ### `canonical` (`CanonicalRef`): one shape per `kind`
 
-`kind` selects a compilation strategy, and each kind needs a different subset of the fields below. Missing a required field for the chosen `kind` raises a located error at load time rather than failing later at query time. Most metrics are `single`, a direct pointer at one measure on one source. The other kinds exist for shapes a plain source-and-measure pair can't express on its own: `ratio` and `weighted_avg` combine two other metrics after they're each aggregated independently, `semi_additive` handles point-in-time values like balances that can't just be summed across every dimension, `distinct_count` and `percentile` recompute their value at whatever grain the query asks for instead of pre-aggregating, `cumulative` turns an additive measure into a running total, `offset` reads another metric at an earlier period, `derived` combines metrics with arithmetic, and `opaque` is the escape hatch for a measure that's only trustworthy at the exact grain it was computed at.
+`kind` selects a compilation strategy, and each kind needs a different subset of the fields below. Missing a required field for the chosen `kind` raises a located error at load time rather than failing later at query time. Most metrics are `single`, a direct pointer at one measure on one source. The other kinds exist for shapes a plain source-and-measure pair can't express on its own: `ratio` and `weighted_avg` combine two other metrics after they're each aggregated independently, `semi_additive` handles point-in-time values like balances that can't just be summed across every dimension, `distinct_count` and `percentile` recompute their value at whatever grain the query asks for instead of pre-aggregating, `cumulative` turns an additive measure into a running total, `offset` reads another metric at an earlier period, `derived` combines metrics with arithmetic, `conversion` counts the events of one metric that follow the events of another for the same entity, and `opaque` is the escape hatch for a measure that's only trustworthy at the exact grain it was computed at.
 
 | `kind` | Required fields | Compiles as |
 | --- | --- | --- |
@@ -63,6 +63,7 @@ A metric binding is what turns a name like `revenue` into something the compiler
 | `cumulative` | `source`, `measure` (additive), `order_by` (non-empty list of dimensions) | Aggregate the measure to the requested grain, then sum it up along `order_by`, per partition of every other requested dimension. With `window` or `grain_to_date`, a trailing window or a period-to-date total per calendar day. See [Cumulative metrics](#cumulative-metrics). |
 | `offset` | `base` (metric name), `time_dimension`, `offset` (duration) | Plan the base by its own kind on rows whose time column is moved forward by the offset. See [Offset and derived metrics](#offset-and-derived-metrics). |
 | `derived` | `expr`, `inputs` (metrics, optional `alias`) | Aggregate every input at the requested grain, then apply the arithmetic per row. See [Offset and derived metrics](#offset-and-derived-metrics). |
+| `conversion` | `base_metric`, `conversion_metric`, `entity`, `base_time`, `conversion_time` | Attribute each conversion event to the latest earlier base event of the same entity, then count or rate the conversions per base dimension. See [Conversion metrics](#conversion-metrics). |
 
 Full field list on `CanonicalRef`:
 
@@ -74,7 +75,7 @@ Full field list on `CanonicalRef`:
 | `numerator` / `denominator` | `str \| null` | `null` | `ratio` (both are metric names). |
 | `weighted_sum` / `weight` | `str \| null` | `null` | `weighted_avg` (both are metric names). |
 | `numerator_parts` | `list[str] \| null` | `null` | `ratio`/`weighted_avg`: the disjoint metrics whose sum is the `numerator` (or `weighted_sum`). See [Numerator parts](#numerator-parts). |
-| `on_zero_denominator` | `OnZeroDenominator` | `null` (coerced) | `ratio`/`weighted_avg`: `null` \| `zero` \| `error` when the denominator is zero. Under `null` a `query` warns only when a returned row had a zero denominator, and names how many. `compile_query` has no result, so it always states the policy. `zero` never warns. The count is in `metadata.composition.<metric>.zero_denominator_rows`. |
+| `on_zero_denominator` | `OnZeroDenominator` | `null` (coerced) | `ratio`/`weighted_avg`, every division of a `derived` and the rate of a `conversion`: `null` \| `zero` \| `error` when the denominator is zero. Under `null` a `query` warns only when a returned row had a zero denominator, and names how many. `compile_query` has no result, so it always states the policy. `zero` never warns. The count is in `metadata.composition.<metric>.zero_denominator_rows`. |
 | `collapse_dimension` | `str \| null` | `null` | `semi_additive`: the dimension that collapses (typically time). |
 | `collapse_agg` | `CollapseAgg \| null` | `null` | `semi_additive`: `last` \| `first` \| `avg` \| `min` \| `max`. |
 | `distinct_on` | `str \| null` | `null` | `distinct_count`: column to count distinct values of. |
@@ -84,7 +85,7 @@ Full field list on `CanonicalRef`:
 | `order_by` | `list[str] \| null` | `null` | `cumulative`: dimensions to accumulate along, sorted lexicographically in list order. |
 | `on_gap` | `OnGap` | `skip` | `cumulative`: `skip` \| `fill_observed`, see [Cumulative metrics](#cumulative-metrics). |
 | `history` | `History` | `exclude` | `cumulative`: `exclude` \| `include`, see [Filters and history](#filters-and-history-history). |
-| `window` | duration \| `null` | `null` | `cumulative`: a trailing window such as `7 days` or `1 month`, see [Trailing windows and period to date](#trailing-windows-and-period-to-date). |
+| `window` | duration \| `null` | `null` | `cumulative`: a trailing window such as `7 days` or `1 month`, see [Trailing windows and period to date](#trailing-windows-and-period-to-date). `conversion`: how long after its base event a conversion still counts, as short as a minute between two timestamps. |
 | `grain_to_date` | `day` \| `week` \| `month` \| `quarter` \| `year` \| `null` | `null` | `cumulative`: the period the total restarts at, such as `month` for month to date. |
 | `period_agg` | `first` \| `last` \| `average` | `last` | `cumulative`: which day of a coarser output bucket represents it. |
 | `base` | `str \| null` | `null` | `offset`: the metric to read at an earlier period. |
@@ -92,7 +93,14 @@ Full field list on `CanonicalRef`:
 | `offset` | duration \| `null` | `null` | `offset`: how far back, such as `1 year` or `1 month`, a day or longer. |
 | `expr` | `str \| null` | `null` | `derived`: arithmetic over the input names. |
 | `inputs` | `list[{metric, alias}] \| null` | `null` | `derived`: the metrics `expr` reads, under `alias` or their own name. |
-| `population_filter` | `str \| null` | `null` | All `kind`s: SQL predicate AND-ed into every leaf query's `WHERE` before aggregation, defining the population the metric is *about* (e.g. excluding test accounts). |
+| `base_metric` | `str \| null` | `null` | `conversion`: the metric of the base events, `single` or `distinct_count`. |
+| `conversion_metric` | `str \| null` | `null` | `conversion`: the metric of the conversion events, a `sum` or `count`, or a `distinct_count`. |
+| `entity` | `str \| {base, conversion} \| null` | `null` | `conversion`: the column that identifies the entity, one name for both sides or one per side. |
+| `base_time` | `str \| null` | `null` | `conversion`: the time of a base event, a `date` or `timestamp` column of the base metric's source. |
+| `conversion_time` | `str \| null` | `null` | `conversion`: the time of a conversion event, on the conversion metric's source. |
+| `calculation` | `conversion_rate` \| `conversions` \| `null` | `conversion_rate` | `conversion`: the share of the base metric that converted, or the conversions themselves. |
+| `constant_properties` | `list[str \| {base, conversion}] \| null` | `null` | `conversion`: columns that must be equal on both events, such as a product. |
+| `population_filter` | `str \| null` | `null` | Every `kind` except `conversion`, which takes each side's from its metric: SQL predicate AND-ed into every leaf query's `WHERE` before aggregation, defining the population the metric is *about* (e.g. excluding test accounts). |
 
 ### Numerator parts
 
@@ -231,6 +239,30 @@ The base may be any kind except `opaque` and a cumulative metric with `window`, 
 **Derived arithmetic.** `expr` may use the input names, numbers, `+ - * /`, parentheses, and `COALESCE`, `NULLIF`, `ABS`, `ROUND`, `LEAST` and `GREATEST`. Each input is computed as if it were requested alone, including its own guardrails, and the arithmetic is applied to its finished value per output row: a ratio already divided, a running total already accumulated. An input with no row is `NULL` there, so write `COALESCE(costs, 0)` to read it as zero. Inputs may be of any kind, `derived` and `offset` included, which is also how a ratio of two ratios is written. A `ratio` component still has to be `single` or `distinct_count`.
 
 **Validation.** At write time, `base` and every input must resolve to an active metric, `expr` must read exactly its inputs and only what is listed above, there may be no cycle, and `time_dimension` must resolve to one `date` or `timestamp` column from every source the base reads. Two offsets combine only on the same column. `decompose` refuses both kinds.
+
+### Conversion metrics
+
+A `conversion` metric counts the events of one metric that follow the events of another for the same entity, such as rentals paid within five days of pickup or visits that lead to a purchase within a week:
+
+```yaml
+metric: payment_rate_5d
+canonical:
+  kind: conversion
+  base_metric: rental_count       # the base events, and the denominator of the rate
+  conversion_metric: paid_rentals # the conversion events
+  entity: rental_id               # or {base: user_id, conversion: customer_id}
+  base_time: pickup_date
+  conversion_time: payment_date
+  window: 5 days                  # optional, every later conversion counts without it
+  calculation: conversion_rate    # or conversions
+  constant_properties: []         # e.g. [product] or [{base: product, conversion: sku}]
+```
+
+**Attribution is last touch.** A conversion event matches a base event of the same entity when it happens at or after it and at most `window` later, the bound included, with every constant property equal. Each conversion event counts once, for the latest matching base event. Base events at the same instant are ordered by the requested dimension values. `conversions` is the conversion metric over the attributed events, grouped by the dimension values of their base events, and `0` where the base metric has a row but nothing converted. `conversion_rate` divides that by the base metric queried alone.
+
+**The base side owns the query.** Requested dimensions, filters and `time_range` apply to the base events. The conversion events keep only their metric's `population_filter`, guardrails and tenant predicates, so a payment after the end of the queried range still counts for a rental inside it. A condition inside a measure expression does not narrow the events, only what the metric counts. Use a `population_filter` on the metric to narrow them.
+
+**Validation.** At write time, both metrics must resolve to active `single` or `distinct_count` metrics, a `single` conversion metric must sum or count, and the entity, the times and the constant properties must name a column, or a dimension backed by one column, of their side's own source. A window shorter than a day needs timestamps on both sides. A `conversion` cannot be a `ratio` component or the base of an `offset`, but it can be an input of a `derived`. At query time, a dimension or filter that fans out the base source is refused with `FANOUT_UNSAFE`, since a repeated base event would count its conversions under one of its values at random. `decompose` refuses the kind.
 
 ### `deprecated_alternatives[]` (`DeprecatedAlternative`)
 

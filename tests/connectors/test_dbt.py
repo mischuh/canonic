@@ -688,3 +688,74 @@ class TestComposedMetrics:
             metric,
         )
         assert "x" not in await self._candidates(manifest)
+
+
+class TestConversionMetrics:
+    """MetricFlow conversion metrics map to a ``conversion`` candidate when they can."""
+
+    async def _candidates(self, path: Path) -> dict[str, ContractCandidate | None]:
+        extract = await DbtConnector(path).extract_definitions()
+        return {
+            d.entity: d.contract_candidate
+            for d in extract.definitions
+            if d.entity_type == DefinitionEntityType.METRIC
+        }
+
+    @staticmethod
+    def _metric(**params: object) -> dict[str, object]:
+        return {
+            "name": "ship_rate",
+            "type": "conversion",
+            "type_params": {
+                "conversion_type_params": {
+                    "base_measure": {"name": "revenue"},
+                    "conversion_measure": "shipped",
+                    "entity": "order_id",
+                    **params,
+                }
+            },
+        }
+
+    async def test_a_conversion_metric_becomes_a_candidate(self, tmp_path: Path) -> None:
+        manifest = _cumulative_manifest(
+            tmp_path / "m.json",
+            self._metric(
+                window={"count": 7, "granularity": "day"},
+                constant_properties=[{"base_property": "region", "conversion_property": "area"}],
+            ),
+        )
+        assert (await self._candidates(manifest))["ship_rate"] == ContractCandidate(
+            kind=CandidateKind.CONVERSION,
+            measures=["revenue", "shipped"],
+            entity={"base": "order_id", "conversion": "order_id"},
+            base_time="order_date",
+            conversion_time="ship_date",
+            window="7 days",
+            calculation="conversion_rate",
+            constant_properties=[{"base": "region", "conversion": "area"}],
+        )
+
+    async def test_without_a_window_and_counting_conversions(self, tmp_path: Path) -> None:
+        manifest = _cumulative_manifest(
+            tmp_path / "m.json", self._metric(calculation="conversions")
+        )
+        candidate = (await self._candidates(manifest))["ship_rate"]
+        assert candidate is not None
+        assert candidate.window is None
+        assert candidate.calculation == "conversions"
+
+    @pytest.mark.parametrize(
+        "params",
+        [
+            {"entity": "customer"},
+            {"calculation": "median"},
+            {"window": "a fortnight"},
+            {"base_measure": {"name": "revenue", "filter": "{{ Dimension('x') }} = 1"}},
+            {"conversion_measure": None},
+        ],
+    )
+    async def test_variants_without_an_equivalent_are_skipped(
+        self, tmp_path: Path, params: dict[str, object]
+    ) -> None:
+        manifest = _cumulative_manifest(tmp_path / "m.json", self._metric(**params))
+        assert "ship_rate" not in await self._candidates(manifest)

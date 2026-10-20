@@ -187,6 +187,19 @@ def _agg_time_dimensions(semantic_models: list[dict[str, Any]]) -> dict[str, str
     return result
 
 
+def _measure_entities(semantic_models: list[dict[str, Any]]) -> dict[str, dict[str, str]]:
+    """Measure name to the entities of its semantic model, each to the column it reads."""
+    result: dict[str, dict[str, str]] = {}
+    for sm in semantic_models:
+        entities = {
+            str(e.get("name", "")): str(e.get("expr") or e.get("name", ""))
+            for e in sm.get("entities", [])
+        }
+        for measure in sm.get("measures", []):
+            result[measure.get("name", "")] = entities
+    return result
+
+
 def _definition_fingerprint(payload: dict[str, Any]) -> str:
     """Stable sha256 over a definition's semantic fields (mirrors compute_fingerprint format)."""
     digest = hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()
@@ -219,6 +232,8 @@ class DbtConnector(ConnectorBase):
         self._source = source
         #: MetricFlow simple metric name to its measure, filled when definitions are extracted.
         self._metric_measures: dict[str, str] = {}
+        #: Measure name to its semantic model's entities and their columns, filled likewise.
+        self._measure_entities: dict[str, dict[str, str]] = {}
 
     def capabilities(self) -> list[Capability]:
         return [Capability.CAPABILITIES, Capability.TEST_CONNECTION, Capability.EXTRACT_DEFINITIONS]
@@ -286,6 +301,7 @@ class DbtConnector(ConnectorBase):
 
         # --- metrics → MEASURE evidence ---
         agg_time_dimensions = _agg_time_dimensions(semantic_models)
+        self._measure_entities = _measure_entities(semantic_models)
         self._metric_measures = {
             str(m.get("name", "")): _measure_name(m.get("type_params", {}))
             for m in metrics.values()
@@ -570,10 +586,7 @@ class DbtConnector(ConnectorBase):
         elif metric_type in ("simple", "ratio", "derived"):
             self._extract_composed(metric, measure_ref, definitions, agg_time_dimensions or {})
         elif metric_type == "conversion":
-            # Known MetricFlow type, not implemented yet; skip silently.
-            logger.debug(
-                "skipping unimplemented MetricFlow metric type %r for %r", metric_type, name
-            )
+            self._extract_conversion(metric, definitions, agg_time_dimensions or {})
         else:
             logger.warning("unknown dbt metric type %r for metric %r; skipping", metric_type, name)
 
@@ -708,6 +721,79 @@ class DbtConnector(ConnectorBase):
             ),
         ]
 
+    def _extract_conversion(
+        self,
+        metric: dict[str, Any],
+        definitions: list[DefinitionEvidence],
+        agg_time_dimensions: dict[str, str],
+    ) -> None:
+        """Propose a ``conversion`` binding for a MetricFlow conversion metric.
+
+        The entity becomes the column each measure's semantic model declares for it, and each
+        time the measure's ``agg_time_dimension``. A metric or measure ``filter`` cannot be
+        carried over, and an entity missing on one side has no column to match on, so such a
+        metric is skipped rather than proposed as a binding that would return another number.
+        """
+        name: str = metric.get("name", "")
+        type_params: dict[str, Any] = metric.get("type_params", {})
+        params: dict[str, Any] = type_params.get("conversion_type_params") or {}
+        measures = [params.get("base_measure"), params.get("conversion_measure")]
+        names = [_measure_name({"measure": m}) for m in measures]
+        entity = str(params.get("entity") or "")
+        calculation = str(params.get("calculation") or "conversion_rate").lower()
+        window = _metricflow_window(params.get("window"))
+        columns = [self._measure_entities.get(m, {}).get(entity) for m in names]
+        reason: str | None = None
+        if metric.get("filter") or any(isinstance(m, dict) and m.get("filter") for m in measures):
+            reason = "its filter cannot be carried over"
+        elif not all(names):
+            reason = "it names no base or conversion measure"
+        elif not entity or None in columns:
+            reason = f"entity {entity!r} is not declared on the semantic model of both measures"
+        elif any(m not in agg_time_dimensions for m in names):
+            reason = "a measure has no agg_time_dimension"
+        elif calculation not in {"conversion_rate", "conversions"}:
+            reason = f"its calculation {calculation!r} is unknown"
+        elif window is not None and not _is_duration(window):
+            reason = f"its window {window!r} is not a duration"
+        if reason is not None:
+            logger.info("skipping conversion dbt metric %r: %s", name, reason)
+            return
+        candidate = ContractCandidate(
+            kind=CandidateKind.CONVERSION,
+            measures=names,
+            entity={"base": str(columns[0]), "conversion": str(columns[1])},
+            base_time=agg_time_dimensions[names[0]],
+            conversion_time=agg_time_dimensions[names[1]],
+            window=str(Duration.parse(window)) if window is not None else None,
+            calculation=calculation,
+            constant_properties=[
+                {
+                    "base": str(p.get("base_property", "")),
+                    "conversion": str(p.get("conversion_property", "")),
+                }
+                for p in params.get("constant_properties") or []
+            ],
+        )
+        definitions.append(
+            DefinitionEvidence(
+                source=self._source,
+                entity=name,
+                entity_type=DefinitionEntityType.METRIC,
+                description=metric.get("description") or None,
+                contract_candidate=candidate,
+                native_ref=metric.get("unique_id", ""),
+                acquisition_tier=AcquisitionTier.MODELING,
+                source_fingerprint=_definition_fingerprint(
+                    {
+                        "entity": name,
+                        "entity_type": "metric",
+                        "candidate": candidate.model_dump(mode="json"),
+                    }
+                ),
+            )
+        )
+
     def _extract_cumulative(
         self,
         metric: dict[str, Any],
@@ -789,6 +875,14 @@ def _metricflow_window(raw: object) -> str | None:
     if isinstance(raw, dict):
         return f"{raw.get('count')} {raw.get('granularity')}"
     return str(raw)
+
+
+def _is_duration(window: str) -> bool:
+    try:
+        Duration.parse(window)
+    except ValueError:
+        return False
+    return True
 
 
 def _is_day_or_longer(window: str) -> bool:

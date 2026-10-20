@@ -107,6 +107,16 @@ A change listed here was reviewed against the classification rules and did not b
 
 ## History
 
+## 3.14 (2026-10-20) - MINOR
+
+- ADR/PR: this PR (feat(compiler): conversion metrics)
+- Summary: query results gain `metadata.conversion`, one entry per conversion metric with its
+  `base_metric`, `conversion_metric`, `entity` and `constant_properties` (each as `base` and
+  `conversion`), `base_time`, `conversion_time`, `window`, `calculation` and `attribution`.
+  `resolve_metric` and `describe_metric` gain a `conversion` block, `null` for other kinds. The
+  new binding kind `conversion` lives in the contract file format, which does not bump the
+  schema on its own. A consumer that ignores unknown fields is unaffected.
+
 ## 3.13 (2026-10-20) - MINOR
 
 - ADR/PR: this PR (feat(compiler): offset and derived metrics for period-over-period comparisons)

@@ -81,6 +81,7 @@ _UNSUPPORTED: dict[BindingKind, str] = {
     BindingKind.CUMULATIVE: "a running total carries every earlier period",
     BindingKind.OFFSET: "it reads another period than the one it is shown in",
     BindingKind.DERIVED: "its expression is not attributed per input yet",
+    BindingKind.CONVERSION: "a conversion is attributed to its base event, not to a member",
 }
 
 _TIER_ORDER = list(TrustTier)

@@ -443,3 +443,44 @@ async def test_an_offset_on_a_dimension_that_will_not_exist_is_not_proposed() ->
     entry = next(e for e in report.entries if e.target == "contracts/metrics/revenue_py.yaml")
     assert entry.decision is ReconciliationDecision.NO_OP
     assert "dimension 'order_day' will not exist" in (entry.recommended_action or "")
+
+
+def _conversion_candidate(base_time: str) -> DefinitionEvidence:
+    return _definition(
+        entity="buyer_rate",
+        entity_type=DefinitionEntityType.METRIC,
+        contract_candidate=ContractCandidate(
+            kind=CandidateKind.CONVERSION,
+            measures=["revenue", "customer_count"],
+            entity={"base": "customer_id", "conversion": "customer_id"},
+            base_time=base_time,
+            conversion_time="order_id",
+            window="7 days",
+            calculation="conversion_rate",
+        ),
+    )
+
+
+async def test_a_conversion_proposes_a_metric_for_each_measure() -> None:
+    contracts = _contracts(
+        await _proposals([*_shop_definitions(), _conversion_candidate("amount")])
+    )
+    assert contracts["contracts/metrics/buyer_rate.yaml"]["canonical"] == {
+        "kind": "conversion",
+        "base_metric": "revenue",
+        "conversion_metric": "customer_count",
+        "entity": {"base": "customer_id", "conversion": "customer_id"},
+        "base_time": "amount",
+        "conversion_time": "order_id",
+        "calculation": "conversion_rate",
+        "window": "7 days",
+    }
+    assert contracts["contracts/metrics/revenue.yaml"]["canonical"]["kind"] == "single"
+
+
+async def test_a_conversion_on_a_time_that_will_not_exist_is_not_proposed() -> None:
+    result = await _proposals([*_shop_definitions(), _conversion_candidate("ordered_at")])
+    report = ReconciliationEngine().reconcile(result.proposals, InMemoryAcceptedStore(()))
+    entry = next(e for e in report.entries if e.target == "contracts/metrics/buyer_rate.yaml")
+    assert entry.decision is ReconciliationDecision.NO_OP
+    assert "dimension 'ordered_at' will not exist" in (entry.recommended_action or "")

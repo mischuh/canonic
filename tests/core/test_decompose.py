@@ -166,6 +166,10 @@ _METRICS = {
         'canonical:\n  kind: derived\n  expr: "revenue / pm - 1"\n'
         "  inputs: [{metric: revenue}, {metric: revenue_pm, alias: pm}]"
     ),
+    "repeat_rate": (
+        "canonical:\n  kind: conversion\n  base_metric: revenue\n  conversion_metric: units\n"
+        "  entity: channel\n  base_time: sale_date\n  conversion_time: sale_date"
+    ),
 }
 
 
@@ -450,6 +454,7 @@ class TestUnsupported:
             ("nested_rate", [], "numerator 'price' has kind ratio"),
             ("revenue_pm", [], "offset cannot be attributed by member: it reads another period"),
             ("revenue_growth", [], "derived cannot be attributed by member: its expression"),
+            ("repeat_rate", [], "conversion cannot be attributed by member: a conversion"),
         ],
     )
     async def test_raises_unsupported_measure(

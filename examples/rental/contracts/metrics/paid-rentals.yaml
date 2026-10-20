@@ -1,0 +1,9 @@
+metric: paid_rentals
+canonical:
+  kind: distinct_count
+  source: payments
+  distinct_on: rental_id
+provenance: human_curated
+label: "Paid Rentals"
+aliases: ["rentals with a payment"]
+status: active

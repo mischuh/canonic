@@ -43,6 +43,8 @@ __all__ = [
     "CompositionOut",
     "CumulativeDefinitionOut",
     "CumulativeOut",
+    "ConversionDefinitionOut",
+    "ConversionPairOut",
     "DerivedDefinitionOut",
     "DerivedInputOut",
     "DimensionInfo",
@@ -398,6 +400,54 @@ class DerivedDefinitionOut(BaseModel):
         )
 
 
+class ConversionPairOut(BaseModel):
+    """A column of a conversion metric, named on the base and on the conversion side."""
+
+    model_config = ConfigDict(frozen=True)
+
+    base: str
+    conversion: str
+
+
+class ConversionDefinitionOut(BaseModel):
+    """How a conversion metric matches conversion events to the base events of its entity.
+
+    Each conversion event counts for the latest base event of the same ``entity`` at or before
+    it, within ``window`` when one is set, and is reported under that base event's dimensions.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    base_metric: str
+    conversion_metric: str
+    entity: ConversionPairOut
+    base_time: str
+    conversion_time: str
+    window: str | None = None
+    calculation: str
+    constant_properties: list[ConversionPairOut] = []
+    attribution: str = "last_touch"
+
+    @classmethod
+    def from_binding(cls, binding: Binding) -> ConversionDefinitionOut | None:
+        """The definition of a conversion binding, ``None`` for any other kind."""
+        conversion = binding.conversion
+        if conversion is None:
+            return None
+        return cls(
+            base_metric=conversion.base.metric,
+            conversion_metric=conversion.conversion.metric,
+            entity=ConversionPairOut(base=conversion.entity[0], conversion=conversion.entity[1]),
+            base_time=conversion.base_time,
+            conversion_time=conversion.conversion_time,
+            window=str(conversion.window) if conversion.window is not None else None,
+            calculation=conversion.calculation.value,
+            constant_properties=[
+                ConversionPairOut(base=b, conversion=c) for b, c in conversion.constant_properties
+            ],
+        )
+
+
 class BindingOut(BaseModel):
     """How a metric is built: the payload of ``resolve_metric`` (SPEC §4.1).
 
@@ -416,6 +466,7 @@ class BindingOut(BaseModel):
     cumulative: CumulativeDefinitionOut | None = None
     offset: OffsetDefinitionOut | None = None
     derived: DerivedDefinitionOut | None = None
+    conversion: ConversionDefinitionOut | None = None
 
     @classmethod
     def from_binding(cls, binding: Binding) -> BindingOut:
@@ -429,6 +480,7 @@ class BindingOut(BaseModel):
             cumulative=CumulativeDefinitionOut.from_binding(binding),
             offset=OffsetDefinitionOut.from_binding(binding),
             derived=DerivedDefinitionOut.from_binding(binding),
+            conversion=ConversionDefinitionOut.from_binding(binding),
         )
 
 
@@ -456,6 +508,7 @@ class MetricDetail(BaseModel):
     cumulative: CumulativeDefinitionOut | None = None
     offset: OffsetDefinitionOut | None = None
     derived: DerivedDefinitionOut | None = None
+    conversion: ConversionDefinitionOut | None = None
     grain: list[str]
     dimensions: list[DimensionInfo]
     measures: list[str]
@@ -520,6 +573,7 @@ class QueryMetadata(BaseModel):
     time_range: TimeRangeOut | None = None
     offset: dict[str, OffsetOut] = {}
     derived: dict[str, DerivedDefinitionOut] = {}
+    conversion: dict[str, ConversionDefinitionOut] = {}
     composition: dict[str, CompositionOut] = {}
     project_fingerprint: str | None = None
 
@@ -668,6 +722,20 @@ class QueryMetadata(BaseModel):
                     on_zero_denominator=d.on_zero_denominator,
                 )
                 for name, d in compiled.derived.items()
+            },
+            conversion={
+                name: ConversionDefinitionOut(
+                    base_metric=c.base_metric,
+                    conversion_metric=c.conversion_metric,
+                    entity=ConversionPairOut(**c.entity),
+                    base_time=c.base_time,
+                    conversion_time=c.conversion_time,
+                    window=c.window,
+                    calculation=c.calculation,
+                    constant_properties=[ConversionPairOut(**p) for p in c.constant_properties],
+                    attribution=c.attribution,
+                )
+                for name, c in compiled.conversions.items()
             },
             composition={
                 name: _composition_out(

@@ -141,6 +141,8 @@ def _timestamp(text: str) -> exp.Expression:
         ("2026-01-31 13:45:00", 1, DurationUnit.MONTH, "2026-02-28 13:45:00"),
         ("2026-03-01 08:00:00", -1, DurationUnit.DAY, "2026-02-28 08:00:00"),
         ("2024-02-29 23:59:59", 1, DurationUnit.YEAR, "2025-02-28 23:59:59"),
+        ("2026-01-31 22:30:00", 2, DurationUnit.HOUR, "2026-02-01 00:30:00"),
+        ("2026-03-01 00:10:00", -15, DurationUnit.MINUTE, "2026-02-28 23:55:00"),
     ],
 )
 def test_a_timestamp_keeps_its_time_of_day(
@@ -150,3 +152,22 @@ def test_a_timestamp_keeps_its_time_of_day(
     moved = adapter.date_add(_timestamp(moment), amount, unit, as_date=False)
     value = _execute(dialect, adapter.emit(exp.select(exp.alias_(moved, "x"))))[0][0]
     assert str(value).replace("T", " ") == expected
+
+
+@pytest.mark.parametrize(
+    ("dialect", "expected"),
+    [
+        ("postgres", '"t"."ts" + INTERVAL \'2 HOUR\''),
+        ("redshift", 'DATEADD(HOUR, 2, "t"."ts")'),
+        ("duckdb", '"t"."ts" + INTERVAL 2 HOUR'),
+        ("snowflake", 'DATEADD(HOUR, 2, "t"."ts")'),
+        ("databricks", "DATEADD(HOUR, 2, `t`.`ts`)"),
+        ("mysql", "DATE_ADD(`t`.`ts`, INTERVAL 2 HOUR)"),
+        ("clickhouse", 'DATE_ADD(HOUR, 2, "t"."ts")'),
+        ("sqlite", 'DATETIME("t"."ts", \'+2 hours\')'),
+    ],
+)
+def test_an_hour_step_moves_a_timestamp_on_every_engine(dialect: str, expected: str) -> None:
+    adapter = DIALECT_ADAPTERS[dialect]
+    step = adapter.date_add(exp.column("ts", table="t"), 2, DurationUnit.HOUR, as_date=False)
+    assert adapter.emit(exp.select(step)) == f"SELECT {expected}"

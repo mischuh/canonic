@@ -76,6 +76,7 @@ def plan_metric(
         ),
         resolved=binding.resolved_key or queried_name,
         offsets=tuple(o for p in planned_inputs for o in p.offsets),
+        conversions=tuple(c for p in planned_inputs for c in p.conversions),
         derived=(
             DerivedMetadata(
                 metric=queried_name,
