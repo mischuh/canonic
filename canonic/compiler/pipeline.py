@@ -38,6 +38,7 @@ from canonic.compiler.result import (
     ScopeMetadata,
     TrustInput,
 )
+from canonic.compiler.time_range import apply_time_range
 from canonic.compiler.trust_inputs import trust_inputs_for_binding
 from canonic.contracts.models import BindingKind, OnMissingPrincipal
 from canonic.contracts.principal import Principal
@@ -64,6 +65,7 @@ from canonic.compiler.strategies import (
     plan_cumulative,
     plan_opaque,
     plan_recompute_at_grain,
+    plan_rolling,
     plan_semi_additive,
     plan_simple_additive,
 )
@@ -320,6 +322,8 @@ def compile(  # noqa: A001 — the public verb for this capability is "compile"
     this is not something a caller should ever ask for.
     """
     sources_by_name = {s.name: s for s in sources}
+    # A typed time range becomes one more filter, resolved to dates once for every leaf.
+    query, time_range = apply_time_range(query, sources_by_name)
 
     # Stage 0 — bind the principal and flatten its effective policy once, before any metric
     # resolution, so a TENANT_UNRESOLVED failure never runs long enough to leak whether a
@@ -478,6 +482,7 @@ def compile(  # noqa: A001 — the public verb for this capability is "compile"
         recompute_at_grain=_first(planned, "recompute_at_grain"),
         opaque=_first(planned, "opaque"),
         cumulative=_first(planned, "cumulative"),
+        time_range=time_range.metadata() if time_range is not None else None,
         scope=ScopeMetadata(
             tenant=bound_principal.tenant_scope,
             scoped_sources=sorted(composed.scoped_sources),
@@ -532,7 +537,9 @@ def _plan_metric(
             effective_policy=effective_policy,
         )
     if binding.kind is BindingKind.CUMULATIVE:
-        return plan_cumulative(
+        assert binding.cumulative is not None  # noqa: S101 — set for every cumulative binding
+        plan_kind = plan_rolling if binding.cumulative.needs_day_spine else plan_cumulative
+        return plan_kind(
             query,
             name,
             binding,

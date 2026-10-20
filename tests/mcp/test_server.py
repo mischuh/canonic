@@ -291,6 +291,7 @@ async def test_resolve_metric_composite_returns_kind_and_components(
             "numerator_parts": None,
         },
         "population_filter": "status = 'completed'",
+        "cumulative": None,
     }
 
 

@@ -32,7 +32,7 @@ from canonic.contracts.models import (
 )
 from canonic.exc import Ambiguous, ContractError
 from canonic.semantic.loader import list_semantic_sources
-from canonic.semantic.models import Additivity, NormalizedType
+from canonic.semantic.models import PERIOD_GRAINS, Additivity, NormalizedType
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
@@ -288,7 +288,8 @@ def _validate_cumulative_binding(
         alias, dim = found
         owner = sources_by_name[alias_to_source.get(alias, alias)]
         value_type = dim.value_type(owner.columns)
-        if value_type not in _ORDERABLE_TYPES:
+        # Per calendar day the order is the backing column's, checked in _validate_day_axis.
+        if value_type not in _ORDERABLE_TYPES and not ref.needs_day_spine:
             shown = value_type.value if value_type is not None else None
             raise ContractError(
                 f"metric {binding.metric!r}: order_by dimension {name!r} has type {shown!r}; "
@@ -306,6 +307,43 @@ def _validate_cumulative_binding(
                 f"metric {binding.metric!r}: order_by dimensions {other!r} and {name!r} are "
                 f"both backed by column {dim.column!r}; keep only the finer one"
             )
+
+    if ref.needs_day_spine:
+        (name, alias, dim) = resolved[0]
+        _validate_day_axis(binding, name, dim, sources_by_name[alias_to_source.get(alias, alias)])
+
+
+def _validate_day_axis(
+    binding: MetricBinding, name: str, dim: Dimension, owner: SemanticSource
+) -> None:
+    """The order dimension of a cumulative metric evaluated per calendar day.
+
+    It only names the axis: the one date or timestamp column the compiler puts a spine day in
+    place of. Which grain the result is grouped by is the query's choice, checked when it is
+    compiled. ``grain_to_date`` must be at least as long as a grain the dimension declares.
+    """
+    ref = binding.canonical
+    columns = dim.backing_columns()
+    column_type = (
+        next((c.type for c in owner.columns if c.name == next(iter(columns))), None)
+        if len(columns) == 1 and dim.json_path is None
+        else None
+    )
+    if column_type not in {NormalizedType.DATE, NormalizedType.TIMESTAMP}:
+        raise ContractError(
+            f"metric {binding.metric!r}: order_by dimension {name!r} must be backed by exactly "
+            f"one date or timestamp column for a window, grain_to_date or period_agg"
+        )
+    grain = dim.period_grain
+    if (
+        ref.grain_to_date is not None
+        and grain is not None
+        and PERIOD_GRAINS.index(ref.grain_to_date.value) < PERIOD_GRAINS.index(grain)
+    ):
+        raise ContractError(
+            f"metric {binding.metric!r}: grain_to_date {ref.grain_to_date.value!r} is finer "
+            f"than order_by dimension {name!r}, which is per {grain}"
+        )
 
 
 def _validate_recompute_at_grain_binding(

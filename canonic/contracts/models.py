@@ -8,6 +8,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from canonic.exc import ContractValidationError
+from canonic.semantic.duration import DurationField, DurationUnit
 from canonic.semantic.models import PackSourceMeta, Provenance
 from canonic.trust.models import TrustTier
 
@@ -34,6 +35,7 @@ __all__ = [
     "OnGap",
     "OnMissingPrincipal",
     "OnZeroDenominator",
+    "PeriodAgg",
     "Realization",
     "RestrictTo",
     "RoleDef",
@@ -124,6 +126,18 @@ class History(StrEnum):
     INCLUDE = "include"
 
 
+class PeriodAgg(StrEnum):
+    """Which day of an output bucket coarser than a day represents a cumulative metric.
+
+    ``LAST`` takes the value at the bucket's last day, ``FIRST`` at its first, ``AVERAGE`` the
+    mean over its days. ``LAST`` is what a running total at a coarse grain always returned.
+    """
+
+    FIRST = "first"
+    LAST = "last"
+    AVERAGE = "average"
+
+
 class CanonicalRef(BaseModel):
     """The canonical binding for a metric — either a single source+measure or a composite (§3).
 
@@ -139,8 +153,10 @@ class CanonicalRef(BaseModel):
     other grain returns UNSUPPORTED_MEASURE (§4.4).
     For ``kind=cumulative``, ``source``, ``measure`` and a non-empty ``order_by`` (dimension
     names, accumulated lexicographically in list order) are required. ``on_gap`` defaults to
-    ``skip`` and ``history`` to ``exclude``. The partition is not declared: it is every requested dimension that is not an
-    order dimension.
+    ``skip`` and ``history`` to ``exclude``. The partition is not declared: it is every
+    requested dimension that is not an order dimension. ``window`` (a trailing duration) or
+    ``grain_to_date`` (a restart at each period) bounds the frame, and ``period_agg`` picks
+    which day represents a coarser output bucket. Either needs exactly one order dimension.
 
     ``numerator_parts`` is optional on ``ratio`` (parts of ``numerator``) and ``weighted_avg``
     (parts of ``weighted_sum``). It lists at least two disjoint metrics whose sum is that
@@ -171,6 +187,9 @@ class CanonicalRef(BaseModel):
     order_by: list[str] | None = None
     on_gap: OnGap = OnGap.SKIP
     history: History = History.EXCLUDE
+    window: DurationField | None = None
+    grain_to_date: DurationUnit | None = None
+    period_agg: PeriodAgg = PeriodAgg.LAST
     population_filter: str | None = None
 
     @field_validator("on_zero_denominator", mode="before")
@@ -193,6 +212,23 @@ class CanonicalRef(BaseModel):
         if v is None:
             return History.EXCLUDE
         return v
+
+    @field_validator("period_agg", mode="before")
+    @classmethod
+    def _coerce_period_agg(cls, v: object) -> object:
+        if v is None:
+            return PeriodAgg.LAST
+        return v
+
+    @property
+    def is_bounded(self) -> bool:
+        """Whether a cumulative frame is a trailing window or restarts at each period."""
+        return self.window is not None or self.grain_to_date is not None
+
+    @property
+    def needs_day_spine(self) -> bool:
+        """Whether a cumulative metric is evaluated per calendar day rather than per row."""
+        return self.is_bounded or self.period_agg is not PeriodAgg.LAST
 
     @model_validator(mode="after")
     def _validate_shape(self) -> CanonicalRef:
@@ -274,8 +310,56 @@ class CanonicalRef(BaseModel):
                 raise ContractValidationError(
                     ("order_by",), f"cumulative binding lists {duplicates} more than once"
                 )
+        self._validate_frame()
         self._validate_numerator_parts()
         return self
+
+    def _validate_frame(self) -> None:
+        """The shape rules of a bounded cumulative frame that need no semantic source."""
+        frame_fields = [
+            name
+            for name, is_set in (
+                ("window", self.window is not None),
+                ("grain_to_date", self.grain_to_date is not None),
+                ("period_agg", self.period_agg is not PeriodAgg.LAST),
+            )
+            if is_set
+        ]
+        if not frame_fields:
+            return
+        if self.kind is not BindingKind.CUMULATIVE:
+            raise ContractValidationError(
+                (frame_fields[0],),
+                f"{frame_fields[0]} is only allowed on cumulative, not {self.kind.value}",
+            )
+        if self.window is not None and self.grain_to_date is not None:
+            raise ContractValidationError(
+                ("window",), "cumulative binding sets both 'window' and 'grain_to_date'"
+            )
+        if self.window is not None and self.window.unit.rank < DurationUnit.DAY.rank:
+            raise ContractValidationError(
+                ("window",), f"cumulative window must be a day or longer, got {self.window}"
+            )
+        if self.grain_to_date is not None and self.grain_to_date.rank < DurationUnit.DAY.rank:
+            raise ContractValidationError(
+                ("grain_to_date",),
+                f"grain_to_date must be a day or longer, got {self.grain_to_date.value}",
+            )
+        if self.order_by is not None and len(self.order_by) != 1:
+            raise ContractValidationError(
+                ("order_by",),
+                f"cumulative binding with {frame_fields[0]} needs exactly one order_by dimension",
+            )
+        if self.is_bounded and self.on_gap is OnGap.FILL_OBSERVED:
+            raise ContractValidationError(
+                ("on_gap",),
+                "on_gap: fill_observed has no effect on a window, which already covers every day",
+            )
+        if self.is_bounded and self.history is History.INCLUDE:
+            raise ContractValidationError(
+                ("history",),
+                "history: include is implied by a window, which always reads its full lookback",
+            )
 
     def _validate_numerator_parts(self) -> None:
         parts = self.numerator_parts

@@ -1,4 +1,68 @@
 {
+  "$defs": {
+    "TimeRange": {
+      "additionalProperties": false,
+      "description": "A typed range on one time dimension: the last N units before ``as_of``, or two dates.\n\n``last`` counts whole units before the unit that contains the anchor day, so ``last: 3\nmonths`` on 20 October is July to September. ``include_current`` extends the range to the\nend of the anchor day. ``start`` is inclusive and ``end`` exclusive. Bounds are resolved to\ndates at compile time (:func:`canonic.compiler.time_range.resolve_time_range`).",
+      "properties": {
+        "dimension": {
+          "title": "Dimension",
+          "type": "string"
+        },
+        "last": {
+          "anyOf": [
+            {
+              "examples": [
+                "7 days",
+                "1 month",
+                "90d"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "start": {
+          "anyOf": [
+            {
+              "format": "date",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Start"
+        },
+        "end": {
+          "anyOf": [
+            {
+              "format": "date",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "End"
+        },
+        "include_current": {
+          "default": false,
+          "title": "Include Current",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "dimension"
+      ],
+      "title": "TimeRange",
+      "type": "object"
+    }
+  },
   "description": "A resolved-by-name request the compiler turns into dialect-correct SQL (\u00a73).",
   "properties": {
     "metrics": {
@@ -68,6 +132,17 @@
       ],
       "default": null,
       "title": "As Of"
+    },
+    "time_range": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/TimeRange"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
     }
   },
   "required": [

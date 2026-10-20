@@ -30,8 +30,9 @@ canonic eval baseline \         # optional: grain-inference accuracy
 canonic.yaml                    ← SQLite connection, LLM, reconcile settings
 setup.sql                       ← DDL + seed data
 semantics/rental_db/            ← 5 dimensions + 4 facts (incl. vehicle_inventory)
-contracts/metrics/              ← 10 metric contracts (rental-revenue, rental-count,
-                                   avg-rental-duration, cumulative-rental-revenue + 6 more)
+contracts/metrics/              ← 12 metric contracts (rental-revenue, rental-count,
+                                   avg-rental-duration, cumulative-rental-revenue,
+                                   trailing-7d-rental-revenue + 7 more)
 contracts/guardrails/           ← completed-rentals-only.yaml
 knowledge/global/               ← 5 definition/caveat pages
 knowledge/user/client_1/        ← 1 personal note (scoped to the client_1 MCP token)

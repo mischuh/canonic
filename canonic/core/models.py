@@ -41,6 +41,7 @@ __all__ = [
     "CompileOutput",
     "CompositionComponentOut",
     "CompositionOut",
+    "CumulativeDefinitionOut",
     "CumulativeOut",
     "DimensionInfo",
     "DomainGroup",
@@ -63,6 +64,7 @@ __all__ = [
     "ReportSummary",
     "ScopeOut",
     "SourceFreshnessOut",
+    "TimeRangeOut",
     "TrustScoreOut",
 ]
 
@@ -153,6 +155,26 @@ class CumulativeOut(BaseModel):
     on_gap: str
     history: str
     visibility_filters: list[str] = []
+    window: str | None = None
+    grain_to_date: str | None = None
+    period_agg: str = "last"
+    lookback: str | None = None
+
+
+class TimeRangeOut(BaseModel):
+    """The query's ``time_range`` resolved to dates, ``start`` inclusive and ``end`` exclusive.
+
+    ``anchor`` is the instant ``last`` was counted back from, ``as_of`` or the compile time.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    dimension: str
+    start: str | None = None
+    end: str | None = None
+    last: str | None = None
+    include_current: bool = False
+    anchor: str | None = None
 
 
 class TrustScoreOut(BaseModel):
@@ -270,6 +292,39 @@ class ComponentsOut(BaseModel):
         )
 
 
+class CumulativeDefinitionOut(BaseModel):
+    """How a cumulative metric accumulates: the axis, and the frame if it is bounded.
+
+    ``window`` is a trailing duration such as ``7 days``, ``grain_to_date`` the period the total
+    restarts at, such as ``month``. Neither is set for a running total from the first row.
+    ``period_agg`` says which day of a coarser output bucket represents it.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    order_by: list[str]
+    window: str | None = None
+    grain_to_date: str | None = None
+    period_agg: str = "last"
+    on_gap: str = "skip"
+    history: str = "exclude"
+
+    @classmethod
+    def from_binding(cls, binding: Binding) -> CumulativeDefinitionOut | None:
+        """The definition of a cumulative binding, ``None`` for any other kind."""
+        frame = binding.cumulative
+        if frame is None:
+            return None
+        return cls(
+            order_by=list(frame.order_by),
+            window=str(frame.window) if frame.window is not None else None,
+            grain_to_date=frame.grain_to_date.value if frame.grain_to_date is not None else None,
+            period_agg=frame.period_agg.value,
+            on_gap=str(frame.on_gap),
+            history=str(frame.history),
+        )
+
+
 class BindingOut(BaseModel):
     """How a metric is built: the payload of ``resolve_metric`` (SPEC §4.1).
 
@@ -285,6 +340,7 @@ class BindingOut(BaseModel):
     measure: str | None
     components: ComponentsOut | None = None
     population_filter: str | None = None
+    cumulative: CumulativeDefinitionOut | None = None
 
     @classmethod
     def from_binding(cls, binding: Binding) -> BindingOut:
@@ -295,6 +351,7 @@ class BindingOut(BaseModel):
             measure=binding.measure,
             components=ComponentsOut.from_binding(binding),
             population_filter=binding.binding.canonical.population_filter,
+            cumulative=CumulativeDefinitionOut.from_binding(binding),
         )
 
 
@@ -319,6 +376,7 @@ class MetricDetail(BaseModel):
     measure: str | None = None
     components: ComponentsOut | None = None
     population_filter: str | None = None
+    cumulative: CumulativeDefinitionOut | None = None
     grain: list[str]
     dimensions: list[DimensionInfo]
     measures: list[str]
@@ -380,6 +438,7 @@ class QueryMetadata(BaseModel):
     trust_score: TrustScoreOut | None = None
     scope: ScopeOut | None = None
     cumulative: CumulativeOut | None = None
+    time_range: TimeRangeOut | None = None
     composition: dict[str, CompositionOut] = {}
     project_fingerprint: str | None = None
 
@@ -489,8 +548,24 @@ class QueryMetadata(BaseModel):
                     on_gap=compiled.cumulative.on_gap,
                     history=compiled.cumulative.history,
                     visibility_filters=list(compiled.cumulative.visibility_filters),
+                    window=compiled.cumulative.window,
+                    grain_to_date=compiled.cumulative.grain_to_date,
+                    period_agg=compiled.cumulative.period_agg,
+                    lookback=compiled.cumulative.lookback,
                 )
                 if compiled.cumulative is not None
+                else None
+            ),
+            time_range=(
+                TimeRangeOut(
+                    dimension=compiled.time_range.dimension,
+                    start=compiled.time_range.start,
+                    end=compiled.time_range.end,
+                    last=compiled.time_range.last,
+                    include_current=compiled.time_range.include_current,
+                    anchor=compiled.time_range.anchor,
+                )
+                if compiled.time_range is not None
                 else None
             ),
             composition={

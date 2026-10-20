@@ -82,17 +82,25 @@ def compile_(
         int | None,
         typer.Option("--limit", help="Row cap injected by the dialect adapter."),
     ] = None,
+    time_range: Annotated[
+        str | None,
+        typer.Option(
+            "--time-range",
+            help="Typed time range: dimension:last:<duration>[:current] (e.g. order_date:last:90d) "
+            "or dimension:<start>..<end> with ISO dates, end exclusive.",
+        ),
+    ] = None,
 ) -> None:
     """Compile a semantic query to SQL + metadata without executing.
 
     Either ``-f``/``--file`` or the inline
-    ``--metrics``/``--dimensions``/``--filter``/``--via``/``--limit`` flags — never both.
+    ``--metrics``/``--dimensions``/``--filter``/``--via``/``--limit``/``--time-range`` flags — never both.
 
     With ``--json`` the output matches the MCP ``compile_query`` tool payload byte-for-byte.
     """
     from canonic.core.models import CompileOutput
 
-    sq = build_semantic_query(file, metrics, dimensions, filter_, via, limit)
+    sq = build_semantic_query(file, metrics, dimensions, filter_, via, limit, time_range)
     result = load_service(ctx).compile_query(sq)
     payload = CompileOutput.from_compile_result(result).model_dump(mode="json")
 

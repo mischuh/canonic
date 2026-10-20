@@ -16,6 +16,7 @@ from sqlglot import exp
 
 from canonic.connectors.readonly import assert_no_writes
 from canonic.exc import ReadOnlyViolation, UnsupportedDialectError
+from canonic.semantic.duration import DurationUnit
 from canonic.semantic.models import NormalizedType
 
 if TYPE_CHECKING:
@@ -152,6 +153,24 @@ class DialectAdapter(ABC):
             this=text, to=exp.DataType.build(self.map_type(value_type), dialect=self.dialect)
         )
 
+    def date_add(
+        self, day: exp.Expression, amount: int | exp.Expression, unit: DurationUnit
+    ) -> exp.Expression:
+        """``day`` moved by ``amount`` units, as a ``DATE``. A negative amount moves back.
+
+        Months, quarters and years clamp to the end of the target month, which is what every
+        engine does natively except SQLite. A week is seven days. An ``amount`` that is an
+        expression rather than a number is only supported in days, which is all the day spine
+        needs. The result is cast back to ``DATE``, since ``date + interval`` is a timestamp on
+        Postgres and DuckDB and would no longer compare equal to a plain date.
+        """
+        sql_unit, count = _normalize_date_step(amount, unit)
+        step = exp.Literal.number(count) if isinstance(count, int) else count
+        return exp.Cast(
+            this=exp.DateAdd(this=day, expression=step, unit=exp.Var(this=sql_unit)),
+            to=exp.DataType.build("DATE"),
+        )
+
     def supports_percentile_cont(self) -> bool:
         """Whether the dialect has a native ordered-set aggregate for percentile queries.
 
@@ -161,6 +180,24 @@ class DialectAdapter(ABC):
         (SPEC §4.3 open question).
         """
         return True
+
+
+def _normalize_date_step(
+    amount: int | exp.Expression, unit: DurationUnit
+) -> tuple[str, int | exp.Expression]:
+    """``(DAY | MONTH, amount)`` for a step of ``amount`` units."""
+    if isinstance(amount, exp.Expression):
+        if unit is not DurationUnit.DAY:
+            raise ValueError(f"a computed date step must be in days, not {unit.value}")
+        return "DAY", amount
+    if unit is DurationUnit.DAY:
+        return "DAY", amount
+    if unit is DurationUnit.WEEK:
+        return "DAY", 7 * amount
+    months = unit.months
+    if months is None:
+        raise ValueError(f"cannot move a date by {unit.value}s")
+    return "MONTH", months * amount
 
 
 class _GenericDialectAdapter(DialectAdapter):
@@ -276,10 +313,38 @@ def _rewrite_date_trunc_for_sqlite(node: exp.Expression) -> exp.Expression:
             "exp.Expression",
             exp.func("DATE", base, exp.Literal.string("weekday 0"), exp.Literal.string("-6 days")),
         )
+    if unit_name == "quarter":
+        # Back from the first of the month by its distance to the quarter's first month.
+        month = exp.Cast(
+            this=exp.Anonymous(this="STRFTIME", expressions=[exp.Literal.string("%m"), base]),
+            to=exp.DataType.build("INT"),
+        )
+        back = exp.Mod(
+            this=exp.Paren(this=exp.Sub(this=month, expression=exp.Literal.number(1))),
+            expression=exp.Literal.number(3),
+        )
+        return cast(
+            "exp.Expression",
+            exp.func(
+                "DATE",
+                base,
+                exp.Literal.string("start of month"),
+                _sqlite_modifier(exp.Neg(this=exp.Paren(this=back)), "months"),
+            ),
+        )
     modifier = _SQLITE_TRUNC_MODIFIERS.get(unit_name)
     if modifier is None:
         return node
     return cast("exp.Expression", exp.func("DATE", base, exp.Literal.string(modifier)))
+
+
+def _sqlite_modifier(amount: exp.Expression, unit: str) -> exp.Expression:
+    """A ``DATE()`` modifier such as ``'-3 months'`` built from a computed amount."""
+    return exp.DPipe(
+        this=exp.Cast(this=amount, to=exp.DataType.build("TEXT")),
+        expression=exp.Literal.string(f" {unit}"),
+        safe=True,
+    )
 
 
 def _strip_offset_from_timestamp_cast(node: exp.Expression) -> exp.Expression:
@@ -320,6 +385,45 @@ class SQLiteDialectAdapter(_GenericDialectAdapter):
 
     def supports_percentile_cont(self) -> bool:
         return False
+
+    def date_add(
+        self, day: exp.Expression, amount: int | exp.Expression, unit: DurationUnit
+    ) -> exp.Expression:
+        """SQLite ``DATE()`` arithmetic, with the month-end clamp SQLite does not do itself.
+
+        ``DATE('2026-01-31', '+1 month')`` is ``2026-03-03`` in SQLite. A month step instead
+        goes to the first of the target month, adds the day of the month, and takes the
+        earlier of that and the target month's last day.
+        """
+        sql_unit, count = _normalize_date_step(amount, unit)
+        if sql_unit == "DAY":
+            if isinstance(count, int):
+                return cast(
+                    "exp.Expression",
+                    exp.func("DATE", day, exp.Literal.string(f"{count:+d} days")),
+                )
+            return cast("exp.Expression", exp.func("DATE", day, _sqlite_modifier(count, "days")))
+        assert isinstance(count, int)  # noqa: S101 — only a day step may be computed
+        months = count
+        day_of_month = exp.Cast(
+            this=exp.Anonymous(this="STRFTIME", expressions=[exp.Literal.string("%d"), day]),
+            to=exp.DataType.build("INT"),
+        )
+        shifted = exp.func(
+            "DATE",
+            day.copy(),
+            exp.Literal.string("start of month"),
+            exp.Literal.string(f"{months:+d} months"),
+            _sqlite_modifier(exp.Sub(this=day_of_month, expression=exp.Literal.number(1)), "days"),
+        )
+        month_end = exp.func(
+            "DATE",
+            day.copy(),
+            exp.Literal.string("start of month"),
+            exp.Literal.string(f"{months + 1:+d} months"),
+            exp.Literal.string("-1 days"),
+        )
+        return exp.Anonymous(this="MIN", expressions=[shifted, month_end])
 
     def json_extract_text(self, column: exp.Expression, segments: Sequence[str]) -> exp.Expression:
         """``JSON_EXTRACT`` works on every SQLite with JSON1, while the ``->>`` operator needs 3.38."""

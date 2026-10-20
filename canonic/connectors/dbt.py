@@ -39,6 +39,7 @@ from canonic.connectors.base import (
     compute_fingerprint,
 )
 from canonic.exc import UnsupportedSourceVersionError
+from canonic.semantic.duration import Duration, DurationUnit
 from canonic.semantic.models import Additivity, Relationship
 
 logger = logging.getLogger(__name__)
@@ -572,23 +573,29 @@ class DbtConnector(ConnectorBase):
         definitions: list[DefinitionEvidence],
         agg_time_dimensions: dict[str, str],
     ) -> None:
-        """Propose a ``cumulative`` binding for a MetricFlow running total.
+        """Propose a ``cumulative`` binding for a MetricFlow cumulative metric.
 
-        Only the unbounded form maps: a ``window`` (trailing N days) or ``grain_to_date``
-        (resets each period) has no ``cumulative`` equivalent yet, and neither has a metric
-        or measure ``filter``, which is Jinja over MetricFlow dimensions. Those are skipped
-        rather than proposed as a binding that would return a different number.
+        A ``window`` becomes a trailing window and ``grain_to_date`` a period-to-date total.
+        ``period_agg`` is always written, as ``first`` when MetricFlow leaves it unset, which is
+        MetricFlow's own default. A metric or measure ``filter`` is Jinja over MetricFlow
+        dimensions and cannot be carried over, so such a metric is skipped rather than proposed
+        as a binding that would return a different number.
         """
         name: str = metric.get("name", "")
         type_params: dict[str, Any] = metric.get("type_params", {})
         nested = type_params.get("cumulative_type_params") or {}
-        window = type_params.get("window") or nested.get("window")
-        grain_to_date = type_params.get("grain_to_date") or nested.get("grain_to_date")
+        window = _metricflow_window(nested.get("window") or type_params.get("window"))
+        grain_to_date = nested.get("grain_to_date") or type_params.get("grain_to_date")
+        period_agg = str(nested.get("period_agg") or "first").lower()
         measure = type_params.get("measure")
         measure_filter = measure.get("filter") if isinstance(measure, dict) else None
         reason: str | None = None
-        if window or grain_to_date:
-            reason = "a window or grain_to_date has no cumulative equivalent yet"
+        if window is not None and not _is_day_or_longer(window):
+            reason = f"its window {window!r} is not a whole number of days or longer"
+        elif grain_to_date and str(grain_to_date).lower() not in _TO_DATE_GRAINS:
+            reason = f"its grain_to_date {grain_to_date!r} is not a day or longer"
+        elif period_agg not in {"first", "last", "average"}:
+            reason = f"its period_agg {period_agg!r} is unknown"
         elif metric.get("filter") or measure_filter:
             reason = "its filter cannot be carried over"
         elif not measure_ref:
@@ -598,6 +605,8 @@ class DbtConnector(ConnectorBase):
         if reason is not None:
             logger.info("skipping cumulative dbt metric %r: %s", name, reason)
             return
+        if window is not None:
+            window = str(Duration.parse(window))
         definitions.append(
             DefinitionEvidence(
                 source=self._source,
@@ -608,11 +617,41 @@ class DbtConnector(ConnectorBase):
                     kind=CandidateKind.CUMULATIVE,
                     measures=[measure_ref],
                     order_by=[agg_time_dimensions[measure_ref]],
+                    window=window,
+                    grain_to_date=str(grain_to_date).lower() if grain_to_date else None,
+                    period_agg=period_agg,
                 ),
                 native_ref=metric.get("unique_id", ""),
                 acquisition_tier=AcquisitionTier.MODELING,
                 source_fingerprint=_definition_fingerprint(
-                    {"entity": name, "entity_type": "metric", "cumulative": measure_ref}
+                    {
+                        "entity": name,
+                        "entity_type": "metric",
+                        "cumulative": measure_ref,
+                        **({"window": window} if window else {}),
+                        **({"grain_to_date": str(grain_to_date)} if grain_to_date else {}),
+                    }
                 ),
             )
         )
+
+
+#: The ``grain_to_date`` values a ``cumulative`` binding accepts.
+_TO_DATE_GRAINS = frozenset({"day", "week", "month", "quarter", "year"})
+
+
+def _metricflow_window(raw: object) -> str | None:
+    """A MetricFlow window as ``"<count> <unit>"``, from its YAML string or manifest object."""
+    if raw is None or raw == "":
+        return None
+    if isinstance(raw, dict):
+        return f"{raw.get('count')} {raw.get('granularity')}"
+    return str(raw)
+
+
+def _is_day_or_longer(window: str) -> bool:
+    try:
+        duration = Duration.parse(window)
+    except ValueError:
+        return False
+    return duration.unit.rank >= DurationUnit.DAY.rank

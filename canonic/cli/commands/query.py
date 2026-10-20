@@ -52,6 +52,14 @@ def query(
         int | None,
         typer.Option("--limit", help="Row cap injected by the dialect adapter."),
     ] = None,
+    time_range: Annotated[
+        str | None,
+        typer.Option(
+            "--time-range",
+            help="Typed time range: dimension:last:<duration>[:current] (e.g. order_date:last:90d) "
+            "or dimension:<start>..<end> with ISO dates, end exclusive.",
+        ),
+    ] = None,
     harness: Annotated[
         bool,
         typer.Option(
@@ -66,7 +74,7 @@ def query(
     Either ``-f``/``--file`` (a JSON file with the
     :class:`~canonic.compiler.SemanticQuery` shape:
     ``{"metrics": [...], "dimensions": [...], "filters": [...], "via": [...], "limit": null}``)
-    or the inline ``--metrics``/``--dimensions``/``--filter``/``--via``/``--limit`` flags —
+    or the inline ``--metrics``/``--dimensions``/``--filter``/``--via``/``--limit``/``--time-range`` flags —
     never both.
 
     With ``--harness`` (benchmark/CI mode), every assertion matching the query is executed
@@ -75,7 +83,7 @@ def query(
     """
     # SPEC-E12 §7: --tenant is local-development/platform-operator only, always warns.
     principal = cli_tenant_principal(tenant)
-    sq = build_semantic_query(file, metrics, dimensions, filter_, via, limit)
+    sq = build_semantic_query(file, metrics, dimensions, filter_, via, limit, time_range)
     service = load_service(ctx)
     result = asyncio.run(service.query(sq, harness=harness, principal=principal))
 

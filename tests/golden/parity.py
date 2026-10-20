@@ -9,6 +9,7 @@ answers case by case.
 
 from __future__ import annotations
 
+import re
 import shutil
 from decimal import Decimal
 from typing import TYPE_CHECKING, Any
@@ -53,11 +54,28 @@ _CLICKHOUSE_TABLE_SUFFIX = " ENGINE = MergeTree ORDER BY tuple()"
 
 _SIG_DIGITS = 9
 
+_MIDNIGHT = re.compile(r"^\d{4}-\d{2}-\d{2}[T ]00:00:00$")
+
 
 def _text_as_varchar(node: exp.Expression) -> exp.Expression:
     """Turn ``TEXT`` into ``VARCHAR(255)``, since MySQL cannot index or make a ``TEXT`` column unique."""
     if isinstance(node, exp.DataType) and node.this == exp.DataType.Type.TEXT:
         return exp.DataType.build("VARCHAR(255)")
+    return node
+
+
+def _text_date_as_date(node: exp.Expression) -> exp.Expression:
+    """Turn a ``TEXT`` column named ``*_date`` into ``DATE``, the type the semantic layer declares.
+
+    SQLite stores dates as text. Left as text, ``DATE_TRUNC`` on a month dimension has no
+    overload for it on DuckDB and Snowflake.
+    """
+    if (
+        isinstance(node, exp.ColumnDef)
+        and node.args["kind"].this == exp.DataType.Type.TEXT
+        and node.name.endswith("_date")
+    ):
+        node.set("kind", exp.DataType.build("DATE"))
     return node
 
 
@@ -105,6 +123,8 @@ def seed_statements(setup_sql: str, dialect: str, *, identify: bool = False) -> 
     statements = [s for s in parsed if not isinstance(s, exp.Pragma)]
     if dialect == "mysql":
         statements = [s.transform(_text_as_varchar) for s in statements]
+    if dialect in {"duckdb", "snowflake"}:
+        statements = [s.transform(_text_date_as_date) for s in statements]
     if dialect == "clickhouse":
         return [
             _clickhouse_create(s) if isinstance(s, exp.Create) else s.sql(dialect=dialect)
@@ -214,11 +234,17 @@ def write_databricks_rental_project(source: Path, dest: Path) -> None:
 
 
 def _comparable(value: Any) -> Any:
-    """Collapse numeric type differences (``Decimal`` vs ``float`` vs ``int``) between engines."""
+    """Collapse numeric type differences (``Decimal`` vs ``float`` vs ``int``) between engines.
+
+    A period bucket is a ``DATE`` on some engines and a midnight ``TIMESTAMP`` on others
+    (``DATE_TRUNC`` on DuckDB and Snowflake), so a midnight timestamp compares as its date.
+    """
     if isinstance(value, bool):
         return value
     if isinstance(value, (int, float, Decimal)):
         return float(f"{float(value):.{_SIG_DIGITS}g}")
+    if isinstance(value, str) and _MIDNIGHT.match(value):
+        return value[:10]
     if isinstance(value, str):
         try:
             return float(f"{float(value):.{_SIG_DIGITS}g}")

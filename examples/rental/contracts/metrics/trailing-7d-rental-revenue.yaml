@@ -1,0 +1,11 @@
+metric: trailing_7d_rental_revenue
+canonical:
+  kind: cumulative
+  source: payments
+  measure: total_paid
+  order_by: [payment_date]
+  window: 7 days
+provenance: human_curated
+label: "Rental Revenue, Trailing 7 Days"
+aliases: ["revenue last 7 days", "weekly rolling revenue"]
+status: active
