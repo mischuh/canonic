@@ -11,7 +11,7 @@ from ruamel.yaml import YAML
 
 from canonic.cli._errors import get_cli_context
 from canonic.compiler import SemanticQuery
-from canonic.compiler.query import parse_filter_flag
+from canonic.compiler.query import parse_filter_flag, parse_time_range_flag
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -82,6 +82,7 @@ def build_semantic_query(
     filters: list[str] | None,
     via: list[str] | None = None,
     limit: int | None = None,
+    time_range: str | None = None,
 ) -> SemanticQuery:
     """Build a :class:`SemanticQuery` from ``-f``/``--file`` or the inline flag set.
 
@@ -89,10 +90,11 @@ def build_semantic_query(
     this so both commands resolve flags to the identical object the JSON-file path
     would deserialize (SPEC-E7-E8 §3, S14).
     """
-    flags_given = bool(metrics or dimensions or filters or via)
+    flags_given = bool(metrics or dimensions or filters or via or time_range)
     if file is not None and flags_given:
         raise typer.BadParameter(
-            "-f/--file and --metrics/--dimensions/--filter/--via are mutually exclusive"
+            "-f/--file and --metrics/--dimensions/--filter/--via/--time-range are mutually "
+            "exclusive"
         )
     if file is None and not flags_given:
         raise typer.BadParameter("either -f/--file or --metrics is required")
@@ -102,6 +104,7 @@ def build_semantic_query(
 
     try:
         parsed_filters = [parse_filter_flag(f) for f in filters or []]
+        parsed_range = parse_time_range_flag(time_range) if time_range else None
     except ValueError as exc:
         raise typer.BadParameter(str(exc)) from exc
 
@@ -111,4 +114,5 @@ def build_semantic_query(
         filters=parsed_filters,
         via=_expand_csv(via),
         limit=limit,
+        time_range=parsed_range,
     )

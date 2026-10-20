@@ -27,6 +27,7 @@ __all__ = [
     "RelatedMetric",
     "ScopeMetadata",
     "SourceFreshness",
+    "TimeRangeMetadata",
     "TrustInput",
 ]
 
@@ -194,6 +195,30 @@ class CumulativeMetadata:
     on_gap: str
     history: str
     visibility_filters: list[str] = field(default_factory=list)
+    #: The trailing window, or ``None`` for a frame that is not a fixed length.
+    window: str | None = None
+    #: The grain the total restarts at, such as ``month`` for month to date.
+    grain_to_date: str | None = None
+    #: Which day of a coarser output bucket represents it: ``first``, ``last`` or ``average``.
+    period_agg: str = "last"
+    #: How far before the first shown day rows are read, ``None`` for the unbounded frame.
+    lookback: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class TimeRangeMetadata:
+    """The query's ``time_range`` resolved to dates.
+
+    ``start`` is inclusive and ``end`` exclusive, either may be ``None`` for an open side.
+    ``anchor`` is the instant ``last`` counted back from, ``None`` for explicit dates.
+    """
+
+    dimension: str
+    start: str | None
+    end: str | None
+    last: str | None = None
+    include_current: bool = False
+    anchor: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -312,6 +337,7 @@ class CompileResult:
     recompute_at_grain: RecomputeAtGrainMetadata | None = None
     opaque: OpaqueMetadata | None = None
     cumulative: CumulativeMetadata | None = None
+    time_range: TimeRangeMetadata | None = None
     trust_inputs: list[TrustInput] = field(default_factory=list)
     time_dimensions: tuple[TimeDimension, ...] = ()
     #: Columns added to ``sql`` that the serving layer strips again, see :class:`ProbeColumn`.

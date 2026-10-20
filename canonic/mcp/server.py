@@ -415,10 +415,18 @@ def build_server(
         description=(
             "Compile a semantic query to dialect-correct SQL + metadata without executing it. "
             "Accepts a dict with keys: metrics (list[str]), dimensions (list[str]), "
-            "filters (list[str]): SQL WHERE predicates e.g. [\"segment = 'smb'\", \"status = 'active'\", \"created_at >= DATE('now', '-12 months')\"]. "
-            "Relative dates use SQLite DATE() modifier syntax, applied left-to-right: "
-            "DATE('now', '-12 months') for a rolling window, or DATE('now', 'start of month', '-1 month') "
-            "for 'last calendar month' (truncate to month start, then step back). "
+            "filters (list[str]): SQL WHERE predicates e.g. [\"segment = 'smb'\", \"status = 'active'\"]. "
+            "time_range (dict|null): a typed range on one time dimension, preferred over "
+            'hand-written relative-date filters. {"dimension": "order_date", "last": "90 days"} '
+            "is the last 90 complete days before today (units day, week, month, quarter, year; "
+            "'3 months' is the last three calendar months), add \"include_current\": true to "
+            'include the current period up to today. {"dimension": ..., "start": '
+            '"2026-01-01", "end": "2026-04-01"} takes ISO dates, end exclusive. The resolved '
+            "dates are returned in metadata.time_range; quote those to the user. "
+            "as_of (ISO datetime|null) pins 'today' for time_range and finality. "
+            "A trailing or to-date total (a cumulative metric whose describe_metric shows a "
+            "window or grain_to_date, such as revenue over the last 7 days per day) is a metric, "
+            "not a filter: request it grouped by its time dimension. "
             "via (list[str]), limit (int|null). "
             "Dimension names must be canonical 'name' values as returned by describe_metric — "
             "not natural-language terms. "
@@ -458,10 +466,18 @@ def build_server(
             "Compile and execute a semantic query read-only. "
             "Returns rows + compiler metadata (resolved bindings, guardrails fired, freshness). "
             "Accepts a dict with keys: metrics (list[str]), dimensions (list[str]), "
-            "filters (list[str]): SQL WHERE predicates e.g. [\"segment = 'smb'\", \"status = 'active'\", \"created_at >= DATE('now', '-12 months')\"]. "
-            "Relative dates use SQLite DATE() modifier syntax, applied left-to-right: "
-            "DATE('now', '-12 months') for a rolling window, or DATE('now', 'start of month', '-1 month') "
-            "for 'last calendar month' (truncate to month start, then step back). "
+            "filters (list[str]): SQL WHERE predicates e.g. [\"segment = 'smb'\", \"status = 'active'\"]. "
+            "time_range (dict|null): a typed range on one time dimension, preferred over "
+            'hand-written relative-date filters. {"dimension": "order_date", "last": "90 days"} '
+            "is the last 90 complete days before today (units day, week, month, quarter, year; "
+            "'3 months' is the last three calendar months), add \"include_current\": true to "
+            'include the current period up to today. {"dimension": ..., "start": '
+            '"2026-01-01", "end": "2026-04-01"} takes ISO dates, end exclusive. The resolved '
+            "dates are returned in metadata.time_range; quote those to the user. "
+            "as_of (ISO datetime|null) pins 'today' for time_range and finality. "
+            "A trailing or to-date total (a cumulative metric whose describe_metric shows a "
+            "window or grain_to_date, such as revenue over the last 7 days per day) is a metric, "
+            "not a filter: request it grouped by its time dimension. "
             "via (list[str]), limit (int|null). "
             "Dimension names must be canonical 'name' values as returned by describe_metric — "
             "not natural-language terms. "

@@ -615,6 +615,10 @@ class TestMetadata:
             "on_gap": "skip",
             "history": history,
             "visibility_filters": visibility,
+            "window": None,
+            "grain_to_date": None,
+            "period_agg": "last",
+            "lookback": None,
         }
 
     def test_no_cumulative_metadata_for_other_kinds(self, run: Any) -> None:

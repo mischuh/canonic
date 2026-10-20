@@ -214,6 +214,29 @@ class TestBuild:
             "history": "include",
         }
 
+    async def test_a_window_carries_over_without_history(self) -> None:
+        candidate = ContractCandidate(
+            kind=CandidateKind.CUMULATIVE,
+            measures=["revenue"],
+            order_by=["order_day"],
+            window="7 days",
+            period_agg="first",
+        )
+        definitions = [
+            *_shop_definitions(),
+            _candidate("revenue_7d", CandidateKind.CUMULATIVE, ["revenue"], order_by=["order_day"]),
+        ]
+        definitions[-1] = definitions[-1].model_copy(update={"contract_candidate": candidate})
+        contracts = _contracts(await _proposals(definitions))
+        assert contracts["contracts/metrics/revenue_7d.yaml"]["canonical"] == {
+            "kind": "cumulative",
+            "source": "orders",
+            "measure": "revenue",
+            "order_by": ["order_day"],
+            "window": "7 days",
+            "period_agg": "first",
+        }
+
     async def test_cumulative_over_a_non_additive_measure_is_skipped(self) -> None:
         definitions = [
             *_shop_definitions(),

@@ -1,0 +1,87 @@
+{
+  "case": "rental_trailing_7d_revenue_by_month_next_to_revenue",
+  "columns": [
+    {
+      "name": "payment_month",
+      "type": "string"
+    },
+    {
+      "name": "trailing_7d_rental_revenue",
+      "type": "float"
+    },
+    {
+      "name": "rental_revenue",
+      "type": "float"
+    }
+  ],
+  "dialect": "sqlite",
+  "finality": null,
+  "guardrails_fired": [],
+  "project": "rental",
+  "resolved": {
+    "metrics": {
+      "rental_revenue": "payments.total_paid",
+      "trailing_7d_rental_revenue": "cumulative(payments.total_paid, window=7 days)"
+    }
+  },
+  "row_count": 11,
+  "rows": [
+    [
+      "2024-01-01",
+      null,
+      1609.83
+    ],
+    [
+      "2024-02-01",
+      null,
+      1379.86
+    ],
+    [
+      "2024-03-01",
+      349.95,
+      2029.81
+    ],
+    [
+      "2024-04-01",
+      null,
+      1479.83
+    ],
+    [
+      "2024-05-01",
+      699.93,
+      1389.82
+    ],
+    [
+      "2024-06-01",
+      null,
+      1779.84
+    ],
+    [
+      "2024-07-01",
+      449.95,
+      1989.81
+    ],
+    [
+      "2024-08-01",
+      null,
+      1849.84
+    ],
+    [
+      "2024-09-01",
+      699.93,
+      1549.82
+    ],
+    [
+      "2024-10-01",
+      null,
+      1079.84
+    ],
+    [
+      "2024-11-01",
+      279.96,
+      1329.89
+    ]
+  ],
+  "trust_tier": "provisional",
+  "warnings": []
+}

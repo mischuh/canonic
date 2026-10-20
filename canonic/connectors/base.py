@@ -275,7 +275,8 @@ class ContractCandidate(BaseModel):
     ``measures`` names the component measures: one for ``distinct_count`` and
     ``cumulative``, numerator then denominator for ``ratio``. ``order_by`` names the
     dimensions a ``cumulative`` candidate accumulates along, and is empty for every other
-    kind.
+    kind. ``window``, ``grain_to_date`` and ``period_agg`` carry a bounded ``cumulative``
+    frame and which day represents a coarser bucket, in the contract's own spelling.
     """
 
     model_config = ConfigDict(frozen=True)
@@ -283,6 +284,9 @@ class ContractCandidate(BaseModel):
     kind: CandidateKind
     measures: list[str]
     order_by: list[str] = []
+    window: str | None = None
+    grain_to_date: str | None = None
+    period_agg: str | None = None
 
 
 class DefinitionEvidence(BaseModel):

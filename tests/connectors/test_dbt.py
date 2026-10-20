@@ -474,7 +474,10 @@ class TestCumulativeMetrics:
         )
         assert await self._candidates(manifest) == {
             "revenue_to_date": ContractCandidate(
-                kind=CandidateKind.CUMULATIVE, measures=["revenue"], order_by=["order_date"]
+                kind=CandidateKind.CUMULATIVE,
+                measures=["revenue"],
+                order_by=["order_date"],
+                period_agg="first",
             )
         }
 
@@ -492,12 +495,49 @@ class TestCumulativeMetrics:
         assert candidate.order_by == ["ship_date"]
 
     @pytest.mark.parametrize(
+        ("type_params", "frame"),
+        [
+            (
+                {"measure": "revenue", "window": {"count": 7, "granularity": "day"}},
+                {"window": "7 days", "period_agg": "first"},
+            ),
+            ({"measure": "revenue", "grain_to_date": "month"}, {"grain_to_date": "month"}),
+            (
+                {"measure": "revenue", "cumulative_type_params": {"window": "1 month"}},
+                {"window": "1 month"},
+            ),
+            (
+                {
+                    "measure": "revenue",
+                    "cumulative_type_params": {"grain_to_date": "YEAR", "period_agg": "last"},
+                },
+                {"grain_to_date": "year", "period_agg": "last"},
+            ),
+        ],
+    )
+    async def test_window_and_grain_to_date_carry_over(
+        self, tmp_path: Path, type_params: dict[str, object], frame: dict[str, str]
+    ) -> None:
+        manifest = _cumulative_manifest(
+            tmp_path / "m.json",
+            {"name": "revenue_window", "type": "cumulative", "type_params": type_params},
+        )
+        assert await self._candidates(manifest) == {
+            "revenue_window": ContractCandidate(
+                kind=CandidateKind.CUMULATIVE,
+                measures=["revenue"],
+                order_by=["order_date"],
+                **{"period_agg": "first", **frame},
+            )
+        }
+
+    @pytest.mark.parametrize(
         "type_params",
         [
-            {"measure": "revenue", "window": {"count": 7, "granularity": "day"}},
-            {"measure": "revenue", "grain_to_date": "month"},
-            {"measure": "revenue", "cumulative_type_params": {"window": "7 days"}},
-            {"measure": "revenue", "cumulative_type_params": {"grain_to_date": "month"}},
+            {"measure": "revenue", "window": "6 hours"},
+            {"measure": "revenue", "window": "a week"},
+            {"measure": "revenue", "grain_to_date": "hour"},
+            {"measure": "revenue", "cumulative_type_params": {"period_agg": "median"}},
             {"measure": {"name": "revenue", "filter": "{{ Dimension('x') }} = 1"}},
             {"measure": "unknown_measure"},
         ],

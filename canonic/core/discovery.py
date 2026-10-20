@@ -14,6 +14,7 @@ from canonic.contracts.principal import Principal
 from canonic.contracts.resolver import Binding as ResolverBinding
 from canonic.core.models import (
     ComponentsOut,
+    CumulativeDefinitionOut,
     DimensionInfo,
     DomainGroup,
     MetricDetail,
@@ -321,6 +322,7 @@ class DiscoveryService:
             source=binding.source,
             measure=binding.measure,
             population_filter=binding.binding.canonical.population_filter,
+            cumulative=CumulativeDefinitionOut.from_binding(binding),
             grain=list(source.grain),
             dimensions=self._reachable_dimensions(source.name, effective_policy),
             measures=[m.name for m in source.measures],

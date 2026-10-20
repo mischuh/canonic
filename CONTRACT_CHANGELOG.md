@@ -107,6 +107,17 @@ A change listed here was reviewed against the classification rules and did not b
 
 ## History
 
+## 3.12 (2026-10-20) - MINOR
+
+- ADR/PR: this PR (feat(compiler): trailing windows, period-to-date totals and typed time ranges)
+- Summary: the semantic query gains an optional `time_range` (`dimension` plus `last` or
+  `start`/`end`, and `include_current`), resolved to literal dates against `as_of` at compile
+  time. `metadata.time_range` echoes the resolved `start`, `end`, `last`, `include_current` and
+  `anchor`. `metadata.cumulative` gains `window`, `grain_to_date`, `period_agg` and `lookback`.
+  The `cumulative` binding gains `window`, `grain_to_date` and `period_agg` in the contract file
+  format, which does not bump the schema on its own. An unbounded cumulative binding without
+  `period_agg` compiles exactly as before. A consumer that ignores unknown fields is unaffected.
+
 ## 3.11 (2026-10-19) - MINOR
 
 - ADR/PR: this PR (feat(core): decompose the change of a metric between two periods)

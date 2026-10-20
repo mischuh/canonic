@@ -36,6 +36,7 @@ from canonic.contracts.models import (
     MetricBinding,
     OnGap,
     OnZeroDenominator,
+    PeriodAgg,
     RoleDef,
     RolePolicy,
     ScopedSource,
@@ -50,6 +51,7 @@ if TYPE_CHECKING:
     from typing import Any
 
     from canonic.contracts.models import Assertion
+    from canonic.semantic.duration import Duration, DurationUnit
     from canonic.semantic.models import SemanticSource
 
 logger = logging.getLogger(__name__)
@@ -104,6 +106,30 @@ class CumulativeBinding:
     order_by: tuple[str, ...]
     on_gap: OnGap
     history: History
+    window: Duration | None = None
+    grain_to_date: DurationUnit | None = None
+    period_agg: PeriodAgg = PeriodAgg.LAST
+
+    @property
+    def needs_day_spine(self) -> bool:
+        """Whether the value is evaluated per calendar day (a bounded frame, or not ``last``)."""
+        return (
+            self.window is not None
+            or self.grain_to_date is not None
+            or self.period_agg is not PeriodAgg.LAST
+        )
+
+    @property
+    def frame_key(self) -> str:
+        """The frame as it appears in the resolved key, empty for the unbounded ``last`` frame."""
+        parts: list[str] = []
+        if self.window is not None:
+            parts.append(f"window={self.window}")
+        if self.grain_to_date is not None:
+            parts.append(f"to_date={self.grain_to_date.value}")
+        if self.period_agg is not PeriodAgg.LAST:
+            parts.append(f"period_agg={self.period_agg.value}")
+        return "".join(f", {p}" for p in parts)
 
 
 @dataclass(frozen=True, slots=True)
@@ -150,7 +176,8 @@ class Binding:
         if self.kind is BindingKind.OPAQUE:
             return f"opaque({self.source}.{self.measure})"
         if self.kind is BindingKind.CUMULATIVE:
-            return f"cumulative({self.source}.{self.measure})"
+            frame = self.cumulative.frame_key if self.cumulative is not None else ""
+            return f"cumulative({self.source}.{self.measure}{frame})"
         return f"{self.source}.{self.measure}"
 
 
@@ -437,6 +464,9 @@ class ContractResolver:
                     order_by=tuple(canonical.order_by),
                     on_gap=canonical.on_gap,
                     history=canonical.history,
+                    window=canonical.window,
+                    grain_to_date=canonical.grain_to_date,
+                    period_agg=canonical.period_agg,
                 ),
             )
 

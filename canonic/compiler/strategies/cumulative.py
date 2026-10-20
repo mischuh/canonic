@@ -163,6 +163,7 @@ def plan_metric(
         metric=MetricPlan(
             name=queried_name,
             refs=(LeafRef(leaf=0, column=queried_name),),
+            cumulative=True,
             accumulate=Accumulate(
                 order_by=order_by,
                 partition_by=partition_by,

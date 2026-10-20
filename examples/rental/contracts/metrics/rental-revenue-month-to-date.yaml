@@ -1,0 +1,11 @@
+metric: rental_revenue_month_to_date
+canonical:
+  kind: cumulative
+  source: payments
+  measure: total_paid
+  order_by: [payment_date]
+  grain_to_date: month
+provenance: human_curated
+label: "Rental Revenue, Month to Date"
+aliases: ["revenue mtd", "month to date revenue"]
+status: active

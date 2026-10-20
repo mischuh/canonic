@@ -1,0 +1,59 @@
+{
+  "case": "rental_revenue_last_90_days",
+  "columns": [
+    {
+      "name": "payment_date",
+      "type": "string"
+    },
+    {
+      "name": "rental_revenue",
+      "type": "float"
+    }
+  ],
+  "dialect": "sqlite",
+  "finality": null,
+  "guardrails_fired": [],
+  "project": "rental",
+  "resolved": {
+    "metrics": {
+      "rental_revenue": "payments.total_paid"
+    }
+  },
+  "row_count": 8,
+  "rows": [
+    [
+      "2024-09-05",
+      359.96
+    ],
+    [
+      "2024-09-17",
+      489.93
+    ],
+    [
+      "2024-09-27",
+      699.93
+    ],
+    [
+      "2024-10-08",
+      349.93
+    ],
+    [
+      "2024-10-17",
+      629.93
+    ],
+    [
+      "2024-10-22",
+      99.98
+    ],
+    [
+      "2024-11-08",
+      1049.93
+    ],
+    [
+      "2024-11-14",
+      279.96
+    ]
+  ],
+  "trust_tier": "provisional",
+  "warnings": []
+}

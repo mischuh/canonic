@@ -25,6 +25,7 @@ measures:
 
 dimensions:
   - { name: payment_date, column: payment_date }
+  - { name: payment_month, column: payment_date, granularity: month }
   - { name: method,       column: method }
   - { name: status,       column: status }
 

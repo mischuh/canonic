@@ -129,6 +129,9 @@ class MetricPlan:
     refs: tuple[LeafRef, ...]
     combine: Combine = Combine.DIRECT
     accumulate: Accumulate | None = None
+    #: A cumulative metric, also when its value is computed inside its leaf rather than by an
+    #: ``accumulate`` step. Finality is not defined for one yet.
+    cumulative: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -158,6 +161,7 @@ class MetricLeaves:
             refs=tuple(LeafRef(leaf=r.leaf + by, column=r.column) for r in self.metric.refs),
             combine=self.metric.combine,
             accumulate=self.metric.accumulate,
+            cumulative=self.metric.cumulative,
         )
 
 
@@ -417,9 +421,10 @@ def compose(
     dim_names = list(leaves[0].dim_names)
     with_is_final = any(p.projects_is_final for p in physical)
     accumulating = [m for m in metrics if m.accumulate is not None]
-    if accumulating and with_is_final:
+    cumulative = [m for m in metrics if m.accumulate is not None or m.cumulative]
+    if cumulative and with_is_final:
         raise UnsupportedMeasure(
-            f"cumulative metric {accumulating[0].name!r} cannot be combined with a metric "
+            f"cumulative metric {cumulative[0].name!r} cannot be combined with a metric "
             f"under a finality rule in one query; request them separately"
         )
 

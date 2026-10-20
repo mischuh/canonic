@@ -138,15 +138,23 @@ def build_candidate_proposals(
                 reason = base if isinstance(base, str) else "the measure is not additive"
                 unexpressible.append((source, f"{label}: {reason}"))
                 continue
-            running_total = {
+            running_total: dict[str, Any] = {
                 "kind": "cumulative",
                 "source": base["source"],
                 "measure": base["measure"],
                 "order_by": list(candidate.order_by),
-                # MetricFlow accumulates from the start of time even under a time constraint,
-                # so an imported running total keeps the rows before a filter.
-                "history": "include",
             }
+            if candidate.window is not None:
+                running_total["window"] = candidate.window
+            elif candidate.grain_to_date is not None:
+                running_total["grain_to_date"] = candidate.grain_to_date
+            else:
+                # MetricFlow accumulates from the start of time even under a time constraint,
+                # so an imported running total keeps the rows before a filter. A window always
+                # reads its full lookback and takes no history setting.
+                running_total["history"] = "include"
+            if candidate.period_agg is not None:
+                running_total["period_agg"] = candidate.period_agg
             propose(definition.entity, running_total, list(definition.aliases), anchor)
             continue
         if candidate.kind is CandidateKind.DISTINCT_COUNT:

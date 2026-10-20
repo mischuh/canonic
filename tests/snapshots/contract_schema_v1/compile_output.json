@@ -148,6 +148,47 @@
           },
           "title": "Visibility Filters",
           "type": "array"
+        },
+        "window": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Window"
+        },
+        "grain_to_date": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Grain To Date"
+        },
+        "period_agg": {
+          "default": "last",
+          "title": "Period Agg",
+          "type": "string"
+        },
+        "lookback": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Lookback"
         }
       },
       "required": [
@@ -285,7 +326,7 @@
           "type": "array"
         },
         "contract_schema": {
-          "default": "3.11",
+          "default": "3.12",
           "title": "Contract Schema",
           "type": "string"
         },
@@ -333,6 +374,17 @@
           "anyOf": [
             {
               "$ref": "#/$defs/CumulativeOut"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "time_range": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TimeRangeOut"
             },
             {
               "type": "null"
@@ -535,6 +587,73 @@
         "source"
       ],
       "title": "SourceFreshnessOut",
+      "type": "object"
+    },
+    "TimeRangeOut": {
+      "description": "The query's ``time_range`` resolved to dates, ``start`` inclusive and ``end`` exclusive.\n\n``anchor`` is the instant ``last`` was counted back from, ``as_of`` or the compile time.",
+      "properties": {
+        "dimension": {
+          "title": "Dimension",
+          "type": "string"
+        },
+        "start": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Start"
+        },
+        "end": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "End"
+        },
+        "last": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Last"
+        },
+        "include_current": {
+          "default": false,
+          "title": "Include Current",
+          "type": "boolean"
+        },
+        "anchor": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Anchor"
+        }
+      },
+      "required": [
+        "dimension"
+      ],
+      "title": "TimeRangeOut",
       "type": "object"
     },
     "TrustScoreOut": {

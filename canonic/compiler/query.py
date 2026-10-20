@@ -8,12 +8,20 @@ resolved by the compiler against bindings and semantic sources.
 from __future__ import annotations
 
 import re
-from datetime import datetime  # noqa: TC003 — Pydantic resolves field annotations at runtime
+from datetime import date, datetime  # noqa: TC003 — Pydantic resolves field annotations at runtime
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, field_validator
+from pydantic import BaseModel, ConfigDict, field_validator, model_validator
 
-__all__ = ["SemanticQuery", "coerce_filters", "parse_filter_flag"]
+from canonic.semantic.duration import Duration, DurationField, DurationUnit
+
+__all__ = [
+    "SemanticQuery",
+    "TimeRange",
+    "coerce_filters",
+    "parse_filter_flag",
+    "parse_time_range_flag",
+]
 
 _OPERATOR_MAP: dict[str, str] = {
     "EQUALS": "=",
@@ -137,6 +145,68 @@ def coerce_filters(v: Any) -> list[str]:
     return result
 
 
+class TimeRange(BaseModel):
+    """A typed range on one time dimension: the last N units before ``as_of``, or two dates.
+
+    ``last`` counts whole units before the unit that contains the anchor day, so ``last: 3
+    months`` on 20 October is July to September. ``include_current`` extends the range to the
+    end of the anchor day. ``start`` is inclusive and ``end`` exclusive. Bounds are resolved to
+    dates at compile time (:func:`canonic.compiler.time_range.resolve_time_range`).
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    dimension: str
+    last: DurationField | None = None
+    start: date | None = None
+    end: date | None = None
+    include_current: bool = False
+
+    @model_validator(mode="after")
+    def _validate_bounds(self) -> TimeRange:
+        explicit = self.start is not None or self.end is not None
+        if (self.last is None) == (not explicit):
+            raise ValueError("time_range sets exactly one of 'last' and 'start'/'end'")
+        if self.last is not None and self.last.unit.rank < DurationUnit.DAY.rank:
+            raise ValueError(f"time_range.last must be a day or longer, got {self.last}")
+        if self.start is not None and self.end is not None and self.start >= self.end:
+            raise ValueError(f"time_range.start {self.start} must be before end {self.end}")
+        if self.include_current and self.last is None:
+            raise ValueError("time_range.include_current requires 'last'")
+        return self
+
+
+def parse_time_range_flag(raw: str) -> TimeRange:
+    """Parse a CLI ``--time-range`` value.
+
+    ``order_date:last:90d`` (with an optional ``:current`` suffix for ``include_current``) or
+    ``order_date:2026-01-01..2026-04-01``, where either date may be left out.
+    """
+    dimension, sep, rest = raw.partition(":")
+    if not sep or not dimension.strip():
+        raise ValueError(
+            f"time range must be dimension:last:<duration> or dimension:<start>..<end>, got {raw!r}"
+        )
+    dimension = dimension.strip()
+    if rest.startswith("last:"):
+        duration, _, flag = rest.removeprefix("last:").partition(":")
+        if flag not in ("", "current"):
+            raise ValueError(f"unknown time range suffix {flag!r}; the only one is 'current'")
+        return TimeRange(
+            dimension=dimension, last=Duration.parse(duration), include_current=flag == "current"
+        )
+    start, dots, end = rest.partition("..")
+    if not dots:
+        raise ValueError(
+            f"time range must be dimension:last:<duration> or dimension:<start>..<end>, got {raw!r}"
+        )
+    return TimeRange(
+        dimension=dimension,
+        start=date.fromisoformat(start) if start else None,
+        end=date.fromisoformat(end) if end else None,
+    )
+
+
 class SemanticQuery(BaseModel):
     """A resolved-by-name request the compiler turns into dialect-correct SQL (§3)."""
 
@@ -148,7 +218,8 @@ class SemanticQuery(BaseModel):
     via: list[str] = []  # [P0] intermediate source names to route join paths through
     context: str | None = None  # [P1] tag activating context-scoped guardrails
     limit: int | None = None  # [P0] row cap injected by the dialect adapter
-    as_of: datetime | None = None  # [P1] reference point for finality watermark evaluation
+    as_of: datetime | None = None  # [P1] reference point for finality and time_range
+    time_range: TimeRange | None = None  # [P1] typed range on one time dimension
 
     @field_validator("filters", mode="before")
     @classmethod
