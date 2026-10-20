@@ -132,6 +132,32 @@ def _resolver() -> ContractResolver:
             _offset("aov_py", "aov", "1 year"),
             _offset("revenue_from_2025_py", "revenue_from_2025", "1 year"),
             _binding(
+                "revenue_a", source="orders", measure="revenue", population_filter="category = 'a'"
+            ),
+            _binding(
+                "revenue_a_py",
+                kind="offset",
+                base="revenue",
+                time_dimension="order_day",
+                offset="1 year",
+                population_filter="category = 'a'",
+            ),
+            _binding(
+                "revenue_py_from_2025",
+                kind="offset",
+                base="revenue",
+                time_dimension="order_day",
+                offset="1 year",
+                population_filter="order_date >= '2025-01-01'",
+            ),
+            _binding(
+                "revenue_a_yoy",
+                kind="derived",
+                expr="(revenue - py) / py",
+                inputs=[{"metric": "revenue"}, {"metric": "revenue_py", "alias": "py"}],
+                population_filter="category = 'a'",
+            ),
+            _binding(
                 "revenue_yoy",
                 kind="derived",
                 expr="(revenue - py) / py",
@@ -322,6 +348,20 @@ class TestOffset:
         assert "2025-12-01" not in values  # 2024-12-31 is before the population starts
         assert values["2026-01-01"] == 45.0  # the 2025 January orders
 
+    def test_its_own_population_filter_narrows_the_base(self, run: Any) -> None:
+        _, plain = run(["revenue_a"], ["order_month"])
+        _, rows = run(["revenue_a_py", "revenue_py"], ["order_month"])
+        assert _by(rows, "order_month", "revenue_a_py") == _shift_keys(
+            _by(plain, "order_month", "revenue_a"), "1 year"
+        )
+        assert _by(rows, "order_month", "revenue_a_py") != _by(rows, "order_month", "revenue_py")
+
+    def test_its_own_population_filter_reads_the_stored_date(self, run: Any) -> None:
+        _, rows = run(["revenue_py_from_2025", "revenue_from_2025_py"], ["order_month"])
+        assert _by(rows, "order_month", "revenue_py_from_2025") == _by(
+            rows, "order_month", "revenue_from_2025_py"
+        )
+
     def test_without_a_time_dimension_or_filter_it_warns(self, run: Any) -> None:
         result, rows = run(["revenue_py"])
         assert rows == [{"revenue_py": 93.0}]
@@ -340,6 +380,18 @@ class TestOffset:
 
 
 class TestDerived:
+    def test_its_own_population_filter_narrows_every_input(self, run: Any) -> None:
+        _, rows = run(["revenue_a_yoy", "revenue_a", "revenue_a_py"], ["order_year"])
+        for row in rows:
+            expected = (
+                round((row["revenue_a"] - row["revenue_a_py"]) / row["revenue_a_py"], 4)
+                if row["revenue_a"] is not None and row["revenue_a_py"]
+                else None
+            )
+            assert row["revenue_a_yoy"] == expected
+        # Category a: 10.00 in 2024 and 16.00 in 2025, so 2025 grew by 60 percent.
+        assert _by(rows, "order_year", "revenue_a_yoy") == {"2025-01-01": 0.6}
+
     def test_p7_growth_against_last_year(self, run: Any) -> None:
         _, rows = run(["revenue", "revenue_py", "revenue_yoy", "revenue_yoy_zero"], ["order_month"])
         for row in rows:

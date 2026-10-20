@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING
 import sqlglot
 from sqlglot import exp
 
+from canonic.compiler._helpers import enclosing_population
 from canonic.compiler.compose import (
     Combine,
     LeafRef,
@@ -53,7 +54,8 @@ def plan_metric(
     operands: list[MetricPlan] = []
     planned_inputs: list[MetricLeaves] = []
     for _alias, input_binding in derived.inputs:
-        planned = plan_input(input_binding.metric, input_binding)
+        with enclosing_population(binding.binding.canonical.population_filter):
+            planned = plan_input(input_binding.metric, input_binding)
         operands.append(planned.offset(len(leaves)))
         leaves.extend(planned.leaves)
         planned_inputs.append(planned)

@@ -28,6 +28,7 @@ from canonic.compiler._helpers import (
     _build_deduped,
     _build_finality_union,
     _build_simple,
+    _combine_population_filters,
     _dim_mask_strategy,
     _dimension_expr,
     _dimension_output_names,
@@ -39,6 +40,7 @@ from canonic.compiler._helpers import (
     _resolve_dim_mask,
     _resolve_dimensions,
     _tenant_conditions,
+    current_enclosing_populations,
     current_time_shifts,
     shifted_columns,
     unshifted,
@@ -308,9 +310,11 @@ def _apply_metric_scoping(
     """
     resolver, query, sources_by_name = ctx.resolver, ctx.query, ctx.sources_by_name
     conditions = list(where_conditions)
-    conditions += _population_filter_conditions(
-        metrics[0].population_filter, sources_by_name, owner, alias_to_source
-    )
+    enclosing = current_enclosing_populations()
+    population = metrics[0].population_filter
+    if enclosing:
+        population = _combine_population_filters(*enclosing, population)
+    conditions += _population_filter_conditions(population, sources_by_name, owner, alias_to_source)
 
     scoping = _Scoping(where_conditions=conditions)
     fired_seen: set[str] = set()
