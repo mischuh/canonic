@@ -214,6 +214,81 @@ def test_ac1_scalar_no_dims_sums_across_entities(resolver: ContractResolver) -> 
     assert rows == [(13,)]  # last-per-warehouse: w1=5 + w2=8, not a single tied row
 
 
+def _monthly_snapshot_source() -> SemanticSource:
+    """Month-end balances per warehouse, with coarser time buckets on the snapshot column."""
+    return SemanticSource(
+        name="inventory_snapshots",
+        connection="warehouse_pg",
+        table="inventory_snapshots",
+        grain=["warehouse_id", "snapshot_month"],
+        columns=[
+            Column(name="warehouse_id", type="string", nullable=False),
+            Column(name="snapshot_month", type="date", nullable=False),
+            Column(name="inventory_level", type="int", nullable=False),
+        ],
+        measures=[
+            Measure(name="inventory_level", expr="sum(inventory_level)", additivity="additive")
+        ],
+        dimensions=[
+            Dimension(name="warehouse_id", column="warehouse_id"),
+            Dimension(name="snapshot_month", column="snapshot_month", granularity="month"),
+            Dimension(name="month", column="snapshot_month", granularity="month"),
+            Dimension(name="quarter", column="snapshot_month", granularity="quarter"),
+        ],
+    )
+
+
+def _run_monthly_snapshots(dimensions: list[str]) -> list[tuple[object, ...]]:
+    import duckdb
+
+    binding = MetricBinding(
+        metric="ending_inventory",
+        canonical=CanonicalRef(
+            kind=BindingKind.SEMI_ADDITIVE,
+            source="inventory_snapshots",
+            measure="inventory_level",
+            collapse_dimension="snapshot_month",
+            collapse_agg=CollapseAgg.LAST,
+        ),
+    )
+    result = compile(
+        SemanticQuery(metrics=["ending_inventory"], dimensions=dimensions),
+        ContractResolver(bindings=[binding], guardrails=[]),
+        [_monthly_snapshot_source()],
+    )
+    con = duckdb.connect()
+    con.execute(
+        "CREATE TABLE inventory_snapshots (warehouse_id TEXT, snapshot_month DATE, inventory_level INT)"
+    )
+    con.execute(
+        "INSERT INTO inventory_snapshots VALUES "
+        "('w1', '2024-01-01', 10), ('w2', '2024-01-01', 20), "
+        "('w1', '2024-03-01', 12), ('w2', '2024-03-01', 22), "
+        "('w1', '2024-04-01', 30), ('w2', '2024-04-01', 40), "
+        "('w1', '2024-06-01', 31), ('w2', '2024-06-01', 41)"
+    )
+    sql = result.sql.replace('"inventory_snapshots"', "inventory_snapshots")
+    return sorted(con.execute(sql).fetchall())
+
+
+def test_coarser_time_bucket_takes_the_last_snapshot_per_bucket() -> None:
+    """Regression: grouped by a quarter bucket of the collapse column, every quarter shows
+    its own last snapshot per entity. The window used to partition by the entity only, so
+    each warehouse's overall last row landed in the newest quarter and older quarters
+    summed to nothing.
+    """
+    rows = _run_monthly_snapshots(["quarter"])
+    assert [value for _, value in rows] == [34, 72]  # Q1: 12 + 22, Q2: 31 + 41
+
+
+def test_same_grain_bucket_under_another_name_keeps_every_month() -> None:
+    """A second dimension on the collapse column at the same grain is one snapshot per
+    bucket, so every month keeps its own total instead of only the newest one.
+    """
+    rows = _run_monthly_snapshots(["month"])
+    assert [value for _, value in rows] == [30, 34, 70, 72]
+
+
 def test_ac1_resolved_by_alias(
     resolver: ContractResolver, inventory_source: SemanticSource
 ) -> None:

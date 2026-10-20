@@ -200,6 +200,18 @@ def plan_metric(
     )
 
 
+def _same_time_axis(
+    alias: str, dim: Dimension, collapse_alias: str, collapse_dim: Dimension
+) -> bool:
+    """Whether *dim* buckets the same column the binding collapses over, at any grain."""
+    return (
+        alias == collapse_alias
+        and dim.column is not None
+        and dim.json_path is None
+        and dim.column == collapse_dim.column
+    )
+
+
 def _build_semi_additive(
     owner: str,
     measure: Measure,
@@ -256,6 +268,13 @@ def _build_semi_additive(
             if name not in seen_names:
                 inner_projections.append(_alias(expr, name))
                 seen_names.add(name)
+
+        # A requested time bucket on the collapse column (a quarter over monthly snapshots,
+        # say) splits the time axis, so "last" is taken per entity *within* each bucket.
+        # Without it every entity's overall last row lands in the newest bucket.
+        for src, dim in dimensions:
+            if _same_time_axis(src, dim, collapse_alias, collapse_dim):
+                partition_exprs.append(_dimension_expr(src, dim))
 
         for input_col in _input_columns(measure):
             inner_projections.append(_alias(exp.column(input_col, table=owner), input_col))

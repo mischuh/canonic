@@ -56,7 +56,7 @@ A metric binding is what turns a name like `revenue` into something the compiler
 | `single` (default) | `source`, `measure` | Resolve to one `(source, measure)` pair. |
 | `ratio` | `numerator`, `denominator` (metric names) | Aggregate numerator & denominator independently, divide after. |
 | `weighted_avg` | `weighted_sum`, `weight` (metric names) | Weighted-sum ÷ weight. |
-| `semi_additive` | `source`, `measure`, `collapse_dimension`, `collapse_agg` | Sum over every dimension except `collapse_dimension`, which collapses via `collapse_agg`. |
+| `semi_additive` | `source`, `measure`, `collapse_dimension`, `collapse_agg` | Sum over every dimension except `collapse_dimension`, which collapses via `collapse_agg`. A coarser bucket of the same column in the query, such as a quarter over monthly snapshots, collapses within each bucket. |
 | `distinct_count` | `source`, `distinct_on` (column name) | Recompute `count(distinct …)` at the requested grain. |
 | `percentile` | `source`, `column`, `quantile` ∈ (0, 1) | Recompute the quantile at the requested grain from base rows. |
 | `opaque` | `source`, `measure`, `native_grain` (non-empty list of dimension columns) | Serve only at its declared native grain. Any other grain returns `UNSUPPORTED_MEASURE`. |

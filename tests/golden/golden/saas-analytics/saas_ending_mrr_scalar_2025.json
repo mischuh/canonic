@@ -1,0 +1,32 @@
+{
+  "case": "saas_ending_mrr_scalar_2025",
+  "columns": [
+    {
+      "name": "ending_mrr",
+      "type": "decimal"
+    }
+  ],
+  "dialect": "duckdb",
+  "finality": null,
+  "guardrails_fired": [
+    {
+      "id": "ending-mrr-requires-month",
+      "kind": "required_dimension",
+      "severity": "warn"
+    }
+  ],
+  "project": "saas-analytics",
+  "resolved": {
+    "metrics": {
+      "ending_mrr": "fct_mrr_snapshot.mrr_sum"
+    }
+  },
+  "row_count": 1,
+  "rows": [
+    [
+      "6591.00"
+    ]
+  ],
+  "trust_tier": "provisional",
+  "warnings": []
+}
