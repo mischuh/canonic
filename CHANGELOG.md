@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.44.1](https://github.com/mischuh/canonic/compare/v0.44.0...v0.44.1) (2026-10-20)
+
+
+### Bug Fixes
+
+* correct semi-additive time buckets, min_trust floors and the daemon contract bootstrap ([#467](https://github.com/mischuh/canonic/issues/467)) ([933ed08](https://github.com/mischuh/canonic/commit/933ed080bfa78f0698e3a8e1f840792225c0828e))
+
 ## [0.44.0](https://github.com/mischuh/canonic/compare/v0.43.2...v0.44.0) (2026-10-20)
 
 
