@@ -22,6 +22,7 @@ import duckdb
 import pytest
 
 from canonic.compiler import SemanticQuery, compile
+from canonic.compiler.compose import zero_denominator_column, zero_denominator_warning
 from canonic.contracts.models import CanonicalRef, MetricBinding
 from canonic.contracts.resolver import ContractResolver
 from canonic.core.models import QueryMetadata
@@ -393,7 +394,13 @@ class TestMatching:
     def test_purchases_before_a_visit_or_of_unknown_users_never_count(self, run: Any) -> None:
         _, rows = run(["conversions_7d", "rate_ever"])
         # Purchase 5 precedes user 4's only visit and purchase 7 belongs to no visitor.
-        assert rows == [{"conversions_7d": 4, "rate_ever": round(5 / 8, 4)}]
+        assert rows == [
+            {
+                "conversions_7d": 4,
+                "rate_ever": round(5 / 8, 4),
+                zero_denominator_column("rate_ever"): 0,
+            }
+        ]
 
     def test_c6_a_constant_property_restricts_the_matches(self, run: Any) -> None:
         _, rows = run(["rate_same_product"], ["channel"])
@@ -441,6 +448,23 @@ class TestValues:
         assert any("zero denominator" in w for w in result.warnings)
         result, _ = run(["rate_7d_zero"], ["channel"])
         assert not any("zero denominator" in w for w in result.warnings)
+
+    def test_the_rate_counts_its_zero_denominators(self, run: Any) -> None:
+        result, rows = run(["rate_7d"], ["channel"])
+        assert result.zero_denominator_metrics == {"rate_7d": "rate_7d"}
+        assert {row[zero_denominator_column("rate_7d")] for row in rows} == {0}
+
+    def test_counted_conversions_have_no_denominator(self, run: Any) -> None:
+        result, _ = run(["conversions_7d"], ["channel"])
+        assert not result.zero_denominator_metrics
+        assert zero_denominator_column("conversions_7d") not in result.sql
+
+    def test_a_derived_metric_answers_for_the_rate_it_reads(self, run: Any) -> None:
+        result, rows = run(["rate_7d_percent"], ["channel"])
+        assert [w for w in result.warnings if "zero denominator" in w] == [
+            zero_denominator_warning("rate_7d_percent")
+        ]
+        assert {row[zero_denominator_column("rate_7d_percent")] for row in rows} == {0}
 
     def test_a_derived_metric_reads_the_rate(self, run: Any) -> None:
         result, rows = run(["rate_7d_percent"], ["channel"])

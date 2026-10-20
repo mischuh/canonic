@@ -143,6 +143,9 @@ def plan_metric(
             combine=Combine.DERIVED,
             operands=(conversions_operand, base_operand),
             template=template,
+            division=(
+                combine if conversion.calculation is ConversionCalculation.CONVERSION_RATE else None
+            ),
         ),
         resolved=binding.resolved_key or queried_name,
         offsets=planned_base.offsets,

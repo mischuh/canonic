@@ -18,11 +18,11 @@ from canonic.compiler._helpers import (
     parse_dialect,
 )
 from canonic.compiler.compose import (
-    Combine,
     MetricLeaves,
     MetricPlan,
     compose,
-    substitutes_zero_denominator,
+    counts_zero_denominator,
+    nulls_zero_denominator,
     zero_denominator_column,
 )
 from canonic.compiler.dialect import adapter_for
@@ -466,14 +466,14 @@ def compile(  # noqa: A001 — the public verb for this capability is "compile"
                     subject=name,
                 )
                 for (name, _), plan in zip(raw_bindings, metric_plans, strict=False)
-                if substitutes_zero_denominator(plan)
+                if counts_zero_denominator(plan)
             ),
             *latest_probes,
         ),
         zero_denominator_metrics={
             name: plan.name
             for (name, _), plan in zip(raw_bindings, metric_plans, strict=False)
-            if plan.combine is Combine.RATIO_NULL and plan.accumulate is None
+            if nulls_zero_denominator(plan)
         },
         time_dimensions=tuple(
             {td.column: td for leaf in leaves for td in leaf.time_dimensions}.values()

@@ -20,6 +20,7 @@ import duckdb
 import pytest
 
 from canonic.compiler import SemanticQuery, compile
+from canonic.compiler.compose import zero_denominator_column, zero_denominator_warning
 from canonic.contracts.models import CanonicalRef, MetricBinding
 from canonic.contracts.resolver import ContractResolver
 from canonic.core.models import QueryMetadata
@@ -181,6 +182,18 @@ def _resolver() -> ContractResolver:
                 kind="derived",
                 expr="ROUND(100 * revenue / revenue_to_date, 2)",
                 inputs=[{"metric": "revenue"}, {"metric": "revenue_to_date"}],
+            ),
+            _binding(
+                "revenue_over_nothing",
+                kind="derived",
+                expr="revenue / (revenue - same)",
+                inputs=[{"metric": "revenue"}, {"metric": "revenue", "alias": "same"}],
+            ),
+            _binding(
+                "aov_percent",
+                kind="derived",
+                expr="100 * aov",
+                inputs=[{"metric": "aov"}],
             ),
             _binding(
                 "growth_of_growth",
@@ -451,3 +464,43 @@ class TestDerived:
         }
         assert set(metadata.offset) == {"revenue_py"}
         assert result.resolved["revenue_yoy"] == "derived((revenue - py) / py)"
+
+
+def _zero_warnings(result: CompileResult) -> list[str]:
+    return [w for w in result.warnings if "zero denominator" in w]
+
+
+class TestZeroDenominators:
+    """A derived metric counts the zero denominators it turns into ``NULL``, its inputs' too."""
+
+    def test_its_own_division_is_counted_per_row(self, run: Any) -> None:
+        result, rows = run(["revenue_over_nothing"], ["order_month"])
+        probe = zero_denominator_column("revenue_over_nothing")
+        assert result.zero_denominator_metrics == {"revenue_over_nothing": "revenue_over_nothing"}
+        assert rows
+        assert all(row[probe] == 1 and row["revenue_over_nothing"] is None for row in rows)
+
+    def test_a_denominator_that_is_never_zero_counts_nothing(self, run: Any) -> None:
+        result, rows = run(["revenue_yoy"], ["order_month"])
+        assert result.zero_denominator_metrics == {"revenue_yoy": "revenue_yoy"}
+        assert {row[zero_denominator_column("revenue_yoy")] for row in rows} == {0}
+
+    def test_an_input_ratio_is_reported_under_the_derived_name(self, run: Any) -> None:
+        result, rows = run(["aov_percent"], ["order_month"])
+        assert _zero_warnings(result) == [zero_denominator_warning("aov_percent")]
+        assert result.zero_denominator_metrics == {"aov_percent": "aov_percent"}
+        assert {row[zero_denominator_column("aov_percent")] for row in rows} == {0}
+
+    def test_a_requested_input_keeps_its_own_warning(self, run: Any) -> None:
+        result, _ = run(["aov", "aov_percent"], ["order_month"])
+        assert set(_zero_warnings(result)) == {
+            zero_denominator_warning("aov"),
+            zero_denominator_warning("aov_percent"),
+        }
+        assert set(result.zero_denominator_metrics) == {"aov", "aov_percent"}
+
+    def test_the_zero_policy_is_not_counted_as_null(self, run: Any) -> None:
+        result, _ = run(["revenue_yoy_zero"], ["order_month"])
+        assert not _zero_warnings(result)
+        assert "revenue_yoy_zero" not in result.zero_denominator_metrics
+        assert zero_denominator_column("revenue_yoy_zero") in result.sql
