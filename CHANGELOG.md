@@ -1,5 +1,24 @@
 # Changelog
 
+## [0.45.0](https://github.com/mischuh/canonic/compare/v0.44.1...v0.45.0) (2026-10-20)
+
+
+### Features
+
+* **compiler:** conversion metrics with last-touch attribution ([#475](https://github.com/mischuh/canonic/issues/475)) ([0561589](https://github.com/mischuh/canonic/commit/0561589c745f6aca3ed5e57ba1dd14d37a844ba4))
+* **compiler:** offset and derived metrics for period-over-period comparisons ([#473](https://github.com/mischuh/canonic/issues/473)) ([9ec75ea](https://github.com/mischuh/canonic/commit/9ec75ea1f8866d9259e4fdf0f670b7b09d41327b))
+* **compiler:** trailing windows, period-to-date totals and typed time ranges ([#470](https://github.com/mischuh/canonic/issues/470)) ([438b6dd](https://github.com/mischuh/canonic/commit/438b6ddce0766d284efcdc948db75a68477ae357))
+
+
+### Bug Fixes
+
+* **compiler:** apply the population_filter of offset and derived metrics ([#477](https://github.com/mischuh/canonic/issues/477)) ([1d93962](https://github.com/mischuh/canonic/commit/1d939622660f0804bd470e5d7b2bc7853bf4fa55))
+
+
+### Documentation
+
+* **connectors:** describe the dbt MetricFlow metric mapping ([#479](https://github.com/mischuh/canonic/issues/479)) ([cdc687d](https://github.com/mischuh/canonic/commit/cdc687db749f941dc6b55cf7720c3e535ee7cf90))
+
 ## [0.44.1](https://github.com/mischuh/canonic/compare/v0.44.0...v0.44.1) (2026-10-20)
 
 
