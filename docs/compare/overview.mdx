@@ -28,7 +28,7 @@ canonic is not a BI tool, not a transformation framework and not a chat interfac
 | How a metric rolls up | The aggregate the modeler chose | The measure type the modeler chose | The measure type the modeler chose | A SQL expression, the consumer decides | Fixed by the binding `kind`, the same at every grain |
 | Business rules | A `filter` on each metric | Filters in the model, access rules in code | Filters and access grants in LookML | Prose in `ai_context` | `mandatory_filter` and other guardrails on the data, applied to every query |
 | Result metadata for the caller | Rows | Rows | Rows | Not applicable | Rows plus definition used, guardrails fired, freshness and a trust tier |
-| Checking a served metric | Table and column tests | Not built in | Not built in | Not built in | Assertions on the metric, run as a CI gate |
+| Checking a served metric | Table and column tests | Not part of the documented model | Not part of the documented model | Not part of the format | Assertions on the metric, run as a CI gate |
 | Authoring | Written by hand | Written by hand | Written by hand | Written by hand or converted | Drafted from schema, manifests and usage evidence, applied as a reviewed diff |
 | Agent interface | dbt MCP server | APIs and an MCP server documented for Cube Cloud | Looker MCP Toolbox, plus a managed MCP server in preview | None, it is a format | MCP server with 14 tools, same core as the CLI |
 | Execution | Generates SQL, run by the dbt platform or your own code | Cube runtime with caching | Looker | None | Generates SQL, runs it read-only against your warehouse |
@@ -40,7 +40,7 @@ Read the table as a sketch of where the emphasis lies, not as a scorecard. Sever
 canonic ingests rather than replaces. The connectors read what you already have and turn it into reviewable proposals:
 
 - **dbt.** A manifest becomes measures, joins and `count_distinct` binding candidates. See [connectors](/concepts/connectors) and the [jaffle-shop guide](/guides/jaffle-shop).
-- **Looker and other BI tools.** Dashboards, explores and usage become evidence about which definitions people actually rely on. BI-encoded SQL is only ever evidence and is never executed.
+- **Looker and other BI tools.** Saved Looks and their usage become evidence about which definitions people actually rely on. BI-encoded SQL is only ever evidence and is never executed.
 - **Apache Ossie.** A model is imported as semantics and contracts. See the [ossie-retail guide](/guides/ossie-retail).
 
 In all three cases the source of truth for your transformations and dashboards stays where it is. canonic adds a layer that a person or an agent can ask.
@@ -61,6 +61,15 @@ In all three cases the source of truth for your transformations and dashboards s
 <CardGroup cols={2}>
   <Card title="dbt MetricFlow" icon="code-compare" href="/compare/dbt-metricflow">
     Two ideas of a metric, what stays in dbt and how to bring a dbt project into canonic.
+  </Card>
+  <Card title="Cube" icon="cube" href="/compare/cube">
+    Serving layer or context layer, and how they could sit side by side.
+  </Card>
+  <Card title="LookML / Looker" icon="chart-line" href="/compare/lookml-looker">
+    What Looker already guards against and how canonic reads it as evidence.
+  </Card>
+  <Card title="Apache Ossie" icon="file-import" href="/compare/ossie-and-interchange">
+    A format versus an engine, and how an Ossie model is imported.
   </Card>
   <Card title="Worked example: coffeehouse" icon="mug-hot" href="/guides/coffeehouse">
     The same questions answered by both, with real output and hand-checked numbers.

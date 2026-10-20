@@ -86,7 +86,10 @@
         "group": "Compare",
         "pages": [
           "compare/overview",
-          "compare/dbt-metricflow"
+          "compare/dbt-metricflow",
+          "compare/cube",
+          "compare/lookml-looker",
+          "compare/ossie-and-interchange"
         ]
       },
       {
