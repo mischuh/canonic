@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.45.2](https://github.com/mischuh/canonic/compare/v0.45.1...v0.45.2) (2026-10-21)
+
+
+### Documentation
+
+* add a social preview image for link cards ([#490](https://github.com/mischuh/canonic/issues/490)) ([a0312f9](https://github.com/mischuh/canonic/commit/a0312f98efed841bf5f5dbe404119d05617e02cc))
+
 ## [0.45.1](https://github.com/mischuh/canonic/compare/v0.45.0...v0.45.1) (2026-10-20)
 
 
