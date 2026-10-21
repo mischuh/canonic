@@ -305,3 +305,42 @@ class TestHarnessGate:
         )
         result = await svc.query(SemanticQuery(metrics=["revenue"]), harness=True)
         assert result.result.rows == [[99.5]]
+
+
+class TestTrustReportReadsAssertionHistory:
+    """``canonic audit`` ranks metrics from ``trust_report``, which must see ``canonic assert``."""
+
+    async def test_passing_harness_run_lifts_asserted_metric_to_trusted(
+        self, orders_source: SemanticSource, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        svc = _service(
+            orders_source,
+            [_assertion(100.0)],
+            _revenue_result(Decimal("100.0")),
+            monkeypatch,
+            project_root=tmp_path,
+        )
+        [(_, before)] = svc.trust_report()
+        assert before.tier == "provisional"
+        assert any("unverified" in r for r in before.reasons)
+
+        await svc.run_accuracy_harness()
+
+        [(_, after)] = svc.trust_report()
+        assert after.tier == "trusted"
+
+    async def test_failing_harness_run_caps_asserted_metric_at_caution(
+        self, orders_source: SemanticSource, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        svc = _service(
+            orders_source,
+            [_assertion(100.0)],
+            _revenue_result(Decimal("999.0")),
+            monkeypatch,
+            project_root=tmp_path,
+        )
+        await svc.run_accuracy_harness()
+
+        [(_, score)] = svc.trust_report()
+        assert score.tier == "caution"
+        assert any("revenue-2025-q1" in r for r in score.reasons)

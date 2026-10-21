@@ -28,6 +28,7 @@ from canonic.core.models import (
 )
 from canonic.core.overview import questions_for_group
 from canonic.exc import CanonicError, Unresolved, UnsupportedMeasure
+from canonic.feedback.assertion_history import AssertionHistory
 from canonic.trust.freshness import is_stale
 from canonic.trust.scorer import TrustScorer
 from canonic.trust.signals import static_signals_for
@@ -197,12 +198,19 @@ class DiscoveryService:
         """Static trust tier for every active canonical metric, sorted by name.
 
         A worklist for improving context (SPEC-E14 §8): uses only the static,
-        compile-time signals (provenance, assertion coverage) — the same ones a
-        ``min_trust`` guardrail would enforce. A served query may still score lower than
+        compile-time signals (provenance, assertion coverage and the persisted ``canonic assert``
+        verdicts) — the same ones a ``min_trust`` guardrail would enforce. Without a project
+        root, or before ``canonic assert`` has run, an asserted metric stays ``provisional``
+        ("assertion unverified"). A served query may still score lower than
         this: E11's dynamic outcome-history signal (SPEC-E11 §5) can additionally cap a
         binding at ``caution`` at serve time — see ``canonic audit``'s Feedback loop
         section for that per-binding state.
         """
+        assertion_history = (
+            AssertionHistory.from_project(self._ctx.project_root)
+            if self._ctx.project_root is not None
+            else None
+        )
         seen: set[str] = set()
         scores: list[tuple[str, TrustScore]] = []
         for b in self._ctx.resolver.active_bindings():
@@ -222,7 +230,9 @@ class DiscoveryService:
                         ),
                     )
                 ]
-            scores.append((b.metric, TrustScorer.score(static_signals_for(trust_inputs))))
+            scores.append(
+                (b.metric, TrustScorer.score(static_signals_for(trust_inputs, assertion_history)))
+            )
         return sorted(scores, key=lambda item: item[0])
 
     def describe_metric(self, name: str, *, principal: Principal | None = None) -> MetricDetail:
