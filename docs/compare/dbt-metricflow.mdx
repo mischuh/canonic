@@ -25,7 +25,7 @@ Neither is a bug in the other. A MetricFlow definition can be written correctly 
 | Business rules (refunds, test data) | A `filter` on each metric | A `mandatory_filter` guardrail on the source, applied to every measure on it |
 | Business meaning, caveats | `description` and `label` | Knowledge pages that are searched and attached to answers |
 | Checking a metric's result | Tests on tables and columns | Assertions on the served metric, run as a CI gate |
-| What the caller gets back | Rows | Rows plus the definition used, guardrails fired, freshness and a trust tier |
+| What the caller gets back | Rows, plus model health and freshness through separate MCP tools | Rows plus the definition used, guardrails fired, freshness and a trust tier |
 | Several definitions of one thing | Can coexist under different names | One canonical binding, other names are aliases |
 | Authoring | Written by hand | Drafted from schema and manifests, applied as a reviewed diff |
 

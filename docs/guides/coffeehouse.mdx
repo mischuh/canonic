@@ -74,7 +74,7 @@ The two layers look alike from a distance: both have measures, metrics and dimen
 | Business rules (refunds, test data) | a `filter` on each metric | a `mandatory_filter` guardrail on the source, applied to every measure on it |
 | Business meaning, caveats | `description` and `label` on the YAML object | knowledge pages that are searched and attached to answers |
 | Checking a metric's result | not built in, dbt tests check tables and columns | assertions on the served metric, run as a CI gate |
-| What the caller gets back | rows | rows plus the definition used, guardrails fired, freshness and a trust tier |
+| What the caller gets back | rows, plus model health and freshness through separate MCP tools | rows plus the definition used, guardrails fired, freshness and a trust tier |
 | Several definitions of one thing | can coexist under different names | one canonical binding per metric, other names are aliases |
 
 The three cases below show what that difference does to a number.
@@ -257,7 +257,7 @@ canonic knowledge search "average order value"
 
 An agent connected over MCP gets the same pages from `search_knowledge` and is told to relay the caveats with its answer. The pages reference measures by name, and `{{ sl:….expr }}` renders the live definition, so the prose cannot quote a formula that has since changed.
 
-In dbt the closest place for this is the `description` of a model, column or metric. It is documentation for people browsing the catalog, not context that reaches the caller at question time.
+In dbt the closest place for this is the `description` of a model, column or metric. An agent can read it through the discovery tools of the dbt MCP server, as metadata it looks up. canonic instead searches knowledge pages and returns the caveats bound to the same sources together with the answer.
 
 ## Assertions
 
