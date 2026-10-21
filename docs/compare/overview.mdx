@@ -21,17 +21,17 @@ canonic is not a BI tool, not a transformation framework and not a chat interfac
 
 ## Side by side
 
-| | dbt MetricFlow | Cube | LookML / Looker | Apache Ossie | canonic |
+|  | canonic | dbt MetricFlow | Cube | LookML / Looker | Apache Ossie |
 | --- | --- | --- | --- | --- | --- |
-| Primary role | Metric definitions in the transform stack | Semantic layer as a service | BI-coupled modeling | Interchange format | Context layer and compiler for agents |
-| Where definitions live | YAML in the dbt project | Data model files in the Cube project | LookML in a Looker project | YAML or JSON model files | `semantics/`, `contracts/` and `knowledge/` in git |
-| How a metric rolls up | The aggregate the modeler chose | The measure type the modeler chose | The measure type the modeler chose | A SQL expression, the consumer decides | Fixed by the binding `kind`, the same at every grain |
-| Business rules | A `filter` on each metric | Filters in the model, access rules in code | Filters and access grants in LookML | Prose in `ai_context` | `mandatory_filter` and other guardrails on the data, applied to every query |
-| Result metadata for the caller | Rows, plus model health and freshness through separate MCP tools | Not documented in the pages reviewed | Not documented in the pages reviewed | Not applicable | Rows plus definition used, guardrails fired, freshness and a trust tier |
-| Checking a served metric | Table and column tests | Not part of the documented model | Not part of the documented model | Not part of the format | Assertions on the metric, run as a CI gate |
-| Authoring | Written by hand | Written by hand | Written by hand | Written by hand or converted | Drafted from schema, manifests and usage evidence, applied as a reviewed diff |
-| Agent interface | dbt MCP server | APIs and an MCP server documented for Cube Cloud | Looker MCP Toolbox, plus a managed MCP server in preview | None, it is a format | MCP server with 14 tools, same core as the CLI |
-| Execution | Generates SQL, run by the dbt platform or your own code | Cube runtime with caching | Looker | None | Generates SQL, runs it read-only against your warehouse |
+| Primary role | Context layer and compiler for agents | Metric definitions in the transform stack | Semantic layer as a service | BI-coupled modeling | Interchange format |
+| Where definitions live | `semantics/`, `contracts/` and `knowledge/` in git | YAML in the dbt project | Data model files in the Cube project | LookML in a Looker project | YAML or JSON model files |
+| How a metric rolls up | Fixed by the binding `kind`, the same at every grain | The aggregate the modeler chose | The measure type the modeler chose | The measure type the modeler chose | A SQL expression, the consumer decides |
+| Business rules | `mandatory_filter` and other guardrails on the data, applied to every query | A `filter` on each metric | Filters in the model, access rules in code | Filters and access grants in LookML | Prose in `ai_context` |
+| Result metadata for the caller | Rows plus definition used, guardrails fired, freshness and a trust tier | Rows, plus model health and freshness through separate MCP tools | Not documented in the pages reviewed | Not documented in the pages reviewed | Not applicable |
+| Checking a served metric | Assertions on the metric, run as a CI gate | Table and column tests | Not part of the documented model | Not part of the documented model | Not part of the format |
+| Authoring | Drafted from schema, manifests and usage evidence, applied as a reviewed diff | Written by hand | Written by hand | Written by hand | Written by hand or converted |
+| Agent interface | MCP server with 14 tools, same core as the CLI | dbt MCP server | APIs and an MCP server documented for Cube Cloud | Looker MCP Toolbox, plus a managed MCP server in preview | None, it is a format |
+| Execution | Generates SQL, runs it read-only against your warehouse | Generates SQL, run by the dbt platform or your own code | Cube runtime with caching | Looker | None |
 
 Read the table as a sketch of where the emphasis lies, not as a scorecard. Several cells say "the modeler chose" because that is a design decision, not a gap. A tool that lets you pick the aggregate gives you control, and a tool that fixes it by kind gives you a guarantee.
 
