@@ -9,7 +9,7 @@ Cube and canonic both put a governed layer between consumers and a warehouse, bu
 
 ## What each one is
 
-**Cube** models data as cubes and views with measures, dimensions and joins, written in YAML or JavaScript. Cube Core is open source (the backend under Apache 2.0, the client under MIT) and exposes the model through SQL, REST and GraphQL APIs, with a built-in caching engine and pre-aggregations for low-latency queries. Cube documents a hosted MCP server in Cube Cloud with tools to search the data model, run queries and, for permitted roles, edit the model and manage pre-aggregations.
+**Cube** models data as cubes and views with measures, dimensions and joins, written in YAML or JavaScript. Cube Core is open source (the backend under Apache 2.0, the client under MIT) and exposes the model through SQL, REST and GraphQL APIs, with a built-in caching engine and pre-aggregations for low-latency queries. Cube documents a hosted MCP server in Cube Cloud with tools to search the data model, run queries, chat and, for permitted roles, edit the model and manage pre-aggregations.
 
 **canonic** is a local-first context layer. It compiles a semantic query (metric names, dimensions, filters) into SQL, applies the guardrails that belong to the data, and returns the answer with the definition used and a trust tier. It is read-only against the warehouse, has no LLM in the answer path and serves agents over MCP.
 
@@ -23,7 +23,7 @@ Cube and canonic both put a governed layer between consumers and a warehouse, bu
 | Joins and fanout | Joins are directed and every cube needs a primary key, which Cube uses to avoid fanouts. Ambiguous paths are resolved with `join_path` in views | A planned join graph with fanout and additivity analysis. An ambiguous route returns the candidates, and `via` picks one |
 | Business rules | Filters on a measure, row-level filters in access policies | `mandatory_filter` and other guardrails attached to a source and applied to every measure on it |
 | Access control | Access policies for member-level and row-level access plus data masking. User attributes are a Cube Cloud feature, Cube Core uses the security context | Roles with metric and dimension allow lists, row scoping per tenant and column masking, enforced in the compiler |
-| What the caller gets back | Rows | Rows plus definition used, guardrails fired, freshness and a trust tier |
+| What the caller gets back | Not documented in the pages reviewed | Rows plus definition used, guardrails fired, freshness and a trust tier |
 | Authoring | Written by hand, or edited by an agent through the MCP server | Drafted from schema, manifests and usage evidence, applied as a reviewed diff |
 | Checking results | Not part of the documented model | Assertions on served metrics, run as a CI gate |
 
