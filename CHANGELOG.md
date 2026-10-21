@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.45.4](https://github.com/mischuh/canonic/compare/v0.45.3...v0.45.4) (2026-10-21)
+
+
+### Bug Fixes
+
+* **trust:** read persisted assertion results in the audit trust report ([#498](https://github.com/mischuh/canonic/issues/498)) ([54835e6](https://github.com/mischuh/canonic/commit/54835e68ae6d0e5b6c5546eb1595920c333c3326))
+
 ## [0.45.3](https://github.com/mischuh/canonic/compare/v0.45.2...v0.45.3) (2026-10-21)
 
 
