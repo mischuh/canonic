@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.45.5](https://github.com/mischuh/canonic/compare/v0.45.4...v0.45.5) (2026-10-21)
+
+
+### Documentation
+
+* **compare:** show canonic in the first column of the side-by-side table ([#501](https://github.com/mischuh/canonic/issues/501)) ([b68ca3f](https://github.com/mischuh/canonic/commit/b68ca3f4f77e65e0f9aa50af07eb8f716f2edde3))
+
 ## [0.45.4](https://github.com/mischuh/canonic/compare/v0.45.3...v0.45.4) (2026-10-21)
 
 
