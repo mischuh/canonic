@@ -9,6 +9,12 @@
     "dark": "#0F766E"
   },
   "favicon": "/favicon.svg",
+  "seo": {
+    "metatags": {
+      "og:image": "https://docs.getcanonic.app/og-image.png",
+      "twitter:image": "https://docs.getcanonic.app/og-image.png"
+    }
+  },
   "navigation": {
     "groups": [
       {
