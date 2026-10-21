@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.45.3](https://github.com/mischuh/canonic/compare/v0.45.2...v0.45.3) (2026-10-21)
+
+
+### Documentation
+
+* **compare:** correct overclaims about dbt and Cube agent features ([#495](https://github.com/mischuh/canonic/issues/495)) ([846103a](https://github.com/mischuh/canonic/commit/846103a22b63d6c2545aa1c8a42bdf8f4ef3f99e))
+
 ## [0.45.2](https://github.com/mischuh/canonic/compare/v0.45.1...v0.45.2) (2026-10-21)
 
 
