@@ -410,6 +410,26 @@ class McpOAuthMode(StrEnum):
     JWT = "jwt"
 
 
+class McpJwtAlgorithm(StrEnum):
+    """Asymmetric JWS algorithms ``mcp.auth.oauth.algorithms`` may accept in ``jwt`` mode.
+
+    Values are the exact JOSE names (``EdDSA`` is mixed-case). ``none`` and the symmetric
+    ``HS*`` family are deliberately absent: ``jwt`` mode always verifies against a JWKS, and
+    a shared secret has no place there.
+    """
+
+    RS256 = "RS256"
+    RS384 = "RS384"
+    RS512 = "RS512"
+    PS256 = "PS256"
+    PS384 = "PS384"
+    PS512 = "PS512"
+    ES256 = "ES256"
+    ES384 = "ES384"
+    ES512 = "ES512"
+    EDDSA = "EdDSA"
+
+
 class McpIdentityAssertionConfig(BaseModel):
     """IdP-signed identity assertion (SEP-990 ID-JAG) accepted by ``mcp.auth.oauth`` in
     ``proxy`` mode (AMENDMENT-fastmcp4-adoption §3.1).
@@ -469,6 +489,10 @@ class McpOAuthConfig(BaseModel):
     #: ``jwt`` mode only. Skips OIDC discovery for IdPs that don't publish
     #: ``/.well-known/openid-configuration``.
     jwks_uri: str | None = None
+    #: ``jwt`` mode only. Signing algorithms a token may use. ``None`` means ``[RS256]``,
+    #: which is also FastMCP's default. An issuer signing with ES256, PS256 or EdDSA must
+    #: list it here, otherwise FastMCP skips its JWKS key and answers 401.
+    algorithms: list[McpJwtAlgorithm] | None = Field(default=None, min_length=1)
     #: ``proxy`` mode only. FastMCP's ``OIDCProxy`` verifies the upstream *access* token
     #: by default, which many IdPs (Google, GitHub, some Okta setups) issue as an opaque,
     #: non-JWT string — verification then fails outright, not just poorly. Set to
@@ -495,6 +519,29 @@ class McpOAuthConfig(BaseModel):
             raise ValueError("mcp.auth.oauth.issuer_url must start with http:// or https://")
         return v
 
+    @field_validator("algorithms", mode="before")
+    @classmethod
+    def _coerce_algorithms(cls, v: Any) -> Any:
+        if isinstance(v, str):
+            v = [v]
+        if isinstance(v, list):
+            for item in v:
+                if not isinstance(item, str):
+                    continue
+                if item.lower() == "none":
+                    raise ValueError("mcp.auth.oauth.algorithms must not accept 'none'")
+                if item.upper().startswith("HS"):
+                    raise ValueError(
+                        f"mcp.auth.oauth.algorithms: {item} is a symmetric algorithm, which "
+                        "needs a shared secret and cannot be verified against a JWKS"
+                    )
+        return v
+
+    @field_validator("algorithms")
+    @classmethod
+    def _dedupe_algorithms(cls, v: list[McpJwtAlgorithm] | None) -> list[McpJwtAlgorithm] | None:
+        return list(dict.fromkeys(v)) if v is not None else None
+
     @field_validator("client_secret_ref")
     @classmethod
     def _reject_literal_client_secret(cls, v: str | None) -> str | None:
@@ -505,6 +552,8 @@ class McpOAuthConfig(BaseModel):
     @model_validator(mode="after")
     def _validate_mode_fields(self) -> McpOAuthConfig:
         if self.mode == McpOAuthMode.PROXY:
+            if self.algorithms is not None:
+                raise ValueError("mcp.auth.oauth.algorithms is not used in proxy mode")
             if self.client_id is None:
                 raise ValueError("mcp.auth.oauth.client_id is required in proxy mode")
             if self.base_url is None:

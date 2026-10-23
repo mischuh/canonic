@@ -11,6 +11,7 @@ and its caller in ``canonic.cli.commands.mcp``.
 from __future__ import annotations
 
 import hmac
+import logging
 from contextvars import ContextVar
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
@@ -21,9 +22,10 @@ from fastmcp.server.auth.identity_assertion import IdentityAssertionValidator
 from fastmcp.server.auth.jwt_issuer import JWTIssuer
 from fastmcp.server.auth.oidc_proxy import OIDCConfiguration, OIDCProxy
 from fastmcp.server.auth.providers.jwt import JWTVerifier
+from fastmcp.utilities.auth import decode_jwt_header
 from pydantic import AnyHttpUrl
 
-from canonic.config import McpOAuthMode
+from canonic.config import McpJwtAlgorithm, McpOAuthMode
 from canonic.contracts.principal import (
     DEFAULT_MAX_TENANTS,
     Caller,
@@ -45,6 +47,7 @@ __all__ = [
     "ASSERTED_CLAIMS_KEY",
     "CLI_OVERRIDE_CLIENT_ID",
     "ID_JAG_GRANT",
+    "CanonicAlgorithmRouter",
     "CanonicCompositeVerifier",
     "CanonicOIDCProxy",
     "CanonicTokenVerifier",
@@ -57,6 +60,8 @@ __all__ = [
     "principal_from_token",
     "resolve_tokens",
 ]
+
+logger = logging.getLogger(__name__)
 
 #: Discovery-document suffix appended to ``issuer_url`` for OIDC discovery.
 _OIDC_DISCOVERY_SUFFIX = "/.well-known/openid-configuration"
@@ -335,12 +340,54 @@ def _discover_jwks_uri(issuer_url: str) -> str:
     return str(config.jwks_uri)
 
 
+class CanonicAlgorithmRouter(TokenVerifier):
+    """Verifies a JWT against one :class:`JWTVerifier` per accepted signing algorithm.
+
+    FastMCP's :class:`JWTVerifier` accepts exactly one algorithm and only loads JWKS keys of
+    the matching type, so accepting several (say RS256 and ES256 during a key-type rotation)
+    takes one verifier each. The token's unverified ``alg`` header only selects which
+    verifier runs. An ``alg`` outside the allow-list, including ``none``, is rejected here
+    and every real check (signature, issuer, audience, expiry, scopes) stays with the
+    selected verifier. Each verifier fetches and caches the JWKS on its own.
+    """
+
+    def __init__(
+        self, verifiers: dict[str, JWTVerifier], required_scopes: list[str] | None = None
+    ) -> None:
+        super().__init__(required_scopes=required_scopes)
+        self._verifiers = verifiers
+
+    async def verify_token(self, token: str) -> AccessToken | None:
+        try:
+            algorithm = decode_jwt_header(token).get("alg")
+        except ValueError:
+            return None
+        verifier = self._verifiers.get(algorithm) if isinstance(algorithm, str) else None
+        if verifier is None:
+            return None
+        return await verifier.verify_token(token)
+
+
+def _build_jwt_verifier(
+    oauth_config: McpOAuthConfig, jwks_uri: str, algorithm: McpJwtAlgorithm
+) -> JWTVerifier:
+    return JWTVerifier(
+        jwks_uri=jwks_uri,
+        issuer=oauth_config.issuer_url,
+        audience=oauth_config.audience,
+        algorithm=algorithm.value,
+        required_scopes=oauth_config.scopes or None,
+    )
+
+
 def build_oauth_verifier(oauth_config: McpOAuthConfig) -> AuthProvider:
     """Build the OAuth 2.1 :class:`AuthProvider` fastmcp's ``mode`` config selects.
 
     - ``jwt``: :class:`JWTVerifier`, verifying a client-presented JWT's signature
       against the IdP's JWKS (``jwks_uri`` if configured, else discovered from
-      ``issuer_url``). No proxy state, no redirect handling.
+      ``issuer_url``). No proxy state, no redirect handling. Accepts the signing
+      algorithms in ``algorithms`` (default ``RS256``). More than one yields a
+      :class:`CanonicAlgorithmRouter`, since a :class:`JWTVerifier` takes a single algorithm.
     - ``proxy``: :class:`OIDCProxy`, presenting a DCR-compliant OAuth server to MCP
       clients and relaying the actual login to the configured upstream IdP
       (Authorization Code + PKCE). ``verify_id_token`` controls whether the upstream
@@ -356,10 +403,12 @@ def build_oauth_verifier(oauth_config: McpOAuthConfig) -> AuthProvider:
     """
     if oauth_config.mode == McpOAuthMode.JWT:
         jwks_uri = oauth_config.jwks_uri or _discover_jwks_uri(oauth_config.issuer_url)
-        return JWTVerifier(
-            jwks_uri=jwks_uri,
-            issuer=oauth_config.issuer_url,
-            audience=oauth_config.audience,
+        algorithms = oauth_config.algorithms or [McpJwtAlgorithm.RS256]
+        logger.info("mcp oauth jwt mode accepts algorithms: %s", ", ".join(algorithms))
+        if len(algorithms) == 1:
+            return _build_jwt_verifier(oauth_config, jwks_uri, algorithms[0])
+        return CanonicAlgorithmRouter(
+            {alg.value: _build_jwt_verifier(oauth_config, jwks_uri, alg) for alg in algorithms},
             required_scopes=oauth_config.scopes or None,
         )
 

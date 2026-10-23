@@ -6,6 +6,8 @@ import pytest
 
 from canonic.config import (
     CanonicConfig,
+    McpJwtAlgorithm,
+    McpOAuthConfig,
     McpOAuthMode,
     McpTasksBackend,
     find_project_root,
@@ -359,6 +361,65 @@ class TestMcpOAuthConfig:
         assert oauth.mode == McpOAuthMode.JWT
         assert oauth.audience == "canonic-mcp"
         assert oauth.jwks_uri == "https://idp.example.com/jwks.json"
+
+    def test_jwt_algorithms_default_to_none(self) -> None:
+        cfg = McpOAuthConfig(mode=McpOAuthMode.JWT, issuer_url="https://idp.example.com")
+        assert cfg.algorithms is None
+
+    def test_jwt_algorithms_parsed_from_yaml(self, tmp_path: Path) -> None:
+        content = (
+            _VALID
+            + "mcp:\n"
+            + "  auth:\n"
+            + "    oauth:\n"
+            + "      mode: jwt\n"
+            + "      issuer_url: https://idp.example.com\n"
+            + "      algorithms: [ES256, EdDSA]\n"
+        )
+        cfg = load_config(_canonic_yaml(tmp_path, content))
+        assert cfg.mcp.auth.oauth is not None
+        assert cfg.mcp.auth.oauth.algorithms == [McpJwtAlgorithm.ES256, McpJwtAlgorithm.EDDSA]
+
+    def test_jwt_algorithms_accepts_a_single_value(self) -> None:
+        cfg = McpOAuthConfig(
+            mode=McpOAuthMode.JWT, issuer_url="https://idp.example.com", algorithms="ES256"
+        )
+        assert cfg.algorithms == [McpJwtAlgorithm.ES256]
+
+    def test_jwt_algorithms_dedupes_and_keeps_order(self) -> None:
+        cfg = McpOAuthConfig(
+            mode=McpOAuthMode.JWT,
+            issuer_url="https://idp.example.com",
+            algorithms=["ES256", "RS256", "ES256"],
+        )
+        assert cfg.algorithms == [McpJwtAlgorithm.ES256, McpJwtAlgorithm.RS256]
+
+    @pytest.mark.parametrize(
+        ("value", "message"),
+        [
+            ("none", "must not accept 'none'"),
+            (["RS256", "None"], "must not accept 'none'"),
+            ("HS256", "symmetric algorithm"),
+            (["ES256", "hs512"], "symmetric algorithm"),
+            ("ES265", "Input should be"),
+            ([], "at least 1 item"),
+        ],
+    )
+    def test_jwt_algorithms_rejects_invalid_values(self, value: object, message: str) -> None:
+        with pytest.raises(ValueError, match=message):
+            McpOAuthConfig(
+                mode=McpOAuthMode.JWT, issuer_url="https://idp.example.com", algorithms=value
+            )
+
+    def test_algorithms_rejected_in_proxy_mode(self) -> None:
+        with pytest.raises(ValueError, match="algorithms is not used in proxy mode"):
+            McpOAuthConfig(
+                mode=McpOAuthMode.PROXY,
+                issuer_url="https://idp.example.com",
+                client_id="canonic-mcp",
+                base_url="https://canonic.internal.example.com",
+                algorithms=["ES256"],
+            )
 
     def test_claim_mapping_defaults_to_empty(self, tmp_path: Path) -> None:
         content = (

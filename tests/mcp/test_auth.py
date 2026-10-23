@@ -4,8 +4,10 @@ AMENDMENT-remote-mcp-transport, AMENDMENT-oauth-mcp-auth).
 
 from __future__ import annotations
 
+import logging
 import time
 import uuid
+from typing import Any
 
 import pytest
 from fastmcp.server.auth.auth import AccessToken, AuthProvider
@@ -20,6 +22,7 @@ from mcp.shared.auth import OAuthClientInformationFull
 from canonic.config import (
     McpAuthConfig,
     McpIdentityAssertionConfig,
+    McpJwtAlgorithm,
     McpOAuthConfig,
     McpOAuthMode,
     McpTokenEntry,
@@ -31,6 +34,7 @@ from canonic.mcp.auth import (
     ASSERTED_CLAIMS_KEY,
     CLI_OVERRIDE_CLIENT_ID,
     ID_JAG_GRANT,
+    CanonicAlgorithmRouter,
     CanonicCompositeVerifier,
     CanonicOIDCProxy,
     CanonicTokenVerifier,
@@ -867,3 +871,120 @@ class TestStaticTokensWithIdentityAssertion:
         token = await composite.verify_token("alice-secret")
         assert token is not None
         assert token.client_id == "alice"
+
+
+_JWT_ISSUER = "https://idp.example.com"
+_JWT_AUDIENCE = "canonic-mcp"
+
+
+def _jwt_config(algorithms: list[McpJwtAlgorithm] | None = None) -> McpOAuthConfig:
+    return McpOAuthConfig(
+        mode=McpOAuthMode.JWT,
+        issuer_url=_JWT_ISSUER,
+        jwks_uri=f"{_JWT_ISSUER}/jwks.json",
+        audience=_JWT_AUDIENCE,
+        algorithms=algorithms,
+    )
+
+
+def _claims() -> dict[str, Any]:
+    return {
+        "iss": _JWT_ISSUER,
+        "aud": _JWT_AUDIENCE,
+        "sub": "alice",
+        "exp": int(time.time()) + 3600,
+    }
+
+
+def _ec_token(key: jwk.ECKey, algorithm: str = "ES256") -> str:
+    return jwt.encode({"alg": algorithm, "kid": "ec1"}, _claims(), key)
+
+
+def _rsa_token(key_pair: RSAKeyPair) -> str:
+    return key_pair.create_token(
+        subject="alice", issuer=_JWT_ISSUER, audience=_JWT_AUDIENCE, kid="rsa1"
+    )
+
+
+@pytest.fixture
+def ec_key() -> jwk.ECKey:
+    return jwk.generate_key("EC", "P-256", parameters={"kid": "ec1"})
+
+
+@pytest.fixture
+def rsa_key_pair() -> RSAKeyPair:
+    return RSAKeyPair.generate()
+
+
+@pytest.fixture
+def served_jwks(
+    monkeypatch: pytest.MonkeyPatch, ec_key: jwk.ECKey, rsa_key_pair: RSAKeyPair
+) -> dict[str, Any]:
+    """An issuer JWKS publishing one P-256 EC key and one RSA key, as in the issue."""
+    rsa_public = jwk.import_key(rsa_key_pair.public_key, "RSA", {"kid": "rsa1"})
+    jwks = {"keys": [ec_key.as_dict(private=False), rsa_public.as_dict(private=False)]}
+
+    async def _fetch_jwks(self: JWTVerifier) -> dict[str, Any]:
+        return jwks
+
+    monkeypatch.setattr(JWTVerifier, "_fetch_jwks", _fetch_jwks)
+    return jwks
+
+
+class TestJwtAlgorithms:
+    def test_defaults_to_rs256(self) -> None:
+        verifier = build_oauth_verifier(_jwt_config())
+        assert isinstance(verifier, JWTVerifier)
+        assert verifier.algorithm == "RS256"
+
+    def test_single_algorithm_is_passed_to_the_verifier(self) -> None:
+        verifier = build_oauth_verifier(_jwt_config([McpJwtAlgorithm.ES256]))
+        assert isinstance(verifier, JWTVerifier)
+        assert verifier.algorithm == "ES256"
+
+    def test_several_algorithms_build_a_router(self) -> None:
+        verifier = build_oauth_verifier(_jwt_config([McpJwtAlgorithm.RS256, McpJwtAlgorithm.ES256]))
+        assert isinstance(verifier, CanonicAlgorithmRouter)
+
+    def test_router_keeps_required_scopes(self) -> None:
+        config = _jwt_config([McpJwtAlgorithm.RS256, McpJwtAlgorithm.ES256])
+        config.scopes = ["mcp:read"]
+        verifier = build_oauth_verifier(config)
+        assert verifier.required_scopes == ["mcp:read"]
+
+    def test_logs_the_accepted_algorithms(self, caplog: pytest.LogCaptureFixture) -> None:
+        with caplog.at_level(logging.INFO, logger="canonic.mcp.auth"):
+            build_oauth_verifier(_jwt_config([McpJwtAlgorithm.ES256, McpJwtAlgorithm.EDDSA]))
+        assert "accepts algorithms: ES256, EdDSA" in caplog.text
+
+    @pytest.mark.usefixtures("served_jwks")
+    async def test_es256_token_is_rejected_by_default(self, ec_key: jwk.ECKey) -> None:
+        verifier = build_oauth_verifier(_jwt_config())
+        assert await verifier.verify_token(_ec_token(ec_key)) is None
+
+    @pytest.mark.usefixtures("served_jwks")
+    async def test_es256_token_is_accepted_when_configured(self, ec_key: jwk.ECKey) -> None:
+        verifier = build_oauth_verifier(_jwt_config([McpJwtAlgorithm.ES256]))
+        access = await verifier.verify_token(_ec_token(ec_key))
+        assert access is not None
+        assert access.client_id == "alice"
+
+    @pytest.mark.usefixtures("served_jwks")
+    async def test_router_accepts_each_listed_algorithm(
+        self, ec_key: jwk.ECKey, rsa_key_pair: RSAKeyPair
+    ) -> None:
+        verifier = build_oauth_verifier(_jwt_config([McpJwtAlgorithm.RS256, McpJwtAlgorithm.ES256]))
+        assert await verifier.verify_token(_rsa_token(rsa_key_pair)) is not None
+        assert await verifier.verify_token(_ec_token(ec_key)) is not None
+
+    @pytest.mark.usefixtures("served_jwks")
+    async def test_router_rejects_an_unlisted_algorithm(self, ec_key: jwk.ECKey) -> None:
+        verifier = build_oauth_verifier(_jwt_config([McpJwtAlgorithm.RS256, McpJwtAlgorithm.ES384]))
+        assert await verifier.verify_token(_ec_token(ec_key)) is None
+
+    @pytest.mark.usefixtures("served_jwks")
+    async def test_router_rejects_alg_none_and_malformed_tokens(self) -> None:
+        verifier = build_oauth_verifier(_jwt_config([McpJwtAlgorithm.RS256, McpJwtAlgorithm.ES256]))
+        unsigned = "eyJhbGciOiJub25lIn0.e30."
+        assert await verifier.verify_token(unsigned) is None
+        assert await verifier.verify_token("not-a-jwt") is None
