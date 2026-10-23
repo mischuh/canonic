@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.46.0](https://github.com/mischuh/canonic/compare/v0.45.5...v0.46.0) (2026-10-23)
+
+
+### Features
+
+* **mcp:** make jwt mode signing algorithms configurable ([#504](https://github.com/mischuh/canonic/issues/504)) ([c9ee172](https://github.com/mischuh/canonic/commit/c9ee172fbb35000f2543753076aadd3e35d985d4))
+
 ## [0.45.5](https://github.com/mischuh/canonic/compare/v0.45.4...v0.45.5) (2026-10-21)
 
 
