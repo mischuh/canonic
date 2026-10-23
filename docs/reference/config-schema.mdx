@@ -319,6 +319,7 @@ mcp:
       client_secret_ref: env:CANONIC_OAUTH_CLIENT_SECRET   # proxy mode only
       scopes: [openid, profile, email]
       base_url: https://canonic.internal.example.com       # proxy mode only, the daemon's own public URL
+      algorithms: [RS256]                                   # jwt mode only, see the table below
       verify_id_token: false                                # proxy mode only, see below
       claim_mapping:                                        # tenancy/RBAC only
         merchant_id: https://example.com/merchant_id
@@ -349,6 +350,7 @@ mcp:
 | `auth.oauth.base_url` | `str \| null` | `null` | Required in `proxy` mode: the daemon's own public URL (where the IdP redirects back to). Rejected in `jwt` mode. |
 | `auth.oauth.audience` | `str \| null` | `null` | `jwt` mode only. Expected token audience. Recommended: without it, any token the IdP issued for *any* resource is accepted, not just this daemon. |
 | `auth.oauth.jwks_uri` | `str \| null` | `null` | `jwt` mode only. Skips OIDC discovery for IdPs that don't publish `/.well-known/openid-configuration`. |
+| `auth.oauth.algorithms` | `list[str] \| null` | `null` (accepts `[RS256]`) | `jwt` mode only. Signing algorithms a token may use: `RS256`, `RS384`, `RS512`, `PS256`, `PS384`, `PS512`, `ES256`, `ES384`, `ES512`, `EdDSA`. A single value (`algorithms: ES256`) is accepted too. An issuer signing with anything other than RS256 must list its algorithm, otherwise the matching JWKS key is skipped and every token gets `401 invalid_token`. `none` and the symmetric `HS*` family are rejected at config load, since a shared secret cannot be verified against a JWKS. Each listed algorithm fetches and caches the JWKS on its own. The accepted algorithms are logged at startup. Rejected in `proxy` mode. |
 | `auth.oauth.verify_id_token` | `bool` | `false` | `proxy` mode only. Verifies the upstream OIDC *id_token* instead of the *access_token*. Rejected in `jwt` mode. See below. |
 | `auth.oauth.claim_mapping` | `dict[str, str]` | `{}` | Maps a [tenancy/role policy](/concepts/tenancy-and-access-control)'s raw `claim` name (e.g. `merchant_id`) to the namespaced claim key the IdP actually issues (e.g. `https://example.com/merchant_id`), which most IdPs require for custom claims. A `claim` absent from this mapping is looked up under its own name unchanged. The mapped claim may be a scalar or a list. The mapping is a flat key lookup, a dotted path into a nested claim is not supported. |
 | `auth.oauth.identity_assertion` | `McpIdentityAssertionConfig \| null` | `null` | `proxy` mode only. Accepts an IdP-signed identity assertion (SEP-990 ID-JAG) in place of the interactive Authorization Code + PKCE flow, for headless/agentic clients that already hold an established identity from the IdP. Rejected in `jwt` mode. |
