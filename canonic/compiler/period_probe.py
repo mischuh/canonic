@@ -196,6 +196,10 @@ def _dimensions_of(
     alias_to_source: dict[str, str],
 ) -> list[tuple[str, Dimension]]:
     if column.table:
+        qualified = f"{column.table}.{column.name}"
+        named = _find_dimension(qualified, sources_by_name, owner, alias_to_source)
+        if named is not None:
+            return [named]
         source = sources_by_name.get(alias_to_source.get(column.table, ""))
         if source is None:
             return []
