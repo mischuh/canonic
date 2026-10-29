@@ -307,7 +307,7 @@ def _read_keyring(target: str) -> str:
     except ImportError as exc:
         raise CredentialError(
             "keyring: credentials_ref needs the 'keyring' package, install it with "
-            "`pip install keyring`"
+            "`pip install 'canonic[keyring]'` (or `pip install keyring`)"
         ) from exc
     try:
         value = keyring.get_password(service, username)

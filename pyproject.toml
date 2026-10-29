@@ -43,6 +43,9 @@ databricks = [
 clickhouse = [
     "clickhouse-connect>=1.9",
 ]
+keyring = [
+    "keyring>=25",
+]
 
 [project.scripts]
 canonic = "canonic.cli.app:app"
@@ -59,6 +62,7 @@ dev = [
     "pymysql>=1.1",
     "clickhouse-connect>=1.9",
     "fakesnow>=0.11",
+    "keyring>=25",
 ]
 
 [build-system]
