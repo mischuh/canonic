@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.46.1](https://github.com/mischuh/canonic/compare/v0.46.0...v0.46.1) (2026-10-29)
+
+
+### Bug Fixes
+
+* **compiler:** probe open periods for filters on qualified dimensions ([#514](https://github.com/mischuh/canonic/issues/514)) ([fd3b5c5](https://github.com/mischuh/canonic/commit/fd3b5c559d0ca5b5548e5705612c86de892d745c))
+* **compiler:** resolve qualified dimensions in filters ([#512](https://github.com/mischuh/canonic/issues/512)) ([da290b2](https://github.com/mischuh/canonic/commit/da290b263dc3186f77f1efc573cf718e69762860))
+* **deps:** upgrade authlib, dnspython, fastmcp and litellm for security advisories ([#518](https://github.com/mischuh/canonic/issues/518)) ([2d9db92](https://github.com/mischuh/canonic/commit/2d9db926ef161026a304a6767c25297feb1064ab))
+
 ## [0.46.0](https://github.com/mischuh/canonic/compare/v0.45.5...v0.46.0) (2026-10-23)
 
 
