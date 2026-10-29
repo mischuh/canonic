@@ -26,5 +26,17 @@ jobs:
       - name: Export locked dependencies
         run: uv export --frozen --no-hashes --no-emit-project --group dev -o requirements-audit.txt
 
+      # The filelock advisories are ignored until fakesnow supports snowflake-connector-python 5,
+      # the first connector release that allows filelock 4. Remove them with #517.
       - name: Audit for known vulnerabilities
-        run: uvx pip-audit -r requirements-audit.txt --no-deps --disable-pip
+        run: >-
+          uvx pip-audit -r requirements-audit.txt --no-deps --disable-pip
+          --ignore-vuln CVE-2026-112907
+          --ignore-vuln CVE-2026-112909
+          --ignore-vuln CVE-2026-112910
+          --ignore-vuln CVE-2026-112913
+          --ignore-vuln CVE-2026-112915
+          --ignore-vuln CVE-2026-112935
+          --ignore-vuln CVE-2026-112936
+          --ignore-vuln CVE-2026-112939
+          --ignore-vuln CVE-2026-112940
