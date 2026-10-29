@@ -1165,21 +1165,53 @@ def _qualify_columns(
     owner: str | None = None,
     alias_to_source: dict[str, str] | None = None,
 ) -> tuple[exp.Expression, set[str]]:
-    """Qualify each bare column in a filter to its owning source alias + physical column."""
+    """Qualify each bare column in a filter to its owning source alias + physical column.
+
+    A role-qualified name (``EventDate.month_start``) resolves like a bare one: a dimension
+    binds to its backing column or inlines its expression, and a physical column of the
+    role's source passes through. With ``alias_to_source`` a qualified name that is neither
+    is refused, so it never reaches the warehouse as a column that does not exist.
+    """
     used: set[str] = set()
+
+    def derived_expr(alias: str, dim: Dimension) -> exp.Expression:
+        # A derived dimension has no column to bind to, so a filter on its name
+        # inlines the expression itself (without time bucketing, like a column dim).
+        used.add(alias)
+        return exp.paren(_dimension_base_expr(alias, dim), copy=False)
+
+    def qualified(node: exp.Column) -> exp.Expression:
+        role = node.table
+        used.add(role)
+        if alias_to_source is None or node.db:
+            return node
+        found = _find_dimension(f"{role}.{node.name}", sources_by_name, owner, alias_to_source)
+        if found is not None:
+            alias, dim = found
+            if dim.is_derived:
+                return derived_expr(alias, dim)
+            if dim.column is not None:
+                return exp.column(dim.column, table=alias)
+            return node
+        source = sources_by_name.get(alias_to_source.get(role, role))
+        if source is None:
+            raise UnreachableError(f"filter references unknown role {role!r}")
+        if not any(c.name == node.name for c in source.columns):
+            suggestions = _dimension_suggestions(node.name, {source.name: source})
+            hint = f"; did you mean: {', '.join(suggestions)}" if suggestions else ""
+            raise UnreachableError(
+                f"filter references unknown name {node.name!r} on {role!r}{hint}",
+                candidates=suggestions,
+            )
+        return node
 
     def transform(node: exp.Expression) -> exp.Expression:
         if isinstance(node, exp.Column):
             if node.table:
-                used.add(node.table)
-                return node
+                return qualified(node)
             derived = _find_dimension(node.name, sources_by_name, owner, alias_to_source)
             if derived is not None and derived[1].is_derived:
-                # A derived dimension has no column to bind to, so a filter on its name
-                # inlines the expression itself (without time bucketing, like a column dim).
-                alias, dim = derived
-                used.add(alias)
-                return exp.paren(_dimension_base_expr(alias, dim), copy=False)
+                return derived_expr(*derived)
             binding = _bind_name(node.name, sources_by_name, owner, alias_to_source)
             if binding is None:
                 raise UnreachableError(f"filter references unknown name {node.name!r}")
