@@ -360,6 +360,23 @@ class TestJoinedSourceDimension:
 
         assert [p.subject for p in compiled.probe_columns] == ["calendar.cal_day"]
 
+    def test_filter_on_the_qualified_joined_dimension_is_recognised(self) -> None:
+        compiled = _compile_joined(["calendar.cal_day >= '2026-10-01'"])
+
+        assert [p.subject for p in compiled.probe_columns] == ["calendar.cal_day"]
+
+    def test_filter_on_the_role_qualified_dimension_is_recognised(self) -> None:
+        compiled = _compile_joined(["booked_on.cal_day >= '2026-10-01'"], name="booked_on")
+
+        (probe,) = compiled.probe_columns
+        assert probe.subject == "booked_on.cal_day"
+        assert 'MAX("booked_on"."day")' in compiled.sql
+
+    def test_filter_on_the_qualified_derived_dimension_is_recognised(self) -> None:
+        compiled = _compile_joined(["calendar.cal_month >= '2026-10-01'"])
+
+        assert [p.subject for p in compiled.probe_columns] == ["calendar.cal_month"]
+
     def test_the_joined_dimension_is_read_through_the_join_alias(self) -> None:
         compiled = _compile_joined(["cal_day >= '2026-10-01'"], name="booked_on")
 
