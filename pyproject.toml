@@ -117,3 +117,7 @@ known-first-party = ["canonic"]
 
 [tool.hatch.build.targets.wheel]
 packages = ["canonic"]
+
+# Demo videos for the homepage (served by GitHub Pages) are not part of the package.
+[tool.hatch.build.targets.sdist]
+exclude = ["/media"]
