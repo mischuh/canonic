@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.46.2](https://github.com/mischuh/canonic/compare/v0.46.1...v0.46.2) (2026-10-31)
+
+
+### Documentation
+
+* **site:** embed demo videos on homepage and in docs ([#524](https://github.com/mischuh/canonic/issues/524)) ([de56e64](https://github.com/mischuh/canonic/commit/de56e64905b425d065e6c3f88d875f056523b9d8))
+
 ## [0.46.1](https://github.com/mischuh/canonic/compare/v0.46.0...v0.46.1) (2026-10-29)
 
 
