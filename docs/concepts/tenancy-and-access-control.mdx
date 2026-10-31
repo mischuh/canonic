@@ -3,7 +3,11 @@ title: "Tenancy & access control"
 description: "Row-level tenant isolation and role-based authorization, enforced as a compiler input, never as a query field."
 ---
 
+import { DemoVideo } from "/snippets/demo-video.jsx";
+
 canonic answers a question the compiler otherwise declines: given a resolved, compiled query, which **rows** and which **metrics** is *this caller* allowed to see? This governance layer exists for the case that motivates it: many merchants served from one warehouse and one daemon, each reaching only its own rows.
+
+<DemoVideo name="three_logins" label="Demo: three logins ask the same question and each sees only their own rows" />
 
 ## Opt-in, and total once opted in
 

@@ -3,7 +3,11 @@ title: "canonic decompose"
 description: "Explain why a metric changed between two periods."
 ---
 
+import { DemoVideo } from "/snippets/demo-video.jsx";
+
 `canonic decompose` attributes the change of one metric between two periods of one time dimension, overall and by member of one or more split dimensions. It is the CLI form of the MCP tool [`decompose_change`](/mcp-integration/tools-reference#decompose_change-request-dict), which describes the methods and the result in full.
+
+<DemoVideo name="decompose" label="Demo: why the win rate fell, split into mix and rate effects" />
 
 ```bash
 canonic decompose --metric margin --period-dimension order_month --base 2026-08 --compare 2026-09 --by region,channel
