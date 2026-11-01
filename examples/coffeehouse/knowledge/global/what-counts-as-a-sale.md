@@ -8,7 +8,7 @@ sl_refs:
 usage_mode: policy
 meta:
   provenance: human_curated
-  last_validated_at: "2026-10-01T00:00:00Z"
+  last_validated_at: "2026-11-01T00:00:00Z"
 ---
 
 ## What counts as a sale
