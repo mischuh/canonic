@@ -6,7 +6,7 @@ sl_refs:
 usage_mode: caveat
 meta:
   provenance: human_curated
-  last_validated_at: "2026-10-01T00:00:00Z"
+  last_validated_at: "2026-11-01T00:00:00Z"
 ---
 
 ## Why AVG(order_total) on a line table is wrong

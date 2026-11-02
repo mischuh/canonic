@@ -8,7 +8,7 @@ refs: [what-counts-as-a-sale]
 usage_mode: definition
 meta:
   provenance: human_curated
-  last_validated_at: "2026-10-01T00:00:00Z"
+  last_validated_at: "2026-11-01T00:00:00Z"
 ---
 
 ## Average order value (AOV)
