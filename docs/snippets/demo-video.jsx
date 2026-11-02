@@ -17,7 +17,7 @@ export const DemoVideo = ({ name, label }) => (
     playsInline
     poster={`https://www.getcanonic.app/media/${name}_poster.jpg`}
     aria-label={label}
-    style={{ width: "100%", aspectRatio: "16 / 9", borderRadius: "12px", background: "#000" }}
+    style={{ width: "100%", aspectRatio: "16 / 9", borderRadius: "12px", background: "#e8e7e2" }}
     onPlay={(e) => addCaptions(e.currentTarget, `/media/${name}.vtt`)}
   >
     <source src={`https://www.getcanonic.app/media/${name}_web.mp4`} type="video/mp4" />
