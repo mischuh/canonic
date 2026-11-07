@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.46.2](https://github.com/mischuh/canonic/compare/v0.46.1...v0.46.2) (2026-11-07)
+
+
+### Documentation
+
+* **site:** add video captions on play so the demos start on iOS Safari ([#529](https://github.com/mischuh/canonic/issues/529)) ([6add799](https://github.com/mischuh/canonic/commit/6add7997ef7397a1505d6a1ffa311ede50f2986d))
+* **site:** embed demo videos on homepage and in docs ([#524](https://github.com/mischuh/canonic/issues/524)) ([de56e64](https://github.com/mischuh/canonic/commit/de56e64905b425d065e6c3f88d875f056523b9d8))
+* **site:** match video background to the posters so no dark edges show ([#530](https://github.com/mischuh/canonic/issues/530)) ([0185c66](https://github.com/mischuh/canonic/commit/0185c669b23a845cddf9ee2e83bd05b17ad52262))
+* **site:** mention change decomposition in the agent output list ([#527](https://github.com/mischuh/canonic/issues/527)) ([dc8067a](https://github.com/mischuh/canonic/commit/dc8067aebed586aff45ee483fd24c99427c261c4))
+
 ## [0.46.1](https://github.com/mischuh/canonic/compare/v0.46.0...v0.46.1) (2026-10-29)
 
 
