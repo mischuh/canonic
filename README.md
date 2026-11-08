@@ -142,6 +142,12 @@ canonic review && canonic status                           # review what it draf
 
 Air-gapped install and offline wheels: [Installation](https://docs.getcanonic.app/installation).
 
+Two short demos of what that context layer does once it is in place:
+
+| [![Trust levels and guardrails](https://raw.githubusercontent.com/mischuh/canonic/main/media/trust_guardrails_poster.jpg)](https://docs.getcanonic.app/concepts/contracts-and-guardrails) | [![Three logins, one question](https://raw.githubusercontent.com/mischuh/canonic/main/media/three_logins_poster.jpg)](https://docs.getcanonic.app/concepts/tenancy-and-access-control) |
+| --- | --- |
+| ▶ [**Can you trust the numbers?**](https://docs.getcanonic.app/concepts/contracts-and-guardrails) Only verified numbers make it onto the board slide. | ▶ [**One question, three logins.**](https://docs.getcanonic.app/concepts/tenancy-and-access-control) Each login sees only its own rows. |
+
 ## Connect your agent (MCP)
 
 canonic exposes its tools over a local, on-demand MCP server, verified with **Claude Code, Cursor, and Codex**:
