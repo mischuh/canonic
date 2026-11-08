@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.46.3](https://github.com/mischuh/canonic/compare/v0.46.2...v0.46.3) (2026-11-08)
+
+
+### Documentation
+
+* **readme:** link two demo videos below the setup demo ([#532](https://github.com/mischuh/canonic/issues/532)) ([af40a25](https://github.com/mischuh/canonic/commit/af40a25d24c0078b3081640ef3802e9bb917e859))
+
 ## [0.46.2](https://github.com/mischuh/canonic/compare/v0.46.1...v0.46.2) (2026-11-07)
 
 
