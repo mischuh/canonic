@@ -759,3 +759,97 @@ class TestConversionMetrics:
     ) -> None:
         manifest = _cumulative_manifest(tmp_path / "m.json", self._metric(**params))
         assert "ship_rate" not in await self._candidates(manifest)
+
+
+def _compiled_manifest(path: Path, *, columns: dict[str, object] | None = None) -> Path:
+    """A manifest in the shape dbt 1.8+ compiles: ``model`` is the unrendered ``ref()``.
+
+    The relation the semantic model reads is only named in ``node_relation``, as dbt writes it.
+    """
+    import json
+
+    path.write_text(
+        json.dumps(
+            {
+                "metadata": {
+                    "dbt_schema_version": "https://schemas.getdbt.com/dbt/manifest/v12.json",
+                    "dbt_version": "1.12.5",
+                },
+                "nodes": {
+                    "model.shop.fct_orders": {
+                        "unique_id": "model.shop.fct_orders",
+                        "resource_type": "model",
+                        "database": "shop_dbt",
+                        "schema": "main",
+                        "name": "fct_orders",
+                        "alias": "fct_orders",
+                        "description": "One row per order.",
+                        "columns": columns or {},
+                    }
+                },
+                "semantic_models": {
+                    "semantic_model.shop.orders": {
+                        "unique_id": "semantic_model.shop.orders",
+                        "name": "orders",
+                        "model": "ref('fct_orders')",
+                        "node_relation": {
+                            "alias": "fct_orders",
+                            "schema_name": "main",
+                            "database": "shop_dbt",
+                            "relation_name": '"shop_dbt"."main"."fct_orders"',
+                        },
+                        "defaults": {"agg_time_dimension": "order_date"},
+                        "entities": [{"name": "order", "type": "primary", "expr": "order_id"}],
+                        "measures": [{"name": "order_total", "agg": "sum", "expr": "amount"}],
+                        "dimensions": [{"name": "order_date", "type": "time"}],
+                    }
+                },
+                "metrics": {},
+            }
+        )
+    )
+    return path
+
+
+class TestCompiledManifest:
+    """A manifest compiled by dbt 1.8+ names a semantic model's relation in ``node_relation``."""
+
+    async def test_measure_references_the_node_relation(self, tmp_path: Path) -> None:
+        result = await DbtConnector(_compiled_manifest(tmp_path / "m.json")).extract_definitions()
+        measure = next(
+            d for d in result.definitions if d.entity_type is DefinitionEntityType.MEASURE
+        )
+        assert measure.references == ["main.fct_orders"]
+
+    async def test_dimension_and_entity_reference_the_node_relation(self, tmp_path: Path) -> None:
+        result = await DbtConnector(_compiled_manifest(tmp_path / "m.json")).extract_definitions()
+        kinds = {DefinitionEntityType.DIMENSION, DefinitionEntityType.ENTITY}
+        refs = {tuple(d.references) for d in result.definitions if d.entity_type in kinds}
+        assert refs == {("main.fct_orders",)}
+
+    async def test_ref_string_without_node_relation_names_the_model(self, tmp_path: Path) -> None:
+        import json
+
+        path = _compiled_manifest(tmp_path / "m.json")
+        manifest = json.loads(path.read_text())
+        sm = manifest["semantic_models"]["semantic_model.shop.orders"]
+        del sm["node_relation"]
+        sm["model"] = 'ref("shop", "fct_orders")'
+        path.write_text(json.dumps(manifest))
+        result = await DbtConnector(path).extract_definitions()
+        measure = next(
+            d for d in result.definitions if d.entity_type is DefinitionEntityType.MEASURE
+        )
+        assert measure.references == ["fct_orders"]
+
+    async def test_model_without_columns_emits_no_relation_schema(self, tmp_path: Path) -> None:
+        result = await DbtConnector(_compiled_manifest(tmp_path / "m.json")).extract_definitions()
+        assert result.relations == []
+        model = next(d for d in result.definitions if d.entity_type is DefinitionEntityType.MODEL)
+        assert model.description == "One row per order."
+
+    async def test_model_with_columns_emits_relation_schema(self, tmp_path: Path) -> None:
+        columns = {"order_id": {"name": "order_id", "data_type": "integer"}}
+        path = _compiled_manifest(tmp_path / "m.json", columns=columns)
+        result = await DbtConnector(path).extract_definitions()
+        assert [r.relation for r in result.relations] == ["shop_dbt.main.fct_orders"]

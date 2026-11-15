@@ -21,6 +21,7 @@ from typing import TYPE_CHECKING, Any, cast
 from pydantic import BaseModel, ConfigDict
 
 from canonic.ingestion.builder import ContextBuilder, LLMDrafter, NullLLMDrafter, SkippedEvidence
+from canonic.ingestion.candidates import CANDIDATE_SENTINEL
 from canonic.ingestion.emitter import AuditTrailWriter, DiffEmitter, EmissionResult, EmittedDiff
 from canonic.ingestion.models import (
     DraftedBy,
@@ -46,7 +47,7 @@ if TYPE_CHECKING:
 
     from canonic.config import ReconcileConfig
     from canonic.connectors.base import ConnectorBase, SchemaIntrospectable
-    from canonic.ingestion.models import EvidenceItem
+    from canonic.ingestion.models import EvidenceItem, Proposal
 
 logger = logging.getLogger(__name__)
 
@@ -265,9 +266,10 @@ class IngestionPipeline:
         if page_check.entries:
             report = ReconciliationReport(entries=[*report.entries, *page_check.entries])
 
-        logger.debug("stage 5: validating %d proposal(s)", len(build.proposals))
+        gated = _gated_proposals(build.proposals, report)
+        logger.debug("stage 5: validating %d proposal(s)", len(gated))
         gate = ValidationGate(self._project_root, self._connectors, evidence)
-        await gate.validate(build.proposals)  # raises before emit (S8)
+        await gate.validate(gated)  # raises before emit (S8)
         logger.debug("stage 5 complete: validation passed")
 
         logger.debug("stage 6: emitting diffs")
@@ -338,3 +340,18 @@ class IngestionPipeline:
         both write the exact proposed state the validation gate already accepted.
         """
         write_emitted_diffs(self._project_root, diffs)
+
+
+def _gated_proposals(proposals: list[Proposal], report: ReconciliationReport) -> list[Proposal]:
+    """The proposals the validation gate checks: all but the contract candidates set aside.
+
+    Reconciliation turns a contract candidate into a no-op when it references a metric that
+    gets no binding, or when a binding already exists. Such a candidate is never written, so
+    validating it would reject a state the run does not produce.
+    """
+    set_aside = {
+        entry.target
+        for entry in report.entries
+        if entry.decision is ReconciliationDecision.NO_OP and entry.target.startswith("contracts/")
+    }
+    return [p for p in proposals if not (CANDIDATE_SENTINEL in p.content and p.target in set_aside)]

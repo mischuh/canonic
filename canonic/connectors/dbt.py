@@ -365,22 +365,27 @@ class DbtConnector(ConnectorBase):
                             )
                         )
 
-        fingerprint = compute_fingerprint(columns, primary_key, foreign_keys)
-        mat = node.get("config", {}).get("materialized", "table")
-        kind: str = "view" if mat == "view" else "table"
-
-        relations.append(
-            RelationSchema(
-                connection=self._source,
-                relation=fq,
-                kind=kind,  # type: ignore[arg-type]
-                columns=columns,
-                primary_key=primary_key,
-                foreign_keys=foreign_keys,
-                acquisition_tier=AcquisitionTier.MODELING,
-                source_fingerprint=fingerprint,
+        # A model whose YAML lists no columns says nothing about its schema. Emitting it as
+        # an empty RelationSchema would outrank the live introspection of the same table and
+        # leave the draft without columns, so only the MODEL evidence below is kept.
+        if columns:
+            fingerprint = compute_fingerprint(columns, primary_key, foreign_keys)
+            mat = node.get("config", {}).get("materialized", "table")
+            kind: str = "view" if mat == "view" else "table"
+            relations.append(
+                RelationSchema(
+                    connection=self._source,
+                    relation=fq,
+                    kind=kind,  # type: ignore[arg-type]
+                    columns=columns,
+                    primary_key=primary_key,
+                    foreign_keys=foreign_keys,
+                    acquisition_tier=AcquisitionTier.MODELING,
+                    source_fingerprint=fingerprint,
+                )
             )
-        )
+        else:
+            logger.info("dbt model %s declares no columns; schema left to live introspection", fq)
 
         description = node.get("description") or None
         fp = _definition_fingerprint({"entity": fq, "entity_type": "model", "grain": primary_key})
@@ -406,12 +411,7 @@ class DbtConnector(ConnectorBase):
         unique_id: str = sm.get("unique_id", sm_name)
         description = sm.get("description") or None
 
-        # Resolve the backing model relation name
-        model_ref: dict[str, Any] = sm.get("model", {})
-        ref_name: str = (
-            model_ref.get("ref_name", "") if isinstance(model_ref, dict) else str(model_ref)
-        )
-        node_relation = ref_name  # best-effort; fully qualified name may not be available
+        node_relation = _semantic_model_relation(sm)
 
         entities: list[dict[str, Any]] = sm.get("entities", [])
         grain: list[str] = [
@@ -866,6 +866,31 @@ class DbtConnector(ConnectorBase):
 
 #: The ``grain_to_date`` values a ``cumulative`` binding accepts.
 _TO_DATE_GRAINS = frozenset({"day", "week", "month", "quarter", "year"})
+
+
+#: ``ref('model')``, ``ref("model")`` or ``ref('package', 'model')``; the model is the last name.
+_REF_CALL = re.compile(r"""^\s*ref\s*\((?:\s*['"][^'"]+['"]\s*,)?\s*['"]([^'"]+)['"]\s*""")
+
+
+def _semantic_model_relation(sm: dict[str, Any]) -> str:
+    """The relation a semantic model reads, as ``schema.alias`` or a bare name.
+
+    A compiled manifest names the relation in ``node_relation``, and ``model`` holds the
+    unrendered ``ref('...')`` string. Older and hand-written manifests carry
+    ``model: {ref_name: ...}`` instead, so that shape is still read.
+    """
+    node_relation = sm.get("node_relation")
+    if isinstance(node_relation, dict) and node_relation.get("alias"):
+        schema = node_relation.get("schema_name") or ""
+        alias = str(node_relation["alias"])
+        return f"{schema}.{alias}" if schema else alias
+    model_ref = sm.get("model")
+    if isinstance(model_ref, dict):
+        return str(model_ref.get("ref_name", ""))
+    if isinstance(model_ref, str):
+        match = _REF_CALL.match(model_ref)
+        return match.group(1) if match else model_ref
+    return ""
 
 
 def _metricflow_window(raw: object) -> str | None:
