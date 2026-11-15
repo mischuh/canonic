@@ -484,3 +484,44 @@ async def test_a_conversion_on_a_time_that_will_not_exist_is_not_proposed() -> N
     entry = next(e for e in report.entries if e.target == "contracts/metrics/buyer_rate.yaml")
     assert entry.decision is ReconciliationDecision.NO_OP
     assert "dimension 'ordered_at' will not exist" in (entry.recommended_action or "")
+
+
+class _OssieWithDanglingDerived(_Ossie):
+    async def extract_definitions(self) -> DefinitionExtract:
+        dangling = ContractCandidate(
+            kind=CandidateKind.DERIVED,
+            measures=[],
+            expr="missing_metric * 12",
+            inputs=[CandidateInput(metric="missing_metric")],
+        )
+        return DefinitionExtract(
+            definitions=[
+                *_shop_definitions(),
+                _definition(
+                    entity="annualized",
+                    entity_type=DefinitionEntityType.METRIC,
+                    contract_candidate=dangling,
+                ),
+            ]
+        )
+
+
+async def test_pipeline_does_not_validate_a_candidate_it_sets_aside(tmp_path: Path) -> None:
+    """A derived candidate whose input gets no binding is a no-op; the gate must not see it."""
+    scaffold_project(tmp_path)
+    connectors: dict[str, ConnectorBase] = {
+        _CONN: _Live(),
+        "shop_ossie": _OssieWithDanglingDerived(),
+    }
+    pipeline = IngestionPipeline(tmp_path, connectors, ReconcileConfig())
+    evidence = await evidence_from_introspection(connectors[_CONN], _CONN)
+    evidence += await evidence_from_definitions(connectors["shop_ossie"], _CONN)
+
+    result = await pipeline.run(evidence)
+
+    entry = next(
+        e for e in result.report.entries if e.target == "contracts/metrics/annualized.yaml"
+    )
+    assert entry.decision is ReconciliationDecision.NO_OP
+    assert "contracts/metrics/annualized.yaml" not in {d.target for d in result.emission.diffs}
+    assert "contracts/metrics/revenue.yaml" in {d.target for d in result.emission.diffs}
