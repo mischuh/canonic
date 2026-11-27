@@ -61,7 +61,7 @@ dev = [
     "testcontainers[postgres,mysql]>=4.0",
     "pymysql>=1.1",
     "clickhouse-connect>=1.9",
-    "fakesnow>=0.11",
+    "fakesnow>=0.13",
     "keyring>=25",
 ]
 
