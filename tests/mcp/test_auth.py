@@ -29,11 +29,12 @@ from canonic.config import (
 )
 from canonic.contracts.models import RolePolicy, TenancyPolicy
 from canonic.contracts.principal import Caller
-from canonic.exc import CredentialError, TenantLimitExceeded, TenantUnresolved
+from canonic.exc import CallerUnresolved, CredentialError, TenantLimitExceeded, TenantUnresolved
 from canonic.mcp.auth import (
     ASSERTED_CLAIMS_KEY,
     CLI_OVERRIDE_CLIENT_ID,
     ID_JAG_GRANT,
+    STATIC_TOKEN_MARKER,
     CanonicAlgorithmRouter,
     CanonicCompositeVerifier,
     CanonicOIDCProxy,
@@ -126,7 +127,7 @@ class TestCanonicTokenVerifier:
         verifier = CanonicTokenVerifier(resolve_tokens(config))
         access = await verifier.verify_token("merchant-secret")
         assert access is not None
-        assert access.claims == {"merchant_id": "4711"}
+        assert access.claims == {"merchant_id": "4711", STATIC_TOKEN_MARKER: True}
 
     @pytest.mark.asyncio
     async def test_rejects_unknown_token(self, auth_config: McpAuthConfig) -> None:
@@ -695,9 +696,55 @@ class TestCallerFromToken:
             id="jsmith@acme-corp.com", acted_via="agent-scheduled-reports"
         )
 
-    def test_other_tokens_attribute_client_id(self) -> None:
-        token = AccessToken(token="t", client_id="alice", scopes=[], subject="alice-sub")
+    def test_static_tokens_attribute_client_id(self) -> None:
+        token = AccessToken(
+            token="t", client_id="alice", scopes=[], claims={STATIC_TOKEN_MARKER: True}
+        )
         assert caller_from_token(token) == Caller(id="alice")
+
+    def test_oauth_token_attributes_the_subject_not_the_client_app(self) -> None:
+        token = AccessToken(token="t", client_id="dcr-app", scopes=[], subject="anna-sub")
+        assert caller_from_token(token) == Caller(id="anna-sub")
+
+    def test_two_users_of_one_client_app_get_distinct_callers(self) -> None:
+        anna = AccessToken(token="t", client_id="dcr-app", scopes=[], subject="anna")
+        ben = AccessToken(token="t", client_id="dcr-app", scopes=[], subject="ben")
+        assert caller_from_token(anna) != caller_from_token(ben)
+
+    def test_oauth_token_reads_the_configured_claim(self) -> None:
+        token = AccessToken(
+            token="t",
+            client_id="dcr-app",
+            scopes=[],
+            subject="3f2a-uuid",
+            claims={"preferred_username": "anna"},
+        )
+        assert caller_from_token(token, user_claim="preferred_username") == Caller(id="anna")
+
+    def test_user_claim_goes_through_claim_mapping(self) -> None:
+        token = AccessToken(
+            token="t",
+            client_id="dcr-app",
+            scopes=[],
+            claims={"https://acme-corp.com/username": "anna"},
+        )
+        caller = caller_from_token(
+            token,
+            user_claim="username",
+            claim_mapping={"username": "https://acme-corp.com/username"},
+        )
+        assert caller == Caller(id="anna")
+
+    @pytest.mark.parametrize("claims", [{}, {"preferred_username": ""}, {"preferred_username": 7}])
+    def test_oauth_token_without_a_usable_claim_fails_closed(self, claims: dict[str, Any]) -> None:
+        token = AccessToken(token="t", client_id="dcr-app", scopes=[], claims=claims)
+        with pytest.raises(CallerUnresolved):
+            caller_from_token(token, user_claim="preferred_username")
+
+    def test_oauth_token_without_subject_never_falls_back_to_client_id(self) -> None:
+        token = AccessToken(token="t", client_id="dcr-app", scopes=[])
+        with pytest.raises(CallerUnresolved):
+            caller_from_token(token)
 
 
 _ASSERTION_ISSUER = "https://login.acme-corp.com"

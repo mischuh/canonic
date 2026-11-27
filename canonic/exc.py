@@ -404,6 +404,16 @@ class TenantLimitExceeded(CanonicError):
     code = ErrorCode.TENANT_LIMIT_EXCEEDED
 
 
+class CallerUnresolved(CanonicError):
+    """An OAuth token carries no usable value for ``mcp.auth.oauth.user_claim``.
+
+    The caller identity keys personal knowledge pages and answer events, so a token that
+    cannot name its user fails closed. Falling back to the token's ``client_id`` would
+    identify the MCP client application instead and let every user of one client share a
+    personal folder. Carries no registry code, so the frozen error registry is unchanged.
+    """
+
+
 class PeriodOpen(CanonicError):
     """A period compared by ``decompose`` has not ended at the serving clock.
 

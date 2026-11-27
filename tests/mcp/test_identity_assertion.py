@@ -17,9 +17,8 @@ from fastmcp.server.auth.auth import AccessToken
 from typer.testing import CliRunner
 
 from canonic.cli.app import app
-from canonic.contracts.principal import Principal
 from canonic.core.service import CanonicService
-from canonic.mcp.auth import ASSERTED_CLAIMS_KEY, ID_JAG_GRANT
+from canonic.mcp.auth import ASSERTED_CLAIMS_KEY, ID_JAG_GRANT, STATIC_TOKEN_MARKER
 from canonic.mcp.server import _effective_user, build_server
 from tests.conftest import MCP_ERAS, mcp_client
 
@@ -88,8 +87,10 @@ def tenant_project(tmp_path: Path) -> Path:
 
 
 def _interactive_token(claims: dict[str, Any]) -> AccessToken:
-    """An ``OIDCProxy`` login token: claims at the top level, subject and caller alike."""
-    return AccessToken(token="t", client_id=_EMPLOYEE, scopes=[], claims=dict(claims))
+    """An ``OIDCProxy`` login token: the employee is the subject, the client the MCP app."""
+    return AccessToken(
+        token="t", client_id="mcp-client-app", scopes=[], subject=_EMPLOYEE, claims=dict(claims)
+    )
 
 
 def _asserted_token(asserted: dict[str, Any]) -> AccessToken:
@@ -282,7 +283,12 @@ class TestFailClosed:
         )
         static = await _call(
             service,
-            AccessToken(token="t", client_id="reporting-service", scopes=[], claims={}),
+            AccessToken(
+                token="t",
+                client_id="reporting-service",
+                scopes=[],
+                claims={STATIC_TOKEN_MARKER: True},
+            ),
             monkeypatch,
             "query",
             _query("revenue"),
@@ -332,15 +338,36 @@ class TestPersonalKnowledgeIdentity:
         monkeypatch.setattr(
             "canonic.mcp.server.get_access_token", lambda: _asserted_token(_VIEWER_CLAIMS)
         )
-        principal = Principal(tenants=("4711",), roles=("merchant_viewer",))
-        assert _effective_user(principal, user="someone-else") == _EMPLOYEE
+        assert _effective_user("someone-else") == _EMPLOYEE
 
-    def test_effective_user_for_other_tokens_is_client_id(
+    def test_effective_user_for_static_tokens_is_client_id(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         token = AccessToken(
-            token="t", client_id="reporting-service", scopes=[], claims=_VIEWER_CLAIMS
+            token="t",
+            client_id="reporting-service",
+            scopes=[],
+            claims={**_VIEWER_CLAIMS, STATIC_TOKEN_MARKER: True},
         )
         monkeypatch.setattr("canonic.mcp.server.get_access_token", lambda: token)
-        principal = Principal(tenants=("4711",), roles=("merchant_viewer",))
-        assert _effective_user(principal, user="someone-else") == "reporting-service"
+        assert _effective_user("someone-else") == "reporting-service"
+
+    def test_effective_user_for_oauth_tokens_is_the_logged_in_user(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(
+            "canonic.mcp.server.get_access_token", lambda: _interactive_token(_VIEWER_CLAIMS)
+        )
+        assert _effective_user("someone-else") == _EMPLOYEE
+
+    def test_client_supplied_user_is_ignored_without_any_policy(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A token pins the identity even when no tenancy/role policy binds a principal."""
+        monkeypatch.setattr("canonic.mcp.server.get_access_token", lambda: _interactive_token({}))
+        assert _effective_user("victim") == _EMPLOYEE
+
+    def test_user_is_accepted_without_a_token(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """stdio has no token: the supplied user is kept."""
+        monkeypatch.setattr("canonic.mcp.server.get_access_token", lambda: None)
+        assert _effective_user("anna") == "anna"

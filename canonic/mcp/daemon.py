@@ -485,6 +485,9 @@ def serve_http_foreground(
         suggestions=suggestions,
         auth=auth,
         claim_mapping=claim_mapping,
+        user_claim=cfg.mcp.auth.oauth.user_claim
+        if cfg is not None and cfg.mcp.auth.oauth
+        else "sub",
         max_tenants=cfg.mcp.auth.max_tenants if cfg is not None else DEFAULT_MAX_TENANTS,
         tasks=tasks,
         tasks_url=tasks_url,

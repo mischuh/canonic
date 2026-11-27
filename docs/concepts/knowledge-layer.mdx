@@ -45,6 +45,8 @@ Two scopes, defined by path, not by a field you set by hand:
 
 **Strict-additive rule:** a user page can *add* context but can never override or shadow a global one. On a name/topic collision, the global page stays authoritative and the user page is surfaced as a personal annotation attached to it, never a replacement. A user's search sees `global` + their own `user/<id>`, never another user's pages.
 
+Who "the user" is depends on how the caller authenticated. With a static token it is the token's `client_id`, so `knowledge/user/anna-emea-sales/` belongs to the token with that `client_id`. With `mcp.auth.oauth` it is the logged-in user, read from the claim named by [`auth.oauth.user_claim`](/reference/config-schema) (the token subject by default, or for example `preferred_username` for readable folder names), never the OAuth client application. Over HTTP the verified identity always wins over a `user` argument supplied by the agent. Personal pages follow the user, not a tenant: a user who works for several tenants sees the same personal folder in each.
+
 Under an active [role policy](/concepts/tenancy-and-access-control), search and page reads are additionally filtered by the caller's `knowledge.allow_tags`: a page whose tags fall entirely outside the allow set is invisible to that role, same treatment as a page outside scope. A role that declares no `knowledge:` block at all defaults to `allow_tags: []`, i.e. zero visible pages, a footgun worth reading about in full under [`RoleDef` fields](/concepts/tenancy-and-access-control#roledef-fields-one-entry-under-roles).
 
 ## Retrieval

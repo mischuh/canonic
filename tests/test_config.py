@@ -434,6 +434,23 @@ class TestMcpOAuthConfig:
         assert cfg.mcp.auth.oauth is not None
         assert cfg.mcp.auth.oauth.claim_mapping == {}
 
+    def test_user_claim_defaults_to_sub_and_is_configurable(self, tmp_path: Path) -> None:
+        base = (
+            _VALID
+            + "mcp:\n"
+            + "  auth:\n"
+            + "    oauth:\n"
+            + "      mode: jwt\n"
+            + "      issuer_url: https://idp.example.com\n"
+        )
+        cfg = load_config(_canonic_yaml(tmp_path, base))
+        assert cfg.mcp.auth.oauth is not None
+        assert cfg.mcp.auth.oauth.user_claim == "sub"
+
+        cfg = load_config(_canonic_yaml(tmp_path, base + "      user_claim: preferred_username\n"))
+        assert cfg.mcp.auth.oauth is not None
+        assert cfg.mcp.auth.oauth.user_claim == "preferred_username"
+
     def test_claim_mapping_parsed(self, tmp_path: Path) -> None:
         """Namespaced custom claims (SPEC-E12 §7) — most IdPs require this for non-standard
         claims like a tenant id."""

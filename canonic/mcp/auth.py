@@ -34,6 +34,7 @@ from canonic.contracts.principal import (
     normalize_tenants,
 )
 from canonic.credentials import resolve_credential
+from canonic.exc import CallerUnresolved
 
 if TYPE_CHECKING:
     from mcp.server.auth.provider import IdentityAssertionParams
@@ -55,6 +56,7 @@ __all__ = [
     "build_mcp_auth",
     "build_oauth_verifier",
     "build_token_verifier",
+    "STATIC_TOKEN_MARKER",
     "caller_from_token",
     "describe_auth_mechanisms",
     "principal_from_token",
@@ -74,6 +76,11 @@ CLI_OVERRIDE_CLIENT_ID = "cli-override"
 #: assertion (SEP-990 ID-JAG). Mirrors FastMCP's private ``_ID_JAG_GRANT_MARKER``,
 #: pinned by a test so an upstream rename fails loudly instead of silently.
 ID_JAG_GRANT = "id_jag"
+
+#: Claim :class:`CanonicTokenVerifier` stamps on every static token it accepts, so
+#: :func:`caller_from_token` can tell a static token, whose ``client_id`` is the identity,
+#: from an OAuth token, whose ``client_id`` names the MCP client application.
+STATIC_TOKEN_MARKER = "canonic_static_token"
 
 #: Claim under which :class:`CanonicOIDCProxy` carries the verified assertion's
 #: non-registered claims (tenant, roles, ...) into the minted access token.
@@ -145,7 +152,10 @@ class CanonicTokenVerifier(TokenVerifier):
         for candidate, resolved in self._tokens.items():
             if hmac.compare_digest(candidate, token):
                 return AccessToken(
-                    token=token, client_id=resolved.client_id, scopes=[], claims=resolved.claims
+                    token=token,
+                    client_id=resolved.client_id,
+                    scopes=[],
+                    claims={**resolved.claims, STATIC_TOKEN_MARKER: True},
                 )
         return None
 
@@ -216,17 +226,43 @@ def principal_from_token(
     return Principal(tenants=tenants, roles=role_names, source=f"{kind}:{token.client_id}")
 
 
-def caller_from_token(token: AccessToken) -> Caller:
+def caller_from_token(
+    token: AccessToken,
+    *,
+    user_claim: str = "sub",
+    claim_mapping: dict[str, str] | None = None,
+) -> Caller:
     """The :class:`Caller` a verified token attributes its request to.
 
-    An identity-asserted token answers for the asserted employee (``sub``) and was
-    presented by the agent (``client_id``), so both are recorded. Every other token
-    source has one identity, its ``client_id``
-    (AMENDMENT-e12-identity-assertion-principal, ``AnswerEvent.user``).
+    - An identity-asserted token answers for the asserted employee (``sub``) and was
+      presented by the agent (``client_id``), so both are recorded
+      (AMENDMENT-e12-identity-assertion-principal, ``AnswerEvent.user``).
+    - A static token has one identity, its ``client_id``, which is also the name of its
+      personal knowledge folder.
+    - Any other token is an OAuth token. Its ``client_id`` is the application the MCP client
+      registered, shared by all its users, so the caller is the value of ``user_claim``
+      (resolved through ``claim_mapping``). Raises :class:`~canonic.exc.CallerUnresolved` when the token has no usable value for
+      it, rather than falling back to ``client_id``.
     """
     if _is_identity_asserted(token) and token.subject:
         return Caller(id=token.subject, acted_via=token.client_id)
-    return Caller(id=token.client_id)
+    if token.claims.get(STATIC_TOKEN_MARKER):
+        return Caller(id=token.client_id)
+    user = _user_claim_value(token, (claim_mapping or {}).get(user_claim, user_claim))
+    if user is None:
+        raise CallerUnresolved(
+            f"the token has no usable '{user_claim}' claim to identify the user "
+            "(mcp.auth.oauth.user_claim)"
+        )
+    return Caller(id=user)
+
+
+def _user_claim_value(token: AccessToken, claim: str) -> str | None:
+    """A non-blank string value of ``claim`` on ``token``, else ``None``."""
+    raw = token.subject if claim == "sub" else token.claims.get(claim)
+    if isinstance(raw, str) and raw.strip():
+        return raw.strip()
+    return None
 
 
 def _is_identity_asserted(token: AccessToken) -> bool:

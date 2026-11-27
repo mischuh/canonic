@@ -38,17 +38,20 @@ if TYPE_CHECKING:
     from canonic.core.service import CanonicService
 
 
-def _caller() -> Caller | None:
+def _caller(user_claim: str = "sub", claim_mapping: dict[str, str] | None = None) -> Caller | None:
     """The verified :class:`Caller` for the current request, or ``None`` under stdio.
 
     ``stdio`` transport has no ``AccessToken`` (no auth layer); ``http`` transport
     always has one once a request is authenticated (unauthenticated requests never
     reach a tool body — FastMCP's auth middleware rejects them with 401 first). For an
     identity-asserted token the caller is the asserted employee, acting via the agent's
-    ``client_id`` (see :func:`canonic.mcp.auth.caller_from_token`).
+    ``client_id``. For an OAuth token it is the ``user_claim`` value, for a static token
+    its ``client_id`` (see :func:`canonic.mcp.auth.caller_from_token`).
     """
     token = get_access_token()
-    return caller_from_token(token) if token is not None else None
+    if token is None:
+        return None
+    return caller_from_token(token, user_claim=user_claim, claim_mapping=claim_mapping)
 
 
 def _principal(
@@ -83,23 +86,23 @@ def _principal(
     )
 
 
-def _effective_user(principal: Principal | None, user: str | None) -> str | None:
+def _effective_user(
+    user: str | None,
+    *,
+    user_claim: str = "sub",
+    claim_mapping: dict[str, str] | None = None,
+) -> str | None:
     """The identity that governs personal-knowledge-page visibility for this call.
 
-    Once a verified ``Principal`` was derived for the request (some tenancy/role policy is
-    configured and the caller is authenticated), the verified caller identity always wins
-    over a client-supplied ``user`` argument — an agent could otherwise claim any user's
-    identity to read their personal knowledge pages (SPEC-E12 §1, the ``search_knowledge``/
-    ``read_knowledge_page``/``run_report`` vulnerability this epic closes). With no principal
-    bound (no policy configured, or ``stdio``), ``user`` is accepted as before — unchanged
-    behavior for existing single-tenant projects. For an identity-asserted token the
-    verified identity is the asserted employee, so their personal pages are the ones
-    visible, never the calling agent's.
+    Whenever the request carries a verified token, the verified caller identity wins over
+    a client-supplied ``user`` argument, whether or not a tenancy/role policy is
+    configured. An agent could otherwise claim any user's identity to read their personal
+    knowledge pages. Only without a token (``stdio``) is ``user`` accepted as given. For an
+    identity-asserted token the verified identity is the asserted employee, so their
+    personal pages are the ones visible, never the calling agent's.
     """
-    if principal is None:
-        return user
-    caller = _caller()
-    return caller.id if caller is not None else None
+    caller = _caller(user_claim, claim_mapping)
+    return caller.id if caller is not None else user
 
 
 __all__ = ["build_server"]
@@ -204,6 +207,7 @@ def build_server(
     auth: AuthProvider | None = None,
     session_principal: Principal | None = None,
     claim_mapping: dict[str, str] | None = None,
+    user_claim: str = "sub",
     max_tenants: int = DEFAULT_MAX_TENANTS,
     tasks: bool = False,
     tasks_url: str | None = None,
@@ -226,6 +230,9 @@ def build_server(
     counterpart to ``session_principal``, resolving a namespaced IdP claim key to a
     tenancy/role policy's own ``claim`` name for every request's derived
     :class:`Principal`. Unused under ``stdio`` or a static-token caller.
+
+    ``user_claim`` is ``mcp.auth.oauth.user_claim``: the token claim naming the logged-in
+    user, which keys their personal knowledge pages under OAuth. Static tokens ignore it.
 
     ``max_tenants`` is ``mcp.auth.max_tenants``: the most distinct tenant values one token may
     carry before the request fails with ``tenant_limit_exceeded``.
@@ -510,7 +517,7 @@ def build_server(
         sq = SemanticQuery.model_validate(query)
         result = await service.query(
             sq,
-            caller=_caller(),
+            caller=_caller(user_claim, claim_mapping),
             principal=_principal(service.resolver, session_principal, claim_mapping, max_tenants),
         )
         response = result.model_dump(mode="json")
@@ -557,7 +564,7 @@ def build_server(
                 raise ValidationFailed(f"invalid decompose request: {exc}") from exc
             result = await service.decompose(
                 parsed,
-                caller=_caller(),
+                caller=_caller(user_claim, claim_mapping),
                 principal=_principal(
                     service.resolver, session_principal, claim_mapping, max_tenants
                 ),
@@ -580,7 +587,7 @@ def build_server(
         result = await service.run_sql(
             sql,
             connection=connection,
-            caller=_caller(),
+            caller=_caller(user_claim, claim_mapping),
             principal=_principal(service.resolver, session_principal, claim_mapping, max_tenants),
         )
         return result.model_dump(mode="json")
@@ -608,7 +615,10 @@ def build_server(
     ) -> dict[str, Any]:
         principal = _principal(service.resolver, session_principal, claim_mapping, max_tenants)
         result = service.search_knowledge(
-            query, user=_effective_user(principal, user), limit=limit, principal=principal
+            query,
+            user=_effective_user(user, user_claim=user_claim, claim_mapping=claim_mapping),
+            limit=limit,
+            principal=principal,
         )
         return {
             "hits": [
@@ -647,7 +657,9 @@ def build_server(
     async def read_knowledge_page(page: str, user: str | None = None) -> dict[str, Any]:
         principal = _principal(service.resolver, session_principal, claim_mapping, max_tenants)
         return service.read_knowledge_page(
-            page, user=_effective_user(principal, user), principal=principal
+            page,
+            user=_effective_user(user, user_claim=user_claim, claim_mapping=claim_mapping),
+            principal=principal,
         )
 
     # ------------------------------------------------------------------
@@ -704,8 +716,8 @@ def build_server(
             report_id,
             as_of=parsed_as_of,
             filters=filters,
-            user=_effective_user(principal, user),
-            caller=_caller(),
+            user=_effective_user(user, user_claim=user_claim, claim_mapping=claim_mapping),
+            caller=_caller(user_claim, claim_mapping),
             principal=principal,
         )
         return result.model_dump(mode="json")
