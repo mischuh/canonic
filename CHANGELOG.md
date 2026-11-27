@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.46.4](https://github.com/mischuh/canonic/compare/v0.46.3...v0.46.4) (2026-11-27)
+
+
+### Bug Fixes
+
+* **deps:** require fastmcp 4.2.6 or newer ([#539](https://github.com/mischuh/canonic/issues/539)) ([16b5007](https://github.com/mischuh/canonic/commit/16b5007cd104d0f741d2ac18f57dbf0cfe24d53b))
+* **deps:** upgrade filelock to 4.3.1 and snowflake-connector-python to 5.2.0 ([#541](https://github.com/mischuh/canonic/issues/541)) ([2fb90ee](https://github.com/mischuh/canonic/commit/2fb90ee408cb0a3ee38d206d2fb0d677fc3e356b))
+* **mcp:** key personal knowledge by the logged-in user under oauth ([#543](https://github.com/mischuh/canonic/issues/543)) ([e6d06a7](https://github.com/mischuh/canonic/commit/e6d06a7809086cc3a44129aeccf050d1f9386882))
+
 ## [0.46.3](https://github.com/mischuh/canonic/compare/v0.46.2...v0.46.3) (2026-11-15)
 
 
