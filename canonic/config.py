@@ -507,6 +507,14 @@ class McpOAuthConfig(BaseModel):
     #: (SPEC-E12 §7). A ``claim`` absent from this mapping is looked up under its own
     #: name unchanged.
     claim_mapping: dict[str, str] = {}
+    #: Token claim that names the logged-in user. It keys personal knowledge pages
+    #: (``knowledge/user/<value>/``) and the ``user`` of answer events. The default ``sub``
+    #: is the token subject. Set e.g. ``preferred_username`` for readable folder names,
+    #: resolved through ``claim_mapping`` like any other claim. A token without the claim
+    #: fails with ``caller_unresolved``. Never the OAuth ``client_id``, which names the MCP
+    #: client application and is shared by all its users. Static tokens are unaffected,
+    #: their ``client_id`` stays the identity.
+    user_claim: str = "sub"
     #: ``proxy`` mode only. Accepts IdP-signed identity assertions (SEP-990 ID-JAG) in
     #: addition to the interactive Authorization Code + PKCE flow, for headless/agentic
     #: clients that already hold an established identity from the IdP.

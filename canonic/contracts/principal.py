@@ -140,7 +140,8 @@ SYSTEM_PRINCIPAL = Principal(roles=(), source="system", system_exempt=True)
 class Caller:
     """Who a verified request is attributed to, for answer events and personal knowledge.
 
-    ``id`` is the identity the answer is *for*: the token's ``client_id`` for a static,
+    ``id`` is the identity the answer is *for*: the token's ``client_id`` for a static
+    token, the value of ``mcp.auth.oauth.user_claim`` (the subject by default) for a
     ``JWTVerifier`` or ``OIDCProxy`` token, or the asserted employee's subject for an
     identity-asserted token (AMENDMENT-e12-identity-assertion-principal). ``acted_via``
     is the calling agent's own ``client_id`` and is set only on the identity-assertion
